@@ -23,6 +23,8 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fflib.mqdb import parse_ff  # noqa: E402
+from fflib.diamond_data import DIAMOND_ROWS  # noqa: E402  exact editor diamond mask
+from fflib.gameresource import GameResource, SH_DEFAULT  # noqa: E402
 
 TILE = 32                 # TILE_SIZE
 DW, DH = TILE * 2, TILE   # diamond 64x32
@@ -121,16 +123,37 @@ class Tiles:
                 self.wborders[t] = wb
         self.diamond = make_diamond()
 
+        # roads + forest come from IsoTerrn via the faithful resolver (drawRoads/
+        # drawTrees in LandscapeObject). roadImage(i) = "ROAD"+i(2)+"00" (i=0..16);
+        # forestByValue = raceCode + "F" + forest(4).
+        self._isoterrn = GameResource(os.path.join(imgs, "IsoTerrn.ff"))
+        self.roads = {}  # roadType -> rgba
+        for i in range(17):
+            fr = self._isoterrn.get_frames("ROAD%s00" % str(i).rjust(2, "0"), SH_DEFAULT)
+            if fr:
+                self.roads[i] = fr[0]
+        self._forest_cache = {}
+
+    def forest(self, value):
+        """forestByValue: <raceCode>F<forest:04> from IsoTerrn (raceCode = value&7)."""
+        forest = (value >> 26) & 0x3F
+        code = RACE_CODE.get(value & 7, "NE")
+        key = "%sF%s" % (code, str(forest).rjust(4, "0"))
+        if key in self._forest_cache:
+            return self._forest_cache[key]
+        fr = self._isoterrn.get_frames(key, SH_DEFAULT)
+        img = fr[0] if fr else None
+        self._forest_cache[key] = img
+        return img
+
     def _variants(self, src, code):
+        # The editor loads exactly k=0,1,2 (MapTileHelper::init: `for k in 0..2:
+        # getFramesById("Ground", code+"_"+k)`), in order, no skipping. Match it.
         out = []
-        for k in range(4):
+        for k in range(3):
             nm = "%s_%02d" % (code, k)
             if nm in src:
-                t = _decode(src[nm])
-                # skip degenerate all-black placeholder tiles (e.g. DW_00)
-                if int(t[..., :3].max()) < 5:
-                    continue
-                out.append(t)
+                out.append(_decode(src[nm]))
         return out or [np.zeros((GROUND_TILE, GROUND_TILE, 4), np.uint8)]
 
     def _border(self, src, prefix, t, key):
@@ -144,15 +167,46 @@ class Tiles:
 
 # ---------- geometry (exact ports) ----------
 def make_diamond():
-    """64x32 alpha mask; interior (tileIndices==0) opaque. Generated to match the
-    editor's diamond: |x'| / TILE + |y'| / (TILE/2) <= 1 in centered coords."""
+    """64x32 alpha mask = the editor's exact createDiamond (tileIndices==0 interior),
+    so diamonds tessellate without gaps (my earlier |x|/cx+|y|/cy<=1 formula left
+    1px seams). DIAMOND_ROWS is parsed verbatim from MapTileHelper.cpp."""
     a = np.zeros((DH, DW), np.uint8)
-    cx, cy = DW / 2.0, DH / 2.0
     for y in range(DH):
+        row = DIAMOND_ROWS[y]
         for x in range(DW):
-            if abs((x + 0.5) - cx) / cx + abs((y + 0.5) - cy) / cy <= 1.0:
+            if (row >> x) & 1:
                 a[y, x] = 255
     return a
+
+
+class _Mt19937:
+    """std::mt19937 (the generator the editor's MapRegionExtractor uses)."""
+
+    def __init__(self, seed):
+        self.mt = [0] * 624
+        self.idx = 624
+        self.mt[0] = seed & 0xFFFFFFFF
+        for i in range(1, 624):
+            self.mt[i] = (1812433253 * (self.mt[i - 1] ^ (self.mt[i - 1] >> 30)) + i) & 0xFFFFFFFF
+
+    def _regen(self):
+        for i in range(624):
+            y = (self.mt[i] & 0x80000000) + (self.mt[(i + 1) % 624] & 0x7FFFFFFF)
+            self.mt[i] = self.mt[(i + 397) % 624] ^ (y >> 1)
+            if y & 1:
+                self.mt[i] ^= 0x9908B0DF
+        self.idx = 0
+
+    def next(self):
+        if self.idx >= 624:
+            self._regen()
+        y = self.mt[self.idx]
+        self.idx += 1
+        y ^= y >> 11
+        y ^= (y << 7) & 0x9D2C5680
+        y ^= (y << 15) & 0xEFC60000
+        y ^= y >> 18
+        return y & 0xFFFFFFFF
 
 
 def x_offset(x, y, total_w):
@@ -164,11 +218,14 @@ def y_offset(x, y):
 
 
 def variant_index(seed, tx, ty, n):
+    # MapRegionExtractor::calculateTileIndex: std::mt19937(seed + tx*73856093 +
+    # ty*19349663), then uniform_int_distribution(0, n-1). We use the exact mt19937
+    # generator; the distribution reduction is a modulo (MSVC's exact reduction is
+    # STL-internal, but the generator output is identical).
     if n <= 1:
         return 0
-    h = (seed + tx * 73856093 + ty * 19349663) & 0xFFFFFFFF
-    h = (h * 2654435761) & 0xFFFFFFFF
-    return h % n
+    rng = _Mt19937((seed + tx * 73856093 + ty * 19349663) & 0xFFFFFFFF)
+    return rng.next() % n
 
 
 class RegionExtractor:
@@ -337,10 +394,46 @@ class TerrainComposer:
         c = tile[..., 3] > 0
         dst[c] = tile[c]
 
+    def _blit(self, src, cx, cy):
+        """drawImage: copy src centered at (cx, cy) where src alpha>0 (no mask)."""
+        if src is None:
+            return
+        h, w = src.shape[0], src.shape[1]
+        x0, y0 = cx - w // 2, cy - h // 2
+        ix0, iy0 = max(0, x0), max(0, y0)
+        ix1, iy1 = min(self.W, x0 + w), min(self.H, y0 + h)
+        if ix1 <= ix0 or iy1 <= iy0:
+            return
+        sub = src[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0]
+        dst = self.img[iy0:iy1, ix0:ix1]
+        m = sub[..., 3] > 0
+        dst[m] = sub[m]
+
+    def _draw_road(self, x, y):
+        rt = self.grid[x][y]["roadType"]
+        if rt == -1:
+            return
+        cx, cy = self.cell_center(x, y)
+        self._blit(self.t.roads.get(rt), cx, cy)
+
+    def _draw_tree(self, x, y):
+        v = self.grid[x][y]["value"]
+        if tile_ground(v) != 1:  # ground==1 => forest cell
+            return
+        cx, cy = self.cell_center(x, y)
+        self._blit(self.t.forest(v), cx, cy)
+
     def compose(self):
+        # exact LandscapeObject::reloadGrid order: all cells, then roads, then trees.
         for x in range(self.n):
             for y in range(self.n):
                 self._draw_cell(x, y)
+        for x in range(self.n):
+            for y in range(self.n):
+                self._draw_road(x, y)
+        for x in range(self.n):
+            for y in range(self.n):
+                self._draw_tree(x, y)
         return self.img
 
     # cell (x,y) screen-space center within the output image (for object alignment)

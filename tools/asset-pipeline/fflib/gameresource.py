@@ -61,6 +61,7 @@ class GameResource:
         self.images_opt = None
         self.anim_opt = None
         self._index = {}  # name(lower) -> (uid, relatedOffset, relatedSize)
+        self._index_orig = []  # original-case logical names, in file order
         self._read()
 
     # ---- container parse ----
@@ -116,6 +117,7 @@ class GameResource:
             rs = _ri(b, i)
             i += 4
             self._index[name.lower()] = (uid, ro, rs)
+            self._index_orig.append(name)
 
     # ---- ImagesContainer / AnimationsContainer (read on demand) ----
     def _image_data(self, related_offset, related_size):
@@ -155,6 +157,17 @@ class GameResource:
         return names
 
     # ---- public ----
+    def all_names(self):
+        """Every resolvable logical id in this archive (index names if indexed, else
+        the standalone PNG record names — the same set getFramesById accepts)."""
+        if self.indexes_opt is not None:
+            return list(self._index_orig)
+        out = []
+        for d in self.resources:
+            if d.name and d.name.upper().endswith(".PNG"):
+                out.append(d.name[:-4])
+        return out
+
     def has(self, name):
         if self.indexes_opt is None:
             return name.upper().replace(".PNG", "") in self._by_name
