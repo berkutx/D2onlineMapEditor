@@ -29,6 +29,7 @@ STAGE1_BUNDLES = [
     ("ground", "Ground.ff", "border", "ground"),
     ("gr-border", "GrBorder.ff", "border", "border"),
     ("iso-still", "IsoStill.ff", "default", "object"),
+    ("iso-cmon", "IsoCmon.ff", "default", "object"),
     ("city", "City.ff", "default", "object"),
     ("capital", "Capital.ff", "default", "object"),
     ("iso-anim", "IsoAnim.ff", "default", "animation"),
