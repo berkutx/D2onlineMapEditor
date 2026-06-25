@@ -1,0 +1,30 @@
+{
+  "name": "@d2/pixi-render",
+  "version": "0.1.0",
+  "description": "Framework-agnostic PixiJS isometric renderer for D2 maps (terrain + objects + animation)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "pixi.js": "^8.5.0",
+    "@pixi/tilemap": "^5.0.1",
+    "@d2/map-schema": "workspace:*",
+    "@d2/asset-manifest": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
