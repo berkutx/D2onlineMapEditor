@@ -42,11 +42,13 @@ export class ObjectLayer {
     this.view.sortableChildren = true;
   }
 
-  /** Rebuild all object sprites from a document. */
+  /** Rebuild all object sprites from a document. `allowedTypes`, when given,
+   *  restricts which object types are placed (e.g. just mountains). */
   build(
     doc: MapDocument,
     assets: AssetStore,
     anim: AnimationManager,
+    allowedTypes?: ReadonlySet<string>,
   ): void {
     this.clear(anim);
     // owner uid -> raceId, so forts/capitals theme by their owner's race.
@@ -55,6 +57,7 @@ export class ObjectLayer {
       raceOf: (owner) => (owner ? raceByPlayer.get(owner) : undefined),
     };
     for (const obj of doc.objects) {
+      if (allowedTypes && !allowedTypes.has(obj.type)) continue;
       this.place(obj, assets, anim, ctx);
     }
   }

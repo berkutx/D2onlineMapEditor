@@ -16,7 +16,7 @@ const mapStore = useMapStore();
 const viewStore = useViewStore();
 
 const { scenarios, currentScenarioId, status } = storeToRefs(mapStore);
-const { terrainVisible, objectsVisible, animate } = storeToRefs(viewStore);
+const { terrainVisible, objectsVisible, gridVisible, animate } = storeToRefs(viewStore);
 
 const dialogVisible = ref(false);
 const listLoading = ref(false);
@@ -51,6 +51,8 @@ function onLayerCommand(command: string): void {
     viewStore.setLayerVisible("terrain", !terrainVisible.value);
   } else if (command === "objects") {
     viewStore.setLayerVisible("objects", !objectsVisible.value);
+  } else if (command === "grid") {
+    viewStore.toggleGrid();
   } else if (command === "animate") {
     viewStore.toggleAnimate();
   }
@@ -84,6 +86,11 @@ function onLayerCommand(command: string): void {
             <span class="check-spacer" v-else />
             Objects layer
           </el-dropdown-item>
+          <el-dropdown-item command="grid">
+            <el-icon v-if="gridVisible"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Grid
+          </el-dropdown-item>
           <el-dropdown-item command="animate" divided>
             <el-icon v-if="animate"><Check /></el-icon>
             <span class="check-spacer" v-else />
@@ -92,6 +99,16 @@ function onLayerCommand(command: string): void {
         </el-dropdown-menu>
       </template>
     </el-dropdown>
+
+    <el-button
+      class="grid-toggle"
+      size="small"
+      :type="gridVisible ? 'primary' : 'info'"
+      plain
+      @click="viewStore.toggleGrid()"
+    >
+      {{ gridVisible ? "Hide grid" : "Show grid" }}
+    </el-button>
 
     <span class="bar-spacer" />
     <el-tag v-if="status === 'loading'" size="small" type="warning" effect="plain">
@@ -158,6 +175,9 @@ function onLayerCommand(command: string): void {
 }
 .menu-trigger:hover {
   background: var(--el-fill-color-light);
+}
+.grid-toggle {
+  margin-left: 8px;
 }
 .bar-spacer {
   flex: 1;

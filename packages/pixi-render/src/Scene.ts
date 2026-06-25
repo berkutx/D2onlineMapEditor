@@ -124,6 +124,7 @@ export class Scene {
     manifest: AssetManifest,
     assets: AssetStore,
     terrain: { texture: Texture; meta: TerrainMeta },
+    objectTypes?: ReadonlySet<string>,
   ): Promise<void> {
     if (!this.app || !this.world) {
       throw new Error("Scene.buildScene called before init()");
@@ -144,7 +145,7 @@ export class Scene {
     this.world.addChild(this.grid.view);
 
     this.objects = new ObjectLayer();
-    this.objects.build(map, assets, this.anim);
+    this.objects.build(map, assets, this.anim, objectTypes);
     this.world.addChild(this.objects.view);
 
     // camera centered on the map

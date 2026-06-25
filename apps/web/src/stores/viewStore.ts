@@ -16,6 +16,7 @@ export interface CursorCell {
 export const useViewStore = defineStore("view", () => {
   const terrainVisible = ref(true);
   const objectsVisible = ref(true);
+  const gridVisible = ref(true);
   const animate = ref(true);
 
   /** Camera zoom factor (for the status bar). */
@@ -26,6 +27,11 @@ export const useViewStore = defineStore("view", () => {
   function setLayerVisible(layer: LayerName, visible: boolean): void {
     if (layer === "terrain") terrainVisible.value = visible;
     else if (layer === "objects") objectsVisible.value = visible;
+    else if (layer === "grid") gridVisible.value = visible;
+  }
+
+  function toggleGrid(): void {
+    gridVisible.value = !gridVisible.value;
   }
 
   function toggleAnimate(): void {
@@ -43,10 +49,12 @@ export const useViewStore = defineStore("view", () => {
   return {
     terrainVisible,
     objectsVisible,
+    gridVisible,
     animate,
     zoom,
     cursorCell,
     setLayerVisible,
+    toggleGrid,
     toggleAnimate,
     setZoom,
     setCursorCell,

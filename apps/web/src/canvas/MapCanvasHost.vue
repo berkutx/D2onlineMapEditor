@@ -28,7 +28,11 @@ const viewStore = useViewStore();
 
 const { currentMap } = storeToRefs(mapStore);
 const { manifest } = storeToRefs(assetStore);
-const { terrainVisible, objectsVisible, animate } = storeToRefs(viewStore);
+const { terrainVisible, objectsVisible, gridVisible, animate } = storeToRefs(viewStore);
+
+// For now show only the relief: terrain + water (baked into the terrain image) +
+// mountains. Other object types are hidden until they're retuned to the tile scale.
+const VISIBLE_OBJECT_TYPES = new Set(["mountains"]);
 
 const mountEl = ref<HTMLDivElement | null>(null);
 const building = ref(false);
@@ -48,10 +52,11 @@ async function rebuild(): Promise<void> {
     // the pre-composited terrain image + alignment meta (compose_terrain.py output)
     const meta = (await (await fetch(`/assets/terrain/${id}.json`)).json()) as TerrainMeta;
     const texture = await Assets.load<Texture>(`/assets/terrain/${id}.png`);
-    await scene.buildScene(doc, man, getAssetStore(), { texture, meta });
+    await scene.buildScene(doc, man, getAssetStore(), { texture, meta }, VISIBLE_OBJECT_TYPES);
     // apply the current view state to the freshly-built scene
     scene.setLayerVisibility("terrain", terrainVisible.value);
     scene.setLayerVisibility("objects", objectsVisible.value);
+    scene.setLayerVisibility("grid", gridVisible.value);
     scene.setAnimationEnabled(animate.value);
     // seed the status bar with the initial camera zoom
     const cam = scene.getCamera();
@@ -132,6 +137,7 @@ watch([currentMap, manifest], () => {
 // Imperatively reflect layer/animation toggles onto the live Scene.
 watch(terrainVisible, (v) => getScene()?.setLayerVisibility("terrain", v));
 watch(objectsVisible, (v) => getScene()?.setLayerVisibility("objects", v));
+watch(gridVisible, (v) => getScene()?.setLayerVisibility("grid", v));
 watch(animate, (v) => getScene()?.setAnimationEnabled(v));
 </script>
 
