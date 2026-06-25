@@ -19,7 +19,7 @@ import {
 import type { MapObject, MapDocument } from "@d2/map-schema";
 import { cellToWorld } from "./iso.js";
 import { zKey } from "./zorder.js";
-import { objectSpriteCandidates, type ObjectResolveCtx } from "./objectSprite.js";
+import { objectSpriteKey } from "./objectSprite.js";
 import type { AssetStore } from "./AssetStore.js";
 import type { AnimationManager } from "./AnimationManager.js";
 
@@ -51,14 +51,9 @@ export class ObjectLayer {
     allowedTypes?: ReadonlySet<string>,
   ): void {
     this.clear(anim);
-    // owner uid -> raceId, so forts/capitals theme by their owner's race.
-    const raceByPlayer = new Map(doc.players.map((p) => [p.id, p.race]));
-    const ctx: ObjectResolveCtx = {
-      raceOf: (owner) => (owner ? raceByPlayer.get(owner) : undefined),
-    };
     for (const obj of doc.objects) {
       if (allowedTypes && !allowedTypes.has(obj.type)) continue;
-      this.place(obj, assets, anim, ctx);
+      this.place(obj, assets, anim);
     }
   }
 
@@ -66,24 +61,13 @@ export class ObjectLayer {
     obj: MapObject,
     assets: AssetStore,
     anim: AnimationManager,
-    ctx: ObjectResolveCtx,
   ): void {
-    // Resolve the object to a sprite/animation by trying its candidate names in
-    // order: an animation wins over a static frame; first hit is used.
-    let animFrames: Texture[] = [];
-    let staticTex: Texture | undefined;
-    for (const name of objectSpriteCandidates(obj, ctx)) {
-      const frames = assets.resolveAnimation(name);
-      if (frames.length > 1) {
-        animFrames = frames;
-        break;
-      }
-      if (!staticTex && assets.hasTexture(name)) {
-        staticTex = assets.resolveTexture(name);
-        if (staticTex.label === "EMPTY") staticTex = undefined;
-        else break;
-      }
-    }
+    // The exact editor key for this object (ports ObjectAccessors::frameData).
+    const key = objectSpriteKey(obj);
+    if (!key) return;
+
+    // An animation (multi-frame) wins; otherwise a single static frame. No fallback.
+    const animFrames: Texture[] = assets.resolveAnimation(key);
 
     let sprite: Sprite | AnimatedSprite;
     let animated = false;
@@ -93,11 +77,10 @@ export class ObjectLayer {
       // the single shared ticker that advances it (no per-sprite ticker).
       sprite = anim.acquire(animFrames);
       animated = true;
-    } else if (staticTex) {
-      sprite = new Sprite(staticTex);
     } else {
-      // nothing resolved (e.g. generic/event, or a stack needing IsoUnit)
-      return;
+      const tex: Texture = assets.resolveTexture(key);
+      if (tex.label === "EMPTY") return; // key didn't resolve -> not drawn
+      sprite = new Sprite(tex);
     }
 
     // D2 iso anchor = bottom-center: the sprite's foot sits on the cell center.

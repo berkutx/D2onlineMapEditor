@@ -182,29 +182,37 @@ export function readUnit(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readMountains(buf: ByteBuffer, obj: FramedObject): MapObject[] {
   const out: MapObject[] = [];
   const { fieldsFrom: f, fieldsEnd: e } = obj;
+  // Each entry is delimited by ID_MOUNT and carries SIZE_X, SIZE_Y, POS_X, POS_Y,
+  // IMAGE, RACE (in that order). Iterating by ID_MOUNT keeps SIZE_X/Y (which precede
+  // POS_X) inside the entry so the editor's "MOMNE"+w+image key can be built.
   let i = f;
   let n = 0;
   for (;;) {
-    const px = buf.indexOf("POS_X", i);
-    if (px < 0 || px >= e) break;
-    const x = buf.readInt32LE(px + "POS_X".length);
-    // POS_Y immediately follows POS_X in each entry
-    const py = buf.indexOf("POS_Y", px);
-    const y = py >= 0 && py < e ? buf.readInt32LE(py + "POS_Y".length) : 0;
-    // IMAGE / RACE belong to THIS entry: search forward but bounded by the next ID_MOUNT
-    const nextEntry = buf.indexOf("ID_MOUNT", px + 1);
-    const entryEnd = nextEntry >= 0 && nextEntry < e ? nextEntry : e;
-    const image = readDefaultInt(buf, "IMAGE", px, entryEnd);
-    const race = readDefaultInt(buf, "RACE", px, entryEnd);
+    const idm = buf.indexOf("ID_MOUNT", i);
+    if (idm < 0 || idm >= e) break;
+    const next = buf.indexOf("ID_MOUNT", idm + 1);
+    const entryEnd = next >= 0 && next < e ? next : e;
+
+    const w = readDefaultInt(buf, "SIZE_X", idm, entryEnd);
+    const h = readDefaultInt(buf, "SIZE_Y", idm, entryEnd);
+    const px = buf.indexOf("POS_X", idm);
+    const x = px >= 0 && px < entryEnd ? buf.readInt32LE(px + "POS_X".length) : 0;
+    const py = buf.indexOf("POS_Y", idm);
+    const y = py >= 0 && py < entryEnd ? buf.readInt32LE(py + "POS_Y".length) : 0;
+    const image = readDefaultInt(buf, "IMAGE", idm, entryEnd);
+    const race = readDefaultInt(buf, "RACE", idm, entryEnd);
+
     out.push({
       type: "mountains",
       id: `${obj.id}#${n}`,
       pos: { x, y },
+      ...(w !== null ? { w } : {}),
+      ...(h !== null ? { h } : {}),
       ...(image !== null ? { image } : {}),
       ...(race !== null ? { race } : {}),
     });
     n++;
-    i = py >= 0 ? py + "POS_Y".length : px + 1;
+    i = entryEnd;
   }
   return out;
 }

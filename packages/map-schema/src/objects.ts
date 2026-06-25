@@ -68,6 +68,10 @@ export const MountainsObject = z.object({
   type: z.literal("mountains"),
   image: z.number().int().optional(),
   race: z.number().int().optional(),
+  // SIZE_X / SIZE_Y from the .sg entry. The editor's image key is
+  // "MOMNE" + w(2) + image(2) (MountainObjectAccessor::frameData).
+  w: z.number().int().optional(),
+  h: z.number().int().optional(),
 });
 export const CrystalObject = z.object({
   ...base,
