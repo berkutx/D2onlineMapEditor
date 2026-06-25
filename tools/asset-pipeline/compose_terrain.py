@@ -219,13 +219,25 @@ def y_offset(x, y):
 
 def variant_index(seed, tx, ty, n):
     # MapRegionExtractor::calculateTileIndex: std::mt19937(seed + tx*73856093 +
-    # ty*19349663), then uniform_int_distribution(0, n-1). We use the exact mt19937
-    # generator; the distribution reduction is a modulo (MSVC's exact reduction is
-    # STL-internal, but the generator output is identical).
+    # ty*19349663), then std::uniform_int_distribution<int>(0, n-1). Ported to MSVC's
+    # _Rng_from_urng: take ceil(log2(n)) LOW bits assembled from engine outputs and
+    # reject values >= n (NOT a plain modulo, which biases + picks different variants).
     if n <= 1:
         return 0
     rng = _Mt19937((seed + tx * 73856093 + ty * 19349663) & 0xFFFFFFFF)
-    return rng.next() % n
+    bits = max(1, (n - 1).bit_length())
+    mask = (1 << bits) - 1
+    buf = 0
+    have = 0
+    while True:
+        if have < bits:
+            buf = (buf << 32) | rng.next()
+            have += 32
+        ret = buf & mask
+        buf >>= bits
+        have -= bits
+        if ret < n:
+            return ret
 
 
 class RegionExtractor:
