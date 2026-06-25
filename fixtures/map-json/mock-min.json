@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "0.1.0",
+  "parserVersion": "mock",
+  "header": {
+    "name": "Mock 2x2",
+    "description": "Hand-authored mock for contract tests",
+    "author": "A3",
+    "version": "S143",
+    "size": 2
+  },
+  "size": 2,
+  "terrain": {
+    "size": 2,
+    "cells": [
+      { "x": 0, "y": 0, "value": 1, "terrain": 1, "ground": 0, "isWater": false, "forest": 0, "roadType": -1, "roadVar": -1 },
+      { "x": 1, "y": 0, "value": 1, "terrain": 1, "ground": 0, "isWater": false, "forest": 0, "roadType": 0, "roadVar": 0 },
+      { "x": 0, "y": 1, "value": 1, "terrain": 1, "ground": 0, "isWater": false, "forest": 3, "roadType": -1, "roadVar": -1 },
+      { "x": 1, "y": 1, "value": 25, "terrain": 1, "ground": 3, "isWater": true, "forest": 0, "roadType": -1, "roadVar": -1 }
+    ]
+  },
+  "objects": [
+    { "type": "village", "id": "FT0001", "pos": { "x": 0, "y": 0 }, "footprint": { "w": 2, "h": 2 }, "owner": "PL0001", "race": 1, "name": "Mock Town", "tier": 2, "imageName": "CITY_HU_2" },
+    { "type": "crystal", "id": "CR0001", "pos": { "x": 1, "y": 0 }, "resource": 5 },
+    { "type": "stack", "id": "ST0001", "pos": { "x": 0, "y": 1 }, "owner": "PL0001", "leaderImage": "G000UU0000HHUMA00", "units": ["UN0001"] },
+    { "type": "generic", "id": "EV0001", "pos": { "x": 1, "y": 1 }, "blockType": "MidEvent", "raw": { "note": "deferred type renders nothing" } }
+  ],
+  "players": [
+    { "id": "PL0001", "playerNo": 1, "race": 1, "name": "Empire", "isHuman": true, "color": "#3060c0" }
+  ]
+}

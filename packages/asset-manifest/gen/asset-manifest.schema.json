@@ -1,0 +1,197 @@
+{
+  "manifestVersion": "0.1.0",
+  "$ref": "#/definitions/AssetManifest",
+  "definitions": {
+    "AssetManifest": {
+      "type": "object",
+      "properties": {
+        "manifestVersion": {
+          "type": "string"
+        },
+        "generatedAt": {
+          "type": "string"
+        },
+        "sourceGameVersion": {
+          "type": "string"
+        },
+        "tickMs": {
+          "type": "number",
+          "default": 42
+        },
+        "paletteMode": {
+          "type": "string",
+          "enum": [
+            "baked",
+            "palette"
+          ],
+          "default": "baked"
+        },
+        "spritesheets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "ff": {
+                "type": "string"
+              },
+              "image": {
+                "type": "string"
+              },
+              "meta": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "image",
+              "meta"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "index": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "sheet": {
+                "type": "string"
+              },
+              "frame": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sheet",
+              "frame"
+            ],
+            "additionalProperties": false
+          },
+          "default": {}
+        },
+        "animations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "atlas": {
+                "type": "string"
+              },
+              "frames": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "frameDurationMs": {
+                "type": "number",
+                "default": 42
+              },
+              "fps": {
+                "type": "number",
+                "default": 23.80952380952381
+              },
+              "loop": {
+                "type": "boolean",
+                "default": true
+              },
+              "anchor": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "atlas",
+              "frames"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "terrain": {
+          "type": "object",
+          "properties": {
+            "tileW": {
+              "type": "number",
+              "default": 192
+            },
+            "base": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "default": {}
+            },
+            "borders": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "default": {}
+            },
+            "roads": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "default": {}
+            },
+            "forest": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {}
+            },
+            "seedFormula": {
+              "type": "string",
+              "default": "(x*y + x + y) % n"
+            }
+          },
+          "additionalProperties": false
+        },
+        "objectNaming": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        }
+      },
+      "required": [
+        "manifestVersion"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

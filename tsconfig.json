@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/map-schema" },
+    { "path": "packages/asset-manifest" },
+    { "path": "packages/socket-contract" }
+  ]
+}

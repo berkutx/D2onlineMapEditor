@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.turbo/
+coverage/
+*.log
+
+# generated assets (large; regenerate via tools/asset-pipeline)
+public/assets/
+tools/asset-pipeline/spikes/out/
+tools/asset-pipeline/**/__pycache__/
+tools/asset-pipeline/.venv/
+
+# editor/OS
+.DS_Store
+.vscode/
+.idea/
+
+# design sub-agent scratch (not part of repo)

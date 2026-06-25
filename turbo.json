@@ -1,0 +1,26 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "gen": {
+      "outputs": ["gen/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build", "gen"],
+      "outputs": []
+    },
+    "build": {
+      "dependsOn": ["^build", "gen"],
+      "outputs": ["dist/**"]
+    },
+    "test": {
+      "dependsOn": ["gen", "^build"],
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

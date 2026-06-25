@@ -1,0 +1,31 @@
+{
+  "name": "@d2/socket-contract",
+  "version": "0.1.0",
+  "description": "Contract C: typed socket.io events + REST shapes + EditOp union",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schema.json": "./gen/edit-op.schema.json"
+  },
+  "files": ["dist", "gen"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "gen": "tsx scripts/gen.ts",
+    "clean": "rimraf dist gen"
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "@d2/map-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "zod-to-json-schema": "^3.23.5",
+    "tsx": "^4.19.2"
+  }
+}

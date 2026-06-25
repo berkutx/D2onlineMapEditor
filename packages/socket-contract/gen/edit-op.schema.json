@@ -1,0 +1,1120 @@
+{
+  "$ref": "#/definitions/EditOp",
+  "definitions": {
+    "EditOp": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "setCell"
+            },
+            "x": {
+              "type": "integer"
+            },
+            "y": {
+              "type": "integer"
+            },
+            "value": {
+              "type": "integer"
+            },
+            "roadType": {
+              "type": "integer"
+            },
+            "roadVar": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "x",
+            "y",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "addObject"
+            },
+            "object": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "stack"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "leaderUnitId": {
+                      "type": "string"
+                    },
+                    "leaderImage": {
+                      "type": "string"
+                    },
+                    "facing": {
+                      "type": "integer"
+                    },
+                    "banner": {
+                      "type": "string"
+                    },
+                    "units": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "fort"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "race": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "capital"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "race": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "village"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "race": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "tier": {
+                      "type": "integer",
+                      "default": 1
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "ruin"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "looted": {
+                      "type": "boolean",
+                      "default": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "merchant"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "mage"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "trainer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "mercenary"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "mountains"
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "race": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "crystal"
+                    },
+                    "resource": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "landmark"
+                    },
+                    "baseType": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "location"
+                    },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "radius": {
+                      "type": "integer",
+                      "default": 0
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "unit"
+                    },
+                    "implId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "generic"
+                    },
+                    "blockType": {
+                      "type": "string"
+                    },
+                    "raw": {
+                      "type": "object",
+                      "additionalProperties": {},
+                      "default": {}
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type",
+                    "blockType"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "object"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "moveObject"
+            },
+            "id": {
+              "type": "string"
+            },
+            "x": {
+              "type": "integer"
+            },
+            "y": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "patchObject"
+            },
+            "id": {
+              "type": "string"
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "fields"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "deleteObject"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

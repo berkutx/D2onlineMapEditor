@@ -1,0 +1,190 @@
+{
+  "$ref": "#/definitions/Spritesheet",
+  "definitions": {
+    "Spritesheet": {
+      "type": "object",
+      "properties": {
+        "frames": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "frame": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number"
+                  },
+                  "h": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              },
+              "rotated": {
+                "type": "boolean",
+                "default": false
+              },
+              "trimmed": {
+                "type": "boolean",
+                "default": false
+              },
+              "spriteSourceSize": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "w": {
+                    "type": "number"
+                  },
+                  "h": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              },
+              "sourceSize": {
+                "type": "object",
+                "properties": {
+                  "w": {
+                    "type": "number"
+                  },
+                  "h": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "w",
+                  "h"
+                ],
+                "additionalProperties": false
+              },
+              "anchor": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "frame"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "animations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "image": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "default": "RGBA8888"
+            },
+            "size": {
+              "type": "object",
+              "properties": {
+                "w": {
+                  "type": "number"
+                },
+                "h": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "w",
+                "h"
+              ],
+              "additionalProperties": false
+            },
+            "scale": {
+              "type": "number",
+              "default": 1
+            },
+            "d2": {
+              "type": "object",
+              "properties": {
+                "ff": {
+                  "type": "string"
+                },
+                "shader": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "shadows",
+                    "transparentBlack",
+                    "border",
+                    "playerColor"
+                  ]
+                },
+                "tileW": {
+                  "type": "number"
+                },
+                "fps": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "image",
+            "size"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "frames",
+        "meta"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
