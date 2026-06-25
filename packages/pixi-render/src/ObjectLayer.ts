@@ -18,7 +18,6 @@ import {
 } from "pixi.js";
 import type { MapObject, MapDocument } from "@d2/map-schema";
 import { cellToWorld } from "./iso.js";
-import { zKey } from "./zorder.js";
 import { objectSpriteKey } from "./objectSprite.js";
 import type { AssetStore } from "./AssetStore.js";
 import type { AnimationManager } from "./AnimationManager.js";
@@ -83,17 +82,19 @@ export class ObjectLayer {
       sprite = new Sprite(tex);
     }
 
-    // D2 iso anchor = bottom-center: the sprite's foot sits on the cell center.
-    sprite.anchor.set(0.5, 1);
-
-    // Position at the object's FRONT cell so multi-tile art lines up with the
-    // cell whose occlusion it controls (same cell zKey sorts on).
-    const fp = obj.footprint ?? { w: 1, h: 1 };
-    const fx = obj.pos.x + (fp.w - 1);
-    const fy = obj.pos.y + (fp.h - 1);
-    const world = cellToWorld(fx, fy);
-    sprite.position.set(world.x, world.y);
-    sprite.zIndex = zKey(obj);
+    // Editor (CustomMapObject::advance): the FULL sprite is CENTERED at the iso
+    // position of the object's footprint centre, cartesianToIsometric(W/2, H/2),
+    // relative to the cell at cellToWorld(x,y). cellToWorld is linear, so that is
+    // cellToWorld(x + W/2, y + H/2). A trimmed Pixi texture's anchor is relative to
+    // its `orig` (untrimmed) size, so anchor (0.5,0.5) centres the original canvas
+    // there and Pixi applies the trim offset — matching the editor's pixmap centring.
+    const w = obj.type === "mountains" ? (obj.w ?? 1) : (obj.footprint?.w ?? 1);
+    const h = obj.type === "mountains" ? (obj.h ?? 1) : (obj.footprint?.h ?? 1);
+    sprite.anchor.set(0.5, 0.5);
+    const center = cellToWorld(obj.pos.x + w / 2, obj.pos.y + h / 2);
+    sprite.position.set(center.x, center.y);
+    // editor z = getZ + x + y + getH; footprint-aware painter order.
+    sprite.zIndex = obj.pos.x + obj.pos.y + h;
     sprite.label = obj.id;
 
     this.view.addChild(sprite);

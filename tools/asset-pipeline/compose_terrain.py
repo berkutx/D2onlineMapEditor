@@ -147,13 +147,19 @@ class Tiles:
         return img
 
     def _variants(self, src, code):
-        # The editor loads exactly k=0,1,2 (MapTileHelper::init: `for k in 0..2:
-        # getFramesById("Ground", code+"_"+k)`), in order, no skipping. Match it.
+        # The editor loads k=0,1,2 (MapTileHelper::init). We do the same, but skip a
+        # DEGENERATE all-black tile (e.g. DW_00 is a single solid #000000 placeholder
+        # in this install's Ground.ff) — it isn't real terrain art; rendering it gives
+        # opaque-black tiles + black border-bleed into neighbours. This is an
+        # invalid-asset guard, not a content guess.
         out = []
         for k in range(3):
             nm = "%s_%02d" % (code, k)
             if nm in src:
-                out.append(_decode(src[nm]))
+                t = _decode(src[nm])
+                if int(t[..., :3].max()) < 5:  # degenerate all-black placeholder
+                    continue
+                out.append(t)
         return out or [np.zeros((GROUND_TILE, GROUND_TILE, 4), np.uint8)]
 
     def _border(self, src, prefix, t, key):
