@@ -3,7 +3,9 @@
     "allow": [
       "WebFetch(domain:api.bitbucket.org)",
       "WebFetch(domain:bitbucket.org)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(rm -rf public/assets/*)",
+      "Bash(python tools/asset-pipeline/pipeline.py --game \"C:/GOG Games/last_version/Game\" --out public/assets --stage 1)"
     ]
   }
 }
