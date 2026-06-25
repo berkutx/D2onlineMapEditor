@@ -70,7 +70,8 @@ export function objectSpriteCandidates(
     }
 
     case "merchant":
-      return ["G000SI0000MERH00", "G000SI0000MERH"];
+      // "G000SI0000MERH" is a real 4-frame animation; prefer it over the still.
+      return ["G000SI0000MERH", "G000SI0000MERH00"];
     case "mage": {
       const i = obj.image ?? 4;
       return [`G000SI0000MAGE${pad(i, 2)}`, "G000SI0000MAGE04"];
