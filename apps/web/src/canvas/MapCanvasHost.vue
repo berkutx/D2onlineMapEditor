@@ -72,6 +72,8 @@ onMounted(async () => {
   });
 
   setScene(scene);
+  // debug hook: lets us inspect the live scene graph from the preview console
+  (window as unknown as { __d2scene?: unknown }).__d2scene = scene;
 
   // Report the cursor cell to the status bar (cheap pointer math via the
   // re-exported pure helpers; no Pixi reactivity involved).

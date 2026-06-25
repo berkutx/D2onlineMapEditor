@@ -19,6 +19,22 @@ import type { TerrainIndex } from "@d2/asset-manifest";
 /** Orthogonal neighbour direction codes used for border blending. */
 export type Edge = "N" | "E" | "S" | "W";
 
+/**
+ * Maps a cell's `terrain` field (bits 0-2) to the 2-letter race code used for base
+ * ground art (Ground.ff). Verified against Riders.sg (player race r -> terrain r+1):
+ * 1=Empire(HU) 2=Undead(UN) 3=Legions(HE) 4=Clans(DW) 5=Neutral(NE) 6=Elves(EL).
+ * 0 is unused in practice; falls back to Neutral. Water (`ground===3`) overrides to "WA".
+ */
+export const TERRAIN_RACE_CODE: Readonly<Record<number, string>> = {
+  0: "NE",
+  1: "HU",
+  2: "UN",
+  3: "HE",
+  4: "DW",
+  5: "NE",
+  6: "EL",
+};
+
 /** One resolved terrain cell: ordered list of frame keys to stamp bottom-to-top. */
 export interface TerrainStamp {
   /** base ground tile frame key (always present if the ground has any base art) */
@@ -98,10 +114,18 @@ export function selectTerrain(
   const { x, y } = cell;
 
   // --- base ---
-  const baseKey = String(cell.ground);
+  // D2 base ground art is per race-theme keyed by a 2-letter code (Ground.ff: HU_00,
+  // NE_00, ...), with water as the special "WA" code. The cell's `terrain` field
+  // (bits 0-2) selects the race theme; `ground === 3` flags water.
+  //
+  // terrain -> code verified against Riders.sg capitals (player race r sits on
+  // terrain r+1): race0/Empire@t1, race3/Clans@t4, race4/Neutral@t5. Standard D2
+  // race order HU,UN,HE,DW,NE,EL -> terrain = raceId + 1.
+  const code = cell.isWater ? "WA" : (TERRAIN_RACE_CODE[cell.terrain] ?? "NE");
   stamp.base =
-    pickVariant(terrain.base[baseKey], x, y) ??
-    // some manifests key water base separately
+    pickVariant(terrain.base[code], x, y) ??
+    // legacy fallbacks (numeric ground key / explicit water key)
+    pickVariant(terrain.base[String(cell.ground)], x, y) ??
     (cell.isWater ? pickVariant(terrain.base["water"], x, y) : undefined);
 
   // --- borders (compare 4 neighbours) ---

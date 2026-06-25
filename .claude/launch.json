@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "corepack",
+      "runtimeArgs": ["pnpm", "--filter", "@d2/web", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "corepack",
+      "runtimeArgs": ["pnpm", "--filter", "@d2/server", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

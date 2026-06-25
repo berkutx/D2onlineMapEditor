@@ -1,19 +1,22 @@
 /**
- * TerrainLayer — stamps the terrain grid into a `@pixi/tilemap` CompositeTilemap.
+ * TerrainLayer — stamps the terrain grid as a layer of PixiJS Sprites.
  *
- * Touches `pixi.js` + `@pixi/tilemap` -> COMPILE-ONLY under vitest.
+ * Touches `pixi.js` -> COMPILE-ONLY under vitest.
  *
  * For every cell it asks the PURE {@link selectTerrain} for the ordered frame keys
  * (base -> borders -> road -> forest), resolves each to a Texture via the
- * {@link AssetStore}, and stamps them at the cell's iso world position. The
- * CompositeTilemap batches everything into a handful of draw calls, which is what
- * makes a 72×72 map cheap.
+ * {@link AssetStore}, and places a Sprite at the cell's iso world position.
+ *
+ * NOTE: an earlier version used `@pixi/tilemap`'s CompositeTilemap, but its render
+ * pipe did not draw under this Pixi v8 setup (tiles had geometry/bounds but never
+ * rasterised). Plain Sprites render reliably; a 72×72 map is ~5k base sprites which
+ * Pixi batches comfortably. Tilemap batching can be revisited as a perf pass.
  *
  * Iso placement: a tile texture's TOP-LEFT is offset so the 192px-wide diamond is
- * centered on the cell's world center (from {@link cellToWorld}).
+ * centered on the cell's world center (from {@link cellToWorld}); tall tiles extend
+ * upward from the diamond's vertical mid-line.
  */
-import { Container, type Texture } from "pixi.js";
-import { CompositeTilemap } from "@pixi/tilemap";
+import { Container, Sprite, type Texture } from "pixi.js";
 import type { TerrainGrid } from "@d2/map-schema";
 import type { TerrainIndex } from "@d2/asset-manifest";
 import { cellToWorld, TILE_W } from "./iso.js";
@@ -23,26 +26,21 @@ import type { AssetStore } from "./AssetStore.js";
 export class TerrainLayer {
   /** The display object to add to the world container. */
   readonly view: Container;
-  private readonly tilemap: CompositeTilemap;
 
   constructor() {
     this.view = new Container();
     this.view.label = "terrain";
-    this.tilemap = new CompositeTilemap();
-    this.view.addChild(this.tilemap);
+    // terrain is opaque & static; let Pixi cull offscreen sprites
+    this.view.cullable = true;
   }
 
-  /**
-   * Rebuild the whole tilemap from a grid. Cheap enough to call on full reloads;
-   * for camera panning the CompositeTilemap itself is GPU-culled by Pixi so we
-   * stamp the entire map once.
-   */
+  /** Rebuild the whole terrain from a grid. */
   build(
     grid: TerrainGrid,
     terrain: TerrainIndex | undefined,
     assets: AssetStore,
   ): void {
-    this.tilemap.clear();
+    this.view.removeChildren().forEach((c) => c.destroy());
     if (!terrain) return;
 
     for (const cell of grid.cells) {
@@ -58,18 +56,14 @@ export class TerrainLayer {
     assets: AssetStore,
   ): void {
     const center = cellToWorld(cx, cy);
-    // The CompositeTilemap.tile origin is the texture's top-left. Center the
-    // 192px-wide diamond horizontally; vertical anchor uses the texture height
-    // at draw time (tilemap reads texture.orig), so we offset by half tile width
-    // and let tall tiles extend upward from the diamond's vertical mid-line.
     const ox = center.x - TILE_W / 2;
 
     const place = (tex: Texture | undefined): void => {
-      if (!tex || tex.label === "EMPTY") return;
-      // Anchor each tile so its bottom sits on the diamond center line; tilemap
-      // draws from the top-left, so subtract the texture's height.
-      const oy = center.y - tex.orig.height + TILE_W / 4;
-      this.tilemap.tile(tex, ox, oy);
+      if (!tex || tex === undefined || tex.label === "EMPTY") return;
+      const sprite = new Sprite(tex);
+      // bottom of the tile sits on the diamond mid-line; sprite anchor is top-left.
+      sprite.position.set(ox, center.y - tex.orig.height + TILE_W / 4);
+      this.view.addChild(sprite);
     };
 
     place(this.tex(assets, stamp.base));
@@ -90,7 +84,6 @@ export class TerrainLayer {
   }
 
   destroy(): void {
-    this.tilemap.destroy();
     this.view.destroy({ children: true });
   }
 }

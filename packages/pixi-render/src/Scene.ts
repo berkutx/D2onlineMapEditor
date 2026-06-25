@@ -91,11 +91,13 @@ export class Scene {
     this.parent = parent;
     const app = new Application();
     await app.init({
-      background: options.background ?? 0x000000,
-      backgroundAlpha: options.background === undefined ? 0 : 1,
+      background: options.background ?? 0x101418,
+      backgroundAlpha: 1,
       antialias: options.antialias ?? true,
       resolution: options.resolution ?? globalThis.devicePixelRatio ?? 1,
       autoDensity: true,
+      // allow screenshot/readback capture of the WebGL frame (debug + minimap snapshots)
+      preserveDrawingBuffer: true,
       resizeTo: options.autoResize === false ? undefined : parent,
       width: parent.clientWidth || 800,
       height: parent.clientHeight || 600,
