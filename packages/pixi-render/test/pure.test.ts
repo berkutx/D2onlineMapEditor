@@ -33,9 +33,9 @@ const doc = MapDocument.parse(JSON.parse(readFileSync(FIXTURE, "utf8")));
 
 describe("iso", () => {
   it("has the documented tile geometry", () => {
-    expect(TILE_W).toBe(192);
-    expect(HALF_W).toBe(96);
-    expect(HALF_H).toBe(48);
+    expect(TILE_W).toBe(64);
+    expect(HALF_W).toBe(32);
+    expect(HALF_H).toBe(16);
   });
 
   it("matches the Contract-A scalar transform", () => {
@@ -45,9 +45,9 @@ describe("iso", () => {
 
   it("projects cells to world centers", () => {
     expect(cellToWorld(0, 0)).toEqual({ x: 0, y: 0 });
-    expect(cellToWorld(1, 0)).toEqual({ x: 96, y: 48 });
-    expect(cellToWorld(0, 1)).toEqual({ x: -96, y: 48 });
-    expect(cellToWorld(2, 3)).toEqual({ x: (2 - 3) * 96, y: (2 + 3) * 48 });
+    expect(cellToWorld(1, 0)).toEqual({ x: 32, y: 16 });
+    expect(cellToWorld(0, 1)).toEqual({ x: -32, y: 16 });
+    expect(cellToWorld(2, 3)).toEqual({ x: (2 - 3) * 32, y: (2 + 3) * 16 });
   });
 
   it("worldToCell inverts cellToWorld", () => {
@@ -66,12 +66,12 @@ describe("iso", () => {
 
   it("computes a padded world AABB for a size×size map", () => {
     const b = mapWorldBounds(2);
-    // extreme centers for size=2: left cell (0,1) x=-96, right cell (1,0) x=96,
-    // top (0,0) y=0, bottom (1,1) y=96 ; padded by half tile.
-    expect(b.minX).toBe(-96 - 96);
-    expect(b.maxX).toBe(96 + 96);
-    expect(b.minY).toBe(-48);
-    expect(b.maxY).toBe(96 + 48);
+    // extreme centers for size=2: left cell (0,1) x=-32, right cell (1,0) x=32,
+    // top (0,0) y=0, bottom (1,1) y=32 ; padded by half tile.
+    expect(b.minX).toBe(-32 - 32);
+    expect(b.maxX).toBe(32 + 32);
+    expect(b.minY).toBe(-16);
+    expect(b.maxY).toBe(32 + 16);
     expect(b.width).toBe(b.maxX - b.minX);
     expect(b.height).toBe(b.maxY - b.minY);
   });

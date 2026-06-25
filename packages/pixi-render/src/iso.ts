@@ -15,12 +15,16 @@
  * `isoY = (x + y) / 2`) scaled by the tile geometry.
  */
 
-/** Full terrain tile width in px (Contract B `tileW`). */
-export const TILE_W = 192;
-/** Diamond half-width = TILE_W / 2. */
-export const HALF_W = 96;
-/** Diamond half-height (2:1 iso). */
-export const HALF_H = 48;
+// D2 terrain TILE_SIZE = 32 -> iso diamonds are 64 wide x 32 tall (verified in the
+// editor's MapTileHelper/MapRegionExtractor). Cell pitch is therefore HALF_W=32,
+// HALF_H=16. Object/decoration sprites keep their native pixel size, so a city or
+// mountain correctly spans several cells (as in the original editor).
+/** Full iso diamond width in px (2 * TILE_SIZE). */
+export const TILE_W = 64;
+/** Diamond half-width = TILE_SIZE. */
+export const HALF_W = 32;
+/** Diamond half-height = TILE_SIZE / 2 (2:1 iso). */
+export const HALF_H = 16;
 
 /** Contract-A scalar iso transform: isoX = x - y. */
 export function isoX(x: number, y: number): number {

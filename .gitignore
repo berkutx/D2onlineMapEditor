@@ -20,3 +20,5 @@ tools/asset-pipeline/.venv/
 
 # local render-check debug artifacts
 /render-check.*
+/terrain-preview.*
+/tiles-strip.*

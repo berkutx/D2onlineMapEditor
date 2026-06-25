@@ -13,8 +13,9 @@
  */
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
+import { Assets, type Texture } from "pixi.js";
 import { Scene } from "@d2/pixi-render";
-import type { CameraSnapshot } from "@d2/pixi-render";
+import type { CameraSnapshot, TerrainMeta } from "@d2/pixi-render";
 import { worldToCell } from "@d2/pixi-render";
 import { useMapStore } from "../stores/mapStore";
 import { useAssetStore } from "../stores/assetStore";
@@ -38,12 +39,16 @@ async function rebuild(): Promise<void> {
   const scene = getScene();
   const doc = currentMap.value;
   const man = manifest.value;
-  if (!scene || !doc || !man) return;
+  const id = mapStore.currentScenarioId;
+  if (!scene || !doc || !man || !id) return;
 
   building.value = true;
   buildError.value = null;
   try {
-    await scene.buildScene(doc, man, getAssetStore());
+    // the pre-composited terrain image + alignment meta (compose_terrain.py output)
+    const meta = (await (await fetch(`/assets/terrain/${id}.json`)).json()) as TerrainMeta;
+    const texture = await Assets.load<Texture>(`/assets/terrain/${id}.png`);
+    await scene.buildScene(doc, man, getAssetStore(), { texture, meta });
     // apply the current view state to the freshly-built scene
     scene.setLayerVisibility("terrain", terrainVisible.value);
     scene.setLayerVisibility("objects", objectsVisible.value);

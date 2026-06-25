@@ -18,12 +18,12 @@
  * Layer order (back to front): terrain tilemap, then the z-sorted object layer.
  * Both live under a single `world` Container that the {@link Camera} pans/zooms.
  */
-import { Application, Container } from "pixi.js";
+import { Application, Container, type Texture } from "pixi.js";
 import type { MapDocument } from "@d2/map-schema";
 import type { AssetManifest } from "@d2/asset-manifest";
 
 import { AssetStore } from "./AssetStore.js";
-import { TerrainLayer } from "./TerrainLayer.js";
+import { TerrainLayer, type TerrainMeta } from "./TerrainLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer } from "./ObjectLayer.js";
 import { AnimationManager } from "./AnimationManager.js";
@@ -123,6 +123,7 @@ export class Scene {
     map: MapDocument,
     manifest: AssetManifest,
     assets: AssetStore,
+    terrain: { texture: Texture; meta: TerrainMeta },
   ): Promise<void> {
     if (!this.app || !this.world) {
       throw new Error("Scene.buildScene called before init()");
@@ -134,7 +135,7 @@ export class Scene {
     this.anim = new AnimationManager({ autoStart: true });
 
     this.terrain = new TerrainLayer();
-    this.terrain.build(map.terrain, manifest.terrain, assets, this.app.renderer);
+    this.terrain.build(terrain.texture, terrain.meta);
     this.world.addChild(this.terrain.view);
 
     // iso grid overlay, above terrain and below objects
