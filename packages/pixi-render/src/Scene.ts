@@ -24,12 +24,13 @@ import type { AssetManifest } from "@d2/asset-manifest";
 
 import { AssetStore } from "./AssetStore.js";
 import { TerrainLayer } from "./TerrainLayer.js";
+import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer } from "./ObjectLayer.js";
 import { AnimationManager } from "./AnimationManager.js";
 import { Camera, type CameraSnapshot } from "./Camera.js";
 
 /** Which logical layers can be toggled by the host. */
-export type LayerName = "terrain" | "objects";
+export type LayerName = "terrain" | "grid" | "objects";
 
 export interface SceneInitOptions {
   /** canvas background color (default transparent). */
@@ -54,6 +55,7 @@ export class Scene {
   /** The pannable/zoomable world root that holds every layer. */
   private world?: Container;
   private terrain?: TerrainLayer;
+  private grid?: GridLayer;
   private objects?: ObjectLayer;
   private anim?: AnimationManager;
   private camera?: Camera;
@@ -132,8 +134,13 @@ export class Scene {
     this.anim = new AnimationManager({ autoStart: true });
 
     this.terrain = new TerrainLayer();
-    this.terrain.build(map.terrain, manifest.terrain, assets);
+    this.terrain.build(map.terrain, manifest.terrain, assets, this.app.renderer);
     this.world.addChild(this.terrain.view);
+
+    // iso grid overlay, above terrain and below objects
+    this.grid = new GridLayer();
+    this.grid.build(map.size);
+    this.world.addChild(this.grid.view);
 
     this.objects = new ObjectLayer();
     this.objects.build(map, assets, this.anim);
@@ -152,6 +159,7 @@ export class Scene {
   /** Toggle a logical layer's visibility. */
   setLayerVisibility(layer: LayerName, visible: boolean): void {
     if (layer === "terrain") this.terrain?.setVisible(visible);
+    else if (layer === "grid") this.grid?.setVisible(visible);
     else if (layer === "objects") this.objects?.setVisible(visible);
   }
 
@@ -219,10 +227,12 @@ export class Scene {
 
   private teardownLayers(): void {
     if (this.objects && this.anim) this.objects.destroy(this.anim);
+    this.grid?.destroy();
     this.terrain?.destroy();
     this.anim?.destroy();
     this.camera?.destroy();
     this.objects = undefined;
+    this.grid = undefined;
     this.terrain = undefined;
     this.anim = undefined;
     this.camera = undefined;

@@ -17,3 +17,6 @@ tools/asset-pipeline/.venv/
 .idea/
 
 # design sub-agent scratch (not part of repo)
+
+# local render-check debug artifacts
+/render-check.*
