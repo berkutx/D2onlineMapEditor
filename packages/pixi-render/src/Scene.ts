@@ -62,6 +62,10 @@ export class Scene {
 
   private handlers: SceneEventHandlers = {};
   private resizeObserver?: ResizeObserver;
+  /** render-on-demand state */
+  private renderScheduled = false;
+  private rafId?: number;
+  private animContinuous = false;
   private wheelHandler?: (e: WheelEvent) => void;
   private pointerState: { dragging: boolean; lastX: number; lastY: number } = {
     dragging: false,
@@ -95,11 +99,10 @@ export class Scene {
     await app.init({
       background: options.background ?? 0x101418,
       backgroundAlpha: 1,
-      antialias: options.antialias ?? true,
+      // pixel-art iso tiles: antialiasing only blurs them and costs fill rate.
+      antialias: options.antialias ?? false,
       resolution: options.resolution ?? globalThis.devicePixelRatio ?? 1,
       autoDensity: true,
-      // allow screenshot/readback capture of the WebGL frame (debug + minimap snapshots)
-      preserveDrawingBuffer: true,
       resizeTo: options.autoResize === false ? undefined : parent,
       width: parent.clientWidth || 800,
       height: parent.clientHeight || 600,
@@ -113,6 +116,13 @@ export class Scene {
     app.stage.addChild(this.world);
 
     this.attachInput();
+
+    // Render ON DEMAND: stop Pixi's continuous render loop. We render once per
+    // change (camera / scene / layer toggle), and run the loop continuously only
+    // while animations are actually playing (see updateRenderMode). A static map
+    // then costs ~0 GPU instead of re-rendering 60x/second forever.
+    app.ticker.stop();
+    this.requestRender();
   }
 
   /**
@@ -156,6 +166,9 @@ export class Scene {
       this.camera.setSnapshotListener(this.handlers.onCameraChange);
     }
     this.camera.fitToScreen();
+
+    this.updateRenderMode();
+    this.requestRender();
   }
 
   /** Toggle a logical layer's visibility. */
@@ -163,16 +176,46 @@ export class Scene {
     if (layer === "terrain") this.terrain?.setVisible(visible);
     else if (layer === "grid") this.grid?.setVisible(visible);
     else if (layer === "objects") this.objects?.setVisible(visible);
+    this.requestRender();
   }
 
   /** Start/stop all sprite animation (single shared ticker). */
   setAnimationEnabled(on: boolean): void {
     this.anim?.setEnabled(on);
+    this.updateRenderMode();
   }
 
   /** Programmatic camera access for hosts (minimap clicks, etc.). */
   getCamera(): Camera | undefined {
     return this.camera;
+  }
+
+  /** Schedule a single render on the next frame. No-op while the animation loop
+   *  is already running (it renders every frame) or a render is already queued. */
+  requestRender(): void {
+    if (!this.app || this.animContinuous || this.renderScheduled) return;
+    this.renderScheduled = true;
+    this.rafId = requestAnimationFrame(() => {
+      this.renderScheduled = false;
+      this.app?.render();
+    });
+  }
+
+  /** Run Pixi's continuous render loop only while animations are actually playing;
+   *  otherwise stay idle and render on demand. */
+  private updateRenderMode(): void {
+    if (!this.app) return;
+    const shouldRun = !!this.anim && this.anim.isEnabled && this.anim.activeCount > 0;
+    if (shouldRun && !this.animContinuous) {
+      this.animContinuous = true;
+      this.app.ticker.start();
+    } else if (!shouldRun && this.animContinuous) {
+      this.animContinuous = false;
+      this.app.ticker.stop();
+      this.requestRender();
+    } else if (!shouldRun) {
+      this.requestRender();
+    }
   }
 
   // --- input wiring (browser only; no-ops if APIs absent) ---
@@ -191,6 +234,7 @@ export class Scene {
       const ay = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
       this.camera.zoomAt(factor, ax, ay);
+      this.requestRender();
     };
     canvas.addEventListener("wheel", this.wheelHandler, { passive: false });
 
@@ -211,6 +255,7 @@ export class Scene {
       this.pointerState.lastX = e.global.x;
       this.pointerState.lastY = e.global.y;
       this.camera.panBy(dx, dy);
+      this.requestRender();
     });
 
     // keep the camera's screen size in sync with the parent element
@@ -221,6 +266,7 @@ export class Scene {
             this.app.screen.width,
             this.app.screen.height,
           );
+          this.requestRender();
         }
       });
       this.resizeObserver.observe(this.parent);
@@ -249,6 +295,10 @@ export class Scene {
       );
     }
     this.wheelHandler = undefined;
+    if (this.rafId !== undefined) cancelAnimationFrame(this.rafId);
+    this.rafId = undefined;
+    this.renderScheduled = false;
+    this.animContinuous = false;
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
 
