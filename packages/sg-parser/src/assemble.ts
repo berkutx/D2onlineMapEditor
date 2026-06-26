@@ -168,6 +168,22 @@ export function assembleDocument(
     }
   }
 
+  // Resolve each fort/capital/village's sprite race from its OWNER player. The
+  // editor sets FortObject.raceId = player.raceId (MapConverter.cpp:380) and builds
+  // the image key from Grace[player.raceId] (NOT from the block's SUBRACE, which is
+  // the banner/faction). PlayerInfo.race is the Grace RACE_ID index; the renderer
+  // maps it through graceFortCodes (Grace -> Lrace 2-char code).
+  const playerRace = new Map<string, number>();
+  for (const p of acc.players) playerRace.set(p.id, p.race);
+  for (const o of acc.objects) {
+    if (o.type === "capital" || o.type === "village" || o.type === "fort") {
+      if (o.owner !== undefined) {
+        const r = playerRace.get(o.owner);
+        if (r !== undefined) o.race = r;
+      }
+    }
+  }
+
   const size = acc.size;
   if (size === null || size <= 0) {
     throw new Error("sg-parser: could not determine map size (no MAP_SIZE / MidgardMap)");

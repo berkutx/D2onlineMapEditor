@@ -67,21 +67,41 @@ def main(argv=None):
             cx = cy = 1
         lm[lid] = [cx, cy]
 
-    # race index -> 2-letter code (Lterrain.dbf: id -> text.replace("L_","")). The
-    # editor builds fort/capital keys from this (e.g. race 1 -> "HU" -> G000FT0000HU0).
-    race_codes = {}
-    for row in read_dbf(_find(globals_dir, "Lterrain.dbf")):
+    # Grace race index -> 2-letter FORT code, the EXACT editor chain for capitals
+    # (ObjectAccessors.cpp FortObjectAccessor) and villages (shortRaceByPlayerId2):
+    #   key = Grace[player.raceId].race_type.value->text   # race_type is IntLink<Lrace>!
+    #   key = key.mid(2, 2)                                  # "L_HUMAN" -> "HU"
+    # i.e. Grace.RACE_ID(num) -> Grace.RACE_TYPE(int) -> Lrace[that].TEXT -> strip L_ -> 2.
+    # NOTE: race_type links to Lrace (HU/UN/HE/DW/NE/EL), NOT Lterrain (GO/HU/DW/HE/UN/NE/EL).
+    def _id_num(s):
+        digits = "".join(ch for ch in (s or "") if ch.isdigit())
+        return int(digits) if digits else None
+
+    lrace = {}
+    for row in read_dbf(_find(globals_dir, "Lrace.dbf")):
         try:
-            rid = int(row.get("ID", ""))
+            lid = int(row.get("ID", ""))
         except ValueError:
             continue
-        race_codes[rid] = row.get("TEXT", "").replace("L_", "").strip()
+        lrace[lid] = row.get("TEXT", "").replace("L_", "").strip()[:2]
 
-    data = {"landmarkFootprints": lm, "raceCodes": race_codes}
+    grace_fort_codes = {}
+    for row in read_dbf(_find(globals_dir, "Grace.dbf")):
+        gidx = _id_num(row.get("RACE_ID", ""))
+        try:
+            rtype = int(row.get("RACE_TYPE", ""))
+        except ValueError:
+            continue
+        if gidx is None or rtype not in lrace:
+            continue
+        grace_fort_codes[gidx] = lrace[rtype]
+
+    data = {"landmarkFootprints": lm, "graceFortCodes": grace_fort_codes}
     os.makedirs(args.out, exist_ok=True)
     out_path = os.path.join(args.out, "objectdata.json")
     json.dump(data, open(out_path, "w"), separators=(",", ":"))
-    print("wrote", out_path, "- landmarks:", len(lm))
+    print("wrote", out_path, "- landmarks:", len(lm),
+          "- graceFortCodes:", grace_fort_codes)
     return 0
 
 

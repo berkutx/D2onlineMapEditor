@@ -25,7 +25,8 @@ import {
   type LandmarkFootprints,
 } from "./objectSprite.js";
 
-/** terrain race index -> 2-letter code (Lterrain.dbf), for fort/capital sprites. */
+/** Grace race index -> 2-letter fort code (Grace.RACE_TYPE -> Lrace), for
+ *  capital/village sprites. The object's `race` is the OWNER player's Grace index. */
 export type RaceCodes = Record<number, string>;
 import type { AssetStore } from "./AssetStore.js";
 import type { AnimationManager } from "./AnimationManager.js";
@@ -41,7 +42,7 @@ export class ObjectLayer {
   readonly view: Container;
   private readonly placed: PlacedObject[] = [];
   private landmarks?: LandmarkFootprints;
-  private raceCodes?: RaceCodes;
+  private graceFortCodes?: RaceCodes;
   /** "x,y" of every water cell (ground==3), to pick the treasure (bag) variant. */
   private waterCells = new Set<string>();
 
@@ -61,11 +62,11 @@ export class ObjectLayer {
     anim: AnimationManager,
     allowedTypes?: ReadonlySet<string>,
     landmarks?: LandmarkFootprints,
-    raceCodes?: RaceCodes,
+    graceFortCodes?: RaceCodes,
   ): void {
     this.clear(anim);
     this.landmarks = landmarks;
-    this.raceCodes = raceCodes;
+    this.graceFortCodes = graceFortCodes;
     // water cells (ground == 3) — treasure bags pick a different sprite on water.
     this.waterCells = new Set();
     for (const c of doc.terrain.cells) {
@@ -86,11 +87,28 @@ export class ObjectLayer {
     const water = obj.type === "treasure"
       ? this.waterCells.has(`${obj.pos.x},${obj.pos.y}`)
       : undefined;
-    const key = objectSpriteKey(obj, { raceCodes: this.raceCodes, water });
+    const key = objectSpriteKey(obj, { graceFortCodes: this.graceFortCodes, water });
     if (!key) return;
 
-    // An animation (multi-frame) wins; otherwise a single static frame. No fallback.
-    const animFrames: Texture[] = assets.resolveAnimation(key);
+    // Candidate keys in editor preference order. Villages try the race-suffixed
+    // sprite first then the base "NE"+tier — FortObjectAccessor calls getImagesData
+    // twice (the second only if the first is empty). All other types have one key.
+    const keys: string[] = [key];
+    if (obj.type === "village") {
+      const base = `G000FT0000NE${obj.tier ?? 1}`;
+      if (base !== key) keys.push(base);
+    }
+
+    // An animation (multi-frame) wins; otherwise a single static frame. No guessed
+    // fallback beyond the editor's own documented two-try above.
+    let animFrames: Texture[] = [];
+    let staticTex: Texture | null = null;
+    for (const k of keys) {
+      const af = assets.resolveAnimation(k);
+      if (af.length > 1) { animFrames = af; break; }
+      const t = assets.resolveTexture(k);
+      if (t.label !== "EMPTY") { staticTex = t; break; }
+    }
 
     let sprite: Sprite | AnimatedSprite;
     let animated = false;
@@ -101,9 +119,8 @@ export class ObjectLayer {
       sprite = anim.acquire(animFrames);
       animated = true;
     } else {
-      const tex: Texture = assets.resolveTexture(key);
-      if (tex.label === "EMPTY") return; // key didn't resolve -> not drawn
-      sprite = new Sprite(tex);
+      if (!staticTex) return; // no candidate key resolved -> not drawn
+      sprite = new Sprite(staticTex);
     }
 
     // Editor (CustomMapObject::advance): the FULL sprite is CENTERED at the iso

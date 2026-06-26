@@ -83,8 +83,12 @@ async function rebuild(): Promise<void> {
     // corrupted (black/garbage), showing as a black rectangle at the zoom that
     // samples it. Plain linear is the known-good path (tiny shimmer at most).
     const texture = await Assets.load<Texture>(`/assets/terrain/${id}.png`);
-    // object placement data (landmark footprints from GLmark.dbf, etc.)
-    const objectData = await (await fetch(`/assets/objectdata.json`)).json();
+    // object placement data (landmark footprints, graceFortCodes from the DBFs).
+    // A pipeline output like the manifest -> fetch fresh (the static mount serves
+    // /assets with a long immutable cache, which would otherwise pin a stale copy).
+    const objectData = await (
+      await fetch(`/assets/objectdata.json`, { cache: "no-store" })
+    ).json();
     await scene.buildScene(
       doc,
       man,

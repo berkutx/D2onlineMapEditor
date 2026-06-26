@@ -34,8 +34,10 @@ const SITE_CODE: Record<string, string> = {
 
 /** Extra context some accessors need to build their key. */
 export interface SpriteKeyContext {
-  /** terrain race index -> 2-letter code (Lterrain.dbf), for fort/capital sprites. */
-  raceCodes?: Record<number, string>;
+  /** Grace race index -> 2-letter fort code (Grace.RACE_TYPE -> Lrace, e.g.
+   *  0 -> "HU", 3 -> "UN"), for capital/village sprites. The object's `race` is
+   *  the OWNER player's Grace index (assemble.ts post-pass). */
+  graceFortCodes?: Record<number, string>;
   /** whether this object's cell is water — selects the treasure (bag) variant. */
   water?: boolean;
 }
@@ -69,16 +71,21 @@ export function objectSpriteKey(
     case "crystal":
       return CRYSTAL_ID[obj.resource ?? 0];
 
-    // FortObjectAccessor (Capital): "G000FT0000" + race(2) + "0". Needs the race code.
+    // FortObjectAccessor (Capital): "G000FT0000" + race(2) + "0", where race is
+    // Grace[owner.raceId].race_type(Lrace).text.mid(2,2). obj.race is the owner's
+    // Grace index; graceFortCodes maps it to the 2-char code.
     case "capital": {
-      const code = ctx?.raceCodes?.[obj.race ?? -1];
+      const code = ctx?.graceFortCodes?.[obj.race ?? -1];
       return code ? `G000FT0000${code}0` : undefined;
     }
 
-    // FortObjectAccessor (Village): "G000FT0000NE" + level. (The editor prefers a
-    // race-suffixed variant and falls back to this base, which always resolves.)
-    case "village":
-      return `G000FT0000NE${obj.tier ?? 1}`;
+    // FortObjectAccessor (Village): "G000FT0000NE" + level + ownerRaceCode
+    // (shortRaceByPlayerId2), with an editor fallback to the base "NE" + level
+    // (handled in ObjectLayer when the race-specific sprite is absent).
+    case "village": {
+      const code = ctx?.graceFortCodes?.[obj.race ?? -1];
+      return `G000FT0000NE${obj.tier ?? 1}${code ?? ""}`;
+    }
 
     // TreasureObjectAccessor: "G000BG0000" + (water ? 0 : 1) + image(2)
     case "treasure":

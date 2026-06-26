@@ -34,8 +34,9 @@ import { Camera, type CameraSnapshot } from "./Camera.js";
 /** Extra game-data tables the renderer needs for placement (objectdata.json). */
 export interface ObjectData {
   landmarkFootprints?: LandmarkFootprints;
-  /** terrain race index -> 2-letter code (Lterrain.dbf), for fort/capital sprites. */
-  raceCodes?: Record<number, string>;
+  /** Grace race index -> 2-letter fort code (Grace.RACE_TYPE -> Lrace), for
+   *  capital/village sprites. The object's `race` is the OWNER player's Grace index. */
+  graceFortCodes?: Record<number, string>;
 }
 
 /** Live performance / engine numbers for the debug HUD. */
@@ -214,7 +215,7 @@ export class Scene {
       this.anim,
       objectTypes,
       objectData?.landmarkFootprints,
-      objectData?.raceCodes,
+      objectData?.graceFortCodes,
     );
     this.world.addChild(this.objects.view);
 

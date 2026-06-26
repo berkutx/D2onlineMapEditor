@@ -14,7 +14,6 @@ import {
   readDefaultBool,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
-import { parseCompoundId } from "../framing.js";
 import type { MapObject } from "@d2/map-schema";
 
 const NULL_ID = "G000000000"; // sentinel "no reference" compound id
@@ -54,12 +53,12 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
   };
 }
 
-/** MidVillage: a town/fort (uid prefix FT, disambiguated by TypeName). SIZE = tier. */
+/** MidVillage: a town/fort (uid prefix FT, disambiguated by TypeName). SIZE = tier.
+ *  `race` is NOT set here: the editor's sprite race is the OWNER player's race
+ *  (Grace), resolved in assemble.ts's post-pass — SUBRACE is the banner/faction. */
 export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
-  const subrace = readDefaultString(buf, "SUBRACE", f, e);
-  const parsedRace = subrace ? parseCompoundId(subrace) : null;
   const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
   const tier = readDefaultInt(buf, "SIZE", f, e) ?? 1;
   return {
@@ -67,25 +66,24 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     id: obj.id,
     pos: pos(buf, obj),
     ...(owner ? { owner } : {}),
-    ...(parsedRace ? { race: parsedRace.index } : {}),
     name,
     tier,
   };
 }
 
-/** Capital: a player capital city (uid prefix FT, TypeName "Capital"). */
+/** Capital: a player capital city (uid prefix FT, TypeName "Capital").
+ *  Like villages, `race` comes from the OWNER player's race (Grace), not SUBRACE
+ *  — the editor sets FortObject.raceId = player.raceId (MapConverter.cpp). Resolved
+ *  in assemble.ts's post-pass. */
 export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
-  const subrace = readDefaultString(buf, "SUBRACE", f, e);
-  const parsedRace = subrace ? parseCompoundId(subrace) : null;
   const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
   return {
     type: "capital",
     id: obj.id,
     pos: pos(buf, obj),
     ...(owner ? { owner } : {}),
-    ...(parsedRace ? { race: parsedRace.index } : {}),
     name,
   };
 }
