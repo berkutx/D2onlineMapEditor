@@ -67,13 +67,11 @@ async function rebuild(): Promise<void> {
   try {
     // the pre-composited terrain image + alignment meta (compose_terrain.py output)
     const meta = (await (await fetch(`/assets/terrain/${id}.json`)).json()) as TerrainMeta;
-    // mipmaps: the terrain is one large 4736x2432 texture; when zoomed out it is
-    // minified heavily, and without mips an iGPU samples the full texture (memory-
-    // bandwidth heavy + shimmer). autoGenerateMipmaps makes zoom-out cheap and crisp.
-    const texture = await Assets.load<Texture>({
-      src: `/assets/terrain/${id}.png`,
-      data: { autoGenerateMipmaps: true },
-    });
+    // NO mipmaps: the terrain is a large NON-power-of-two texture (4736x2432) and
+    // autoGenerateMipmaps on NPOT is buggy on Intel/ANGLE — a mip level comes out
+    // corrupted (black/garbage), showing as a black rectangle at the zoom that
+    // samples it. Plain linear is the known-good path (tiny shimmer at most).
+    const texture = await Assets.load<Texture>(`/assets/terrain/${id}.png`);
     // object placement data (landmark footprints from GLmark.dbf, etc.)
     const objectData = await (await fetch(`/assets/objectdata.json`)).json();
     await scene.buildScene(

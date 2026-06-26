@@ -9,7 +9,28 @@ UPPERCASE logical id. Multi-frame ids become animations (id -> [id#0, id#1, ...]
 import numpy as np
 
 from decode_images import Frame, _trim_bbox
-from fflib.gameresource import GameResource, SH_DEFAULT
+from fflib.gameresource import GameResource, SH_DEFAULT, SH_TRANSP_BLACK
+
+
+def _shader_for(name):
+    """Per-object preprocessing shader, matching the editor's ObjectAccessors. Most
+    sprites use the magenta colour key (Default); crystals and rods additionally key
+    out black (TransparentBlack) — their art sits on a large black field that would
+    otherwise render as a solid black rectangle."""
+    u = name.upper()
+    if u.startswith("G000CR") or "RROD" in u:
+        return SH_DEFAULT | SH_TRANSP_BLACK
+    return SH_DEFAULT
+
+
+def _is_blank(rgba):
+    """True if a decoded frame has no non-black opaque pixel — a pure-black placeholder
+    (e.g. the blank G002MG80xx landmark images in this install). It carries no art, so
+    rendering it just yields a black blob; skip it (invalid-asset guard)."""
+    op = rgba[..., 3] > 0
+    if not op.any():
+        return True
+    return int(rgba[op][:, :3].max()) < 5
 
 
 def _to_frame(key, rgba):
@@ -23,15 +44,19 @@ def _to_frame(key, rgba):
 
 
 def decode_bundle(path, shader=SH_DEFAULT):
-    """Return (frames, animations) for an archive, resolved through GameResource."""
+    """Return (frames, animations) for an archive, resolved through GameResource.
+
+    The per-name shader follows the editor (see _shader_for); pure-black placeholder
+    frames are dropped so missing/blank art isn't drawn as a black rectangle."""
     gr = GameResource(path)
     frames = []
     animations = {}
     for name in gr.all_names():
         try:
-            fr = gr.get_frames(name, shader)
+            fr = gr.get_frames(name, _shader_for(name))
         except Exception:
             fr = []
+        fr = [f for f in fr if not _is_blank(f)]
         if not fr:
             continue
         key = name.upper()
