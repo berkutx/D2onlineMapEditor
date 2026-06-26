@@ -23,16 +23,6 @@ def _shader_for(name):
     return SH_DEFAULT
 
 
-def _is_blank(rgba):
-    """True if a decoded frame has no non-black opaque pixel — a pure-black placeholder
-    (e.g. the blank G002MG80xx landmark images in this install). It carries no art, so
-    rendering it just yields a black blob; skip it (invalid-asset guard)."""
-    op = rgba[..., 3] > 0
-    if not op.any():
-        return True
-    return int(rgba[op][:, :3].max()) < 5
-
-
 def _to_frame(key, rgba):
     """Trim an assembled HxWx4 array into a Frame (preserving the iso anchor)."""
     src_h, src_w = int(rgba.shape[0]), int(rgba.shape[1])
@@ -46,8 +36,10 @@ def _to_frame(key, rgba):
 def decode_bundle(path, shader=SH_DEFAULT):
     """Return (frames, animations) for an archive, resolved through GameResource.
 
-    The per-name shader follows the editor (see _shader_for); pure-black placeholder
-    frames are dropped so missing/blank art isn't drawn as a black rectangle."""
+    The per-name shader follows the editor (see _shader_for). We do NOT drop dark/
+    "blank-looking" frames: many landmark images are intentionally black/void bases
+    that the editor renders (they fill the gaps between edge structures), so skipping
+    them left terrain showing through where the editor shows solid black."""
     gr = GameResource(path)
     frames = []
     animations = {}
@@ -56,7 +48,6 @@ def decode_bundle(path, shader=SH_DEFAULT):
             fr = gr.get_frames(name, _shader_for(name))
         except Exception:
             fr = []
-        fr = [f for f in fr if not _is_blank(f)]
         if not fr:
             continue
         key = name.upper()
