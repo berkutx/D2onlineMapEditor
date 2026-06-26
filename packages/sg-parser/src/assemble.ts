@@ -24,6 +24,7 @@ import {
   readLocation,
   readLandmark,
   readUnit,
+  readTreasure,
   readMountains,
   readGeneric,
   type RoadRecord,
@@ -78,6 +79,7 @@ const SINGLE_READERS: Record<
   MidLocation: readLocation,
   MidLandmark: readLandmark,
   MidUnit: readUnit,
+  MidBag: readTreasure,
 };
 
 function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {

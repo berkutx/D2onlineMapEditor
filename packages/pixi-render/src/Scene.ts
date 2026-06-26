@@ -33,6 +33,8 @@ import { Camera, type CameraSnapshot } from "./Camera.js";
 /** Extra game-data tables the renderer needs for placement (objectdata.json). */
 export interface ObjectData {
   landmarkFootprints?: LandmarkFootprints;
+  /** terrain race index -> 2-letter code (Lterrain.dbf), for fort/capital sprites. */
+  raceCodes?: Record<number, string>;
 }
 
 /** Live performance / engine numbers for the debug HUD. */
@@ -210,6 +212,7 @@ export class Scene {
       this.anim,
       objectTypes,
       objectData?.landmarkFootprints,
+      objectData?.raceCodes,
     );
     this.world.addChild(this.objects.view);
 

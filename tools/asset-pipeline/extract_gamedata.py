@@ -67,7 +67,17 @@ def main(argv=None):
             cx = cy = 1
         lm[lid] = [cx, cy]
 
-    data = {"landmarkFootprints": lm}
+    # race index -> 2-letter code (Lterrain.dbf: id -> text.replace("L_","")). The
+    # editor builds fort/capital keys from this (e.g. race 1 -> "HU" -> G000FT0000HU0).
+    race_codes = {}
+    for row in read_dbf(_find(globals_dir, "Lterrain.dbf")):
+        try:
+            rid = int(row.get("ID", ""))
+        except ValueError:
+            continue
+        race_codes[rid] = row.get("TEXT", "").replace("L_", "").strip()
+
+    data = {"landmarkFootprints": lm, "raceCodes": race_codes}
     os.makedirs(args.out, exist_ok=True)
     out_path = os.path.join(args.out, "objectdata.json")
     json.dump(data, open(out_path, "w"), separators=(",", ":"))

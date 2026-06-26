@@ -162,6 +162,19 @@ export function readLandmark(buf: ByteBuffer, obj: FramedObject): MapObject {
   };
 }
 
+/** MidBag (D2Bag): a treasure bag/chest. POS_X/Y + IMAGE; the editor's key is
+ *  "G000BG0000" + (isWater ? 0 : 1) + image(2) (TreasureObjectAccessor). */
+export function readTreasure(buf: ByteBuffer, obj: FramedObject): MapObject {
+  const { fieldsFrom: f, fieldsEnd: e } = obj;
+  const image = readDefaultInt(buf, "IMAGE", f, e);
+  return {
+    type: "treasure",
+    id: obj.id,
+    pos: pos(buf, obj),
+    ...(image !== null ? { image } : {}),
+  };
+}
+
 /** MidUnit: a unit definition (referenced by stacks/cities). TYPE = impl id. */
 export function readUnit(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;

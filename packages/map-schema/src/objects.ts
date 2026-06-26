@@ -94,6 +94,11 @@ export const UnitObject = z.object({
   type: z.literal("unit"),
   implId: z.string().optional(), // unit impl -> IsoUnit/IsoStill sprite
 });
+export const TreasureObject = z.object({
+  ...base,
+  type: z.literal("treasure"),
+  image: z.number().int().optional(), // MidBag IMAGE -> G000BG0000{0|1}{image}
+});
 
 /** Fallback for any block type the parser does not yet model: keeps the map renderable
  *  and round-trippable while @d2/sg-parser fills in concrete types. */
@@ -119,6 +124,7 @@ export const MapObject = z.discriminatedUnion("type", [
   LandmarkObject,
   LocationObject,
   UnitObject,
+  TreasureObject,
   GenericObject,
 ]);
 export type MapObject = z.infer<typeof MapObject>;

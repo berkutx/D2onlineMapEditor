@@ -32,8 +32,19 @@ const SITE_CODE: Record<string, string> = {
   trainer: "TRAI", // Trainer
 };
 
+/** Extra context some accessors need to build their key. */
+export interface SpriteKeyContext {
+  /** terrain race index -> 2-letter code (Lterrain.dbf), for fort/capital sprites. */
+  raceCodes?: Record<number, string>;
+  /** whether this object's cell is water — selects the treasure (bag) variant. */
+  water?: boolean;
+}
+
 /** The exact image/animation key for an object, or undefined if not drawable. */
-export function objectSpriteKey(obj: MapObject): string | undefined {
+export function objectSpriteKey(
+  obj: MapObject,
+  ctx?: SpriteKeyContext,
+): string | undefined {
   switch (obj.type) {
     // MountainObjectAccessor: "MOMNE" + w(2) + image(2)   [IsoTerrn]
     case "mountains":
@@ -57,6 +68,21 @@ export function objectSpriteKey(obj: MapObject): string | undefined {
     // CrystalObjectAccessor: CrystalIdByResource(resource)
     case "crystal":
       return CRYSTAL_ID[obj.resource ?? 0];
+
+    // FortObjectAccessor (Capital): "G000FT0000" + race(2) + "0". Needs the race code.
+    case "capital": {
+      const code = ctx?.raceCodes?.[obj.race ?? -1];
+      return code ? `G000FT0000${code}0` : undefined;
+    }
+
+    // FortObjectAccessor (Village): "G000FT0000NE" + level. (The editor prefers a
+    // race-suffixed variant and falls back to this base, which always resolves.)
+    case "village":
+      return `G000FT0000NE${obj.tier ?? 1}`;
+
+    // TreasureObjectAccessor: "G000BG0000" + (water ? 0 : 1) + image(2)
+    case "treasure":
+      return `G000BG0000${ctx?.water ? "0" : "1"}${pad(obj.image ?? 0, 2)}`;
 
     default:
       return undefined;

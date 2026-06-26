@@ -43,6 +43,9 @@ const VISIBLE_OBJECT_TYPES = new Set([
   "mage",
   "mercenary",
   "trainer",
+  "capital",
+  "village",
+  "treasure",
 ]);
 
 const mountEl = ref<HTMLDivElement | null>(null);

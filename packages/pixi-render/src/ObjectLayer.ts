@@ -24,6 +24,9 @@ import {
   objectZBase,
   type LandmarkFootprints,
 } from "./objectSprite.js";
+
+/** terrain race index -> 2-letter code (Lterrain.dbf), for fort/capital sprites. */
+export type RaceCodes = Record<number, string>;
 import type { AssetStore } from "./AssetStore.js";
 import type { AnimationManager } from "./AnimationManager.js";
 
@@ -38,6 +41,9 @@ export class ObjectLayer {
   readonly view: Container;
   private readonly placed: PlacedObject[] = [];
   private landmarks?: LandmarkFootprints;
+  private raceCodes?: RaceCodes;
+  /** "x,y" of every water cell (ground==3), to pick the treasure (bag) variant. */
+  private waterCells = new Set<string>();
 
   constructor() {
     this.view = new Container();
@@ -55,9 +61,16 @@ export class ObjectLayer {
     anim: AnimationManager,
     allowedTypes?: ReadonlySet<string>,
     landmarks?: LandmarkFootprints,
+    raceCodes?: RaceCodes,
   ): void {
     this.clear(anim);
     this.landmarks = landmarks;
+    this.raceCodes = raceCodes;
+    // water cells (ground == 3) — treasure bags pick a different sprite on water.
+    this.waterCells = new Set();
+    for (const c of doc.terrain.cells) {
+      if (((c.value >> 3) & 7) === 3) this.waterCells.add(`${c.x},${c.y}`);
+    }
     for (const obj of doc.objects) {
       if (allowedTypes && !allowedTypes.has(obj.type)) continue;
       this.place(obj, assets, anim);
@@ -70,7 +83,10 @@ export class ObjectLayer {
     anim: AnimationManager,
   ): void {
     // The exact editor key for this object (ports ObjectAccessors::frameData).
-    const key = objectSpriteKey(obj);
+    const water = obj.type === "treasure"
+      ? this.waterCells.has(`${obj.pos.x},${obj.pos.y}`)
+      : undefined;
+    const key = objectSpriteKey(obj, { raceCodes: this.raceCodes, water });
     if (!key) return;
 
     // An animation (multi-frame) wins; otherwise a single static frame. No fallback.
