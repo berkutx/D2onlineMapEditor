@@ -102,6 +102,12 @@ export class AssetStore {
     const imageUrl = this.url(imagePath);
     const baseTexture = await Assets.load<Texture>(imageUrl);
 
+    // D2 sprites are pixel art and the editor draws them unsmoothed. Nearest
+    // filtering matches that AND stops linear sampling from bleeding adjacent
+    // packed atlas frames at frame edges — that bleed showed up as hard seams in
+    // dense overlapping objects (e.g. mountain ranges).
+    baseTexture.source.scaleMode = "nearest";
+
     const sheet = new Spritesheet(baseTexture, json);
     await sheet.parse();
 
