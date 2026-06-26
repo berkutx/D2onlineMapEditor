@@ -6,19 +6,26 @@ IsoCmon/IsoAnim/City/Capital, PNG names otherwise) it calls GameResource.get_fra
 trims each assembled frame, and emits decode_images.Frame objects keyed by the
 UPPERCASE logical id. Multi-frame ids become animations (id -> [id#0, id#1, ...]).
 """
+import re
+
 import numpy as np
 
 from decode_images import Frame, _trim_bbox
 from fflib.gameresource import GameResource, SH_DEFAULT, SH_TRANSP_BLACK
 
+# G<NNN>MG<....> = landmark images. Some (notably the G002MG80xx "mountain"
+# landmarks in this install) carry a solid BLACK diamond base under the art that
+# must be keyed out — otherwise a black diamond covers the terrain. Black-keying
+# normal landmarks is harmless (their background is magenta; only ~0.3% truly-black
+# art pixels drop). Crystals (G000CR) and rods (RROD) likewise sit on a black field.
+_LANDMARK_RE = re.compile(r"G\d{3}MG", re.IGNORECASE)
+
 
 def _shader_for(name):
-    """Per-object preprocessing shader, matching the editor's ObjectAccessors. Most
-    sprites use the magenta colour key (Default); crystals and rods additionally key
-    out black (TransparentBlack) — their art sits on a large black field that would
-    otherwise render as a solid black rectangle."""
+    """Per-object preprocessing shader. Default = magenta colour key; landmarks,
+    crystals and rods also key out black (TransparentBlack)."""
     u = name.upper()
-    if u.startswith("G000CR") or "RROD" in u:
+    if _LANDMARK_RE.match(u) or u.startswith("G000CR") or "RROD" in u:
         return SH_DEFAULT | SH_TRANSP_BLACK
     return SH_DEFAULT
 
