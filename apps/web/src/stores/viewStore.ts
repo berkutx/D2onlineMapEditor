@@ -17,9 +17,12 @@ export const useViewStore = defineStore("view", () => {
   const terrainVisible = ref(true);
   const objectsVisible = ref(true);
   const gridVisible = ref(true);
-  const animate = ref(true);
+  // Animation off for now (objects render their first frame statically); toggle in View.
+  const animate = ref(false);
   /** Left "Objects" panel — hidden by default; toggle from the View menu. */
   const objectPanelVisible = ref(false);
+  /** Debug HUD overlay (FPS / render ms / iso engine). On by default for now. */
+  const debugOverlay = ref(true);
 
   /** Camera zoom factor (for the status bar). */
   const zoom = ref(1);
@@ -44,6 +47,10 @@ export const useViewStore = defineStore("view", () => {
     objectPanelVisible.value = !objectPanelVisible.value;
   }
 
+  function toggleDebugOverlay(): void {
+    debugOverlay.value = !debugOverlay.value;
+  }
+
   function setZoom(z: number): void {
     zoom.value = z;
   }
@@ -58,12 +65,14 @@ export const useViewStore = defineStore("view", () => {
     gridVisible,
     animate,
     objectPanelVisible,
+    debugOverlay,
     zoom,
     cursorCell,
     setLayerVisible,
     toggleGrid,
     toggleAnimate,
     toggleObjectPanel,
+    toggleDebugOverlay,
     setZoom,
     setCursorCell,
   };

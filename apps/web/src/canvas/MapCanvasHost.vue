@@ -15,7 +15,7 @@ import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { Assets, type Texture } from "pixi.js";
 import { Scene } from "@d2/pixi-render";
-import type { CameraSnapshot, TerrainMeta } from "@d2/pixi-render";
+import type { CameraSnapshot, TerrainMeta, DebugStats } from "@d2/pixi-render";
 import { worldToCell } from "@d2/pixi-render";
 import { useMapStore } from "../stores/mapStore";
 import { useAssetStore } from "../stores/assetStore";
@@ -28,15 +28,31 @@ const viewStore = useViewStore();
 
 const { currentMap } = storeToRefs(mapStore);
 const { manifest } = storeToRefs(assetStore);
-const { terrainVisible, objectsVisible, gridVisible, animate } = storeToRefs(viewStore);
+const { terrainVisible, objectsVisible, gridVisible, animate, debugOverlay, cursorCell } =
+  storeToRefs(viewStore);
 
-// For now show only the relief: terrain + water (baked into the terrain image) +
-// mountains. Other object types are hidden until they're retuned to the tile scale.
-const VISIBLE_OBJECT_TYPES = new Set(["mountains"]);
+// Static object layers with a faithful sprite key + footprint ported, that resolve
+// in the atlases. Forts/capitals/villages, stacks, units (DBF-driven) and locations
+// come next. Animation is intentionally off for now.
+const VISIBLE_OBJECT_TYPES = new Set([
+  "mountains",
+  "landmark",
+  "ruin",
+  "crystal",
+  "merchant",
+  "mage",
+  "mercenary",
+  "trainer",
+]);
 
 const mountEl = ref<HTMLDivElement | null>(null);
 const building = ref(false);
 const buildError = ref<string | null>(null);
+
+// Debug HUD: poll the Scene's live perf/engine numbers ~4x/s (setInterval works
+// even when the page is backgrounded; rAF would not).
+const debugStats = ref<DebugStats | null>(null);
+let debugTimer: number | undefined;
 
 /** Build (or rebuild) the scene from the current document + manifest. */
 async function rebuild(): Promise<void> {
@@ -58,7 +74,16 @@ async function rebuild(): Promise<void> {
       src: `/assets/terrain/${id}.png`,
       data: { autoGenerateMipmaps: true },
     });
-    await scene.buildScene(doc, man, getAssetStore(), { texture, meta }, VISIBLE_OBJECT_TYPES);
+    // object placement data (landmark footprints from GLmark.dbf, etc.)
+    const objectData = await (await fetch(`/assets/objectdata.json`)).json();
+    await scene.buildScene(
+      doc,
+      man,
+      getAssetStore(),
+      { texture, meta },
+      VISIBLE_OBJECT_TYPES,
+      objectData,
+    );
     // apply the current view state to the freshly-built scene
     scene.setLayerVisibility("terrain", terrainVisible.value);
     scene.setLayerVisibility("objects", objectsVisible.value);
@@ -100,6 +125,11 @@ onMounted(async () => {
     canvas.addEventListener("pointerleave", onPointerLeave);
   }
 
+  // poll debug stats for the HUD
+  debugTimer = window.setInterval(() => {
+    debugStats.value = getScene()?.getDebugStats() ?? null;
+  }, 250);
+
   // If a document is already loaded (startup auto-load races mount), build now.
   if (currentMap.value && manifest.value) await rebuild();
 });
@@ -127,6 +157,7 @@ function onPointerLeave(): void {
 }
 
 onBeforeUnmount(() => {
+  if (debugTimer !== undefined) clearInterval(debugTimer);
   const canvas = getScene()?.canvas;
   if (canvas) {
     canvas.removeEventListener("pointermove", onPointerMove);
@@ -150,6 +181,29 @@ watch(animate, (v) => getScene()?.setAnimationEnabled(v));
 <template>
   <div class="canvas-host">
     <div ref="mountEl" class="canvas-mount" />
+    <div v-if="debugOverlay && debugStats" class="debug-hud">
+      <div class="hud-row hud-head">debug</div>
+      <div class="hud-row">
+        <span>renders/s</span><b :class="{ warn: debugStats.fps > 0 && debugStats.fps < 30 }">{{ debugStats.fps }}</b>
+      </div>
+      <div class="hud-row"><span>cpu/frame</span><b>{{ debugStats.cpuMs.toFixed(2) }} ms</b></div>
+      <div class="hud-row">
+        <span>gpu/frame</span><b>{{ debugStats.gpuMs != null ? debugStats.gpuMs.toFixed(2) + " ms" : "—" }}</b>
+      </div>
+      <div class="hud-sep" />
+      <div class="hud-row"><span>zoom</span><b>{{ (debugStats.zoom * 100).toFixed(0) }}%</b></div>
+      <div class="hud-row">
+        <span>cell</span><b>{{ cursorCell ? cursorCell.x + "," + cursorCell.y : "—" }}</b>
+      </div>
+      <div class="hud-row"><span>world</span><b>{{ Math.round(debugStats.world.x) }}, {{ Math.round(debugStats.world.y) }}</b></div>
+      <div class="hud-sep" />
+      <div class="hud-row"><span>objects</span><b>{{ debugStats.objects }}<template v-if="debugStats.animActive"> ({{ debugStats.animActive }} anim)</template></b></div>
+      <div class="hud-row"><span>screen</span><b>{{ debugStats.screen.w }}×{{ debugStats.screen.h }} @{{ debugStats.resolution }}x</b></div>
+      <div class="hud-row"><span>buffer</span><b>{{ debugStats.drawingBuffer.w }}×{{ debugStats.drawingBuffer.h }} (dpr {{ debugStats.dpr }})</b></div>
+      <div class="hud-sep" />
+      <div class="hud-row"><span>{{ debugStats.rendererType }}</span><b>max tex {{ debugStats.maxTexture }}</b></div>
+      <div class="hud-row hud-gpu">{{ debugStats.gpu }}</div>
+    </div>
     <div v-if="building" v-loading="true" class="canvas-overlay" element-loading-text="Building scene…" />
     <el-alert
       v-if="buildError"
@@ -186,5 +240,55 @@ watch(animate, (v) => getScene()?.setAnimationEnabled(v));
   left: 12px;
   bottom: 12px;
   max-width: 60%;
+}
+.debug-hud {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 20;
+  min-width: 180px;
+  padding: 6px 8px;
+  font: 11px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #d7f0d7;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(120, 200, 120, 0.25);
+  border-radius: 5px;
+  pointer-events: none;
+  user-select: none;
+}
+.hud-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hud-row > span {
+  color: #8fae8f;
+}
+.hud-row > b {
+  font-weight: 600;
+}
+.hud-row > b.warn {
+  color: #ffce6b;
+}
+.hud-head {
+  justify-content: center;
+  color: #6fd06f;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+.hud-gpu {
+  display: block;
+  margin-top: 2px;
+  color: #7f9a7f;
+  font-size: 10px;
+  max-width: 230px;
+  white-space: normal;
+}
+.hud-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: rgba(120, 200, 120, 0.18);
 }
 </style>

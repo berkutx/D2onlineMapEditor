@@ -16,6 +16,8 @@ export type {
   LayerName,
   SceneInitOptions,
   SceneEventHandlers,
+  ObjectData,
+  DebugStats,
 } from "./Scene.js";
 
 export { AssetStore } from "./AssetStore.js";
@@ -24,6 +26,8 @@ export type { AssetStoreOptions } from "./AssetStore.js";
 export { TerrainLayer } from "./TerrainLayer.js";
 export type { TerrainMeta } from "./TerrainLayer.js";
 export { ObjectLayer } from "./ObjectLayer.js";
+export { objectSpriteKey, objectFootprint, objectZBase } from "./objectSprite.js";
+export type { LandmarkFootprints } from "./objectSprite.js";
 export { AnimationManager, D2_FRAME_MS, D2_ANIMATION_SPEED } from "./AnimationManager.js";
 export type { AnimationManagerOptions } from "./AnimationManager.js";
 

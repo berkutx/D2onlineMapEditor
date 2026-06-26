@@ -26,8 +26,40 @@ import { AssetStore } from "./AssetStore.js";
 import { TerrainLayer, type TerrainMeta } from "./TerrainLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer } from "./ObjectLayer.js";
+import type { LandmarkFootprints } from "./objectSprite.js";
 import { AnimationManager } from "./AnimationManager.js";
 import { Camera, type CameraSnapshot } from "./Camera.js";
+
+/** Extra game-data tables the renderer needs for placement (objectdata.json). */
+export interface ObjectData {
+  landmarkFootprints?: LandmarkFootprints;
+}
+
+/** Live performance / engine numbers for the debug HUD. */
+export interface DebugStats {
+  /** Renders in the last second (0 when idle — rendering is on-demand). */
+  fps: number;
+  /** CPU time to ISSUE the last frame's draw calls (ms). */
+  cpuMs: number;
+  /** GPU-synced frame time, sampled ~1×/s via gl.finish (ms), null until sampled. */
+  gpuMs: number | null;
+  /** World zoom (renderer = world.scale). */
+  zoom: number;
+  /** World container offset (px). */
+  world: { x: number; y: number };
+  /** Drawn object sprites + how many are animating. */
+  objects: number;
+  animActive: number;
+  /** Backbuffer + screen + density. */
+  screen: { w: number; h: number };
+  drawingBuffer: { w: number; h: number };
+  resolution: number;
+  dpr: number;
+  /** Static GPU caps (cached). */
+  gpu: string;
+  maxTexture: number;
+  rendererType: string;
+}
 
 /** Which logical layers can be toggled by the host. */
 export type LayerName = "terrain" | "grid" | "objects";
@@ -72,6 +104,12 @@ export class Scene {
     lastX: 0,
     lastY: 0,
   };
+  /** debug instrumentation (every renderer.render is timed; see instrumentRender) */
+  private renderTimes: number[] = [];
+  private lastCpuMs = 0;
+  private gpuMs: number | null = null;
+  private sampleGpuNext = false;
+  private gpuInfo?: { gpu: string; maxTexture: number };
 
   /** Install host event handlers (camera change, etc.). */
   on(handlers: SceneEventHandlers): void {
@@ -108,6 +146,7 @@ export class Scene {
       height: parent.clientHeight || 600,
     });
     this.app = app;
+    this.instrumentRender(app);
 
     parent.appendChild(app.canvas);
 
@@ -135,6 +174,7 @@ export class Scene {
     assets: AssetStore,
     terrain: { texture: Texture; meta: TerrainMeta },
     objectTypes?: ReadonlySet<string>,
+    objectData?: ObjectData,
   ): Promise<void> {
     if (!this.app || !this.world) {
       throw new Error("Scene.buildScene called before init()");
@@ -155,7 +195,13 @@ export class Scene {
     this.world.addChild(this.grid.view);
 
     this.objects = new ObjectLayer();
-    this.objects.build(map, assets, this.anim, objectTypes);
+    this.objects.build(
+      map,
+      assets,
+      this.anim,
+      objectTypes,
+      objectData?.landmarkFootprints,
+    );
     this.world.addChild(this.objects.view);
 
     // camera centered on the map
@@ -216,6 +262,75 @@ export class Scene {
     }
     this.renderScheduled = false;
     this.app.render();
+  }
+
+  /** Wrap the renderer so EVERY frame (ticker, rAF, or renderNow) is timed for the
+   *  debug HUD. `sampleGpuNext` triggers a one-off gl.finish so we get a real
+   *  GPU-synced frame time roughly once per second without stalling every frame. */
+  private instrumentRender(app: Application): void {
+    const r = app.renderer as unknown as {
+      render: (...a: unknown[]) => unknown;
+      gl?: WebGLRenderingContext;
+    };
+    const orig = r.render.bind(r);
+    r.render = (...args: unknown[]) => {
+      const t0 = performance.now();
+      const out = orig(...args);
+      this.lastCpuMs = performance.now() - t0;
+      this.renderTimes.push(t0);
+      if (this.sampleGpuNext && r.gl) {
+        this.sampleGpuNext = false;
+        const g0 = performance.now();
+        r.gl.finish();
+        this.gpuMs = performance.now() - g0 + this.lastCpuMs;
+      }
+      return out;
+    };
+  }
+
+  /** Snapshot live perf/engine numbers for the debug overlay. Cheap; call ~4×/s. */
+  getDebugStats(): DebugStats | undefined {
+    if (!this.app) return undefined;
+    const now = performance.now();
+    let cut = 0;
+    while (cut < this.renderTimes.length && now - (this.renderTimes[cut] as number) > 1000) {
+      cut++;
+    }
+    if (cut > 0) this.renderTimes.splice(0, cut);
+    this.sampleGpuNext = true; // ask the next real render to gl.finish-time itself
+    const r = this.app.renderer;
+    const gl = (r as unknown as { gl?: WebGLRenderingContext }).gl;
+    if (!this.gpuInfo) {
+      let gpu = "n/a";
+      let maxTexture = 0;
+      if (gl) {
+        maxTexture = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+        const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+        gpu = dbg
+          ? (gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) as string)
+          : (gl.getParameter(gl.RENDERER) as string);
+      }
+      this.gpuInfo = { gpu, maxTexture };
+    }
+    return {
+      fps: this.renderTimes.length,
+      cpuMs: this.lastCpuMs,
+      gpuMs: this.gpuMs,
+      zoom: this.world?.scale.x ?? 1,
+      world: { x: this.world?.x ?? 0, y: this.world?.y ?? 0 },
+      objects: this.objects?.view.children.length ?? 0,
+      animActive: this.anim?.activeCount ?? 0,
+      screen: { w: r.screen.width, h: r.screen.height },
+      drawingBuffer: {
+        w: gl?.drawingBufferWidth ?? 0,
+        h: gl?.drawingBufferHeight ?? 0,
+      },
+      resolution: r.resolution,
+      dpr: globalThis.devicePixelRatio ?? 1,
+      gpu: this.gpuInfo.gpu,
+      maxTexture: this.gpuInfo.maxTexture,
+      rendererType: r.type === 1 ? "WebGL" : String(r.type),
+    };
   }
 
   /** Run Pixi's continuous render loop only while animations are actually playing;

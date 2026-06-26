@@ -62,3 +62,56 @@ export function objectSpriteKey(obj: MapObject): string | undefined {
       return undefined;
   }
 }
+
+/** Landmark id (UPPER) -> [cx, cy] footprint, from GLmark.dbf (objectdata.json). */
+export type LandmarkFootprints = Record<string, [number, number]>;
+
+/**
+ * Object footprint in cells — a port of each accessor's getW/getH (the editor
+ * centres the full sprite on this footprint's centre, see CustomMapObject). Base
+ * default is 1x1 (MapObjectAccessor::getW/getH).
+ */
+export function objectFootprint(
+  obj: MapObject,
+  landmarks?: LandmarkFootprints,
+): { w: number; h: number } {
+  switch (obj.type) {
+    case "mountains":
+      return { w: obj.w ?? 1, h: obj.h ?? 1 };
+    case "ruin": // RuinObjectAccessor::getW/getH = 3
+    case "merchant": // MerchantObjectAccessor::getW/getH = 3
+    case "mage":
+    case "mercenary":
+    case "trainer":
+      return { w: 3, h: 3 };
+    case "capital": // FortObjectAccessor: Capital = 5
+      return { w: 5, h: 5 };
+    case "village": // FortObjectAccessor: else = 4
+    case "fort":
+      return { w: 4, h: 4 };
+    case "location": {
+      const r = obj.radius ?? 1; // LocationObjectAccessor::getW/getH = r
+      return { w: r, h: r };
+    }
+    case "landmark": {
+      const fp = obj.baseType ? landmarks?.[obj.baseType.toUpperCase()] : undefined;
+      return fp ? { w: fp[0], h: fp[1] } : { w: 1, h: 1 };
+    }
+    default: // crystal, unit, generic -> base default 1x1
+      return { w: 1, h: 1 };
+  }
+}
+
+/** Painter's-order z base — a port of each accessor's getZ (default 15). */
+export function objectZBase(obj: MapObject): number {
+  switch (obj.type) {
+    case "stack":
+      return 15.2;
+    case "unit":
+      return 0;
+    case "location":
+      return 1300;
+    default:
+      return 15;
+  }
+}

@@ -18,7 +18,12 @@ import {
 } from "pixi.js";
 import type { MapObject, MapDocument } from "@d2/map-schema";
 import { cellToWorld } from "./iso.js";
-import { objectSpriteKey } from "./objectSprite.js";
+import {
+  objectSpriteKey,
+  objectFootprint,
+  objectZBase,
+  type LandmarkFootprints,
+} from "./objectSprite.js";
 import type { AssetStore } from "./AssetStore.js";
 import type { AnimationManager } from "./AnimationManager.js";
 
@@ -32,6 +37,7 @@ export class ObjectLayer {
   /** The display object to add to the world container. */
   readonly view: Container;
   private readonly placed: PlacedObject[] = [];
+  private landmarks?: LandmarkFootprints;
 
   constructor() {
     this.view = new Container();
@@ -48,8 +54,10 @@ export class ObjectLayer {
     assets: AssetStore,
     anim: AnimationManager,
     allowedTypes?: ReadonlySet<string>,
+    landmarks?: LandmarkFootprints,
   ): void {
     this.clear(anim);
+    this.landmarks = landmarks;
     for (const obj of doc.objects) {
       if (allowedTypes && !allowedTypes.has(obj.type)) continue;
       this.place(obj, assets, anim);
@@ -88,13 +96,12 @@ export class ObjectLayer {
     // cellToWorld(x + W/2, y + H/2). A trimmed Pixi texture's anchor is relative to
     // its `orig` (untrimmed) size, so anchor (0.5,0.5) centres the original canvas
     // there and Pixi applies the trim offset — matching the editor's pixmap centring.
-    const w = obj.type === "mountains" ? (obj.w ?? 1) : (obj.footprint?.w ?? 1);
-    const h = obj.type === "mountains" ? (obj.h ?? 1) : (obj.footprint?.h ?? 1);
+    const { w, h } = objectFootprint(obj, this.landmarks);
     sprite.anchor.set(0.5, 0.5);
     const center = cellToWorld(obj.pos.x + w / 2, obj.pos.y + h / 2);
     sprite.position.set(center.x, center.y);
     // editor z = getZ + x + y + getH; footprint-aware painter order.
-    sprite.zIndex = obj.pos.x + obj.pos.y + h;
+    sprite.zIndex = objectZBase(obj) + obj.pos.x + obj.pos.y + h;
     sprite.label = obj.id;
 
     this.view.addChild(sprite);

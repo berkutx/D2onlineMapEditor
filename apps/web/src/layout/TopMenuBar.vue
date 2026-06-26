@@ -16,7 +16,7 @@ const mapStore = useMapStore();
 const viewStore = useViewStore();
 
 const { scenarios, currentScenarioId, status } = storeToRefs(mapStore);
-const { terrainVisible, objectsVisible, gridVisible, animate, objectPanelVisible } =
+const { terrainVisible, objectsVisible, gridVisible, animate, objectPanelVisible, debugOverlay } =
   storeToRefs(viewStore);
 
 const dialogVisible = ref(false);
@@ -58,6 +58,8 @@ function onLayerCommand(command: string): void {
     viewStore.toggleAnimate();
   } else if (command === "objectPanel") {
     viewStore.toggleObjectPanel();
+  } else if (command === "debug") {
+    viewStore.toggleDebugOverlay();
   }
 }
 </script>
@@ -103,6 +105,11 @@ function onLayerCommand(command: string): void {
             <el-icon v-if="objectPanelVisible"><Check /></el-icon>
             <span class="check-spacer" v-else />
             Objects panel
+          </el-dropdown-item>
+          <el-dropdown-item command="debug">
+            <el-icon v-if="debugOverlay"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Debug overlay
           </el-dropdown-item>
         </el-dropdown-menu>
       </template>
