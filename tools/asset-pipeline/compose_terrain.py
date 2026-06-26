@@ -22,152 +22,127 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fflib.mqdb import parse_ff  # noqa: E402
 from fflib.diamond_data import DIAMOND_ROWS  # noqa: E402  exact editor diamond mask
-from fflib.gameresource import GameResource, SH_DEFAULT  # noqa: E402
+from fflib.gameresource import (  # noqa: E402
+    GameResource, SH_DEFAULT, SH_TRANSP_BLACK, SH_BORDER,
+)
 
 TILE = 32                 # TILE_SIZE
 DW, DH = TILE * 2, TILE   # diamond 64x32
 EXTRA = TILE * 2          # EXTRA_OFFSET
 GROUND_TILE = 192         # source ground tile size (MapRegionExtractor m_tileSize)
 
-# terrain index (value & 7) -> 2-letter code, AUTHORITATIVE from Lterrain.dbf:
-#   0 L_GO  1 L_HU  2 L_DW  3 L_HE  4 L_UN  5 L_NE  6 L_EL
-RACE_CODE = {0: "NE", 1: "HU", 2: "DW", 3: "HE", 4: "UN", 5: "NE", 6: "EL"}
+def read_lterrain(globals_dir):
+    """{terrain id -> 2-letter code}, exactly as MapTileHelper::init reads it from
+    Lterrain.dbf: code = terr->text.replace("L_", "") (e.g. "L_HU" -> "HU")."""
+    path = None
+    for nm in ("Lterrain.dbf", "Lterrain.DBF"):
+        p = os.path.join(globals_dir, nm)
+        if os.path.exists(p):
+            path = p
+            break
+    if path is None:
+        raise FileNotFoundError("Lterrain.dbf not found in %s" % globals_dir)
+    d = open(path, "rb").read()
+    nrec = struct.unpack_from("<I", d, 4)[0]
+    hlen = struct.unpack_from("<H", d, 8)[0]
+    rlen = struct.unpack_from("<H", d, 10)[0]
+    fields = []
+    i = 32
+    while d[i] != 0x0D:
+        fields.append((d[i:i + 11].split(b"\x00")[0].decode("latin1"), d[i + 16]))
+        i += 32
+    out = {}
+    for r in range(nrec):
+        off = hlen + r * rlen
+        if off + rlen > len(d):
+            break
+        pos = off + 1
+        row = {}
+        for (name, flen) in fields:
+            row[name] = d[pos:pos + flen].decode("latin1").strip()
+            pos += flen
+        out[int(row["ID"])] = row["TEXT"].replace("L_", "")
+    return out
 
 
 # ---------- .ff image loading ----------
-def _names_and_pngs(path):
-    """Return (name->png bytes) for an archive via the id==2 name table."""
-    d = open(path, "rb").read()
-    import re
-    recs = []
-    for o in (m.start() for m in re.finditer(b"MQRC", d)):
-        rid, sizeA = struct.unpack_from("<ii", d, o + 8)
-        recs.append((rid, d[o + 28 : o + 28 + sizeA]))
-    id2png = {rid: p for rid, p in recs if p[:4] == b"\x89PNG"}
-    names = {}
-    for rid, p in recs:
-        if rid == 2:
-            for base in _table_starts(p):
-                off = base
-                while off + 260 <= len(p):
-                    eid = struct.unpack_from("<i", p, off)[0]
-                    raw = p[off + 4 : off + 260].split(b"\x00")[0]
-                    try:
-                        nm = raw.decode("latin1")
-                    except Exception:
-                        nm = ""
-                    if nm.upper().endswith(".PNG") and eid in id2png:
-                        names[nm.upper()[:-4]] = id2png[eid]
-                    off += 260
-                if names:
-                    break
-    return names
-
-
-def _table_starts(payload):
-    starts = {0}
-    if len(payload) >= 4:
-        na = struct.unpack_from("<i", payload, 0)[0]
-        if 0 < na < len(payload):
-            starts.add(4 + na)
-    return sorted(starts)
-
-
-def _decode(png_bytes, key="magenta"):
-    """PNG bytes -> HxWx4 uint8 RGBA with the given colour key removed."""
-    import io
-    im = Image.open(io.BytesIO(png_bytes))
-    if im.mode == "P":
-        idx = np.array(im)
-        pal = np.array(im.getpalette() or [], dtype=np.uint8).reshape(-1, 3)
-        rgb = pal[idx]
-    else:
-        rgb = np.array(im.convert("RGB"))
-    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-    if key == "black":  # TransparentBlack: black -> transparent (blend masks)
-        transparent = (r < 5) & (g < 5) & (b < 5)
-    else:  # magenta colour-key (default / border)
-        transparent = (r > 247) & (b > 247) & (g < 8)
-    a = np.where(transparent, 0, 255).astype(np.uint8)
-    return np.dstack([rgb, a])
-
-
 def _scaled(rgba, w, h):
     return np.array(Image.fromarray(rgba, "RGBA").resize((w, h), Image.NEAREST))
 
 
 class Tiles:
-    """Loads every terrain source image the compositor needs."""
+    """Loads every terrain source image via GameResource — the SAME path the editor
+    uses (getFramesById / getImagesData) with the editor's shaders. (The previous
+    custom PNG name-table loader mis-decoded some Ground tiles, e.g. DW_00 -> all
+    black; GameResource reads it correctly as the light-grey dwarf rock.)"""
 
     def __init__(self, game_dir):
         imgs = os.path.join(game_dir, "Imgs")
-        self.ground = _names_and_pngs(os.path.join(imgs, "Ground.ff"))
-        self.border = _names_and_pngs(os.path.join(imgs, "GrBorder.ff"))
-        self.terrn = _names_and_pngs(os.path.join(imgs, "IsoTerrn.ff"))
-        # base race variants (192x192) per terrain index, + water variants
+        self.gr_ground = GameResource(os.path.join(imgs, "Ground.ff"))
+        self.gr_border = GameResource(os.path.join(imgs, "GrBorder.ff"))
+        self.gr_terrn = GameResource(os.path.join(imgs, "IsoTerrn.ff"))
+        # race code per terrain id, from Lterrain.dbf (faithful, not hard-coded)
+        self.race_code = read_lterrain(os.path.join(game_dir, "Globals"))
+        # base race ground variants (k=0,1,2) per terrain id that has textures
         self.base = {}
-        for tv, code in RACE_CODE.items():
-            self.base[tv] = self._variants(self.ground, code)
-        self.water = self._variants(self.ground, "WA")
-        # border masks (NE_<type>_<var>) and water foam borders (WA_<type>_<var>)
-        self.masks = {}     # type -> [64x32 alpha-mask rgba]
+        for tid, code in self.race_code.items():
+            vs = self._ground(code)
+            if vs:
+                self.base[tid] = vs
+        # water ground (L_WATER -> "WA"; one 128px variant in this install)
+        self.water = self._ground("WA")
+        # border masks NE_<t>_<k> (TransparentBlack) + water foam WA_<t>_<k> (Border)
+        self.masks = {}     # type -> [64x32 mask rgba], reversed to Qt values() order
         self.wborders = {}  # type -> [64x32 rgba]
         for t in range(1, 32):
-            mk = self._border(self.border, "NE", t, "black")
+            mk = self._border("NE", t, SH_TRANSP_BLACK)
             if mk:
                 self.masks[t] = mk
-            wb = self._border(self.border, "WA", t, "magenta")
+            wb = self._border("WA", t, SH_BORDER)
             if wb:
                 self.wborders[t] = wb
         self.diamond = make_diamond()
 
-        # roads + forest come from IsoTerrn via the faithful resolver (drawRoads/
-        # drawTrees in LandscapeObject). roadImage(i) = "ROAD"+i(2)+"00" (i=0..16);
-        # forestByValue = raceCode + "F" + forest(4).
-        self._isoterrn = GameResource(os.path.join(imgs, "IsoTerrn.ff"))
+        # roads + forest from IsoTerrn (LandscapeObject::drawRoads / drawTrees).
+        # roadImage(i) = "ROAD"+i(2)+"00" (i=0..16); forestByValue = race + "F" + forest(4).
         self.roads = {}  # roadType -> rgba
         for i in range(17):
-            fr = self._isoterrn.get_frames("ROAD%s00" % str(i).rjust(2, "0"), SH_DEFAULT)
+            fr = self.gr_terrn.get_frames("ROAD%s00" % str(i).rjust(2, "0"), SH_DEFAULT)
             if fr:
                 self.roads[i] = fr[0]
         self._forest_cache = {}
 
     def forest(self, value):
-        """forestByValue: <raceCode>F<forest:04> from IsoTerrn (raceCode = value&7)."""
+        """forestByValue: raceMap[terrain] + "F" + forest(4) from IsoTerrn."""
         forest = (value >> 26) & 0x3F
-        code = RACE_CODE.get(value & 7, "NE")
+        code = self.race_code.get(value & 7, "NE")
         key = "%sF%s" % (code, str(forest).rjust(4, "0"))
         if key in self._forest_cache:
             return self._forest_cache[key]
-        fr = self._isoterrn.get_frames(key, SH_DEFAULT)
+        fr = self.gr_terrn.get_frames(key, SH_DEFAULT)
         img = fr[0] if fr else None
         self._forest_cache[key] = img
         return img
 
-    def _variants(self, src, code):
-        # The editor loads k=0,1,2 (MapTileHelper::init). We do the same, but skip a
-        # DEGENERATE all-black tile (e.g. DW_00 is a single solid #000000 placeholder
-        # in this install's Ground.ff) — it isn't real terrain art; rendering it gives
-        # opaque-black tiles + black border-bleed into neighbours. This is an
-        # invalid-asset guard, not a content guess.
+    def _ground(self, code):
+        """Ground variants k=0,1,2 for a 2-letter code (getFramesById("Ground", ...))."""
         out = []
         for k in range(3):
-            nm = "%s_%02d" % (code, k)
-            if nm in src:
-                t = _decode(src[nm])
-                if int(t[..., :3].max()) < 5:  # degenerate all-black placeholder
-                    continue
-                out.append(t)
-        return out or [np.zeros((GROUND_TILE, GROUND_TILE, 4), np.uint8)]
+            fr = self.gr_ground.get_frames("%s_%02d" % (code, k), SH_DEFAULT)
+            if fr:
+                out.append(fr[0])
+        return out
 
-    def _border(self, src, prefix, t, key):
+    def _border(self, prefix, t, shader):
+        # getBlendMask/waterBorder index m_border*.values(type); Qt QMultiHash::values
+        # yields most-recently-inserted first, so reverse the k=0,1,2 insertion order.
         out = []
         for k in range(3):
-            nm = "%s_%02d_%02d" % (prefix, t, k)
-            if nm in src:
-                out.append(_scaled(_decode(src[nm], key), DW, DH))
+            fr = self.gr_border.get_frames("%s_%02d_%02d" % (prefix, t, k), shader)
+            if fr:
+                out.append(_scaled(fr[0], DW, DH))
+        out.reverse()
         return out
 
 
@@ -247,24 +222,26 @@ def variant_index(seed, tx, ty, n):
 
 
 class RegionExtractor:
-    """Port of MapRegionExtractor: 64x32 region cut from a 192-tiled variant plane."""
+    """Port of MapRegionExtractor: a 64x32 region cut from variants tiled at the
+    variant's OWN pixel size (m_tileSize = im.width() — 192 for races, 128 water)."""
 
     def __init__(self, variants, seed=0):
         self.variants = variants
         self.seed = seed
+        self.ts = variants[0].shape[1] if variants else GROUND_TILE
         self.cache = {}
 
     def extract(self, x, y):
-        rx, ry = x % GROUND_TILE, y % GROUND_TILE
+        ts = self.ts
+        rx, ry = x % ts, y % ts
         key = (rx, ry)
         if key in self.cache:
             return self.cache[key]
-        plane = np.zeros((GROUND_TILE * 2, GROUND_TILE * 2, 4), np.uint8)
+        plane = np.zeros((ts * 2, ts * 2, 4), np.uint8)
         for tx in (0, 1):
             for ty in (0, 1):
                 vi = variant_index(self.seed, tx, ty, len(self.variants))
-                plane[ty * GROUND_TILE:(ty + 1) * GROUND_TILE,
-                      tx * GROUND_TILE:(tx + 1) * GROUND_TILE] = self.variants[vi]
+                plane[ty * ts:(ty + 1) * ts, tx * ts:(tx + 1) * ts] = self.variants[vi]
         region = plane[ry:ry + DH, rx:rx + DW].copy()
         self.cache[key] = region
         return region
@@ -314,7 +291,9 @@ class TerrainComposer:
         ny = y_offset(x * TILE, y * TILE)
         if tile_ground(value) == 3:
             return self.water_ex.extract(nx, ny)
-        ex = self.race_ex.get(tile_terrain(value)) or self.race_ex[5]
+        ex = (self.race_ex.get(tile_terrain(value))
+              or self.race_ex.get(5)
+              or next(iter(self.race_ex.values())))
         return ex.extract(nx, ny)
 
     def blend_mask(self, x, y, t):
