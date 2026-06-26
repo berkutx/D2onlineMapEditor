@@ -6,10 +6,13 @@
  * Vue owns this DOM chrome; the <MapCanvasHost> is the only seam where PixiJS
  * takes over a div and renders the map.
  */
+import { useViewStore } from "../stores/viewStore";
 import TopMenuBar from "./TopMenuBar.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import StatusBar from "./StatusBar.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
+
+const view = useViewStore();
 </script>
 
 <template>
@@ -18,7 +21,7 @@ import MapCanvasHost from "../canvas/MapCanvasHost.vue";
       <TopMenuBar />
     </el-header>
     <el-container class="app-body">
-      <el-aside class="app-aside" width="220px">
+      <el-aside v-if="view.objectPanelVisible" class="app-aside" width="220px">
         <LeftObjectPanel />
       </el-aside>
       <el-main class="app-main">

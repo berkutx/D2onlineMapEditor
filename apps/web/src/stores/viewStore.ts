@@ -18,6 +18,8 @@ export const useViewStore = defineStore("view", () => {
   const objectsVisible = ref(true);
   const gridVisible = ref(true);
   const animate = ref(true);
+  /** Left "Objects" panel — hidden by default; toggle from the View menu. */
+  const objectPanelVisible = ref(false);
 
   /** Camera zoom factor (for the status bar). */
   const zoom = ref(1);
@@ -38,6 +40,10 @@ export const useViewStore = defineStore("view", () => {
     animate.value = !animate.value;
   }
 
+  function toggleObjectPanel(): void {
+    objectPanelVisible.value = !objectPanelVisible.value;
+  }
+
   function setZoom(z: number): void {
     zoom.value = z;
   }
@@ -51,11 +57,13 @@ export const useViewStore = defineStore("view", () => {
     objectsVisible,
     gridVisible,
     animate,
+    objectPanelVisible,
     zoom,
     cursorCell,
     setLayerVisible,
     toggleGrid,
     toggleAnimate,
+    toggleObjectPanel,
     setZoom,
     setCursorCell,
   };
