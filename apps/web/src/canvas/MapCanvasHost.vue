@@ -185,6 +185,7 @@ watch(animate, (v) => getScene()?.setAnimationEnabled(v));
         <span>renders/s</span><b :class="{ warn: debugStats.fps > 0 && debugStats.fps < 30 }">{{ debugStats.fps }}</b>
       </div>
       <div class="hud-row"><span>cpu/frame</span><b>{{ debugStats.cpuMs.toFixed(2) }} ms</b></div>
+      <div class="hud-row"><span>cpu load</span><b>{{ (debugStats.fps * debugStats.cpuMs / 10).toFixed(0) }}%</b></div>
       <div class="hud-row">
         <span>gpu/frame</span><b>{{ debugStats.gpuMs != null ? debugStats.gpuMs.toFixed(2) + " ms" : "—" }}</b>
       </div>
@@ -198,6 +199,14 @@ watch(animate, (v) => getScene()?.setAnimationEnabled(v));
       <div class="hud-row"><span>objects</span><b>{{ debugStats.objects }}<template v-if="debugStats.animActive"> ({{ debugStats.animActive }} anim)</template></b></div>
       <div class="hud-row"><span>screen</span><b>{{ debugStats.screen.w }}×{{ debugStats.screen.h }} @{{ debugStats.resolution }}x</b></div>
       <div class="hud-row"><span>buffer</span><b>{{ debugStats.drawingBuffer.w }}×{{ debugStats.drawingBuffer.h }} (dpr {{ debugStats.dpr }})</b></div>
+      <div class="hud-sep" />
+      <div class="hud-row"><span>tex vram</span><b>{{ debugStats.texMB.toFixed(0) }} MB / {{ debugStats.texCount }}</b></div>
+      <div class="hud-row">
+        <span>js heap</span>
+        <b v-if="debugStats.jsHeapMB != null">{{ debugStats.jsHeapMB.toFixed(0) }} / {{ debugStats.jsHeapLimitMB?.toFixed(0) }} MB</b>
+        <b v-else>n/a</b>
+      </div>
+      <div class="hud-row"><span>net</span><b>{{ debugStats.netMB.toFixed(1) }} MB ({{ debugStats.assetsMB.toFixed(0) }} dec)</b></div>
       <div class="hud-sep" />
       <div class="hud-row"><span>{{ debugStats.rendererType }}</span><b>max tex {{ debugStats.maxTexture }}</b></div>
       <div class="hud-row hud-gpu">{{ debugStats.gpu }}</div>

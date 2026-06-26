@@ -59,6 +59,15 @@ export interface DebugStats {
   gpu: string;
   maxTexture: number;
   rendererType: string;
+  /** Estimated GPU texture memory (MB) of the terrain + object atlases + count. */
+  texMB: number;
+  texCount: number;
+  /** JS heap (Chrome `performance.memory`; null elsewhere) — used / limit, MB. */
+  jsHeapMB: number | null;
+  jsHeapLimitMB: number | null;
+  /** Bytes pulled this session: over-the-wire vs decoded (resource timing), MB. */
+  netMB: number;
+  assetsMB: number;
 }
 
 /** Which logical layers can be toggled by the host. */
@@ -312,6 +321,24 @@ export class Scene {
       }
       this.gpuInfo = { gpu, maxTexture };
     }
+    // estimate texture VRAM from the distinct sources actually on screen
+    const sources = new Map<number, { width: number; height: number }>();
+    const addTex = (c: unknown): void => {
+      const src = (c as { texture?: { source?: { uid: number; pixelWidth?: number; pixelHeight?: number; width: number; height: number } } }).texture?.source;
+      if (src) sources.set(src.uid, { width: src.pixelWidth ?? src.width, height: src.pixelHeight ?? src.height });
+    };
+    this.terrain?.view.children.forEach(addTex);
+    this.objects?.view.children.forEach(addTex);
+    let texBytes = 0;
+    sources.forEach((s) => (texBytes += s.width * s.height * 4));
+    const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
+    let net = 0;
+    let assets = 0;
+    for (const e of performance.getEntriesByType("resource") as PerformanceResourceTiming[]) {
+      net += e.transferSize || 0;
+      assets += e.decodedBodySize || 0;
+    }
+    const MB = 1048576;
     return {
       fps: this.renderTimes.length,
       cpuMs: this.lastCpuMs,
@@ -330,6 +357,12 @@ export class Scene {
       gpu: this.gpuInfo.gpu,
       maxTexture: this.gpuInfo.maxTexture,
       rendererType: r.type === 1 ? "WebGL" : String(r.type),
+      texMB: texBytes / MB,
+      texCount: sources.size,
+      jsHeapMB: mem ? mem.usedJSHeapSize / MB : null,
+      jsHeapLimitMB: mem ? mem.jsHeapSizeLimit / MB : null,
+      netMB: net / MB,
+      assetsMB: assets / MB,
     };
   }
 
