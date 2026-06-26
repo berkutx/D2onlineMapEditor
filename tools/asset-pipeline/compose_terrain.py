@@ -111,12 +111,21 @@ class Tiles:
             fr = self.gr_terrn.get_frames("ROAD%s00" % str(i).rjust(2, "0"), SH_DEFAULT)
             if fr:
                 self.roads[i] = fr[0]
+            else:
+                # Editor (MapTileHelper::init): a missing ROADxx00 inserts a solid
+                # opaque-red 40x40 placeholder (QImage(40,40).fill(Qt::red)).
+                ph = np.zeros((40, 40, 4), np.uint8)
+                ph[..., 0] = 255  # R
+                ph[..., 3] = 255  # opaque
+                self.roads[i] = ph
         self._forest_cache = {}
 
     def forest(self, value):
         """forestByValue: raceMap[terrain] + "F" + forest(4) from IsoTerrn."""
         forest = (value >> 26) & 0x3F
-        code = self.race_code.get(value & 7, "NE")
+        # Editor: key = raceMap[terrain] + "F" + forest(4); raceMap is a QMap whose
+        # operator[] yields "" for a missing terrain id (NOT a substituted race).
+        code = self.race_code.get(value & 7, "")
         key = "%sF%s" % (code, str(forest).rjust(4, "0"))
         if key in self._forest_cache:
             return self._forest_cache[key]
@@ -200,25 +209,20 @@ def y_offset(x, y):
 
 def variant_index(seed, tx, ty, n):
     # MapRegionExtractor::calculateTileIndex: std::mt19937(seed + tx*73856093 +
-    # ty*19349663), then std::uniform_int_distribution<int>(0, n-1). Ported to MSVC's
-    # _Rng_from_urng: take ceil(log2(n)) LOW bits assembled from engine outputs and
-    # reject values >= n (NOT a plain modulo, which biases + picks different variants).
+    # ty*19349663), then std::uniform_int_distribution<int>(0, n-1). The editor is
+    # built with MSVC (D2MapEditor.pro: win32 QMAKE_CXXFLAGS += /bigobj), whose
+    # _Rng_from_urng for mt19937 has _Bits=32 / _Bmask=0xFFFFFFFF: the bit-gathering
+    # loop runs ONCE (one full 32-bit engine output), then returns ret % n, rejecting
+    # only the single partial top bucket. Net effect: engine_output % n (NOT the
+    # libstdc++ low-bits scheme, which picks a different variant for non-power-of-2 n).
     if n <= 1:
         return 0
     rng = _Mt19937((seed + tx * 73856093 + ty * 19349663) & 0xFFFFFFFF)
-    bits = max(1, (n - 1).bit_length())
-    mask = (1 << bits) - 1
-    buf = 0
-    have = 0
+    mask = 0xFFFFFFFF  # _Bmask; _Bits == 32 so the gather loop runs once
     while True:
-        if have < bits:
-            buf = (buf << 32) | rng.next()
-            have += 32
-        ret = buf & mask
-        buf >>= bits
-        have -= bits
-        if ret < n:
-            return ret
+        ret = rng.next()  # _Ret = one full 32-bit _Get_bits()
+        if ret // n < mask // n or mask % n == n - 1:
+            return ret % n
 
 
 class RegionExtractor:
@@ -291,9 +295,11 @@ class TerrainComposer:
         ny = y_offset(x * TILE, y * TILE)
         if tile_ground(value) == 3:
             return self.water_ex.extract(nx, ny)
-        ex = (self.race_ex.get(tile_terrain(value))
-              or self.race_ex.get(5)
-              or next(iter(self.race_ex.values())))
+        ex = self.race_ex.get(tile_terrain(value))
+        if ex is None:
+            # Editor: extractors[id] is a default-constructed MapRegionExtractor with
+            # an empty tile list -> empty region. No race substitution (no fallbacks).
+            return np.zeros((DH, DW, 4), np.uint8)
         return ex.extract(nx, ny)
 
     def blend_mask(self, x, y, t):

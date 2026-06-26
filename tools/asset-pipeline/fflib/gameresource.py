@@ -238,11 +238,16 @@ class GameResource:
             for (sx, sy, tx, ty, pw, ph) in parts:
                 fidx[sy : sy + ph, sx : sx + pw] = sidx[ty : ty + ph, tx : tx + pw]
             rgb = pal[fidx]
-            # transparency by palette: index 0 forced magenta; key magenta (+black if asked)
+            # shaderProcessedPixmap order: Default magenta, TransparentBlack, Border —
+            # each only when its flag is set (matches _shade and the editor exactly).
             r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
-            transp = (r > 247) & (b > 247) & (g < 8)
+            transp = np.zeros(rgb.shape[:2], bool)
+            if shader & SH_DEFAULT:
+                transp |= (r > 247) & (b > 247) & (g < 8)
             if shader & SH_TRANSP_BLACK:
                 transp |= (r < 5) & (g < 5) & (b < 5)
+            if shader & SH_BORDER:
+                transp |= ((r > 250) & (b > 250) & (g < 5)) | ((r > 250) & (b > 250) & (g > 250))
             a = np.where(transp, 0, 255).astype(np.uint8)
             return np.dstack([rgb, a])
         # RGB source
