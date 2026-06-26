@@ -201,6 +201,23 @@ export class Scene {
     });
   }
 
+  /**
+   * Render IMMEDIATELY, bypassing requestAnimationFrame. Used during active pan/zoom:
+   * a single frame is cheap (<2 ms here), but rAF gets throttled in background /
+   * embedded / unfocused contexts, which makes on-demand panning feel laggy even
+   * though the GPU is idle. Rendering straight from the input handler keeps dragging
+   * responsive regardless of rAF cadence. No-op while the continuous loop is running.
+   */
+  private renderNow(): void {
+    if (!this.app || this.animContinuous) return;
+    if (this.rafId !== undefined) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = undefined;
+    }
+    this.renderScheduled = false;
+    this.app.render();
+  }
+
   /** Run Pixi's continuous render loop only while animations are actually playing;
    *  otherwise stay idle and render on demand. */
   private updateRenderMode(): void {
@@ -234,7 +251,7 @@ export class Scene {
       const ay = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
       this.camera.zoomAt(factor, ax, ay);
-      this.requestRender();
+      this.renderNow();
     };
     canvas.addEventListener("wheel", this.wheelHandler, { passive: false });
 
@@ -255,7 +272,7 @@ export class Scene {
       this.pointerState.lastX = e.global.x;
       this.pointerState.lastY = e.global.y;
       this.camera.panBy(dx, dy);
-      this.requestRender();
+      this.renderNow();
     });
 
     // keep the camera's screen size in sync with the parent element

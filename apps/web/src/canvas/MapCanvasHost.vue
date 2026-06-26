@@ -51,7 +51,13 @@ async function rebuild(): Promise<void> {
   try {
     // the pre-composited terrain image + alignment meta (compose_terrain.py output)
     const meta = (await (await fetch(`/assets/terrain/${id}.json`)).json()) as TerrainMeta;
-    const texture = await Assets.load<Texture>(`/assets/terrain/${id}.png`);
+    // mipmaps: the terrain is one large 4736x2432 texture; when zoomed out it is
+    // minified heavily, and without mips an iGPU samples the full texture (memory-
+    // bandwidth heavy + shimmer). autoGenerateMipmaps makes zoom-out cheap and crisp.
+    const texture = await Assets.load<Texture>({
+      src: `/assets/terrain/${id}.png`,
+      data: { autoGenerateMipmaps: true },
+    });
     await scene.buildScene(doc, man, getAssetStore(), { texture, meta }, VISIBLE_OBJECT_TYPES);
     // apply the current view state to the freshly-built scene
     scene.setLayerVisibility("terrain", terrainVisible.value);
