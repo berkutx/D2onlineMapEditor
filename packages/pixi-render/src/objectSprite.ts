@@ -84,6 +84,11 @@ export function objectSpriteKey(
     case "treasure":
       return `G000BG0000${ctx?.water ? "0" : "1"}${pad(obj.image ?? 0, 2)}`;
 
+    // StackObjectAccessor: leaderImpl + "STOP" + rotation  [IsoAnim, IsoUnit]
+    // (boat/shadow/banner layers not ported yet; this is the leader's standing sprite)
+    case "stack":
+      return obj.leaderImage ? `${obj.leaderImage}STOP${obj.facing ?? 0}` : undefined;
+
     default:
       return undefined;
   }

@@ -154,6 +154,20 @@ export function assembleDocument(
 
   for (const obj of iterateObjects(buf)) consume(buf, obj, acc);
 
+  // Resolve each stack's leader sprite base: leaderUnitId -> the MidUnit's implId
+  // (a Gunit id like G000UU7624). The editor's stack sprite is leaderImpl + "STOP" +
+  // facing (StackObjectAccessor), so the renderer needs the impl on the stack itself.
+  const unitImpl = new Map<string, string>();
+  for (const o of acc.objects) {
+    if (o.type === "unit" && o.implId) unitImpl.set(o.id, o.implId);
+  }
+  for (const o of acc.objects) {
+    if (o.type === "stack" && o.leaderUnitId) {
+      const impl = unitImpl.get(o.leaderUnitId);
+      if (impl) o.leaderImage = impl;
+    }
+  }
+
   const size = acc.size;
   if (size === null || size <= 0) {
     throw new Error("sg-parser: could not determine map size (no MAP_SIZE / MidgardMap)");

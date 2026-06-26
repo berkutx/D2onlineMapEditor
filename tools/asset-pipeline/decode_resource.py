@@ -69,3 +69,26 @@ def decode_bundle(path, shader=SH_DEFAULT):
         seen.add(f.key)
         deduped.append(f)
     return deduped, animations
+
+
+def decode_keys(path, keys, shader=SH_DEFAULT):
+    """Decode ONLY the given logical ids (first frame each) from an archive.
+
+    For IsoUnit, which has 100k+ names — decoding it wholesale is infeasible. The
+    caller passes just the leader STOP{facing} keys a map actually references. We
+    take frame 0 (animation is off for now), keyed by the UPPERCASE id."""
+    gr = GameResource(path)
+    frames = []
+    seen = set()
+    for key in keys:
+        ku = key.upper()
+        if ku in seen:
+            continue
+        seen.add(ku)
+        try:
+            fr = gr.get_frames(key, shader)
+        except Exception:
+            fr = []
+        if fr:
+            frames.append(_to_frame(ku, fr[0]))
+    return frames

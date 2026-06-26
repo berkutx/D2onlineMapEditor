@@ -33,7 +33,53 @@ STAGE1_OBJECT_ARCHIVES = [
 ]
 
 
-def run_stage1(game_dir, out_dir):
+def _needed_unit_keys(server):
+    """Leader STOP{facing} keys the map's stacks reference (IsoUnit is far too large
+    to decode wholesale). Resolves stack.leaderUnitId -> unit.implId -> key."""
+    import json
+    import urllib.request
+    try:
+        scen = json.load(urllib.request.urlopen(server + "/api/scenarios"))
+        riders = next((s for s in scen if "Rider" in s.get("name", "")), scen[0])
+        doc = json.load(urllib.request.urlopen(server + "/api/maps/" + riders["id"]))
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write("  unit keys: map fetch failed (%s); skipping IsoUnit\n" % e)
+        return set()
+    impl = {o["id"]: o["implId"] for o in doc.get("objects", [])
+            if o.get("type") == "unit" and o.get("implId")}
+    keys = set()
+    for o in doc.get("objects", []):
+        if o.get("type") == "stack" and o.get("leaderUnitId"):
+            im = impl.get(o["leaderUnitId"])
+            if im:
+                keys.add("%sSTOP%d" % (im, o.get("facing", 0) or 0))
+    return keys
+
+
+def _add_units(game_dir, out_dir, server, builder, stats):
+    """Targeted IsoUnit pass: decode only the leader sprites the map uses."""
+    keys = _needed_unit_keys(server)
+    path = extract_ff.find_archive(game_dir, "IsoUnit.ff")
+    if not keys or not path:
+        return
+    frames = decode_resource.decode_keys(path, keys)
+    if not frames:
+        return
+    written = build_atlases.build_atlas(
+        "iso-unit", frames, out_dir, ff="IsoUnit.ff", shader="default", tile_w=None)
+    for page_idx, (img_name, meta_name) in enumerate(written):
+        sheet_id = "iso-unit" if len(written) == 1 else "iso-unit-%d" % page_idx
+        builder.add_spritesheet(sheet_id, img_name, meta_name, ff="IsoUnit.ff")
+    for f in frames:
+        builder.add_index(f.key, "iso-unit", frame=f.key)
+    stats["archives"] += 1
+    stats["frames"] += len(frames)
+    stats["sheets"] += len(written)
+    sys.stderr.write("  iso-unit: %d leader sprites (of %d requested)\n"
+                     % (len(frames), len(keys)))
+
+
+def run_stage1(game_dir, out_dir, server="http://localhost:3000"):
     builder = manifest_mod.ManifestBuilder(source_game_version="GOG/last_version")
     stats = {"archives": 0, "frames": 0, "sheets": 0, "animations": 0, "missing": []}
 
@@ -73,6 +119,8 @@ def run_stage1(game_dir, out_dir):
             builder.add_animations(anim_defs)
             stats["animations"] += len(anim_defs)
 
+    _add_units(game_dir, out_dir, server, builder, stats)
+
     manifest_path = os.path.join(out_dir, "manifest.json")
     data = builder.write(manifest_path)
     ok, msg = manifest_mod.validate(data)
@@ -84,6 +132,8 @@ def main(argv=None):
     ap.add_argument("--game", required=True, help="path to the Game directory")
     ap.add_argument("--out", required=True, help="output dir (e.g. public/assets)")
     ap.add_argument("--stage", type=int, default=1, help="pipeline stage (only 1 supported)")
+    ap.add_argument("--server", default="http://localhost:3000",
+                    help="map server for the targeted IsoUnit (stack leaders) pass")
     args = ap.parse_args(argv)
 
     if args.stage != 1:
@@ -95,7 +145,7 @@ def main(argv=None):
     print("  out :", out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    stats, manifest_path, ok, msg = run_stage1(args.game, out_dir)
+    stats, manifest_path, ok, msg = run_stage1(args.game, out_dir, args.server)
 
     print("\nSUMMARY")
     print("  archives processed:", stats["archives"])
