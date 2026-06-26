@@ -28,8 +28,15 @@ const viewStore = useViewStore();
 
 const { currentMap } = storeToRefs(mapStore);
 const { manifest } = storeToRefs(assetStore);
-const { terrainVisible, objectsVisible, gridVisible, animate, debugOverlay, cursorCell } =
-  storeToRefs(viewStore);
+const {
+  terrainVisible,
+  objectsVisible,
+  gridVisible,
+  locationsVisible,
+  animate,
+  debugOverlay,
+  cursorCell,
+} = storeToRefs(viewStore);
 
 // Static object layers with a faithful sprite key + footprint ported, that resolve
 // in the atlases. Forts/capitals/villages, stacks, units (DBF-driven) and locations
@@ -90,6 +97,7 @@ async function rebuild(): Promise<void> {
     scene.setLayerVisibility("terrain", terrainVisible.value);
     scene.setLayerVisibility("objects", objectsVisible.value);
     scene.setLayerVisibility("grid", gridVisible.value);
+    scene.setLayerVisibility("locations", locationsVisible.value);
     scene.setAnimationEnabled(animate.value);
     // seed the status bar with the initial camera zoom
     const cam = scene.getCamera();
@@ -177,6 +185,7 @@ watch([currentMap, manifest], () => {
 watch(terrainVisible, (v) => getScene()?.setLayerVisibility("terrain", v));
 watch(objectsVisible, (v) => getScene()?.setLayerVisibility("objects", v));
 watch(gridVisible, (v) => getScene()?.setLayerVisibility("grid", v));
+watch(locationsVisible, (v) => getScene()?.setLayerVisibility("locations", v));
 watch(animate, (v) => getScene()?.setAnimationEnabled(v));
 </script>
 

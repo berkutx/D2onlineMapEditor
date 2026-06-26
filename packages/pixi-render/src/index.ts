@@ -26,6 +26,7 @@ export type { AssetStoreOptions } from "./AssetStore.js";
 export { TerrainLayer } from "./TerrainLayer.js";
 export type { TerrainMeta } from "./TerrainLayer.js";
 export { ObjectLayer } from "./ObjectLayer.js";
+export { LocationLayer } from "./LocationLayer.js";
 export { objectSpriteKey, objectFootprint, objectZBase } from "./objectSprite.js";
 export type { LandmarkFootprints } from "./objectSprite.js";
 export { AnimationManager, D2_FRAME_MS, D2_ANIMATION_SPEED } from "./AnimationManager.js";

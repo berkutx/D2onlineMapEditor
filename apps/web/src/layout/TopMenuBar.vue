@@ -16,8 +16,15 @@ const mapStore = useMapStore();
 const viewStore = useViewStore();
 
 const { scenarios, currentScenarioId, status } = storeToRefs(mapStore);
-const { terrainVisible, objectsVisible, gridVisible, animate, objectPanelVisible, debugOverlay } =
-  storeToRefs(viewStore);
+const {
+  terrainVisible,
+  objectsVisible,
+  gridVisible,
+  locationsVisible,
+  animate,
+  objectPanelVisible,
+  debugOverlay,
+} = storeToRefs(viewStore);
 
 const dialogVisible = ref(false);
 const listLoading = ref(false);
@@ -54,6 +61,8 @@ function onLayerCommand(command: string): void {
     viewStore.setLayerVisible("objects", !objectsVisible.value);
   } else if (command === "grid") {
     viewStore.toggleGrid();
+  } else if (command === "locations") {
+    viewStore.toggleLocations();
   } else if (command === "animate") {
     viewStore.toggleAnimate();
   } else if (command === "objectPanel") {
@@ -95,6 +104,11 @@ function onLayerCommand(command: string): void {
             <el-icon v-if="gridVisible"><Check /></el-icon>
             <span class="check-spacer" v-else />
             Grid
+          </el-dropdown-item>
+          <el-dropdown-item command="locations">
+            <el-icon v-if="locationsVisible"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Locations
           </el-dropdown-item>
           <el-dropdown-item command="animate" divided>
             <el-icon v-if="animate"><Check /></el-icon>

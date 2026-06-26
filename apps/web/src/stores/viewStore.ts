@@ -17,6 +17,8 @@ export const useViewStore = defineStore("view", () => {
   const terrainVisible = ref(true);
   const objectsVisible = ref(true);
   const gridVisible = ref(true);
+  /** Event-location highlights (spawns / trigger regions). On by default. */
+  const locationsVisible = ref(true);
   // Animation off for now (objects render their first frame statically); toggle in View.
   const animate = ref(false);
   /** Left "Objects" panel — hidden by default; toggle from the View menu. */
@@ -33,6 +35,11 @@ export const useViewStore = defineStore("view", () => {
     if (layer === "terrain") terrainVisible.value = visible;
     else if (layer === "objects") objectsVisible.value = visible;
     else if (layer === "grid") gridVisible.value = visible;
+    else if (layer === "locations") locationsVisible.value = visible;
+  }
+
+  function toggleLocations(): void {
+    locationsVisible.value = !locationsVisible.value;
   }
 
   function toggleGrid(): void {
@@ -63,6 +70,7 @@ export const useViewStore = defineStore("view", () => {
     terrainVisible,
     objectsVisible,
     gridVisible,
+    locationsVisible,
     animate,
     objectPanelVisible,
     debugOverlay,
@@ -71,6 +79,7 @@ export const useViewStore = defineStore("view", () => {
     setLayerVisible,
     toggleGrid,
     toggleAnimate,
+    toggleLocations,
     toggleObjectPanel,
     toggleDebugOverlay,
     setZoom,
