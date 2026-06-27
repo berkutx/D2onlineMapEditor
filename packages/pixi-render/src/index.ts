@@ -23,6 +23,8 @@ export type {
 export { AssetStore } from "./AssetStore.js";
 export type { AssetStoreOptions } from "./AssetStore.js";
 
+export { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
+// legacy pre-composited-PNG terrain (kept for reference; renderer uses the tilemap)
 export { TerrainLayer } from "./TerrainLayer.js";
 export type { TerrainMeta } from "./TerrainLayer.js";
 export { ObjectLayer } from "./ObjectLayer.js";

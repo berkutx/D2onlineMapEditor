@@ -156,6 +156,14 @@ def main(argv=None):
         if rtype in lrace:
             grace_fort_codes[gidx] = lrace[rtype]
 
+    # Lterrain id -> 2-letter terrain race code (MapTileHelper raceMap): drives the
+    # forest/tree sprite key "<code>F<forest:04>" (a missing id yields "" like the editor).
+    terrain_codes = {}
+    for row in read_dbf(_find(globals_dir, "Lterrain.dbf")):
+        tid = _int_or_none(row.get("ID"))
+        if tid is not None:
+            terrain_codes[tid] = (row.get("TEXT", "") or "").replace("L_", "").strip()
+
     unit_boat = _unit_boat(globals_dir, args.server)
 
     # GVars.GU_RANGE: the single global guard range -> guard overlay radius
@@ -170,6 +178,7 @@ def main(argv=None):
         "landmarkMountain": lm_mountain,
         "graceFortCodes": grace_fort_codes,
         "graceRaceType": grace_race_type,
+        "terrainCodes": terrain_codes,
         "unitBoat": unit_boat,
         "guardRange": guard_range,
     }

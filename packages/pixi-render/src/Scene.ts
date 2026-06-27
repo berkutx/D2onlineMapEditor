@@ -18,12 +18,12 @@
  * Layer order (back to front): terrain tilemap, then the z-sorted object layer.
  * Both live under a single `world` Container that the {@link Camera} pans/zooms.
  */
-import { Application, Container, type Texture } from "pixi.js";
+import { Application, Container } from "pixi.js";
 import type { MapDocument } from "@d2/map-schema";
 import type { AssetManifest } from "@d2/asset-manifest";
 
 import { AssetStore } from "./AssetStore.js";
-import { TerrainLayer, type TerrainMeta } from "./TerrainLayer.js";
+import { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer } from "./ObjectLayer.js";
 import { LocationLayer } from "./LocationLayer.js";
@@ -40,6 +40,8 @@ export interface ObjectData {
   graceFortCodes?: Record<number, string>;
   /** Grace race index -> Lrace key (RACE_TYPE int), for the rod sprite. */
   graceRaceType?: Record<number, number>;
+  /** Lterrain id -> 2-letter terrain code (forest/tree sprite key). */
+  terrainCodes?: Record<number, string>;
   /** leader impl id -> boat race (Lrace key); only boat-eligible leaders (not
    *  water_only, not flying). Drives the stack-on-water boat sprite. */
   unitBoat?: Record<string, number>;
@@ -109,7 +111,7 @@ export class Scene {
 
   /** The pannable/zoomable world root that holds every layer. */
   private world?: Container;
-  private terrain?: TerrainLayer;
+  private terrain?: TerrainTilemapLayer;
   private grid?: GridLayer;
   private objects?: ObjectLayer;
   private locations?: LocationLayer;
@@ -197,7 +199,6 @@ export class Scene {
     map: MapDocument,
     manifest: AssetManifest,
     assets: AssetStore,
-    terrain: { texture: Texture; meta: TerrainMeta },
     objectTypes?: ReadonlySet<string>,
     objectData?: ObjectData,
   ): Promise<void> {
@@ -210,8 +211,9 @@ export class Scene {
 
     this.anim = new AnimationManager({ autoStart: true });
 
-    this.terrain = new TerrainLayer();
-    this.terrain.build(terrain.texture, terrain.meta);
+    // terrain composited at runtime from the shared tile atlas (no per-map PNG)
+    this.terrain = new TerrainTilemapLayer();
+    this.terrain.build(map, assets, objectData?.terrainCodes);
     this.world.addChild(this.terrain.view);
 
     // iso grid overlay, above terrain and below objects

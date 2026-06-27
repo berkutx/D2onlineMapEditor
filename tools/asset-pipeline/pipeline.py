@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import build_animations
 import build_atlases
+import build_terrain_tiles
 import decode_resource
 import extract_ff
 import manifest as manifest_mod
@@ -134,6 +135,12 @@ def run_stage1(game_dir, out_dir, server="http://localhost:3000"):
             stats["animations"] += len(anim_defs)
 
     _add_units(game_dir, out_dir, server, builder, stats)
+
+    # shared runtime-terrain base tile atlas (replaces per-map compose_terrain PNGs)
+    try:
+        build_terrain_tiles.add_terrain_base(game_dir, out_dir, builder, stats)
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write("  terrain-base: FAILED (%s)\n" % e)
 
     manifest_path = os.path.join(out_dir, "manifest.json")
     data = builder.write(manifest_path)
