@@ -291,6 +291,12 @@ export class Scene {
     this.requestRender();
   }
 
+  /** Fit the whole map into the viewport and re-render (camera "home"). */
+  fitView(): void {
+    this.camera?.fitToScreen();
+    this.requestRender();
+  }
+
   /** Start/stop all sprite animation (single shared ticker). */
   setAnimationEnabled(on: boolean): void {
     this.anim?.setEnabled(on);

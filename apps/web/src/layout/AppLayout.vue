@@ -6,7 +6,9 @@
  * Vue owns this DOM chrome; the <MapCanvasHost> is the only seam where PixiJS
  * takes over a div and renders the map.
  */
+import { onMounted, onBeforeUnmount } from "vue";
 import { useViewStore } from "../stores/viewStore";
+import { getScene } from "../canvas/sceneHolder";
 import TopMenuBar from "./TopMenuBar.vue";
 import ToolbarPanel from "./ToolbarPanel.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
@@ -14,6 +16,28 @@ import StatusBar from "./StatusBar.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
 
 const view = useViewStore();
+
+/** Global view hotkeys (single keys; ignored while typing or with modifiers). */
+function onKey(e: KeyboardEvent): void {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target as HTMLElement | null;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  switch (e.key.toLowerCase()) {
+    case "t": view.setLayerVisible("terrain", !view.terrainVisible); break;
+    case "o": view.setLayerVisible("objects", !view.objectsVisible); break;
+    case "g": view.toggleGrid(); break;
+    case "l": view.toggleLocations(); break;
+    case "a": view.toggleAnimate(); break;
+    case "p": view.toggleObjectPanel(); break;
+    case "d": view.toggleDebugOverlay(); break;
+    case "f": getScene()?.fitView(); break;
+    default: return;
+  }
+  e.preventDefault();
+}
+
+onMounted(() => window.addEventListener("keydown", onKey));
+onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 </script>
 
 <template>

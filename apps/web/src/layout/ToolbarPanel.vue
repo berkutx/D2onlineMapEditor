@@ -17,13 +17,13 @@ const {
 } = storeToRefs(view);
 
 const tools = [
-  { label: "Terrain", icon: Picture, active: terrainVisible, toggle: () => view.setLayerVisible("terrain", !terrainVisible.value) },
-  { label: "Objects", icon: Box, active: objectsVisible, toggle: () => view.setLayerVisible("objects", !objectsVisible.value) },
-  { label: "Grid", icon: Grid, active: gridVisible, toggle: () => view.toggleGrid() },
-  { label: "Locations", icon: Location, active: locationsVisible, toggle: () => view.toggleLocations() },
-  { label: "Animation", icon: VideoPlay, active: animate, toggle: () => view.toggleAnimate() },
-  { label: "Objects panel", icon: Menu, active: objectPanelVisible, toggle: () => view.toggleObjectPanel() },
-  { label: "Debug HUD", icon: Monitor, active: debugOverlay, toggle: () => view.toggleDebugOverlay() },
+  { label: "Terrain", key: "T", icon: Picture, active: terrainVisible, toggle: () => view.setLayerVisible("terrain", !terrainVisible.value) },
+  { label: "Objects", key: "O", icon: Box, active: objectsVisible, toggle: () => view.setLayerVisible("objects", !objectsVisible.value) },
+  { label: "Grid", key: "G", icon: Grid, active: gridVisible, toggle: () => view.toggleGrid() },
+  { label: "Locations", key: "L", icon: Location, active: locationsVisible, toggle: () => view.toggleLocations() },
+  { label: "Animation", key: "A", icon: VideoPlay, active: animate, toggle: () => view.toggleAnimate() },
+  { label: "Objects panel", key: "P", icon: Menu, active: objectPanelVisible, toggle: () => view.toggleObjectPanel() },
+  { label: "Debug HUD", key: "D", icon: Monitor, active: debugOverlay, toggle: () => view.toggleDebugOverlay() },
 ];
 </script>
 
@@ -32,7 +32,7 @@ const tools = [
     <el-tooltip
       v-for="t in tools"
       :key="t.label"
-      :content="t.label"
+      :content="`${t.label} (${t.key})`"
       placement="right"
       :show-after="250"
     >
