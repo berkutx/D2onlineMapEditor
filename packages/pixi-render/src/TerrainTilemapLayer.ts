@@ -15,7 +15,7 @@
  *
  * Touches `pixi.js` + `@pixi/tilemap` -> COMPILE-ONLY under vitest.
  */
-import { Container } from "pixi.js";
+import { Container, Sprite } from "pixi.js";
 import { CompositeTilemap } from "@pixi/tilemap";
 import type { MapDocument } from "@d2/map-schema";
 import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
@@ -42,8 +42,10 @@ export class TerrainTilemapLayer {
   readonly view: Container;
   private readonly baseTM = new CompositeTilemap();
   private readonly borderTM = new CompositeTilemap();
-  private readonly roadTM = new CompositeTilemap();
-  private readonly treeTM = new CompositeTilemap();
+  // roads/trees are large, TRIMMED iso-terrn sprites — drawn as Sprites (anchor 0.5
+  // applies the trim offset correctly; the tilemap ignores trim and mis-places them).
+  private readonly roadLayer = new Container();
+  private readonly treeLayer = new Container();
   private readonly missing = new Set<string>();
   /** cached variant counts per mask key ("E<mt>" / "W<type>"), discovered from the atlas. */
   private readonly varCount = new Map<string, number>();
@@ -56,15 +58,15 @@ export class TerrainTilemapLayer {
     this.view = new Container();
     this.view.label = "terrain";
     // z-order: base < border < road < tree (editor reloadGrid order)
-    this.view.addChild(this.baseTM, this.borderTM, this.roadTM, this.treeTM);
+    this.view.addChild(this.baseTM, this.borderTM, this.roadLayer, this.treeLayer);
   }
 
   build(doc: MapDocument, assets: AssetStore, terrainCodes?: TerrainCodes): void {
     this.assets = assets;
     this.baseTM.clear();
     this.borderTM.clear();
-    this.roadTM.clear();
-    this.treeTM.clear();
+    this.roadLayer.removeChildren().forEach((c) => c.destroy());
+    this.treeLayer.removeChildren().forEach((c) => c.destroy());
     this.missing.clear();
     this.varCount.clear();
     const n = (this.n = doc.size);
@@ -79,13 +81,13 @@ export class TerrainTilemapLayer {
     }
     // 3) roads (centred on the cell), 4) trees (x-outer/y-inner like the editor)
     for (const c of cells) {
-      if (c.roadType !== -1) this.placeCentered(this.roadTM, `ROAD${pad(c.roadType, 2)}00`, c.x, c.y);
+      if (c.roadType !== -1) this.placeCentered(this.roadLayer, `ROAD${pad(c.roadType, 2)}00`, c.x, c.y);
     }
     const forest = cells.filter((c) => c.ground === 1).sort((a, b) => a.x - b.x || a.y - b.y);
     for (const c of forest) {
       const code = terrainCodes?.[c.value & 7] ?? "";
       const f = (c.value >>> 26) & 0x3f;
-      this.placeCentered(this.treeTM, `${code}F${pad(f, 4)}`, c.x, c.y);
+      this.placeCentered(this.treeLayer, `${code}F${pad(f, 4)}`, c.x, c.y);
     }
 
     if (this.missing.size > 0) {
@@ -224,15 +226,20 @@ export class TerrainTilemapLayer {
     return e;
   }
 
-  /** Place a road/tree sprite centred on a cell's centre (= cellToWorld(x,y)). */
-  private placeCentered(tm: CompositeTilemap, key: string, x: number, y: number): void {
+  /** Place a road/tree as a Sprite centred on the cell centre (= cellToWorld(x,y)).
+   *  A Sprite (anchor 0.5) applies the texture's trim offset, so the small tree art
+   *  inside its large 320x320 frame lands on the cell — unlike a raw tilemap quad. */
+  private placeCentered(layer: Container, key: string, x: number, y: number): void {
     const tex = this.assets.resolveTexture(key);
     if (tex.label === "EMPTY") {
       this.missing.add(key);
       return;
     }
+    const sprite = new Sprite(tex);
+    sprite.anchor.set(0.5, 0.5);
     const w = cellToWorld(x, y);
-    tm.tile(tex, w.x - tex.width / 2, w.y - tex.height / 2);
+    sprite.position.set(w.x, w.y);
+    layer.addChild(sprite);
   }
 
   /** Distinct unresolved tile keys from the last build (for the HUD/debug). */
