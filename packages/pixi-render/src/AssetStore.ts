@@ -44,10 +44,21 @@ export class AssetStore {
   /** animation id -> ordered Texture[] */
   private readonly animations = new Map<string, Texture[]>();
 
+  /** every sheet id -> its ref (incl. lazy unit chunks not loaded upfront). */
+  private readonly refById = new Map<string, SpritesheetRef>();
+  /** in-flight lazy sheet loads, deduped by sheet id. */
+  private readonly loadingSheets = new Map<string, Promise<void>>();
+
   private loaded = false;
 
   constructor(options: AssetStoreOptions = {}) {
     this.opts = options;
+  }
+
+  /** Per-unit chunks ("unit-<impl>") are loaded ON DEMAND via {@link ensureLoaded},
+   *  not in the initial {@link load}, so opening a map only pulls that map's units. */
+  private static isLazy(ref: SpritesheetRef): boolean {
+    return ref.id.startsWith("unit-");
   }
 
   /** True once {@link load} has completed. */
@@ -80,9 +91,15 @@ export class AssetStore {
     this.sheets.clear();
     this.textures.clear();
     this.animations.clear();
+    this.loadingSheets.clear();
+    this.refById.clear();
+    for (const ref of manifest.spritesheets) this.refById.set(ref.id, ref);
 
+    // Load everything EXCEPT the lazy per-unit chunks (those load on demand).
     await Promise.all(
-      manifest.spritesheets.map((ref) => this.loadSheet(ref)),
+      manifest.spritesheets
+        .filter((ref) => !AssetStore.isLazy(ref))
+        .map((ref) => this.loadSheet(ref)),
     );
 
     // Build named animation lists from the manifest (cross-sheet aware).
@@ -91,6 +108,35 @@ export class AssetStore {
     }
 
     this.loaded = true;
+  }
+
+  /**
+   * Lazily load the (lazy) sheets that contain `keys` — used to pull in just the
+   * units a freshly-opened map references, instead of every unit upfront. Resolves
+   * once those sheets are parsed; concurrent calls for the same sheet are deduped.
+   * Keys whose sheet is already loaded (or unknown) are skipped.
+   */
+  async ensureLoaded(keys: Iterable<string>): Promise<void> {
+    const index = this.manifest?.index;
+    if (!index) return;
+    const sheetIds = new Set<string>();
+    for (const key of keys) {
+      const entry = index[key];
+      if (entry && !this.sheets.has(entry.sheet)) sheetIds.add(entry.sheet);
+    }
+    await Promise.all([...sheetIds].map((id) => this.loadSheetOnce(id)));
+  }
+
+  /** Load a sheet by id at most once (dedupes in-flight + already-loaded). */
+  private loadSheetOnce(id: string): Promise<void> {
+    if (this.sheets.has(id)) return Promise.resolve();
+    const existing = this.loadingSheets.get(id);
+    if (existing) return existing;
+    const ref = this.refById.get(id);
+    if (!ref) return Promise.resolve();
+    const p = this.loadSheet(ref).finally(() => this.loadingSheets.delete(id));
+    this.loadingSheets.set(id, p);
+    return p;
   }
 
   private async loadSheet(ref: SpritesheetRef): Promise<void> {

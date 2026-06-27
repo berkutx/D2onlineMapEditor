@@ -221,6 +221,16 @@ export class Scene {
     this.grid.build(map.size);
     this.world.addChild(this.grid.view);
 
+    // Lazily pull in just THIS map's unit (leader) sprites before placing objects —
+    // unit atlases are per-impl chunks not loaded upfront (AssetStore.ensureLoaded).
+    const unitKeys: string[] = [];
+    for (const o of map.objects) {
+      if (o.type === "stack" && o.garrisoned !== true && o.leaderImage) {
+        unitKeys.push(`${o.leaderImage}STOP${o.facing ?? 0}`);
+      }
+    }
+    await assets.ensureLoaded(unitKeys);
+
     this.objects = new ObjectLayer();
     this.objects.build(map, assets, this.anim, objectTypes, {
       landmarks: objectData?.landmarkFootprints,

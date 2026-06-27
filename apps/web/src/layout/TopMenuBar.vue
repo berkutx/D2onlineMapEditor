@@ -4,7 +4,7 @@
  *   File ▸ Open map  -> dialog listing GET /api/scenarios, click to load.
  *   View ▸ Terrain / Objects layer toggles + Animation toggle.
  */
-import { ref } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import { Check } from "@element-plus/icons-vue";
@@ -75,6 +75,31 @@ function onLayerCommand(command: string): void {
     viewStore.toggleOverlayTint(command.slice(5) as OverlayTint);
   }
 }
+
+// --- Map switcher (direct dropdown; loads any map in realtime) ----------------
+/** scenarios grouped by campaign, for the Map dropdown. */
+const scenariosByCampaign = computed(() => {
+  const groups = new Map<string, ScenarioEntry[]>();
+  for (const s of scenarios.value) {
+    const k = s.campaign || "—";
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(s);
+  }
+  return [...groups.entries()].map(([campaign, maps]) => ({ campaign, maps }));
+});
+
+async function onMapCommand(id: string): Promise<void> {
+  if (id === currentScenarioId.value) return;
+  try {
+    await mapStore.openMap(id);
+  } catch (e) {
+    ElMessage.error(`Failed to open map: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+// Populate the switcher up front so the dropdown is ready (best-effort).
+onMounted(() => {
+  void mapStore.loadScenarios().catch(() => {});
+});
 </script>
 
 <template>
@@ -159,6 +184,22 @@ function onLayerCommand(command: string): void {
       </template>
     </el-dropdown>
 
+    <el-dropdown trigger="click" max-height="70vh" @command="onMapCommand">
+      <span class="menu-trigger">Map</span>
+      <template #dropdown>
+        <el-dropdown-menu>
+          <template v-for="g in scenariosByCampaign" :key="g.campaign">
+            <el-dropdown-item disabled class="map-group">{{ g.campaign }}</el-dropdown-item>
+            <el-dropdown-item v-for="m in g.maps" :key="m.id" :command="m.id">
+              <el-icon v-if="m.id === currentScenarioId"><Check /></el-icon>
+              <span class="check-spacer" v-else />
+              {{ m.name }} <span class="map-size">{{ m.mapSize }}×{{ m.mapSize }}</span>
+            </el-dropdown-item>
+          </template>
+        </el-dropdown-menu>
+      </template>
+    </el-dropdown>
+
     <el-button
       class="grid-toggle"
       size="small"
@@ -209,6 +250,20 @@ function onLayerCommand(command: string): void {
 </template>
 
 <style scoped>
+.map-group {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--el-text-color-secondary);
+  opacity: 1 !important;
+  cursor: default;
+}
+.map-size {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
 .menu-bar {
   display: flex;
   align-items: center;

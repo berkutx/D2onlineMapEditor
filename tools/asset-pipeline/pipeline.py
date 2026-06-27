@@ -34,64 +34,65 @@ STAGE1_OBJECT_ARCHIVES = [
 ]
 
 
-def _needed_unit_keys(server):
-    """Leader STOP{facing} keys the map's stacks reference (IsoUnit is far too large
-    to decode wholesale). Resolves stack.leaderUnitId -> unit.implId -> key."""
-    import json
-    import urllib.request
-    try:
-        scen = json.load(urllib.request.urlopen(server + "/api/scenarios"))
-        riders = next((s for s in scen if "Rider" in s.get("name", "")), scen[0])
-        doc = json.load(urllib.request.urlopen(server + "/api/maps/" + riders["id"]))
-    except Exception as e:  # noqa: BLE001
-        sys.stderr.write("  unit keys: map fetch failed (%s); skipping IsoUnit\n" % e)
-        return set()
-    impl = {o["id"]: o["implId"] for o in doc.get("objects", [])
-            if o.get("type") == "unit" and o.get("implId")}
-    keys = set()
-    for o in doc.get("objects", []):
-        if o.get("type") == "stack" and o.get("leaderUnitId"):
-            im = impl.get(o["leaderUnitId"])
-            if im:
-                keys.add("%sSTOP%d" % (im, o.get("facing", 0) or 0))
-    return keys
-
-
-def _needed_boat_keys(out_dir):
-    """Boat body sprites for stacks on water: G000RR000<race>SBOA<rot>, rot 0..7,
-    for every race in objectdata.json's unitBoat (boat-eligible leaders). Boat shadow
-    (BOAT key) is deferred with the Shadows shader. Requires extract_gamedata to have
-    run first (it writes unitBoat)."""
-    import json
-    try:
-        data = json.load(open(os.path.join(out_dir, "objectdata.json")))
-    except Exception:  # noqa: BLE001
-        return set()
-    races = set((data.get("unitBoat") or {}).values())
-    return {"G000RR000%dSBOA%d" % (r, rot) for r in races for rot in range(8)}
+def _register_bundle(builder, bundle, written, frames):
+    for page_idx, (img_name, meta_name) in enumerate(written):
+        sid = bundle if len(written) == 1 else "%s-%d" % (bundle, page_idx)
+        builder.add_spritesheet(sid, img_name, meta_name, ff="IsoUnit.ff")
+    for f in frames:
+        builder.add_index(f.key, bundle, frame=f.key)
 
 
 def _add_units(game_dir, out_dir, server, builder, stats):
-    """Targeted IsoUnit pass: decode only the leader (+ boat) sprites the map uses."""
-    keys = _needed_unit_keys(server) | _needed_boat_keys(out_dir)
+    """Decode EVERY unit idle (STOP) sprite + boats from IsoUnit, map-independent.
+
+    Boats (G000RR000<race>SBOA<rot>) go to one small UPFRONT atlas "iso-unit".
+    Each unit's idle frames go to a LAZY per-impl chunk "unit-<impl>" that
+    AssetStore loads on demand (ensureLoaded), so opening a map pulls only that
+    map's units — not all ~350 (~20-30 MB) upfront. IsoUnit is 159 MB / 10k+
+    records, so we scan its name table for the exact keys instead of decoding it
+    wholesale."""
+    import re
     path = extract_ff.find_archive(game_dir, "IsoUnit.ff")
-    if not keys or not path:
+    if not path:
         return
-    frames = decode_resource.decode_keys(path, keys)
-    if not frames:
+    raw = open(path, "rb").read()
+    stop_keys = sorted(set(
+        m.group(0).decode("latin1")
+        for m in re.finditer(rb"G[0-9A-Za-z]{3}UU[0-9]{4}STOP[0-7]", raw)))
+    boat_keys = sorted(set(
+        m.group(0).decode("latin1")
+        for m in re.finditer(rb"G000RR000[0-9]SBOA[0-7]", raw)))
+    if not stop_keys and not boat_keys:
         return
-    written = build_atlases.build_atlas(
-        "iso-unit", frames, out_dir, ff="IsoUnit.ff", shader="default", tile_w=None)
-    for page_idx, (img_name, meta_name) in enumerate(written):
-        sheet_id = "iso-unit" if len(written) == 1 else "iso-unit-%d" % page_idx
-        builder.add_spritesheet(sheet_id, img_name, meta_name, ff="IsoUnit.ff")
-    for f in frames:
-        builder.add_index(f.key, "iso-unit", frame=f.key)
+    frames = decode_resource.decode_keys(path, stop_keys + boat_keys)
+    boat_frames = [f for f in frames if "SBOA" in f.key]
+    stop_frames = [f for f in frames if "STOP" in f.key]
+
+    # boats: one upfront atlas (small; needed for any stack-on-water)
+    if boat_frames:
+        written = build_atlases.build_atlas(
+            "iso-unit", boat_frames, out_dir, ff="IsoUnit.ff", shader="default", tile_w=None)
+        _register_bundle(builder, "iso-unit", written, boat_frames)
+        stats["sheets"] += len(written)
+
+    # leader idle sprites: lazy per-impl chunks "unit-<impl>"
+    by_impl = {}
+    for f in stop_frames:
+        by_impl.setdefault(f.key.split("STOP")[0], []).append(f)
+    pages = 0
+    for impl, ifr in by_impl.items():
+        bundle = "unit-" + impl
+        written = build_atlases.build_atlas(
+            bundle, ifr, out_dir, ff="IsoUnit.ff", shader="default", tile_w=None)
+        _register_bundle(builder, bundle, written, ifr)
+        pages += len(written)
+
     stats["archives"] += 1
     stats["frames"] += len(frames)
-    stats["sheets"] += len(written)
-    sys.stderr.write("  iso-unit: %d leader sprites (of %d requested)\n"
-                     % (len(frames), len(keys)))
+    stats["sheets"] += pages
+    sys.stderr.write(
+        "  iso-unit: %d boats (upfront) + %d idle frames in %d lazy unit chunks\n"
+        % (len(boat_frames), len(stop_frames), len(by_impl)))
 
 
 def run_stage1(game_dir, out_dir, server="http://localhost:3000"):
