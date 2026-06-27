@@ -8,6 +8,7 @@
  */
 import { useViewStore } from "../stores/viewStore";
 import TopMenuBar from "./TopMenuBar.vue";
+import ToolbarPanel from "./ToolbarPanel.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import StatusBar from "./StatusBar.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
@@ -21,6 +22,9 @@ const view = useViewStore();
       <TopMenuBar />
     </el-header>
     <el-container class="app-body">
+      <div class="app-toolbar">
+        <ToolbarPanel />
+      </div>
       <el-aside v-if="view.objectPanelVisible" class="app-aside" width="220px">
         <LeftObjectPanel />
       </el-aside>
@@ -45,6 +49,9 @@ const view = useViewStore();
 .app-body {
   flex: 1;
   min-height: 0;
+}
+.app-toolbar {
+  flex: 0 0 auto;
 }
 .app-aside {
   padding: 0;
