@@ -27,6 +27,7 @@ import { TerrainLayer, type TerrainMeta } from "./TerrainLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer } from "./ObjectLayer.js";
 import { LocationLayer } from "./LocationLayer.js";
+import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
 import type { LandmarkFootprints } from "./objectSprite.js";
 import { AnimationManager } from "./AnimationManager.js";
 import { Camera, type CameraSnapshot } from "./Camera.js";
@@ -37,6 +38,15 @@ export interface ObjectData {
   /** Grace race index -> 2-letter fort code (Grace.RACE_TYPE -> Lrace), for
    *  capital/village sprites. The object's `race` is the OWNER player's Grace index. */
   graceFortCodes?: Record<number, string>;
+  /** Grace race index -> Lrace key (RACE_TYPE int), for the rod sprite. */
+  graceRaceType?: Record<number, number>;
+  /** leader impl id -> boat race (Lrace key); only boat-eligible leaders (not
+   *  water_only, not flying). Drives the stack-on-water boat sprite. */
+  unitBoat?: Record<string, number>;
+  /** UPPER landmark ids flagged GLmark.mountain (terraforming overlay). */
+  landmarkMountain?: string[];
+  /** GVars.GU_RANGE: guard overlay radius source ((gu_range-1)/2). */
+  guardRange?: number;
 }
 
 /** Live performance / engine numbers for the debug HUD. */
@@ -75,7 +85,7 @@ export interface DebugStats {
 }
 
 /** Which logical layers can be toggled by the host. */
-export type LayerName = "terrain" | "grid" | "objects" | "locations";
+export type LayerName = "terrain" | "grid" | "objects" | "locations" | "overlay";
 
 export interface SceneInitOptions {
   /** canvas background color (default transparent). */
@@ -103,6 +113,7 @@ export class Scene {
   private grid?: GridLayer;
   private objects?: ObjectLayer;
   private locations?: LocationLayer;
+  private overlay?: OverlayLayer;
   private anim?: AnimationManager;
   private camera?: Camera;
 
@@ -209,20 +220,29 @@ export class Scene {
     this.world.addChild(this.grid.view);
 
     this.objects = new ObjectLayer();
-    this.objects.build(
-      map,
-      assets,
-      this.anim,
-      objectTypes,
-      objectData?.landmarkFootprints,
-      objectData?.graceFortCodes,
-    );
+    this.objects.build(map, assets, this.anim, objectTypes, {
+      landmarks: objectData?.landmarkFootprints,
+      graceFortCodes: objectData?.graceFortCodes,
+      graceRaceType: objectData?.graceRaceType,
+      unitBoat: objectData?.unitBoat,
+    });
     this.world.addChild(this.objects.view);
 
     // event-location highlights, drawn on top of everything (editor getZ ~1300)
     this.locations = new LocationLayer();
     this.locations.build(map.objects);
     this.world.addChild(this.locations.view);
+
+    // editor-assist overlays (tints / hover outline / cursor) on top of everything
+    this.overlay = new OverlayLayer();
+    this.overlay.build(
+      map,
+      assets,
+      objectData?.landmarkFootprints,
+      objectData?.landmarkMountain,
+      objectData?.guardRange,
+    );
+    this.world.addChild(this.overlay.view);
 
     // camera centered on the map
     this.camera = new Camera(this.world, map.size);
@@ -243,6 +263,19 @@ export class Scene {
     else if (layer === "grid") this.grid?.setVisible(visible);
     else if (layer === "objects") this.objects?.setVisible(visible);
     else if (layer === "locations") this.locations?.setVisible(visible);
+    else if (layer === "overlay") this.overlay?.setVisible(visible);
+    this.requestRender();
+  }
+
+  /** Toggle an editor-assist tint category (passable/danger/terraform/forest/roads). */
+  setOverlayTint(cat: OverlayTint, on: boolean): void {
+    this.overlay?.setTint(cat, on);
+    this.requestRender();
+  }
+
+  /** Move the cursor-tile highlight + hovered-object outline (null = clear). */
+  setCursorCell(cell: CellRef | null): void {
+    this.overlay?.setCursorCell(cell);
     this.requestRender();
   }
 
@@ -452,12 +485,14 @@ export class Scene {
 
   private teardownLayers(): void {
     if (this.objects && this.anim) this.objects.destroy(this.anim);
+    this.overlay?.destroy();
     this.locations?.destroy();
     this.grid?.destroy();
     this.terrain?.destroy();
     this.anim?.destroy();
     this.camera?.destroy();
     this.objects = undefined;
+    this.overlay = undefined;
     this.locations = undefined;
     this.grid = undefined;
     this.terrain = undefined;

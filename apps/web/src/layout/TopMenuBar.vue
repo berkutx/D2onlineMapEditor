@@ -9,6 +9,7 @@ import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import { Check } from "@element-plus/icons-vue";
 import type { ScenarioEntry } from "@d2/socket-contract";
+import type { OverlayTint } from "@d2/pixi-render";
 import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
 
@@ -24,6 +25,7 @@ const {
   animate,
   objectPanelVisible,
   debugOverlay,
+  overlayTints,
 } = storeToRefs(viewStore);
 
 const dialogVisible = ref(false);
@@ -69,6 +71,8 @@ function onLayerCommand(command: string): void {
     viewStore.toggleObjectPanel();
   } else if (command === "debug") {
     viewStore.toggleDebugOverlay();
+  } else if (command.startsWith("tint:")) {
+    viewStore.toggleOverlayTint(command.slice(5) as OverlayTint);
   }
 }
 </script>
@@ -124,6 +128,32 @@ function onLayerCommand(command: string): void {
             <el-icon v-if="debugOverlay"><Check /></el-icon>
             <span class="check-spacer" v-else />
             Debug overlay
+          </el-dropdown-item>
+
+          <el-dropdown-item command="tint:passable" divided>
+            <el-icon v-if="overlayTints.passable"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Overlay: passability
+          </el-dropdown-item>
+          <el-dropdown-item command="tint:danger">
+            <el-icon v-if="overlayTints.danger"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Overlay: danger
+          </el-dropdown-item>
+          <el-dropdown-item command="tint:terraform">
+            <el-icon v-if="overlayTints.terraform"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Overlay: terraform
+          </el-dropdown-item>
+          <el-dropdown-item command="tint:forest">
+            <el-icon v-if="overlayTints.forest"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Overlay: forest
+          </el-dropdown-item>
+          <el-dropdown-item command="tint:roads">
+            <el-icon v-if="overlayTints.roads"><Check /></el-icon>
+            <span class="check-spacer" v-else />
+            Overlay: roads
           </el-dropdown-item>
         </el-dropdown-menu>
       </template>

@@ -25,10 +25,13 @@ import {
   readLandmark,
   readUnit,
   readTreasure,
+  readRod,
+  readTomb,
   readMountains,
   readGeneric,
   type RoadRecord,
 } from "./blocks/index.js";
+import { readDefaultInt } from "./bytebuffer.js";
 import type { MapDocument, MapObject, PlayerInfo, MapHeader } from "@d2/map-schema";
 
 const DEFAULT_SG_VERSION = "S143";
@@ -60,6 +63,8 @@ interface Accumulated {
   objects: MapObject[];
   blocks: TerrainBlock[];
   roads: RoadRecord[];
+  /** MidSubRace block index -> banner number (for stack/fort STACK_BANNER sprites). */
+  subraceBanners: Map<number, number>;
 }
 
 /** Single-object readers keyed by TypeName. */
@@ -80,6 +85,8 @@ const SINGLE_READERS: Record<
   MidLandmark: readLandmark,
   MidUnit: readUnit,
   MidBag: readTreasure,
+  MidRod: readRod,
+  MidTomb: readTomb,
 };
 
 function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
@@ -108,6 +115,14 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
     case "MidRoad": {
       const road = readRoad(buf, obj);
       if (road) acc.roads.push(road);
+      return;
+    }
+    case "MidSubRace": {
+      // Non-visual: capture only the banner number, keyed by the block's index,
+      // so stacks/forts can resolve their STACK_BANNER sprite via their SUBRACE link.
+      const banner = readDefaultInt(buf, "BANNER", obj.fieldsFrom, obj.fieldsEnd);
+      const idx = parseCompoundId(obj.id)?.index;
+      if (banner !== null && idx !== undefined) acc.subraceBanners.set(idx, banner);
       return;
     }
     case "MidMountains": {
@@ -150,6 +165,7 @@ export function assembleDocument(
     objects: [],
     blocks: [],
     roads: [],
+    subraceBanners: new Map(),
   };
 
   for (const obj of iterateObjects(buf)) consume(buf, obj, acc);
@@ -176,11 +192,27 @@ export function assembleDocument(
   const playerRace = new Map<string, number>();
   for (const p of acc.players) playerRace.set(p.id, p.race);
   for (const o of acc.objects) {
-    if (o.type === "capital" || o.type === "village" || o.type === "fort") {
+    if (
+      o.type === "capital" || o.type === "village" ||
+      o.type === "fort" || o.type === "rod"
+    ) {
       if (o.owner !== undefined) {
         const r = playerRace.get(o.owner);
         if (r !== undefined) o.race = r;
       }
+    }
+  }
+
+  // Resolve each stack/fort's STACK_BANNER number from its linked MidSubRace block
+  // (the editor reads subrace.banner, NOT the stack's own BANNER field).
+  for (const o of acc.objects) {
+    if (
+      (o.type === "stack" || o.type === "capital" || o.type === "village") &&
+      o.subRace !== undefined
+    ) {
+      const idx = parseCompoundId(o.subRace)?.index;
+      const banner = idx !== undefined ? acc.subraceBanners.get(idx) : undefined;
+      if (banner !== undefined) o.bannerIndex = banner;
     }
   }
 

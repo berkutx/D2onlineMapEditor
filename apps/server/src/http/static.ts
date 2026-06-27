@@ -1,17 +1,21 @@
 /**
  * Static atlas serving. Mounts the generated `public/assets/**` at `/assets/*`
- * with long, immutable cache headers and directory listing disabled.
+ * with directory listing disabled.
+ *
+ * Cache policy: the atlas filenames are NOT content-hashed (e.g. "iso-unit.png"),
+ * so an asset-pipeline rebuild overwrites them in place. `immutable` would then pin
+ * a stale atlas in the browser forever. We instead use `no-cache` (must-revalidate):
+ * @fastify/static still emits ETag + Last-Modified, so an unchanged file revalidates
+ * to a cheap 304 while a regenerated file is re-fetched. Matches the manifest route.
  *
  * NOTE: the manifest's `image`/`meta` fields are bare filenames (e.g.
- * "iso-terrn-0.png"), so the web renderer should request them at
- * `/assets/<image>`. The mount root is config.ASSETS_DIR (absolute).
+ * "iso-terrn-0.png"), so the web renderer requests them at `/assets/<image>`.
+ * The mount root is config.ASSETS_DIR (absolute).
  */
 
 import type { FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { config } from "../config.js";
-
-const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
 
 export async function registerStatic(app: FastifyInstance): Promise<void> {
   await app.register(fastifyStatic, {
@@ -20,8 +24,10 @@ export async function registerStatic(app: FastifyInstance): Promise<void> {
     index: false,
     list: false,
     redirect: false,
-    immutable: true,
-    maxAge: ONE_YEAR_SECONDS * 1000, // @fastify/static expects ms
     cacheControl: true,
+    maxAge: 0,
+    immutable: false,
+    // force revalidation so a pipeline rebuild is picked up (ETag/Last-Modified -> 304)
+    setHeaders: (res) => res.setHeader("cache-control", "no-cache"),
   });
 }

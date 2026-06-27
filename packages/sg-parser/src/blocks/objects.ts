@@ -2,16 +2,15 @@
  * Placed-object block readers. Each returns a MapObject (Contract A) or null.
  *
  * Positions are CARTESIAN (POS_X = col, POS_Y = row); iso lives in the renderer.
- * Field names below were read from real bytes (see spikes); fields marked GUESS
- * in comments were inferred from toolsqt naming and degrade gracefully (they are
- * optional in the schema).
+ * Field tags are taken from the toolsqt D2* block readers (the editor's own read()
+ * methods) — no guessed tags. A block whose TypeName has no reader degrades to
+ * GenericObject (kept renderable/round-trippable, never drawn with a fabricated key).
  */
 
 import {
   ByteBuffer,
   readDefaultInt,
   readDefaultString,
-  readDefaultBool,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import type { MapObject } from "@d2/map-schema";
@@ -41,6 +40,11 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
   const leaderUnitId = refOrUndef(readDefaultString(buf, "LEADER_ID", f, e));
   const banner = refOrUndef(readDefaultString(buf, "BANNER", f, e));
   const facing = readDefaultInt(buf, "FACING", f, e);
+  // SUBRACE -> MidSubRace (faction/banner); INSIDE -> the fort this stack garrisons.
+  // A garrisoned stack draws NOTHING (the editor's StackObjectAccessor returns early).
+  const subRace = refOrUndef(readDefaultString(buf, "SUBRACE", f, e));
+  const inside = refOrUndef(readDefaultString(buf, "INSIDE", f, e));
+  const order = readDefaultInt(buf, "ORDER", f, e); // 1=Normal..3=Guard (D2Stack::Order)
   return {
     type: "stack",
     id: obj.id,
@@ -48,7 +52,10 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(owner ? { owner } : {}),
     ...(leaderUnitId ? { leaderUnitId } : {}),
     ...(banner ? { banner } : {}),
+    ...(subRace ? { subRace } : {}),
+    ...(inside ? { garrisoned: true } : {}),
     ...(facing !== null ? { facing } : {}),
+    ...(order !== null ? { order } : {}),
     units,
   };
 }
@@ -59,6 +66,7 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
+  const subRace = refOrUndef(readDefaultString(buf, "SUBRACE", f, e));
   const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
   const tier = readDefaultInt(buf, "SIZE", f, e) ?? 1;
   return {
@@ -66,6 +74,7 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     id: obj.id,
     pos: pos(buf, obj),
     ...(owner ? { owner } : {}),
+    ...(subRace ? { subRace } : {}),
     name,
     tier,
   };
@@ -78,22 +87,27 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
+  const subRace = refOrUndef(readDefaultString(buf, "SUBRACE", f, e));
   const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
   return {
     type: "capital",
     id: obj.id,
     pos: pos(buf, obj),
     ...(owner ? { owner } : {}),
+    ...(subRace ? { subRace } : {}),
     name,
   };
 }
 
-/** MidRuin: a lootable ruin. NAME_TXT, IMAGE (GUESS), looted flag (GUESS). */
+/** MidRuin: a lootable ruin (D2Ruin). TITLE=name, IMAGE=index, LOOTER=looter id
+ *  ("000000" until taken). A looted ruin shows the destroyed sprite at image+100
+ *  (documented in ObjectAccessors.cpp as "+100 to destructed"). */
 export function readRuin(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
-  const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
-  const image = readDefaultInt(buf, "IMAGE", f, e); // GUESS: image index tag
-  const looted = readDefaultBool(buf, "LOOTED", f, e); // GUESS
+  const name = readDefaultString(buf, "TITLE", f, e) ?? "";
+  const image = readDefaultInt(buf, "IMAGE", f, e);
+  const looter = readDefaultString(buf, "LOOTER", f, e);
+  const looted = !!looter && looter !== "000000" && looter !== NULL_ID;
   return {
     type: "ruin",
     id: obj.id,
@@ -170,6 +184,28 @@ export function readTreasure(buf: ByteBuffer, obj: FramedObject): MapObject {
     id: obj.id,
     pos: pos(buf, obj),
     ...(image !== null ? { image } : {}),
+  };
+}
+
+/** MidRod (D2Rod): a mana-rod marker. OWNER -> player; the editor keys the sprite
+ *  off the OWNER player's race (G000RR<rodRaceID>RROD8), resolved in the post-pass. */
+export function readRod(buf: ByteBuffer, obj: FramedObject): MapObject {
+  const { fieldsFrom: f, fieldsEnd: e } = obj;
+  const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
+  return {
+    type: "rod",
+    id: obj.id,
+    pos: pos(buf, obj),
+    ...(owner ? { owner } : {}),
+  };
+}
+
+/** MidTomb (D2Tomb): a graveyard marker. Constant sprite G000TB0000G (no race). */
+export function readTomb(buf: ByteBuffer, obj: FramedObject): MapObject {
+  return {
+    type: "tomb",
+    id: obj.id,
+    pos: pos(buf, obj),
   };
 }
 

@@ -1,18 +1,27 @@
 /**
- * objectSprite — EXACT port of the editor's per-type image key (MapObjects/
- * ObjectAccessors.cpp :: <Type>Accessor::frameData). One key per object, built the
- * same way the editor builds it; the renderer then searches the asset store for that
- * exact key (animation -> AnimatedSprite, else static). No guessing, no fallback
- * candidates — if a key doesn't resolve, the object simply isn't drawn.
+ * objectSprite — EXACT port of each editor accessor's FrameData LIST (MapObjects/
+ * ObjectAccessors.cpp :: <Type>Accessor::frameData). An object is a STACK of
+ * sub-sprites drawn in order (e.g. a land stack = leader body + banner; a fort =
+ * building + banner).
  *
- * Types that resolve through DBF tables (forts/capitals/villages via Grace/subrace,
- * stacks via Gunit, treasure/tomb/rod) are not ported here yet and return undefined
- * rather than a guessed key. They'll be added by porting their exact accessor + the
- * required DBF lookups.
+ * NO FALLBACKS, NO GUESSES (per project rule): every key is built the editor's way.
+ * If a required input is missing (an unresolved race code, a missing leader, an
+ * out-of-range enum) we THROW — we never silently draw nothing or substitute a
+ * default sprite, because that hides data/logic bugs. The ONE tolerated branch is
+ * the editor's OWN documented village two-try (race-suffixed key, else base), which
+ * is the editor's behaviour, not our invention.
+ *
+ * Shadows (leader SSTO, boat BOAT, fort SHLV shield) are intentionally omitted for
+ * now: they need the editor's "Shadows" preprocessing shader (deferred, see TODO.md).
  */
 import type { MapObject } from "@d2/map-schema";
 
 const pad = (n: number, w: number): string => String(n).padStart(w, "0");
+
+/** Fail loud: a required input for an object's sprite is missing/invalid. */
+function fail(obj: MapObject, why: string): never {
+  throw new Error(`objectSprites(${obj.type} ${obj.id}): ${why}`);
+}
 
 /** CrystalObject::CrystalIdByResource — resource enum GOLG..ELVES (0..5). */
 const CRYSTAL_ID = [
@@ -32,72 +41,138 @@ const SITE_CODE: Record<string, string> = {
   trainer: "TRAI", // Trainer
 };
 
-/** Extra context some accessors need to build their key. */
+/** RodObject::rodByRaceID — swaps gnoms(1)<->undead(3), else identity. */
+const rodByRaceID = (k: number): number => (k === 1 ? 3 : k === 3 ? 1 : k);
+
+/** A single drawable layer of an object (editor FrameData entry). */
+export interface SubSprite {
+  /** primary atlas key */
+  key: string;
+  /** fallback key tried only if `key` doesn't resolve (the editor's village two-try). */
+  fallback?: string;
+}
+
+/** Extra context some accessors need to build their keys. */
 export interface SpriteKeyContext {
-  /** Grace race index -> 2-letter fort code (Grace.RACE_TYPE -> Lrace, e.g.
-   *  0 -> "HU", 3 -> "UN"), for capital/village sprites. The object's `race` is
-   *  the OWNER player's Grace index (assemble.ts post-pass). */
+  /** Grace race index -> 2-letter fort code (Grace.RACE_TYPE -> Lrace), capital/village. */
   graceFortCodes?: Record<number, string>;
-  /** whether this object's cell is water — selects the treasure (bag) variant. */
+  /** Grace race index -> Lrace key (RACE_TYPE int), for the rod sprite. */
+  graceRaceType?: Record<number, number>;
+  /** leader impl id -> boat race (Lrace key); present ONLY for boat-eligible leaders
+   *  (not water_only, not flying). Absent => that leader shows its STOP frame on water. */
+  unitBoat?: Record<string, number>;
+  /** whether this object's cell is water (treasure variant + stack boat). */
   water?: boolean;
 }
 
-/** The exact image/animation key for an object, or undefined if not drawable. */
-export function objectSpriteKey(
+/** STACK_BANNER_<nn>00 — the faction banner flag (subrace.banner). */
+function bannerSub(bannerIndex: number | undefined): SubSprite | null {
+  if (bannerIndex === undefined) return null;
+  return { key: `STACK_BANNER_${pad(bannerIndex, 2)}00` };
+}
+
+/** The ordered list of drawable sub-sprites for an object (editor FrameData list). */
+export function objectSprites(
   obj: MapObject,
   ctx?: SpriteKeyContext,
-): string | undefined {
+): SubSprite[] {
   switch (obj.type) {
     // MountainObjectAccessor: "MOMNE" + w(2) + image(2)   [IsoTerrn]
     case "mountains":
-      return `MOMNE${pad(obj.w ?? 0, 2)}${pad(obj.image ?? 0, 2)}`;
+      return [{ key: `MOMNE${pad(obj.w ?? 0, 2)}${pad(obj.image ?? 0, 2)}` }];
 
     // LandmarkObjectAccessor: lmarkId.toUpper()            [IsoCmon, IsoAnim]
     case "landmark":
-      return obj.baseType ? obj.baseType.toUpperCase() : undefined;
+      if (!obj.baseType) return fail(obj, "no baseType (TYPE) — cannot build landmark key");
+      return [{ key: obj.baseType.toUpperCase() }];
 
-    // RuinObjectAccessor: "G000RU0000" + image(3)          [IsoCmon, IsoAnim]
+    // RuinObjectAccessor: "G000RU0000" + image(3); destroyed/looted -> image+100
+    // ("+100 to destructed", ObjectAccessors.cpp).
     case "ruin":
-      return `G000RU0000${pad(obj.image ?? 0, 3)}`;
+      return [{ key: `G000RU0000${pad((obj.image ?? 0) + (obj.looted ? 100 : 0), 3)}` }];
 
     // MerchantObjectAccessor: "G000SI0000" + <TYPE> + image(2)
     case "merchant":
     case "mage":
     case "mercenary":
     case "trainer":
-      return `G000SI0000${SITE_CODE[obj.type]}${pad(obj.image ?? 0, 2)}`;
+      return [{ key: `G000SI0000${SITE_CODE[obj.type]}${pad(obj.image ?? 0, 2)}` }];
 
-    // CrystalObjectAccessor: CrystalIdByResource(resource)
-    case "crystal":
-      return CRYSTAL_ID[obj.resource ?? 0];
-
-    // FortObjectAccessor (Capital): "G000FT0000" + race(2) + "0", where race is
-    // Grace[owner.raceId].race_type(Lrace).text.mid(2,2). obj.race is the owner's
-    // Grace index; graceFortCodes maps it to the 2-char code.
-    case "capital": {
-      const code = ctx?.graceFortCodes?.[obj.race ?? -1];
-      return code ? `G000FT0000${code}0` : undefined;
+    // CrystalObjectAccessor: CrystalIdByResource((ResourceType)resource). resource is
+    // the D2Crystal RESOURCE int cast straight to the 0..5 enum (NOT packed). Out of
+    // range = bad data -> fail loud.
+    case "crystal": {
+      const res = obj.resource;
+      if (res === undefined || res < 0 || res >= CRYSTAL_ID.length)
+        return fail(obj, `RESOURCE ${res} out of range 0..${CRYSTAL_ID.length - 1}`);
+      return [{ key: CRYSTAL_ID[res]! }];
     }
 
-    // FortObjectAccessor (Village): "G000FT0000NE" + level + ownerRaceCode
-    // (shortRaceByPlayerId2), with an editor fallback to the base "NE" + level
-    // (handled in ObjectLayer when the race-specific sprite is absent).
+    // FortObjectAccessor (Capital): building "G000FT0000" + race(2) + "0", + banner.
+    case "capital": {
+      if (obj.race === undefined) return fail(obj, "no owner race resolved (owner -> player.race)");
+      const code = ctx?.graceFortCodes?.[obj.race];
+      if (!code) return fail(obj, `no graceFortCodes entry for race ${obj.race}`);
+      const subs: SubSprite[] = [{ key: `G000FT0000${code}0` }];
+      const banner = bannerSub(obj.bannerIndex);
+      if (banner) subs.push(banner);
+      return subs;
+    }
+
+    // FortObjectAccessor (Village): "G000FT0000NE" + level + ownerRaceCode, with the
+    // editor's fallback to base "NE" + level; + banner.
     case "village": {
-      const code = ctx?.graceFortCodes?.[obj.race ?? -1];
-      return `G000FT0000NE${obj.tier ?? 1}${code ?? ""}`;
+      if (obj.race === undefined) return fail(obj, "no owner race resolved (owner -> player.race)");
+      const code = ctx?.graceFortCodes?.[obj.race];
+      if (!code) return fail(obj, `no graceFortCodes entry for race ${obj.race}`);
+      const tier = obj.tier ?? 1;
+      // editor's OWN two-try: race-suffixed key, else base "NE"+level (ObjectAccessors).
+      const subs: SubSprite[] = [
+        { key: `G000FT0000NE${tier}${code}`, fallback: `G000FT0000NE${tier}` },
+      ];
+      const banner = bannerSub(obj.bannerIndex);
+      if (banner) subs.push(banner);
+      return subs;
     }
 
     // TreasureObjectAccessor: "G000BG0000" + (water ? 0 : 1) + image(2)
     case "treasure":
-      return `G000BG0000${ctx?.water ? "0" : "1"}${pad(obj.image ?? 0, 2)}`;
+      return [{ key: `G000BG0000${ctx?.water ? "0" : "1"}${pad(obj.image ?? 0, 2)}` }];
 
-    // StackObjectAccessor: leaderImpl + "STOP" + rotation  [IsoAnim, IsoUnit]
-    // (boat/shadow/banner layers not ported yet; this is the leader's standing sprite)
-    case "stack":
-      return obj.leaderImage ? `${obj.leaderImage}STOP${obj.facing ?? 0}` : undefined;
+    // RodObjectAccessor: "G000RR" + rodByRaceID(owner race -> Lrace key)(4) + "RROD8"
+    case "rod": {
+      if (obj.race === undefined) return fail(obj, "no owner race resolved (owner -> player.race)");
+      const lr = ctx?.graceRaceType?.[obj.race];
+      if (lr === undefined) return fail(obj, `no graceRaceType entry for race ${obj.race}`);
+      return [{ key: `G000RR${pad(rodByRaceID(lr), 4)}RROD8` }];
+    }
+
+    // TombObjectAccessor: constant "G000TB0000G"
+    case "tomb":
+      return [{ key: "G000TB0000G" }];
+
+    // StackObjectAccessor: garrisoned -> nothing; on water (boat-eligible leader) ->
+    // boat body only; else leader STOP + banner. (Shadows omitted — see header.)
+    case "stack": {
+      // garrisoned (INSIDE a fort) -> editor draws nothing. Explicit editor behaviour,
+      // not a fallback.
+      if (obj.garrisoned) return [];
+      const leader = obj.leaderImage;
+      if (!leader) return fail(obj, "no leaderImage resolved (LEADER_ID -> unit.implId)");
+      const facing = obj.facing ?? 0;
+      const boatRace = ctx?.water ? ctx?.unitBoat?.[leader] : undefined;
+      if (boatRace !== undefined) {
+        // editor returns early on water: boat body, no banner.
+        return [{ key: `G000RR000${boatRace}SBOA${facing}` }];
+      }
+      const subs: SubSprite[] = [{ key: `${leader}STOP${facing}` }];
+      const banner = bannerSub(obj.bannerIndex);
+      if (banner) subs.push(banner);
+      return subs;
+    }
 
     default:
-      return undefined;
+      return [];
   }
 }
 
@@ -135,7 +210,7 @@ export function objectFootprint(
       const fp = obj.baseType ? landmarks?.[obj.baseType.toUpperCase()] : undefined;
       return fp ? { w: fp[0], h: fp[1] } : { w: 1, h: 1 };
     }
-    default: // crystal, unit, generic -> base default 1x1
+    default: // crystal, unit, rod, tomb, treasure, generic -> base default 1x1
       return { w: 1, h: 1 };
   }
 }

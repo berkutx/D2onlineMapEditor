@@ -27,8 +27,10 @@ export { TerrainLayer } from "./TerrainLayer.js";
 export type { TerrainMeta } from "./TerrainLayer.js";
 export { ObjectLayer } from "./ObjectLayer.js";
 export { LocationLayer } from "./LocationLayer.js";
-export { objectSpriteKey, objectFootprint, objectZBase } from "./objectSprite.js";
-export type { LandmarkFootprints } from "./objectSprite.js";
+export { OverlayLayer } from "./OverlayLayer.js";
+export type { OverlayTint, CellRef } from "./OverlayLayer.js";
+export { objectSprites, objectFootprint, objectZBase } from "./objectSprite.js";
+export type { LandmarkFootprints, SubSprite, SpriteKeyContext } from "./objectSprite.js";
 export { AnimationManager, D2_FRAME_MS, D2_ANIMATION_SPEED } from "./AnimationManager.js";
 export type { AnimationManagerOptions } from "./AnimationManager.js";
 

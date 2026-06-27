@@ -35,6 +35,8 @@ const TYPE_RANK: Record<MapObject["type"], number> = {
   landmark: 5,
   crystal: 10,
   treasure: 12,
+  rod: 13,
+  tomb: 14,
   ruin: 15,
   mountains: 18,
   // structures

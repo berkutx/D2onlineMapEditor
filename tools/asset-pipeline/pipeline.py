@@ -56,9 +56,23 @@ def _needed_unit_keys(server):
     return keys
 
 
+def _needed_boat_keys(out_dir):
+    """Boat body sprites for stacks on water: G000RR000<race>SBOA<rot>, rot 0..7,
+    for every race in objectdata.json's unitBoat (boat-eligible leaders). Boat shadow
+    (BOAT key) is deferred with the Shadows shader. Requires extract_gamedata to have
+    run first (it writes unitBoat)."""
+    import json
+    try:
+        data = json.load(open(os.path.join(out_dir, "objectdata.json")))
+    except Exception:  # noqa: BLE001
+        return set()
+    races = set((data.get("unitBoat") or {}).values())
+    return {"G000RR000%dSBOA%d" % (r, rot) for r in races for rot in range(8)}
+
+
 def _add_units(game_dir, out_dir, server, builder, stats):
-    """Targeted IsoUnit pass: decode only the leader sprites the map uses."""
-    keys = _needed_unit_keys(server)
+    """Targeted IsoUnit pass: decode only the leader (+ boat) sprites the map uses."""
+    keys = _needed_unit_keys(server) | _needed_boat_keys(out_dir)
     path = extract_ff.find_archive(game_dir, "IsoUnit.ff")
     if not keys or not path:
         return

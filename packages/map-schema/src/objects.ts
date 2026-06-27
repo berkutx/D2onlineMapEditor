@@ -19,6 +19,10 @@ export const StackObject = z.object({
   leaderImage: z.string().optional(), // resolved iso sprite of the lead unit
   facing: z.number().int().optional(),
   banner: z.string().optional(),
+  subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (faction/banner)
+  bannerIndex: z.number().int().optional(), // resolved subrace banner number
+  garrisoned: z.boolean().optional(), // INSIDE a fort -> editor draws nothing
+  order: z.number().int().optional(), // ORDER (1=Normal..3=Guard..); Guard => guard-range overlay
   units: z.array(z.string()).default([]),
 });
 
@@ -34,6 +38,8 @@ export const CapitalObject = z.object({
   type: z.literal("capital"),
   owner: z.string().optional(),
   race: z.number().int().optional(),
+  subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (banner)
+  bannerIndex: z.number().int().optional(), // resolved subrace banner number
   name: z.string().default(""),
 });
 export const VillageObject = z.object({
@@ -41,6 +47,8 @@ export const VillageObject = z.object({
   type: z.literal("village"),
   owner: z.string().optional(),
   race: z.number().int().optional(),
+  subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (banner)
+  bannerIndex: z.number().int().optional(), // resolved subrace banner number
   name: z.string().default(""),
   tier: z.number().int().default(1), // city level 1..5 -> City.ff sprite
 });
@@ -100,6 +108,17 @@ export const TreasureObject = z.object({
   image: z.number().int().optional(), // MidBag IMAGE -> G000BG0000{0|1}{image}
 });
 
+export const RodObject = z.object({
+  ...base,
+  type: z.literal("rod"),
+  owner: z.string().optional(),
+  race: z.number().int().optional(), // owner player's Grace index -> G000RR<rodRaceID>RROD8
+});
+export const TombObject = z.object({
+  ...base,
+  type: z.literal("tomb"), // constant sprite G000TB0000G
+});
+
 /** Fallback for any block type the parser does not yet model: keeps the map renderable
  *  and round-trippable while @d2/sg-parser fills in concrete types. */
 export const GenericObject = z.object({
@@ -125,6 +144,8 @@ export const MapObject = z.discriminatedUnion("type", [
   LocationObject,
   UnitObject,
   TreasureObject,
+  RodObject,
+  TombObject,
   GenericObject,
 ]);
 export type MapObject = z.infer<typeof MapObject>;

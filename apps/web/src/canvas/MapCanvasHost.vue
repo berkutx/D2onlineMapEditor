@@ -19,7 +19,7 @@ import type { CameraSnapshot, TerrainMeta, DebugStats } from "@d2/pixi-render";
 import { worldToCell } from "@d2/pixi-render";
 import { useMapStore } from "../stores/mapStore";
 import { useAssetStore } from "../stores/assetStore";
-import { useViewStore } from "../stores/viewStore";
+import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
 import { getAssetStore, getScene, setScene, destroyScene } from "./sceneHolder";
 
 const mapStore = useMapStore();
@@ -35,6 +35,7 @@ const {
   locationsVisible,
   animate,
   debugOverlay,
+  overlayTints,
   cursorCell,
 } = storeToRefs(viewStore);
 
@@ -54,6 +55,8 @@ const VISIBLE_OBJECT_TYPES = new Set([
   "village",
   "treasure",
   "stack",
+  "rod",
+  "tomb",
 ]);
 
 const mountEl = ref<HTMLDivElement | null>(null);
@@ -102,6 +105,7 @@ async function rebuild(): Promise<void> {
     scene.setLayerVisibility("objects", objectsVisible.value);
     scene.setLayerVisibility("grid", gridVisible.value);
     scene.setLayerVisibility("locations", locationsVisible.value);
+    for (const cat of OVERLAY_TINTS) scene.setOverlayTint(cat, overlayTints.value[cat]);
     scene.setAnimationEnabled(animate.value);
     // seed the status bar with the initial camera zoom
     const cam = scene.getCamera();
@@ -161,13 +165,16 @@ function onPointerMove(e: PointerEvent): void {
   const cy = Math.floor(frac.y);
   if (cx >= 0 && cy >= 0 && cx < doc.size && cy < doc.size) {
     viewStore.setCursorCell({ x: cx, y: cy });
+    scene?.setCursorCell({ x: cx, y: cy });
   } else {
     viewStore.setCursorCell(null);
+    scene?.setCursorCell(null);
   }
 }
 
 function onPointerLeave(): void {
   viewStore.setCursorCell(null);
+  getScene()?.setCursorCell(null);
 }
 
 onBeforeUnmount(() => {
@@ -191,6 +198,15 @@ watch(objectsVisible, (v) => getScene()?.setLayerVisibility("objects", v));
 watch(gridVisible, (v) => getScene()?.setLayerVisibility("grid", v));
 watch(locationsVisible, (v) => getScene()?.setLayerVisibility("locations", v));
 watch(animate, (v) => getScene()?.setAnimationEnabled(v));
+watch(
+  overlayTints,
+  (t) => {
+    const s = getScene();
+    if (!s) return;
+    for (const cat of OVERLAY_TINTS) s.setOverlayTint(cat, t[cat]);
+  },
+  { deep: true },
+);
 </script>
 
 <template>

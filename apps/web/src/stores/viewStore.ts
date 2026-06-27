@@ -6,12 +6,16 @@
  */
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { LayerName } from "@d2/pixi-render";
+import type { LayerName, OverlayTint } from "@d2/pixi-render";
 
 export interface CursorCell {
   x: number;
   y: number;
 }
+
+/** Editor-assist tint overlays (passable/danger/terraform/forest/roads). Off by default. */
+export type OverlayTints = Record<OverlayTint, boolean>;
+const OVERLAY_TINTS: OverlayTint[] = ["passable", "danger", "terraform", "forest", "roads"];
 
 export const useViewStore = defineStore("view", () => {
   const terrainVisible = ref(true);
@@ -25,6 +29,10 @@ export const useViewStore = defineStore("view", () => {
   const objectPanelVisible = ref(false);
   /** Debug HUD overlay (FPS / render ms / iso engine). On by default for now. */
   const debugOverlay = ref(true);
+  /** Editor-assist tint overlays — all off by default (opt-in like the editor). */
+  const overlayTints = ref<OverlayTints>({
+    passable: false, danger: false, terraform: false, forest: false, roads: false,
+  });
 
   /** Camera zoom factor (for the status bar). */
   const zoom = ref(1);
@@ -58,6 +66,10 @@ export const useViewStore = defineStore("view", () => {
     debugOverlay.value = !debugOverlay.value;
   }
 
+  function toggleOverlayTint(cat: OverlayTint): void {
+    overlayTints.value = { ...overlayTints.value, [cat]: !overlayTints.value[cat] };
+  }
+
   function setZoom(z: number): void {
     zoom.value = z;
   }
@@ -74,6 +86,7 @@ export const useViewStore = defineStore("view", () => {
     animate,
     objectPanelVisible,
     debugOverlay,
+    overlayTints,
     zoom,
     cursorCell,
     setLayerVisible,
@@ -82,7 +95,10 @@ export const useViewStore = defineStore("view", () => {
     toggleLocations,
     toggleObjectPanel,
     toggleDebugOverlay,
+    toggleOverlayTint,
     setZoom,
     setCursorCell,
   };
 });
+
+export { OVERLAY_TINTS };
