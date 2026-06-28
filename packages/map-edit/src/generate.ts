@@ -75,11 +75,16 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   grass_fill: { G: { kind: "terrain", terrain: 5 } }, // 5 = neutral land
 };
 
-/** 1×1 wall landmark ids grouped by iso orientation (built from decorCatalog). */
-export interface WallSet {
+/** One wall art set's 1×1 pieces grouped by iso orientation. */
+export interface WallStyle {
   "NE-SW": string[];
   "NW-SE": string[];
   corner: string[];
+}
+/** Available wall styles (each a consistent art set). A maze uses ONE style so the walls
+ *  don't mix faction art cell-to-cell; styles[0] = the preferred (stone) set. */
+export interface WallSet {
+  styles: WallStyle[];
 }
 
 interface WallCatalogEntry {
@@ -90,19 +95,30 @@ interface WallCatalogEntry {
   iso?: { orient?: string };
 }
 
-/** Collect 1×1 wall landmarks by orientation from the decoration catalog. */
+/**
+ * Collect 1×1 wall/fence pieces from the catalog, grouped into consistent ART SETS
+ * (shape + faction), each by iso orientation. Styles are sorted so the most complete
+ * stone "wall" set is first — a maze then uses ONE style instead of mixing art.
+ */
 export function buildWallSet(
   catalog: Record<string, WallCatalogEntry> | WallCatalogEntry[],
 ): WallSet {
   const arr = Array.isArray(catalog) ? catalog : Object.values(catalog);
-  const set: WallSet = { "NE-SW": [], "NW-SE": [], corner: [] };
+  const byStyle = new Map<string, WallStyle>();
   for (const e of arr) {
-    if (e.shape !== "wall" || e.cx !== 1 || e.cy !== 1) continue;
+    if ((e.shape !== "wall" && e.shape !== "fence") || e.cx !== 1 || e.cy !== 1) continue;
+    const key = `${e.shape}|${e.id.slice(0, 4)}`; // one art set = shape + faction prefix
+    let st = byStyle.get(key);
+    if (!st) { st = { "NE-SW": [], "NW-SE": [], corner: [] }; byStyle.set(key, st); }
     const o = e.iso?.orient;
-    if (o === "NE-SW" || o === "NW-SE") set[o].push(e.id);
-    else set.corner.push(e.id);
+    if (o === "NE-SW" || o === "NW-SE") st[o].push(e.id);
+    else st.corner.push(e.id);
   }
-  return set;
+  const score = (k: string, s: WallStyle): number =>
+    (s["NE-SW"].length && s["NW-SE"].length ? 2 : 0) + Math.min(s.corner.length, 2) + (k.startsWith("wall|") ? 1 : 0);
+  const usable = [...byStyle.entries()].filter(([, s]) => (s["NE-SW"].length || s["NW-SE"].length) && s.corner.length);
+  usable.sort(([ka, a], [kb, b]) => score(kb, b) - score(ka, a) || (ka < kb ? 1 : -1)); // tie -> faction desc (stone G003 first)
+  return { styles: usable.map(([, s]) => s) };
 }
 
 /** 1×1 decoration landmark ids grouped by catalog `shape` (rock / vegetation / …). */
@@ -129,12 +145,23 @@ const N4: ReadonlyArray<readonly [number, number, number]> = [
   [-1, 0, 8],
 ];
 
-/** Map a 4-neighbour wall mask to the available iso orientations (corner covers the rest). */
-function wallOrient(mask: number): keyof WallSet {
+/**
+ * 16-case wall autotiling → the piece id from one style. Cartesian N/S map to the iso
+ * NE-SW axis, E/W to the iso NW-SE axis. The art only has straights + 2 corners (no
+ * cap/T/cross sprites exist), so: straight runs AND ends use a straight; corners/T/cross/
+ * post use a corner (the 2 rotations split across the 4 corner directions as a best fit).
+ */
+function wallPiece(mask: number, style: WallStyle): string | undefined {
   const n = mask & 1, e = mask & 2, s = mask & 4, w = mask & 8;
-  if (e && w && !n && !s) return "NW-SE"; // straight E–W run
-  if (n && s && !e && !w) return "NE-SW"; // straight N–S run
-  return "corner"; // ends / corners / T / cross / isolated
+  const ns = n || s, ew = e || w;
+  const NE = style["NE-SW"], NW = style["NW-SE"], CO = style.corner;
+  if (ns && !ew) return NE[0] ?? NW[0] ?? CO[0]; // N–S run, or a N/S end
+  if (ew && !ns) return NW[0] ?? NE[0] ?? CO[0]; // E–W run, or an E/W end
+  if (CO.length) {
+    const variant = mask === 3 || mask === 12 || mask === 7 || mask === 13 ? 0 : 1; // opposite-pair split
+    return CO[variant % CO.length];
+  }
+  return NE[0] ?? NW[0];
 }
 
 /**
@@ -199,19 +226,19 @@ export function decodeGrid(
   // id (they read the current max/count from the doc).
   let work = doc;
 
-  // 2a: wall landmarks, oriented by the 4-neighbour mask.
-  let pick = 0;
-  for (const key of wallCells) {
-    const [x, y] = key.split(",").map(Number) as [number, number];
-    let mask = 0;
-    for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx},${y + dy}`)) mask |= bit;
-    const orient = wallOrient(mask);
-    const list = walls[orient].length ? walls[orient] : walls.corner.length ? walls.corner : walls["NW-SE"];
-    if (!list.length) continue;
-    const baseType = list[pick++ % list.length]!;
-    const placeOps = placeLandmarkOps(work, x, y, baseType);
-    ops.push(...placeOps);
-    work = applyOps(work, placeOps);
+  // 2a: wall landmarks — ONE consistent style, auto-tiled by the 4-neighbour mask.
+  const style = walls.styles[0];
+  if (style) {
+    for (const key of wallCells) {
+      const [x, y] = key.split(",").map(Number) as [number, number];
+      let mask = 0;
+      for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx},${y + dy}`)) mask |= bit;
+      const baseType = wallPiece(mask, style);
+      if (!baseType) continue;
+      const placeOps = placeLandmarkOps(work, x, y, baseType);
+      ops.push(...placeOps);
+      work = applyOps(work, placeOps);
+    }
   }
 
   // 2b: mountains (1×1). Image varies by position so a range mixes sprites (no RNG — keeps

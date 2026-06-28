@@ -159,6 +159,7 @@ const EXAMPLES: { group: string; items: { text: string; llm?: boolean }[] }[] = 
     { text: "лабиринт" },
     { text: "лабиринт 28x28" },
     { text: "каменный лабиринт" },
+    { text: "живая изгородь лабиринт" },
     { text: "горный лабиринт" },
     { text: "забор 24x24" },
     { text: "лабиринт вокруг этой точки 22x22" },
@@ -211,11 +212,11 @@ function routeRecipe(text: string): string | null {
   const sparse = /редк|разброс|местами|кое-?где|отдельн|дусти|припорош/.test(t);
   const patchy = /пятн|клоч|островк|местечк/.test(t);
   // mazes — branch by material (Cyrillic-safe: \w doesn't match Cyrillic without /u).
-  // plain «лабиринт» = hedge (reads best); «каменный/горный лабиринт» = mountains; «забор» = wall objects.
+  // plain «лабиринт» = stone walls (auto-tiled); «горный» = mountains; «живая изгородь» = forest.
   if (/лабиринт|maze|изгород/.test(t)) {
-    if (/каменн|камен|горн|скальн|скал/.test(t)) return "mountain_maze";
-    if (/забор|стен|частокол|плетен/.test(t)) return "wall_maze";
-    return "hedge_maze";
+    if (/горн|гора|гор\b/.test(t)) return "mountain_maze";
+    if (/изгород|живая|жив\b/.test(t)) return "hedge_maze";
+    return "wall_maze";
   }
   if (/забор|частокол|стен/.test(t)) return "wall_maze";
   // mountains & hills (before generic checks; «гряда гор», «разбросай холмы», «горы по краю»)
