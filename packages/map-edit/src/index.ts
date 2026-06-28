@@ -14,6 +14,7 @@ export * from "./ops.js";
 export * from "./brush.js";
 export * from "./roadSelect.js";
 export * from "./place.js";
+export * from "./generate.js";
 export * from "./applyBytes.js";
 export * from "./verifySemantic.js";
 export * from "./relations.js";

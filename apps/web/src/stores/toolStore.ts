@@ -7,9 +7,16 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 
 /** select = pan/inspect (no painting); terrain/water/forest/road/erase paint cells;
- *  decor = place a decoration; move = pick+drop an object; roadsel = select a road segment. */
+ *  decor = place a decoration; move = pick+drop an object; roadsel = select a road segment;
+ *  region = drag a rectangle for Copilot generation. */
 export type EditTool =
-  | "select" | "terrain" | "water" | "forest" | "road" | "erase" | "decor" | "move" | "roadsel";
+  | "select" | "terrain" | "water" | "forest" | "road" | "erase"
+  | "decor" | "move" | "roadsel" | "region";
+
+/** How the "region" tool paints a generation zone: a rectangle, a freehand brush, a
+ *  thick line, or just the rectangle's perimeter (frame). rect = the whole bbox; the
+ *  others build an arbitrary CELL MASK that clips generation to a hand-drawn shape. */
+export type ZoneMode = "rect" | "brush" | "line" | "frame";
 
 export const useToolStore = defineStore("tool", () => {
   const tool = ref<EditTool>("select");
@@ -23,6 +30,17 @@ export const useToolStore = defineStore("tool", () => {
   const moveId = ref<string | null>(null);
   /** Cells of the road segment currently selected by the "roadsel" tool. */
   const roadSel = ref<{ x: number; y: number }[]>([]);
+  /** The rectangle selected by the "region" tool (for Copilot generation); null = none.
+   *  For mask modes this is the bounding box of the painted cells (display + LLM + bbox-size). */
+  const region = ref<{ x: number; y: number; w: number; h: number } | null>(null);
+  /** How the region tool draws (rect = bbox fill; brush/line/frame paint a cell mask). */
+  const zoneMode = ref<ZoneMode>("rect");
+  /** The hand-drawn cell mask ("x,y" keys); null = use the whole `region` bbox (rect mode). */
+  const regionMask = ref<string[] | null>(null);
+  /** Temporarily hide the zone overlay (so it doesn't obscure the generated result). */
+  const zoneHidden = ref(false);
+  /** "👁 eye" mode: when on and no zone is drawn, the visible screen area IS the zone. */
+  const eyeZone = ref(false);
 
   const painting = (): boolean => tool.value !== "select";
 
@@ -48,9 +66,33 @@ export const useToolStore = defineStore("tool", () => {
   function setRoadSel(cells: { x: number; y: number }[]): void {
     roadSel.value = cells;
   }
+  /** Set/clear the Copilot generation region (bbox). */
+  function setRegion(r: { x: number; y: number; w: number; h: number } | null): void {
+    region.value = r;
+  }
+  function setZoneMode(m: ZoneMode): void {
+    zoneMode.value = m;
+  }
+  /** Set/clear the hand-drawn cell mask. */
+  function setRegionMask(cells: string[] | null): void {
+    regionMask.value = cells && cells.length ? cells : null;
+  }
+  function setZoneHidden(h: boolean): void {
+    zoneHidden.value = h;
+  }
+  function setEyeZone(v: boolean): void {
+    eyeZone.value = v;
+  }
+  /** Clear the whole zone selection (region bbox + mask) — the "accept"/done action. */
+  function clearZone(): void {
+    region.value = null;
+    regionMask.value = null;
+    zoneHidden.value = false;
+  }
 
   return {
-    tool, size, terrainId, decorId, moveId, roadSel,
+    tool, size, terrainId, decorId, moveId, roadSel, region, zoneMode, regionMask, zoneHidden, eyeZone,
     painting, setTool, setSize, setTerrainId, setDecor, setMoveId, setRoadSel,
+    setRegion, setZoneMode, setRegionMask, setZoneHidden, setEyeZone, clearZone,
   };
 });

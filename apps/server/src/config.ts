@@ -52,6 +52,10 @@ export const config = {
   UPLOAD_DIR:
     process.env.UPLOAD_DIR ?? resolve(REPO_ROOT, "var", "uploads"),
 
+  /** Copilot LLM file-bridge dir (Phase-4 POC): requests/ + responses/ + archive/. */
+  LLM_DIR:
+    process.env.LLM_DIR ?? resolve(REPO_ROOT, "var", "llm"),
+
   /** Upload guard: 32 MiB cap and required magic. */
   UPLOAD_MAX_BYTES: 32 * 1024 * 1024,
   SG_MAGIC: "D2EESFISIG",

@@ -10,10 +10,10 @@
  * ETag is id+mtime derived, so `If-None-Match` short-circuits to 304.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { REST, type ValidationReport } from "@d2/socket-contract";
+import { REST, Region, type ValidationReport } from "@d2/socket-contract";
 import {
   parseScenario,
   parseScenarioRaw,
@@ -26,10 +26,18 @@ import {
 import {
   EditorProject,
   activeOps,
+  applyOps,
+  pushCommit,
   applyEditsToBytes,
   roundTripSemantic,
+  buildWallSet,
+  DECODE_TABLES,
+  type WallSet,
 } from "@d2/map-edit";
+import { getRecipe } from "@d2/mapgen";
+import { runGenerationSteps, type PlanStep } from "../maps/generation.js";
 import { config } from "../config.js";
+import type { MapDocument } from "@d2/map-schema";
 import type { MapStore } from "../maps/mapStore.js";
 
 const FILLS: readonly TerrainFill[] = TERRAIN_FILLS;
@@ -75,6 +83,126 @@ function buildAndValidate(
   };
   return { report, bytes };
 }
+
+/** Lazily load + cache the 1×1 wall landmarks (by iso orientation) from the catalog. */
+let wallSetCache: WallSet | null = null;
+async function loadWallSet(): Promise<WallSet> {
+  if (wallSetCache) return wallSetCache;
+  const path = join(config.ASSETS_DIR, "decorCatalog.json");
+  const json = JSON.parse(await readFile(path, "utf-8")) as never;
+  wallSetCache = buildWallSet(json);
+  return wallSetCache;
+}
+
+/** Parse a hand-drawn cell mask (body.cells = [[x,y],…]) into an "x,y" Set; undefined if empty. */
+function parseMask(raw: unknown): Set<string> | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const s = new Set<string>();
+  for (const p of raw as unknown[]) {
+    if (Array.isArray(p) && Number.isInteger(p[0]) && Number.isInteger(p[1])) s.add(`${p[0]},${p[1]}`);
+  }
+  return s.size ? s : undefined;
+}
+
+/** A cell is "protected" if it currently holds water (ground==3) or a mountain stamp (37). */
+function isProtectedCell(value: number): boolean {
+  return ((value >> 3) & 7) === 3 || value === 37;
+}
+
+/** Count protected (water/mountain) cells inside a region (or a drawn mask) — for debug. */
+function countProtected(
+  doc: MapDocument,
+  region: { x: number; y: number; w: number; h: number },
+  mask?: Set<string>,
+): number {
+  const n = doc.size;
+  let c = 0;
+  const test = (x: number, y: number): void => {
+    if (x >= 0 && y >= 0 && x < n && y < n && isProtectedCell(doc.terrain.cells[y * n + x]!.value)) c++;
+  };
+  if (mask) for (const k of mask) { const [x, y] = k.split(",").map(Number) as [number, number]; test(x, y); }
+  else for (let y = region.y; y < region.y + region.h; y++) for (let x = region.x; x < region.x + region.w; x++) test(x, y);
+  return c;
+}
+
+// --- Copilot LLM file bridge (Phase-4 POC) -----------------------------------
+let copilotReqCounter = 0;
+
+/** Compact one-char-per-cell terrain map for the LLM: W=water, F=forest, S=snow, .=other land. */
+function terrainAscii(doc: MapDocument): { legend: Record<string, string>; rows: string[] } {
+  const n = doc.size;
+  const rows: string[] = [];
+  for (let y = 0; y < n; y++) {
+    let s = "";
+    for (let x = 0; x < n; x++) {
+      const v = doc.terrain.cells[y * n + x]!.value;
+      const ground = (v >> 3) & 7;
+      const forest = v >>> 26;
+      const terr = v & 7;
+      s += ground === 3 ? "W" : forest > 0 ? "F" : terr === 2 ? "S" : ".";
+    }
+    rows.push(s);
+  }
+  return {
+    legend: { W: "water", F: "forest", S: "snow/Mountain-Clans", ".": "other land (grass/dirt/faction)" },
+    rows,
+  };
+}
+
+/** Coarse object list (type + cell) so the LLM knows what is already placed. Capped. */
+function objectsSummary(doc: MapDocument): { type: string; x: number; y: number }[] {
+  return doc.objects.slice(0, 200).map((o) => ({ type: o.type, x: o.pos.x, y: o.pos.y }));
+}
+
+/** Poll for the agent's response file; tolerate ENOENT (not ready) + partial writes. */
+async function waitForResponse(
+  file: string,
+  timeoutMs: number,
+): Promise<{ reasoning?: string; steps?: unknown[] } | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let raw: string | null = null;
+    try {
+      raw = await readFile(file, "utf-8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    }
+    if (raw !== null) {
+      try {
+        return JSON.parse(raw) as { reasoning?: string; steps?: unknown[] };
+      } catch {
+        /* partial write — retry next tick */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return null;
+}
+
+/** The self-describing contract written into every request file (so the agent knows the shape). */
+const COPILOT_RESPONSE_SPEC = {
+  note:
+    "You are the LLM for a Disciples-2 map editor. Read this request and write your answer to " +
+    "var/llm/responses/<requestId>.json. Coordinates are CARTESIAN cells (x=col 0..size-1, y=row, " +
+    "origin top-left). Compose terrain ONLY (water/snow/forest/grass/other land + walls); no units/buildings.",
+  responseShape: {
+    reasoning: "string — one short sentence shown to the user",
+    steps:
+      "array — each step paints one region. Use a registered recipe OR an inline recipe you author.",
+  },
+  step_registered: { recipeId: "water_lake|water_isles|river|decor_forest|forest_scatter|forest_clearings|mountain_fill|relief_ridge|relief_hills|hedge_maze|mountain_maze|wall_maze|snow_overlay|snow_patches|snow_scatter|grass_fill", region: { x: 0, y: 0, w: 10, h: 10 } },
+  step_inline_fill: {
+    recipe: { kind: "fill", fillSymbol: "X" },
+    decode: { X: { kind: "terrain", terrain: 4 } },
+    region: { x: 0, y: 0, w: 10, h: 10 },
+    hint: "terrain ids: 1=empire/green 2=snow 3=legions 4=undead/waste 5=neutral 6=elf/forest-land; or {kind:'water'} / {kind:'forest'} / {kind:'wall'} / {kind:'skip'}",
+  },
+  step_inline_mj: {
+    recipe: { kind: "mj", xml: "<one values=\"BWA\" in=\"WBB\" out=\"WAW\" origin=\"True\"/>" },
+    decode: { B: { kind: "wall" }, W: { kind: "skip" }, A: { kind: "skip" } },
+    region: { x: 0, y: 0, w: 15, h: 15 },
+  },
+} as const;
 
 export async function registerMapRoutes(
   app: FastifyInstance,
@@ -193,4 +321,183 @@ export async function registerMapRoutes(
         .send(Buffer.from(bytes));
     });
   }
+
+  // POST /api/maps/:id/generate -> run a MarkovJunior recipe over a region, decode to
+  // EditOps against the current project, validate, return { ops, report }. The client
+  // commits the ops (one undo step). The LLM/keyword router (client) only picks recipe+region.
+  app.post<{ Params: { id: string } }>(REST.mapGenerate(":id"), async (req, reply) => {
+    const { id } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    const projParsed = EditorProject.safeParse(body.project);
+    if (!projParsed.success) {
+      return reply.code(400).send({ error: "invalid EditorProject", detail: projParsed.error.message });
+    }
+    const project = projParsed.data;
+    if (project.baseScenarioId !== id) {
+      return reply.code(400).send({ error: `project baseScenarioId ${project.baseScenarioId} != ${id}` });
+    }
+    const regParsed = Region.safeParse(body.region);
+    if (!regParsed.success) {
+      return reply.code(400).send({ error: "invalid region", detail: regParsed.error.message });
+    }
+    const region = regParsed.data;
+    const recipeId = String(body.recipeId ?? "");
+    if (!getRecipe(recipeId) || !DECODE_TABLES[recipeId]) {
+      return reply.code(400).send({ error: `unknown recipe '${recipeId}'` });
+    }
+
+    const base = await store.getRawBytes(id);
+    if (!base) {
+      return reply.code(404).send({ error: "map not found" });
+    }
+
+    // current document = base + the project's active ops (so ids/cells are up to date)
+    const { doc } = parseScenarioRaw(base.bytes);
+    const liveDoc = applyOps(doc, activeOps(project));
+
+    const seed = Number.isInteger(body.seed) ? Number(body.seed) : Date.now() & 0x7fffffff;
+    const mask = parseMask(body.cells);
+    const protect = body.protect === true;
+    const t0 = Date.now();
+    let ops;
+    try {
+      const walls = await loadWallSet();
+      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect);
+    } catch (e) {
+      return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
+    }
+
+    // validate the generated ops as one more commit on top of the project
+    const augmented = ops.length ? pushCommit(project, ops) : project;
+    const { report } = buildAndValidate(base.bytes, augmented);
+    const debug = {
+      serverMs: Date.now() - t0,
+      opCount: ops.length,
+      recipe: recipeId,
+      protect,
+      protectedInRegion: protect ? countProtected(liveDoc, region, mask) : undefined,
+      validation: { ok: report.ok, identity: report.identity, semantic: report.semantic.ok, structural: report.structural.ok },
+    };
+    return reply.send({ ops, report, debug });
+  });
+
+  // POST /api/maps/:id/copilot -> the Phase-4 LLM bridge (POC). Writes the natural-language
+  // command + map context to var/llm/requests/<id>.json, then LONG-POLLS for the agent's
+  // response (a generation plan) at var/llm/responses/<id>.json. The plan's steps run through
+  // the SAME generation executor + 3-tier validator as /generate; the client commits {ops}
+  // as one undoable edit. (Stands in for a real LLM endpoint, none configured.)
+  app.post<{ Params: { id: string } }>(REST.mapCopilot(":id"), async (req, reply) => {
+    const { id } = req.params;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    const projParsed = EditorProject.safeParse(body.project);
+    if (!projParsed.success) {
+      return reply.code(400).send({ error: "invalid EditorProject", detail: projParsed.error.message });
+    }
+    const project = projParsed.data;
+    if (project.baseScenarioId !== id) {
+      return reply.code(400).send({ error: `project baseScenarioId ${project.baseScenarioId} != ${id}` });
+    }
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text) {
+      return reply.code(400).send({ error: "text required" });
+    }
+    const selParsed = body.selection == null ? null : Region.safeParse(body.selection);
+    const selection = selParsed && selParsed.success ? selParsed.data : null;
+
+    const base = await store.getRawBytes(id);
+    if (!base) {
+      return reply.code(404).send({ error: "map not found" });
+    }
+    const { doc } = parseScenarioRaw(base.bytes);
+    const liveDoc = applyOps(doc, activeOps(project));
+
+    // 1) write the request file (the "LLM prompt") with rich map context
+    const reqDir = join(config.LLM_DIR, "requests");
+    const resDir = join(config.LLM_DIR, "responses");
+    const arcDir = join(config.LLM_DIR, "archive");
+    await mkdir(reqDir, { recursive: true });
+    await mkdir(resDir, { recursive: true });
+    await mkdir(arcDir, { recursive: true });
+    const requestId = `${Date.now()}-${(copilotReqCounter++).toString(36)}`;
+    const reqFile = join(reqDir, `${requestId}.json`);
+    const resFile = join(resDir, `${requestId}.json`);
+    const requestDoc = {
+      requestId,
+      mapId: id,
+      text,
+      size: liveDoc.size,
+      selection,
+      terrain: terrainAscii(liveDoc),
+      objects: objectsSummary(liveDoc),
+      registeredRecipes: [
+        "water_lake (organic blob)", "water_isles (archipelago)", "river (winding)",
+        "decor_forest (groves)", "forest_scatter (sparse trees)", "forest_clearings (forest+glades)",
+        "mountain_fill (massif)", "relief_ridge (mountain ridge)", "relief_hills (scattered hills)",
+        "hedge_maze (forest)", "mountain_maze (stone)", "wall_maze (fence objects)",
+        "snow_overlay (solid wash)", "snow_patches (organic)", "snow_scatter (sparse)",
+        "grass_fill (wash)",
+      ],
+      respondTo: resFile,
+      spec: COPILOT_RESPONSE_SPEC,
+      createdAt: new Date().toISOString(),
+    };
+    await writeFile(reqFile, JSON.stringify(requestDoc, null, 2), "utf-8");
+
+    // 2) wait for the agent (acting as the LLM) to drop the response plan
+    const plan = await waitForResponse(resFile, 150_000);
+    if (!plan || !Array.isArray(plan.steps)) {
+      return reply
+        .code(504)
+        .send({ error: "no LLM response (is the agent watching var/llm/requests?)", requestId });
+    }
+
+    // 3) validate + execute the plan steps through the shared generation pipeline
+    const steps: PlanStep[] = [];
+    for (const s of plan.steps as Record<string, unknown>[]) {
+      const reg = Region.safeParse(s?.region);
+      if (!reg.success) {
+        return reply.code(400).send({ error: "plan step has an invalid region", detail: reg.error.message, requestId });
+      }
+      steps.push({ ...(s as object), region: reg.data } as PlanStep);
+    }
+    const walls = await loadWallSet();
+    const seed = Date.now() & 0x7fffffff;
+    const mask = parseMask(body.cells);
+    const protect = body.protect === true;
+    const t0 = Date.now();
+    let ops;
+    try {
+      ops = await runGenerationSteps(liveDoc, steps, walls, seed, mask, protect);
+    } catch (e) {
+      return reply.code(400).send({ error: e instanceof Error ? e.message : String(e), requestId });
+    }
+
+    const augmented = ops.length ? pushCommit(project, ops) : project;
+    const { report } = buildAndValidate(base.bytes, augmented);
+    const debug = {
+      serverMs: Date.now() - t0,
+      opCount: ops.length,
+      steps: steps.length,
+      protect,
+      validation: { ok: report.ok, identity: report.identity, semantic: report.semantic.ok, structural: report.structural.ok },
+    };
+
+    // 4) archive the exchange for inspection, then return the result
+    try {
+      await rename(reqFile, join(arcDir, `${requestId}.request.json`));
+      await rename(resFile, join(arcDir, `${requestId}.response.json`));
+    } catch {
+      /* best-effort cleanup */
+    }
+
+    return reply.send({
+      ops,
+      report,
+      reasoning: typeof plan.reasoning === "string" ? plan.reasoning : undefined,
+      steps: plan.steps,
+      debug,
+    });
+  });
 }

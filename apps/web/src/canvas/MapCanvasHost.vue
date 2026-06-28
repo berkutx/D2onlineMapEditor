@@ -125,9 +125,12 @@ async function rebuild(): Promise<void> {
     scene.setLayerVisibility("locations", locationsVisible.value);
     for (const cat of OVERLAY_TINTS) scene.setOverlayTint(cat, overlayTints.value[cat]);
     scene.setAnimationEnabled(animate.value);
-    // seed the status bar with the initial camera zoom
+    // seed the status bar with the initial camera zoom + visible-cell box
     const cam = scene.getCamera();
-    if (cam) viewStore.setZoom(cam.zoom);
+    if (cam) {
+      viewStore.setZoom(cam.zoom);
+      updateVisibleCells(cam.snapshot());
+    }
   } catch (e) {
     buildError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -141,10 +144,11 @@ onMounted(async () => {
   const scene = new Scene();
   await scene.init(mountEl.value);
 
-  // Sync camera changes back into the (reactive) view store for the status bar.
+  // Sync camera changes back into the (reactive) view store for the status bar + the eye zone.
   scene.on({
     onCameraChange: (snap: CameraSnapshot) => {
       viewStore.setZoom(snap.zoom);
+      updateVisibleCells(snap);
     },
   });
 
@@ -174,6 +178,27 @@ onMounted(async () => {
   if (currentMap.value && manifest.value) await rebuild();
 });
 
+/** Compute the bounding box (cells) of what's visible on screen, for the "👁 eye" zone. */
+function updateVisibleCells(snap: CameraSnapshot): void {
+  const n = editStore.liveDoc?.size ?? currentMap.value?.size ?? 0;
+  if (!n) return viewStore.setVisibleCells(null);
+  const corners: [number, number][] = [
+    [snap.x, snap.y],
+    [snap.x + snap.width, snap.y],
+    [snap.x, snap.y + snap.height],
+    [snap.x + snap.width, snap.y + snap.height],
+  ];
+  let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+  for (const [wx, wy] of corners) {
+    const c = worldToCell(wx, wy);
+    if (c.x < mnx) mnx = c.x; if (c.y < mny) mny = c.y; if (c.x > mxx) mxx = c.x; if (c.y > mxy) mxy = c.y;
+  }
+  const x0 = Math.max(0, Math.floor(mnx)), y0 = Math.max(0, Math.floor(mny));
+  const x1 = Math.min(n - 1, Math.ceil(mxx)), y1 = Math.min(n - 1, Math.ceil(mxy));
+  if (x1 < x0 || y1 < y0) return viewStore.setVisibleCells(null);
+  viewStore.setVisibleCells({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 });
+}
+
 /** Map a pointer event to a cell, or null when off-map. */
 function cellFromEvent(e: PointerEvent): { x: number; y: number } | null {
   const scene = getScene();
@@ -194,6 +219,80 @@ let painting = false;
 let strokeOps: EditOp[] = [];
 /** Last hovered cell (null = off-map); used to refresh the decor ghost on cycle. */
 let lastCell: { x: number; y: number } | null = null;
+
+// --- region select (zone for Copilot generation) -----------------------------
+let regionDragging = false;
+let regionStart: { x: number; y: number } | null = null;
+/** Accumulated cell mask for the brush mode (built across a drag). */
+let regionMaskAccum = new Set<string>();
+/** Normalised rectangle (inclusive) from two corner cells. */
+function rectFrom(a: { x: number; y: number }, b: { x: number; y: number }): { x: number; y: number; w: number; h: number } {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(a.x - b.x) + 1,
+    h: Math.abs(a.y - b.y) + 1,
+  };
+}
+/** Cells of a square brush of side `side` centred at (cx,cy). */
+function squareCells(cx: number, cy: number, side: number): { x: number; y: number }[] {
+  const r = Math.floor(side / 2);
+  const out: { x: number; y: number }[] = [];
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) out.push({ x: cx + dx, y: cy + dy });
+  return out;
+}
+/** Cells along a (thick) straight line a→b (Bresenham + square stamp) — the "line" mode. */
+function lineMask(a: { x: number; y: number }, b: { x: number; y: number }, side: number): Set<string> {
+  const out = new Set<string>();
+  let x0 = a.x, y0 = a.y;
+  const x1 = b.x, y1 = b.y;
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  for (;;) {
+    for (const c of squareCells(x0, y0, side)) out.add(`${c.x},${c.y}`);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+  return out;
+}
+/** Perimeter cells of a rectangle — the "frame" mode. */
+function frameMask(r: { x: number; y: number; w: number; h: number }): Set<string> {
+  const out = new Set<string>();
+  for (let x = r.x; x < r.x + r.w; x++) { out.add(`${x},${r.y}`); out.add(`${x},${r.y + r.h - 1}`); }
+  for (let y = r.y; y < r.y + r.h; y++) { out.add(`${r.x},${y}`); out.add(`${r.x + r.w - 1},${y}`); }
+  return out;
+}
+/** Bounding box of a set of "x,y" cells. */
+function bboxOfMask(cells: Iterable<string>): { x: number; y: number; w: number; h: number } {
+  let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+  for (const k of cells) {
+    const [x, y] = k.split(",").map(Number) as [number, number];
+    if (x < mnx) mnx = x; if (y < mny) mny = y; if (x > mxx) mxx = x; if (y > mxy) mxy = y;
+  }
+  return { x: mnx, y: mny, w: mxx - mnx + 1, h: mxy - mny + 1 };
+}
+/** "x,y" cells -> in-bounds CellRefs for the footprint overlay. */
+function maskRefs(cells: Iterable<string>): { x: number; y: number }[] {
+  const n = editStore.liveDoc?.size ?? currentMap.value?.size ?? 0;
+  const out: { x: number; y: number }[] = [];
+  for (const k of cells) {
+    const [x, y] = k.split(",").map(Number) as [number, number];
+    if (x >= 0 && y >= 0 && x < n && y < n) out.push({ x, y });
+  }
+  return out;
+}
+/** Re-render the persistent generation zone (drawn mask if any, else the bbox) — faint, hideable. */
+function showZone(): void {
+  const s = getScene();
+  if (!s) return;
+  if (toolStore.zoneHidden) { s.setFootprint([]); return; }
+  const mask = toolStore.regionMask;
+  if (mask && mask.length) { s.setFootprint(maskRefs(mask), true, true); return; }
+  const r = toolStore.region;
+  s.setFootprint(r ? footprintCells(r.x, r.y, r.w, r.h) : [], true, true);
+}
 
 // --- decoration placement (decor tool) ---------------------------------------
 /** Footprint in cells. MOMNE mountains are square (verified across all game maps),
@@ -396,6 +495,22 @@ let roadLevel = 0;
 
 function onPointerDown(e: PointerEvent): void {
   if (e.ctrlKey) return; // Ctrl+drag pans the camera (handled by Scene), not a tool action
+  // region tool: start drawing the Copilot generation zone (mode = rect/brush/line/frame).
+  if (toolStore.tool === "region") {
+    const cell = cellFromEvent(e);
+    if (!cell) return;
+    regionStart = cell;
+    regionDragging = true;
+    regionMaskAccum = new Set();
+    if (toolStore.zoneMode === "brush") {
+      for (const c of squareCells(cell.x, cell.y, toolStore.size)) regionMaskAccum.add(`${c.x},${c.y}`);
+      getScene()?.setFootprint(maskRefs(regionMaskAccum), true);
+    } else {
+      getScene()?.setFootprint(footprintCells(cell.x, cell.y, 1, 1), true);
+    }
+    getScene()?.canvas?.setPointerCapture(e.pointerId);
+    return;
+  }
   // road-select tool: click a road to select its segment; click the same cell to grow.
   if (toolStore.tool === "roadsel") {
     const cell = cellFromEvent(e);
@@ -460,6 +575,39 @@ function onPointerDown(e: PointerEvent): void {
 }
 
 function onPointerUp(e: PointerEvent): void {
+  // region tool: finalize the drawn zone. rect -> bbox (no mask); brush/line/frame -> a
+  // cell MASK + its bbox. A click without a drag yields a 1×1 "point" (rect mode), used by
+  // the Copilot's "вокруг этой точки NxM" to anchor a centred region on that cell.
+  if (regionDragging) {
+    regionDragging = false;
+    const mode = toolStore.zoneMode;
+    if (regionStart) {
+      const end = lastCell ?? regionStart;
+      if (mode === "rect") {
+        const r = rectFrom(regionStart, end);
+        toolStore.setRegion(r);
+        toolStore.setRegionMask(null);
+      } else {
+        const set =
+          mode === "brush" ? regionMaskAccum
+          : mode === "line" ? lineMask(regionStart, end, Math.max(3, toolStore.size))
+          : frameMask(rectFrom(regionStart, end));
+        const cells = maskRefs(set).map((c) => `${c.x},${c.y}`); // clamp to bounds
+        if (cells.length) {
+          toolStore.setRegionMask(cells);
+          toolStore.setRegion(bboxOfMask(cells));
+        }
+      }
+      toolStore.setZoneHidden(false);
+      showZone();
+    }
+    try {
+      getScene()?.canvas?.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    return;
+  }
   if (!painting) return;
   painting = false;
   if (strokeOps.length) editStore.commitStroke(strokeOps);
@@ -483,6 +631,22 @@ function onPointerMove(e: PointerEvent): void {
     getScene()?.setCursorCell(null);
   }
   if (toolStore.tool === "decor" || toolStore.tool === "move") refreshGhost(cell);
+  if (regionDragging && regionStart && cell) {
+    const mode = toolStore.zoneMode;
+    const s = getScene();
+    if (mode === "rect") {
+      const r = rectFrom(regionStart, cell);
+      s?.setFootprint(footprintCells(r.x, r.y, r.w, r.h), true);
+    } else if (mode === "frame") {
+      s?.setFootprint(maskRefs(frameMask(rectFrom(regionStart, cell))), true);
+    } else if (mode === "line") {
+      s?.setFootprint(maskRefs(lineMask(regionStart, cell, Math.max(3, toolStore.size))), true);
+    } else {
+      // brush: accumulate cells along the drag
+      for (const c of squareCells(cell.x, cell.y, toolStore.size)) regionMaskAccum.add(`${c.x},${c.y}`);
+      s?.setFootprint(maskRefs(regionMaskAccum), true);
+    }
+  }
 }
 
 function onPointerLeave(): void {
@@ -553,9 +717,21 @@ watch(
       roadAnchor = null;
       roadLevel = 0;
     }
+    if (prev === "region") regionDragging = false;
     if (t === "decor" || t === "move") refreshGhost(lastCell);
+    else if (t === "region") showZone(); // re-show the existing zone (mask or bbox)
     else clearPreview();
   },
+);
+
+// Keep the zone overlay in sync when the region / mask / hidden flag changes from elsewhere
+// (the accept ✓ / hide 👁 buttons, mode switches, programmatic setRegion).
+watch(
+  () => [toolStore.region, toolStore.regionMask, toolStore.zoneHidden],
+  () => {
+    if (toolStore.tool === "region") showZone();
+  },
+  { deep: true },
 );
 
 // Mirror the road-segment selection onto the Scene highlight.

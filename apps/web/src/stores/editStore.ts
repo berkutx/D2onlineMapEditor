@@ -26,8 +26,8 @@ import {
   type EditOp,
 } from "@d2/map-edit";
 import type { MapDocument } from "@d2/map-schema";
-import type { ValidationReport } from "@d2/socket-contract";
-import { validateProject, exportProject, type ExportResult } from "../services/api";
+import type { ValidationReport, Region, GenDebug } from "@d2/socket-contract";
+import { validateProject, exportProject, generateRegion, copilotLlm, type ExportResult } from "../services/api";
 
 const keyFor = (mapId: string): string => `d2.project.${mapId}`;
 
@@ -46,6 +46,8 @@ export const useEditStore = defineStore("edit", () => {
   const project = ref<EditorProject | null>(null);
   const report = ref<ValidationReport | null>(null);
   const busy = ref(false);
+  /** Debug/timing for the last Copilot generation (shown in the chat). */
+  const genDebug = ref<GenDebug | null>(null);
 
   /** The map as loaded (base) and the live doc = base + active commits. */
   const baseDoc = shallowRef<MapDocument | null>(null);
@@ -159,6 +161,54 @@ export const useEditStore = defineStore("edit", () => {
     }
   }
 
+  /**
+   * Copilot generation: run `recipeId` over `region` server-side (MarkovJunior + decode +
+   * validate), then commit the returned ops as ONE undoable edit if they validate.
+   */
+  async function generate(
+    recipeId: string,
+    region: Region,
+    seed?: number,
+    cells?: [number, number][] | null,
+    protect?: boolean,
+  ): Promise<ValidationReport | null> {
+    if (!project.value) return null;
+    busy.value = true;
+    try {
+      const res = await generateRegion(project.value.baseScenarioId, project.value, recipeId, region, seed, cells, protect);
+      report.value = res.report;
+      genDebug.value = res.debug ?? null;
+      if (res.report.ok && res.ops.length) commit(res.ops);
+      return res.report;
+    } finally {
+      busy.value = false;
+    }
+  }
+
+  /**
+   * Copilot LLM (Phase-4 POC): send a natural-language command to the server's LLM bridge,
+   * which returns a generation plan's EditOps + validation report. Commits the ops as ONE
+   * undoable edit if they validate. Returns the report + the LLM's prose (for the chat).
+   */
+  async function copilot(
+    text: string,
+    selection?: Region | null,
+    cells?: [number, number][] | null,
+    protect?: boolean,
+  ): Promise<{ report: ValidationReport; reasoning?: string; debug?: GenDebug } | null> {
+    if (!project.value) return null;
+    busy.value = true;
+    try {
+      const res = await copilotLlm(project.value.baseScenarioId, project.value, text, selection ?? null, cells, protect);
+      report.value = res.report;
+      genDebug.value = res.debug ?? null;
+      if (res.report.ok && res.ops.length) commit(res.ops);
+      return { report: res.report, reasoning: res.reasoning, debug: res.debug };
+    } finally {
+      busy.value = false;
+    }
+  }
+
   async function exportSg(): Promise<ExportResult | null> {
     if (!project.value) return null;
     busy.value = true;
@@ -176,6 +226,7 @@ export const useEditStore = defineStore("edit", () => {
     project,
     report,
     busy,
+    genDebug,
     baseDoc,
     liveDoc,
     rev,
@@ -192,6 +243,8 @@ export const useEditStore = defineStore("edit", () => {
     redoEdit,
     reset,
     validate,
+    generate,
+    copilot,
     exportSg,
   };
 });

@@ -6,7 +6,14 @@
  * vite.config.ts). In prod they are served by the same Fastify instance.
  */
 import { REST } from "@d2/socket-contract";
-import type { ScenarioEntry, MapMeta, ValidationReport } from "@d2/socket-contract";
+import type {
+  ScenarioEntry,
+  MapMeta,
+  ValidationReport,
+  Region,
+  GenerateResult,
+  CopilotResult,
+} from "@d2/socket-contract";
 import type { MapDocument } from "@d2/map-schema";
 import type { EditorProject } from "@d2/map-edit";
 import type { AssetManifest } from "@d2/asset-manifest";
@@ -95,6 +102,72 @@ export async function exportProject(id: string, project: EditorProject): Promise
   const m = /filename="?([^"]+)"?/.exec(disp);
   const filename = m ? decodeURIComponent(m[1]!) : `${id}-edited.sg`;
   return { ok: true, blob: await res.blob(), filename };
+}
+
+/**
+ * POST /api/maps/:id/generate — run a Copilot recipe over `region` against the current
+ * project. Returns the new EditOps + their validation report; the caller commits the ops.
+ */
+export async function generateRegion(
+  id: string,
+  project: EditorProject,
+  recipeId: string,
+  region: Region,
+  seed?: number,
+  cells?: [number, number][] | null,
+  protect?: boolean,
+): Promise<GenerateResult> {
+  const res = await fetch(REST.mapGenerate(id), {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ project, recipeId, region, seed, cells: cells ?? undefined, protect: protect || undefined }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`generate failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+  }
+  return (await res.json()) as GenerateResult;
+}
+
+/**
+ * POST /api/maps/:id/copilot — the Phase-4 LLM bridge (POC). Sends a natural-language
+ * command + the current project; the server file-bridges it to an LLM/agent and returns the
+ * resulting EditOps + validation report + the LLM's prose. This call can block for a while
+ * (the server long-polls for the agent's reply), so the caller should show a "thinking" state.
+ */
+export async function copilotLlm(
+  id: string,
+  project: EditorProject,
+  text: string,
+  selection?: Region | null,
+  cells?: [number, number][] | null,
+  protect?: boolean,
+  timeoutMs = 175_000,
+): Promise<CopilotResult> {
+  // Abort if the bridge is unreachable/unresponsive (server long-polls ~150s for the agent).
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(REST.mapCopilot(id), {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ project, text, selection: selection ?? null, cells: cells ?? undefined, protect: protect || undefined }),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    if ((e as Error).name === "AbortError") {
+      throw new Error(`LLM не ответил за ${Math.round(timeoutMs / 1000)}с (агент не на связи?)`);
+    }
+    throw new Error(`copilot недоступен: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`copilot failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+  }
+  return (await res.json()) as CopilotResult;
 }
 
 /** POST /api/maps/new -> { id }. Generates a from-scratch blank terrain map server-side. */

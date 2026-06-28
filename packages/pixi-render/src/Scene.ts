@@ -390,8 +390,10 @@ export class Scene {
    * Footprint "fitting" preview — translucent iso diamonds over the target `cells`,
    * green when the placement/move is valid, red when not. Empty array clears it.
    * Works for ANY object (no sprite key needed), so move always shows where it lands.
+   * `faint` draws it lightly (for a persistent generation zone that shouldn't obscure
+   * the result), vs. the bold default used for transient move/decor previews.
    */
-  setFootprint(cells: readonly CellRef[], valid = true): void {
+  setFootprint(cells: readonly CellRef[], valid = true, faint = false): void {
     if (!this.world) return;
     if (!this.footprint) {
       this.footprint = new Graphics();
@@ -407,8 +409,8 @@ export class Scene {
     }
     if (cells.length) {
       const color = valid ? 0x66ff99 : 0xff6b6b;
-      g.fill({ color, alpha: 0.22 });
-      g.stroke({ color, alpha: 0.95, width: 1.5 });
+      g.fill({ color, alpha: faint ? 0.1 : 0.22 });
+      g.stroke({ color, alpha: faint ? 0.5 : 0.95, width: faint ? 1 : 1.5 });
     }
     this.requestRender();
   }

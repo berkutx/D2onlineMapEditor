@@ -1,4 +1,5 @@
-export { ScenarioEntry, MapMeta, ValidationReport, REST } from "./rest.js";
+export { ScenarioEntry, MapMeta, ValidationReport, REST, Region, GenerateRequest, CopilotRequest } from "./rest.js";
+export type { GenerateResult, CopilotResult, GenDebug } from "./rest.js";
 export { EditOp, OpAck } from "./ops.js";
 export { UserPresence } from "./presence.js";
 export {

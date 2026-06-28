@@ -19,6 +19,7 @@
     "@d2/map-schema": "workspace:*",
     "@d2/sg-parser": "workspace:*",
     "@d2/map-edit": "workspace:*",
+    "@d2/mapgen": "workspace:*",
     "@d2/socket-contract": "workspace:*"
   },
   "devDependencies": {

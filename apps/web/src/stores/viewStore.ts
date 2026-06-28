@@ -61,6 +61,8 @@ export const useViewStore = defineStore("view", () => {
   const zoom = ref(1);
   /** Cursor cell under the pointer, null when off-map. */
   const cursorCell = ref<CursorCell | null>(null);
+  /** Bounding box (cells) of what's currently visible on screen — drives the "👁 eye" zone. */
+  const visibleCells = ref<{ x: number; y: number; w: number; h: number } | null>(null);
 
   function setLayerVisible(layer: LayerName, visible: boolean): void {
     if (layer === "terrain") terrainVisible.value = visible;
@@ -110,6 +112,9 @@ export const useViewStore = defineStore("view", () => {
   function setCursorCell(cell: CursorCell | null): void {
     cursorCell.value = cell;
   }
+  function setVisibleCells(r: { x: number; y: number; w: number; h: number } | null): void {
+    visibleCells.value = r;
+  }
 
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
@@ -147,6 +152,7 @@ export const useViewStore = defineStore("view", () => {
     overlayTints,
     zoom,
     cursorCell,
+    visibleCells,
     setLayerVisible,
     toggleGrid,
     toggleAnimate,
