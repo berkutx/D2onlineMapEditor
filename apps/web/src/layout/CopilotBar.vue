@@ -171,6 +171,14 @@ const EXAMPLES: { group: string; items: { text: string; llm?: boolean }[] }[] = 
     { text: "трава по всей карте" },
     { text: "трава 20x20" },
   ] },
+  { group: "🪨 Декор и дороги", items: [
+    { text: "извилистая дорога" },
+    { text: "тропинка через лес" },
+    { text: "разбросай камни" },
+    { text: "кусты у воды" },
+    { text: "руины" },
+    { text: "кладбище 16x16" },
+  ] },
   { group: "📍 Вокруг точки / стороны (зону можно не рисовать)", items: [
     { text: "озеро вокруг этой точки 20x20" },
     { text: "роща вокруг этой точки 16x16" },
@@ -214,6 +222,12 @@ function routeRecipe(text: string): string | null {
   if (/холм/.test(t) || (sparse && /гор|скал/.test(t))) return "relief_hills";
   if (/гряд|хребет/.test(t)) return "relief_ridge";
   if (/гор\b|горы|гора|горн|скал|утёс|утес|массив/.test(t)) return "mountain_fill";
+  // roads & scattered decorations (before water/forest so «кусты у воды» isn't water)
+  if (/дорог|тропа|тропинк|тропу|путь|перекрёст|перекрест|просёлок|просёл|просел/.test(t)) return "road_path";
+  if (/камн|валун|булыжник/.test(t)) return "decor_rocks";
+  if (/куст|поросль|кустарник/.test(t)) return "decor_bushes";
+  if (/руин|развалин/.test(t)) return "decor_ruins";
+  if (/могил|кладбищ|кост|череп|надгроб/.test(t)) return "decor_graves";
   // snow
   if (/снег|снеж|зим/.test(t)) return sparse ? "snow_scatter" : patchy ? "snow_patches" : "snow_overlay";
   // water

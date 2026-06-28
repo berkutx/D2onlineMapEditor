@@ -10,7 +10,7 @@
 import type { MapDocument } from "@d2/map-schema";
 import type { EditOp } from "./ops.js";
 import { applyOps } from "./ops.js";
-import { brushValue } from "./brush.js";
+import { brushValue, roadBrush } from "./brush.js";
 import { placeLandmarkOps, placeMountainOps } from "./place.js";
 
 /** Number of 1×1 mountain sprites in the catalog (MOMNE0100..MOMNE0126). */
@@ -36,7 +36,9 @@ export type DecodeAction =
   | { kind: "water" }
   | { kind: "forest" }
   | { kind: "wall" } // landmark wall, orientation from the 16-mask
-  | { kind: "mountain" }; // a 1×1 mountain object (+37 cell stamp)
+  | { kind: "mountain" } // a 1×1 mountain object (+37 cell stamp)
+  | { kind: "road" } // a road cell (auto-tiled via roadBrush)
+  | { kind: "decor"; shape: string }; // a scattered decoration (decorCatalog 1×1 of `shape`)
 
 export type DecodeTable = Record<string, DecodeAction>;
 
@@ -59,6 +61,13 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   mountain_fill: { M: { kind: "mountain" } },
   relief_ridge: { M: { kind: "mountain" }, R: { kind: "mountain" } },
   relief_hills: { M: { kind: "mountain" } },
+  // Roads: P = path trail, R = path head (both become auto-tiled road cells).
+  road_path: { P: { kind: "road" }, R: { kind: "road" } },
+  // Scattered decorations (D = a placed object of the given catalog shape).
+  decor_rocks: { D: { kind: "decor", shape: "rock" } },
+  decor_bushes: { D: { kind: "decor", shape: "vegetation" } },
+  decor_ruins: { D: { kind: "decor", shape: "ruin-building" } },
+  decor_graves: { D: { kind: "decor", shape: "grave" } },
   // Snow: full wash, organic patches, or sparse scatter — all map S -> snow tileset.
   snow_overlay: { S: { kind: "terrain", terrain: 2 } }, // 2 = DW/snow tileset
   snow_patches: { S: { kind: "terrain", terrain: 2 } },
@@ -96,6 +105,22 @@ export function buildWallSet(
   return set;
 }
 
+/** 1×1 decoration landmark ids grouped by catalog `shape` (rock / vegetation / …). */
+export type DecorSet = Record<string, string[]>;
+
+/** Group the catalog's 1×1 decorations by shape, for scatter recipes. */
+export function buildDecorSet(
+  catalog: Record<string, WallCatalogEntry> | WallCatalogEntry[],
+): DecorSet {
+  const arr = Array.isArray(catalog) ? catalog : Object.values(catalog);
+  const set: DecorSet = {};
+  for (const e of arr) {
+    if ((e.cx ?? 1) > 1 || (e.cy ?? 1) > 1 || !e.shape) continue; // 1×1 only
+    (set[e.shape] ??= []).push(e.id);
+  }
+  return set;
+}
+
 // 4 neighbours -> bit (N=1, E=2, S=4, W=8).
 const N4: ReadonlyArray<readonly [number, number, number]> = [
   [0, -1, 1],
@@ -128,12 +153,16 @@ export function decodeGrid(
   /** Protect existing features: skip cells whose CURRENT value is water (ground==3) or
    *  a mountain stamp (37), so generation never overwrites a hand-made lake / mountain. */
   protect?: boolean,
+  /** Decoration ids grouped by shape (for the "decor" action). */
+  decor?: DecorSet,
 ): EditOp[] {
   const n = doc.size;
   const inb = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < n && y < n;
   const ops: EditOp[] = [];
   const wallCells = new Set<string>();
   const mountainCells: { x: number; y: number }[] = [];
+  const roadCells: { x: number; y: number }[] = [];
+  const decorCells: { x: number; y: number; shape: string }[] = [];
 
   // pass 1: terrain ops + collect wall cells
   for (let gy = 0; gy < grid.height; gy++) {
@@ -158,6 +187,10 @@ export function decodeGrid(
         wallCells.add(`${x},${y}`);
       } else if (action.kind === "mountain") {
         mountainCells.push({ x, y });
+      } else if (action.kind === "road") {
+        roadCells.push({ x, y });
+      } else if (action.kind === "decor") {
+        decorCells.push({ x, y, shape: action.shape });
       }
     }
   }
@@ -188,6 +221,27 @@ export function decodeGrid(
     const placeOps = placeMountainOps(work, x, y, 1, 1, image);
     ops.push(...placeOps);
     work = applyOps(work, placeOps);
+  }
+
+  // 2c: roads (auto-tiled). roadBrush recomputes the cell + its neighbours from the roads
+  // already in the working doc, so threading produces correct connectivity.
+  for (const { x, y } of roadCells) {
+    const rOps = roadBrush(work, x, y);
+    ops.push(...rOps);
+    work = applyOps(work, rOps);
+  }
+
+  // 2d: scattered decorations — a landmark object picked from the catalog by shape (sprite
+  // varies by position for variety). Skipped silently when no catalog/shape is available.
+  if (decor) {
+    for (const { x, y, shape } of decorCells) {
+      const list = decor[shape];
+      if (!list || !list.length) continue;
+      const id = list[(((x * 31 + y * 17) % list.length) + list.length) % list.length]!;
+      const placeOps = placeLandmarkOps(work, x, y, id);
+      ops.push(...placeOps);
+      work = applyOps(work, placeOps);
+    }
   }
   return ops;
 }

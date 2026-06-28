@@ -147,6 +147,52 @@ export const RECIPES: Record<string, Recipe> = {
     notes: "Scattered hills / lone peaks.",
   },
 
+  // --- roads (decoded to auto-tiled road cells) -----------------------------
+  // A winding road (self-avoiding growth path); roadBrush auto-tiles the connectivity.
+  road_path: {
+    id: "road_path",
+    kind: "mj",
+    xml: `<one values="BRP" origin="True" in="RBB" out="PPR"/>`,
+    alphabet: "BRP",
+    inputMode: "zone",
+    notes: "A winding road / path across the zone.",
+  },
+
+  // --- scattered decorations (decoded to catalog landmark objects by shape) --
+  // Same sparse-scatter program; the decode table maps D to a catalog shape.
+  decor_rocks: {
+    id: "decor_rocks",
+    kind: "mj",
+    xml: `<prl values="BD" in="B" out="D" p="0.04" steps="1"/>`,
+    alphabet: "BD",
+    inputMode: "zone",
+    notes: "Scattered rocks / boulders.",
+  },
+  decor_bushes: {
+    id: "decor_bushes",
+    kind: "mj",
+    xml: `<prl values="BD" in="B" out="D" p="0.05" steps="1"/>`,
+    alphabet: "BD",
+    inputMode: "zone",
+    notes: "Scattered bushes / vegetation.",
+  },
+  decor_ruins: {
+    id: "decor_ruins",
+    kind: "mj",
+    xml: `<prl values="BD" in="B" out="D" p="0.02" steps="1"/>`,
+    alphabet: "BD",
+    inputMode: "zone",
+    notes: "Scattered ruins / broken buildings.",
+  },
+  decor_graves: {
+    id: "decor_graves",
+    kind: "mj",
+    xml: `<prl values="BD" in="B" out="D" p="0.03" steps="1"/>`,
+    alphabet: "BD",
+    inputMode: "zone",
+    notes: "A graveyard / scattered bones & graves.",
+  },
+
   // --- snow: full wash, organic patches, or sparse scatter ------------------
   snow_overlay: {
     id: "snow_overlay",

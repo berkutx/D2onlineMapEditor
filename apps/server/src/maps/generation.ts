@@ -10,7 +10,7 @@
  * later step (e.g. walls around a lake) sees the cells an earlier step changed.
  */
 import { runRecipe, getRecipe } from "@d2/mapgen";
-import { decodeGrid, applyOps, DECODE_TABLES, type DecodeTable, type WallSet, type EditOp } from "@d2/map-edit";
+import { decodeGrid, applyOps, DECODE_TABLES, type DecodeTable, type WallSet, type DecorSet, type EditOp } from "@d2/map-edit";
 import type { MapDocument } from "@d2/map-schema";
 
 /** A region in cells: top-left + size. */
@@ -112,6 +112,7 @@ export async function runGenerationSteps(
   defaultSeed: number,
   mask?: ReadonlySet<string>,
   protect?: boolean,
+  decor?: DecorSet,
 ): Promise<EditOp[]> {
   let work = liveDoc;
   const all: EditOp[] = [];
@@ -133,7 +134,7 @@ export async function runGenerationSteps(
     }
     const seed = Number.isInteger(step.seed) ? (step.seed as number) : defaultSeed;
     const grid = await buildGrid(recipe, step.region, seed);
-    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect);
+    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor);
     all.push(...ops);
     work = applyOps(work, ops);
   }

@@ -31,8 +31,10 @@ import {
   applyEditsToBytes,
   roundTripSemantic,
   buildWallSet,
+  buildDecorSet,
   DECODE_TABLES,
   type WallSet,
+  type DecorSet,
 } from "@d2/map-edit";
 import { getRecipe } from "@d2/mapgen";
 import { runGenerationSteps, type PlanStep } from "../maps/generation.js";
@@ -84,14 +86,18 @@ function buildAndValidate(
   return { report, bytes };
 }
 
-/** Lazily load + cache the 1×1 wall landmarks (by iso orientation) from the catalog. */
+/** Lazily load + cache the decoration catalog as a wall set (by iso orient) + a decor set
+ *  (1×1 by shape), both from public/assets/decorCatalog.json (read once). */
 let wallSetCache: WallSet | null = null;
-async function loadWallSet(): Promise<WallSet> {
-  if (wallSetCache) return wallSetCache;
-  const path = join(config.ASSETS_DIR, "decorCatalog.json");
-  const json = JSON.parse(await readFile(path, "utf-8")) as never;
-  wallSetCache = buildWallSet(json);
-  return wallSetCache;
+let decorSetCache: DecorSet | null = null;
+async function loadCatalogSets(): Promise<{ walls: WallSet; decor: DecorSet }> {
+  if (!wallSetCache || !decorSetCache) {
+    const path = join(config.ASSETS_DIR, "decorCatalog.json");
+    const json = JSON.parse(await readFile(path, "utf-8")) as never;
+    wallSetCache = buildWallSet(json);
+    decorSetCache = buildDecorSet(json);
+  }
+  return { walls: wallSetCache, decor: decorSetCache };
 }
 
 /** Parse a hand-drawn cell mask (body.cells = [[x,y],…]) into an "x,y" Set; undefined if empty. */
@@ -190,7 +196,7 @@ const COPILOT_RESPONSE_SPEC = {
     steps:
       "array — each step paints one region. Use a registered recipe OR an inline recipe you author.",
   },
-  step_registered: { recipeId: "water_lake|water_isles|river|decor_forest|forest_scatter|forest_clearings|mountain_fill|relief_ridge|relief_hills|hedge_maze|mountain_maze|wall_maze|snow_overlay|snow_patches|snow_scatter|grass_fill", region: { x: 0, y: 0, w: 10, h: 10 } },
+  step_registered: { recipeId: "water_lake|water_isles|river|decor_forest|forest_scatter|forest_clearings|mountain_fill|relief_ridge|relief_hills|hedge_maze|mountain_maze|wall_maze|road_path|decor_rocks|decor_bushes|decor_ruins|decor_graves|snow_overlay|snow_patches|snow_scatter|grass_fill", region: { x: 0, y: 0, w: 10, h: 10 } },
   step_inline_fill: {
     recipe: { kind: "fill", fillSymbol: "X" },
     decode: { X: { kind: "terrain", terrain: 4 } },
@@ -362,8 +368,8 @@ export async function registerMapRoutes(
     const t0 = Date.now();
     let ops;
     try {
-      const walls = await loadWallSet();
-      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect);
+      const { walls, decor } = await loadCatalogSets();
+      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect, decor);
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -436,6 +442,7 @@ export async function registerMapRoutes(
         "decor_forest (groves)", "forest_scatter (sparse trees)", "forest_clearings (forest+glades)",
         "mountain_fill (massif)", "relief_ridge (mountain ridge)", "relief_hills (scattered hills)",
         "hedge_maze (forest)", "mountain_maze (stone)", "wall_maze (fence objects)",
+        "road_path (winding road)", "decor_rocks", "decor_bushes", "decor_ruins", "decor_graves",
         "snow_overlay (solid wash)", "snow_patches (organic)", "snow_scatter (sparse)",
         "grass_fill (wash)",
       ],
@@ -462,14 +469,14 @@ export async function registerMapRoutes(
       }
       steps.push({ ...(s as object), region: reg.data } as PlanStep);
     }
-    const walls = await loadWallSet();
+    const { walls, decor } = await loadCatalogSets();
     const seed = Date.now() & 0x7fffffff;
     const mask = parseMask(body.cells);
     const protect = body.protect === true;
     const t0 = Date.now();
     let ops;
     try {
-      ops = await runGenerationSteps(liveDoc, steps, walls, seed, mask, protect);
+      ops = await runGenerationSteps(liveDoc, steps, walls, seed, mask, protect, decor);
     } catch (e) {
       return reply.code(400).send({ error: e instanceof Error ? e.message : String(e), requestId });
     }
