@@ -13,8 +13,8 @@ import { applyOps } from "./ops.js";
 import { brushValue, roadBrush } from "./brush.js";
 import { placeLandmarkOps, placeMountainOps } from "./place.js";
 
-/** Number of 1×1 mountain sprites in the catalog (MOMNE0100..MOMNE0126). */
-const MOUNTAIN_IMAGES = 27;
+/** Mountain sprite image counts per footprint width (MOMNE{ww}{ii}): 1×1→27, 2×2→25, 3×3→26. */
+const MOUNTAIN_IMAGES_BY_W: Record<number, number> = { 1: 27, 2: 25, 3: 26 };
 
 export interface Region {
   x: number;
@@ -241,13 +241,31 @@ export function decodeGrid(
     }
   }
 
-  // 2b: mountains (1×1). Image varies by position so a range mixes sprites (no RNG — keeps
-  // generation deterministic per seed); placeMountainOps also stamps the 37 cell value.
-  for (const { x, y } of mountainCells) {
-    const image = (((x * 31 + y * 17) % MOUNTAIN_IMAGES) + MOUNTAIN_IMAGES) % MOUNTAIN_IMAGES;
-    const placeOps = placeMountainOps(work, x, y, 1, 1, image);
+  // 2b: mountains — greedily pack the LARGEST sprite (3×3 → 2×2 → 1×1) that fits entirely
+  // within the mountain-cell set, so a solid massif uses big peaks and a thin ridge stays
+  // 1×1. Image varies by position (deterministic). placeMountainOps stamps the 37 cells.
+  const mset = new Set(mountainCells.map((c) => `${c.x},${c.y}`));
+  const placedM = new Set<string>();
+  const mfits = (x0: number, y0: number, sz: number): boolean => {
+    for (let dy = 0; dy < sz; dy++)
+      for (let dx = 0; dx < sz; dx++) {
+        const k = `${x0 + dx},${y0 + dy}`;
+        if (!mset.has(k) || placedM.has(k)) return false; // mset cells are already in-bounds
+      }
+    return true;
+  };
+  const sortedM = mountainCells.slice().sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const { x, y } of sortedM) {
+    if (placedM.has(`${x},${y}`)) continue;
+    let sz = 1;
+    if (mfits(x, y, 3)) sz = 3;
+    else if (mfits(x, y, 2)) sz = 2;
+    const imgN = MOUNTAIN_IMAGES_BY_W[sz] ?? 1;
+    const image = (((x * 31 + y * 17) % imgN) + imgN) % imgN;
+    const placeOps = placeMountainOps(work, x, y, sz, sz, image);
     ops.push(...placeOps);
     work = applyOps(work, placeOps);
+    for (let dy = 0; dy < sz; dy++) for (let dx = 0; dx < sz; dx++) placedM.add(`${x + dx},${y + dy}`);
   }
 
   // 2c: roads (auto-tiled). roadBrush recomputes the cell + its neighbours from the roads

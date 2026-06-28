@@ -164,6 +164,7 @@ export const useViewStore = defineStore("view", () => {
     toggleOverlayTint,
     setZoom,
     setCursorCell,
+    setVisibleCells,
   };
 });
 
