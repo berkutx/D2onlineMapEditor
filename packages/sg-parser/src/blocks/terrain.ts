@@ -3,7 +3,7 @@
  * MidRoad (road overlay applied onto cells).
  */
 
-import { ByteBuffer, readDefaultInt } from "../bytebuffer.js";
+import { ByteBuffer, readDefaultInt, tagValueOffset } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import { parseCompoundId } from "../framing.js";
 import type { TerrainBlock } from "../grid.js";
@@ -50,6 +50,29 @@ export function readMapBlock(buf: ByteBuffer, obj: FramedObject): TerrainBlock |
   return { bx, by, values };
 }
 
+/**
+ * Locate a MidgardMapBlock's raw cell bytes for in-place patching (the writer).
+ * Returns the chunk origin (bx,by, in cells) and the absolute byte offset of the
+ * first of its 32 int32 cells (i.e. just past `BLOCKDATA` + its int32 byteLen).
+ * Cell (x,y) inside the chunk lives at `cellsAt + ((y-by)*8 + (x-bx)) * 4`.
+ */
+export interface MapBlockLoc {
+  bx: number;
+  by: number;
+  cellsAt: number;
+}
+export function locateMapBlock(buf: ByteBuffer, obj: FramedObject): MapBlockLoc | null {
+  const id = parseCompoundId(obj.id);
+  if (!id) return null;
+  const bx = id.index & 0xff;
+  const by = (id.index >> 8) & 0xff;
+  const bdi = buf.indexOf("BLOCKDATA", obj.fieldsFrom);
+  if (bdi < 0 || bdi >= obj.fieldsEnd) return null;
+  const cellsAt = bdi + "BLOCKDATA".length + 4; // skip tag + int32 byteLen
+  if (cellsAt + CHUNK_CELLS * 4 > buf.length) return null;
+  return { bx, by, cellsAt };
+}
+
 /** A road overlay record extracted from a MidRoad block. */
 export interface RoadRecord {
   x: number;
@@ -67,4 +90,28 @@ export function readRoad(buf: ByteBuffer, obj: FramedObject): RoadRecord | null 
   const roadType = readDefaultInt(buf, "INDEX", f, e) ?? -1;
   const roadVar = readDefaultInt(buf, "VAR", f, e) ?? -1;
   return { x, y, roadType, roadVar };
+}
+
+/**
+ * Locate a MidRoad block's patchable fields: the cell it covers and the absolute
+ * byte offsets of its INDEX/VAR int32s (null when the tag is absent). Used by the
+ * writer to retune an existing road in place (adding a road needs a new block).
+ */
+export interface RoadLoc {
+  x: number;
+  y: number;
+  indexAt: number | null;
+  varAt: number | null;
+}
+export function locateRoad(buf: ByteBuffer, obj: FramedObject): RoadLoc | null {
+  const { fieldsFrom: f, fieldsEnd: e } = obj;
+  const x = readDefaultInt(buf, "POS_X", f, e);
+  const y = readDefaultInt(buf, "POS_Y", f, e);
+  if (x === null || y === null) return null;
+  return {
+    x,
+    y,
+    indexAt: tagValueOffset(buf, "INDEX", f, e),
+    varAt: tagValueOffset(buf, "VAR", f, e),
+  };
 }

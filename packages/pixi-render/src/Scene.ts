@@ -18,16 +18,17 @@
  * Layer order (back to front): terrain tilemap, then the z-sorted object layer.
  * Both live under a single `world` Container that the {@link Camera} pans/zooms.
  */
-import { Application, Container } from "pixi.js";
+import { Application, Container, Sprite, Graphics } from "pixi.js";
 import type { MapDocument } from "@d2/map-schema";
 import type { AssetManifest } from "@d2/asset-manifest";
 
 import { AssetStore } from "./AssetStore.js";
 import { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
 import { GridLayer } from "./GridLayer.js";
-import { ObjectLayer } from "./ObjectLayer.js";
+import { ObjectLayer, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer } from "./LocationLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
+import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
 import type { LandmarkFootprints } from "./objectSprite.js";
 import { AnimationManager } from "./AnimationManager.js";
 import { Camera, type CameraSnapshot } from "./Camera.js";
@@ -118,6 +119,19 @@ export class Scene {
   private overlay?: OverlayLayer;
   private anim?: AnimationManager;
   private camera?: Camera;
+  /** kept so the terrain layer can be re-tiled in place after an edit (M2 brushes). */
+  private assets?: AssetStore;
+  private terrainCodes?: Record<number, string>;
+  /** kept so the object layer can be rebuilt in place after a placement/move edit. */
+  private objectTypes?: ReadonlySet<string>;
+  private objectTables?: ObjectTables;
+  /** translucent placement preview (the decor tool) — one reused sprite. */
+  private ghost?: Container;
+  private ghostSprite?: Sprite;
+  /** highlight diamonds for a selected road segment (the road-select tool). */
+  private roadSel?: Graphics;
+  /** footprint "fitting" diamonds for the decor/move target (green=valid, red=invalid). */
+  private footprint?: Graphics;
 
   private handlers: SceneEventHandlers = {};
   private resizeObserver?: ResizeObserver;
@@ -125,6 +139,8 @@ export class Scene {
   private renderScheduled = false;
   private rafId?: number;
   private animContinuous = false;
+  /** When false, drag-pan is suppressed so a paint tool can own the drag. */
+  private panEnabled = true;
   private wheelHandler?: (e: WheelEvent) => void;
   private pointerState: { dragging: boolean; lastX: number; lastY: number } = {
     dragging: false,
@@ -212,8 +228,10 @@ export class Scene {
     this.anim = new AnimationManager({ autoStart: true });
 
     // terrain composited at runtime from the shared tile atlas (no per-map PNG)
+    this.assets = assets;
+    this.terrainCodes = objectData?.terrainCodes;
     this.terrain = new TerrainTilemapLayer();
-    this.terrain.build(map, assets, objectData?.terrainCodes);
+    this.terrain.build(map, assets, this.terrainCodes);
     this.world.addChild(this.terrain.view);
 
     // iso grid overlay, above terrain and below objects
@@ -232,12 +250,14 @@ export class Scene {
     await assets.ensureLoaded(unitKeys);
 
     this.objects = new ObjectLayer();
-    this.objects.build(map, assets, this.anim, objectTypes, {
+    this.objectTypes = objectTypes;
+    this.objectTables = {
       landmarks: objectData?.landmarkFootprints,
       graceFortCodes: objectData?.graceFortCodes,
       graceRaceType: objectData?.graceRaceType,
       unitBoat: objectData?.unitBoat,
-    });
+    };
+    this.objects.build(map, assets, this.anim, objectTypes, this.objectTables);
     this.world.addChild(this.objects.view);
 
     // event-location highlights, drawn on top of everything (editor getZ ~1300)
@@ -267,6 +287,136 @@ export class Scene {
 
     this.updateRenderMode();
     this.requestRender();
+  }
+
+  /**
+   * Re-tile the terrain layer from an edited document (M2 brushes). Lighter than a
+   * full buildScene: only the terrain layer rebuilds; objects/grid/camera untouched.
+   */
+  updateTerrain(map: MapDocument): void {
+    if (!this.terrain || !this.assets) return;
+    this.terrain.build(map, this.assets, this.terrainCodes);
+    this.requestRender();
+  }
+
+  /**
+   * Rebuild the object layer in place from an edited document (a placed/moved/removed
+   * object). ObjectLayer.build() clears itself first and its container keeps its slot
+   * in the world, so z-order vs terrain/overlay is preserved. Call this only on edits
+   * that change objects (placement/move) — not on every terrain brush stroke.
+   */
+  updateObjects(map: MapDocument): void {
+    if (!this.objects || !this.assets || !this.anim) return;
+    this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
+    this.updateRenderMode();
+    this.requestRender();
+  }
+
+  /**
+   * Show (or hide) a translucent placement preview ("ghost") for the decor tool.
+   * `key` is the sprite atlas key (a landmark id / MOMNE id); `footprint` is in cells
+   * so the ghost centres on its footprint like a real object. `valid===false` tints it
+   * red. Pass `key=null` (or no cell) to hide. One Sprite is reused across calls.
+   */
+  setGhost(
+    key: string | null,
+    cell?: CellRef | null,
+    footprint?: { w: number; h: number },
+    valid = true,
+  ): void {
+    if (!this.world || !this.assets) return;
+    if (!key || !cell) {
+      if (this.ghost) this.ghost.visible = false;
+      this.requestRender();
+      return;
+    }
+    let tex = this.assets.resolveTexture(key);
+    if (tex.label === "EMPTY") {
+      const frames = this.assets.resolveAnimation(key);
+      if (frames.length > 0) tex = frames[0]!;
+    }
+    if (tex.label === "EMPTY") {
+      if (this.ghost) this.ghost.visible = false;
+      this.requestRender();
+      return;
+    }
+    if (!this.ghost) {
+      this.ghost = new Container();
+      this.ghost.label = "ghost";
+      this.world.addChild(this.ghost); // added after every layer -> drawn on top
+    }
+    if (!this.ghostSprite) {
+      this.ghostSprite = new Sprite();
+      this.ghostSprite.anchor.set(0.5, 0.5);
+      this.ghostSprite.alpha = 0.6;
+      this.ghost.addChild(this.ghostSprite);
+    }
+    this.ghostSprite.texture = tex;
+    this.ghostSprite.tint = valid ? 0xffffff : 0xff6666;
+    const w = footprint?.w ?? 1;
+    const h = footprint?.h ?? 1;
+    const c = cellToWorld(cell.x + w / 2, cell.y + h / 2);
+    this.ghostSprite.position.set(c.x, c.y);
+    this.ghost.visible = true;
+    this.requestRender();
+  }
+
+  /**
+   * Highlight a selected road segment with translucent iso diamonds over `cells`
+   * (the road-select tool). Pass an empty array to clear. One reused Graphics.
+   */
+  setRoadSelection(cells: readonly CellRef[]): void {
+    if (!this.world) return;
+    if (!this.roadSel) {
+      this.roadSel = new Graphics();
+      this.roadSel.label = "road-selection";
+      this.world.addChild(this.roadSel); // added last -> drawn on top
+    }
+    const g = this.roadSel;
+    g.clear();
+    for (const c of cells) {
+      const p = cellToWorld(c.x, c.y);
+      const cy = p.y + HALF_H;
+      g.poly([p.x, cy - HALF_H, p.x + HALF_W, cy, p.x, cy + HALF_H, p.x - HALF_W, cy]);
+    }
+    if (cells.length) {
+      g.fill({ color: 0x46d0ff, alpha: 0.34 });
+      g.stroke({ color: 0x9fe6ff, alpha: 0.95, width: 1 });
+    }
+    this.requestRender();
+  }
+
+  /**
+   * Footprint "fitting" preview — translucent iso diamonds over the target `cells`,
+   * green when the placement/move is valid, red when not. Empty array clears it.
+   * Works for ANY object (no sprite key needed), so move always shows where it lands.
+   */
+  setFootprint(cells: readonly CellRef[], valid = true): void {
+    if (!this.world) return;
+    if (!this.footprint) {
+      this.footprint = new Graphics();
+      this.footprint.label = "footprint";
+      this.world.addChild(this.footprint);
+    }
+    const g = this.footprint;
+    g.clear();
+    for (const c of cells) {
+      const p = cellToWorld(c.x, c.y);
+      const cy = p.y + HALF_H;
+      g.poly([p.x, cy - HALF_H, p.x + HALF_W, cy, p.x, cy + HALF_H, p.x - HALF_W, cy]);
+    }
+    if (cells.length) {
+      const color = valid ? 0x66ff99 : 0xff6b6b;
+      g.fill({ color, alpha: 0.22 });
+      g.stroke({ color, alpha: 0.95, width: 1.5 });
+    }
+    this.requestRender();
+  }
+
+  /** Enable/disable drag-to-pan (disabled while a paint tool is active). */
+  setPanEnabled(enabled: boolean): void {
+    this.panEnabled = enabled;
+    if (!enabled) this.pointerState.dragging = false;
   }
 
   /** Toggle a logical layer's visibility. */
@@ -470,6 +620,9 @@ export class Scene {
     app.stage.eventMode = "static";
     app.stage.hitArea = app.screen;
     app.stage.on("pointerdown", (e) => {
+      // a paint/edit tool owns the drag (setPanEnabled false) — EXCEPT Ctrl+drag, which
+      // always pans the camera so you can move the map without leaving the active tool.
+      if (!this.panEnabled && !e.ctrlKey) return;
       this.pointerState.dragging = true;
       this.pointerState.lastX = e.global.x;
       this.pointerState.lastY = e.global.y;
@@ -502,6 +655,19 @@ export class Scene {
   }
 
   private teardownLayers(): void {
+    if (this.ghost) {
+      this.ghost.destroy({ children: true });
+      this.ghost = undefined;
+      this.ghostSprite = undefined;
+    }
+    if (this.roadSel) {
+      this.roadSel.destroy();
+      this.roadSel = undefined;
+    }
+    if (this.footprint) {
+      this.footprint.destroy();
+      this.footprint = undefined;
+    }
     if (this.objects && this.anim) this.objects.destroy(this.anim);
     this.overlay?.destroy();
     this.locations?.destroy();

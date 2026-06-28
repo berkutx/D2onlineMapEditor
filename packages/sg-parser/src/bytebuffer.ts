@@ -116,6 +116,24 @@ export function readDefaultInt(
 }
 
 /**
+ * Offset of the int32 value that immediately follows raw ASCII `tag`, scoped to
+ * [from, end). This is `readDefaultInt`'s read position, exposed so the writer can
+ * splice the value in place. Returns `null` when the tag is absent in range.
+ */
+export function tagValueOffset(
+  buf: ByteBuffer,
+  tag: string,
+  from: number,
+  end: number,
+): number | null {
+  const i = buf.indexOf(tag, from);
+  if (i < 0 || i >= end) return null;
+  const at = i + tag.length;
+  if (at + 4 > buf.length) return null;
+  return at;
+}
+
+/**
  * Read a length-prefixed CP1251 string following raw ASCII `tag`, scoped to
  * [from, end). The stored byte length frequently includes a trailing NUL, which
  * we strip. Returns `null` when the tag is not present in range.

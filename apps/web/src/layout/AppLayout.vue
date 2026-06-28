@@ -7,21 +7,86 @@
  * takes over a div and renders the map.
  */
 import { onMounted, onBeforeUnmount } from "vue";
+import { eraseRoadCells } from "@d2/map-edit";
 import { useViewStore } from "../stores/viewStore";
+import { useToolStore } from "../stores/toolStore";
+import { useDecorStore } from "../stores/decorStore";
+import { useEditStore } from "../stores/editStore";
 import { getScene } from "../canvas/sceneHolder";
 import TopMenuBar from "./TopMenuBar.vue";
 import ToolbarPanel from "./ToolbarPanel.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import StatusBar from "./StatusBar.vue";
+import CopilotBar from "./CopilotBar.vue";
+import EditToolsBar from "./EditToolsBar.vue";
+import DecorPalette from "./DecorPalette.vue";
+import ObjectActionBar from "./ObjectActionBar.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
 
 const view = useViewStore();
+const toolStore = useToolStore();
+const decorStore = useDecorStore();
+const editStore = useEditStore();
 
 /** Global view hotkeys (single keys; ignored while typing or with modifiers). */
 function onKey(e: KeyboardEvent): void {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const t = e.target as HTMLElement | null;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  // road-select tool: Delete erases the selected segment, Escape clears it.
+  if (toolStore.tool === "roadsel" && toolStore.roadSel.length) {
+    if (e.key === "Delete" || e.key === "Backspace") {
+      const doc = editStore.liveDoc;
+      if (doc) editStore.commit(eraseRoadCells(doc, toolStore.roadSel));
+      toolStore.setRoadSel([]);
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "Escape") {
+      toolStore.setRoadSel([]);
+      e.preventDefault();
+      return;
+    }
+  }
+  // move tool: Escape drops the carried object without moving it.
+  if (e.key === "Escape" && toolStore.tool === "move" && toolStore.moveId) {
+    toolStore.setMoveId(null);
+    e.preventDefault();
+    return;
+  }
+  // move tool, carrying a re-rollable object: R = random look, [ ] , . = cycle look.
+  if (toolStore.tool === "move" && toolStore.moveId) {
+    const obj = editStore.liveDoc?.objects.find((o) => o.id === toolStore.moveId);
+    const curId = obj ? decorStore.catalogIdOf(obj) : null;
+    if (obj && curId) {
+      let next: string | null = null;
+      if (e.key === "r" || e.key === "R") next = decorStore.randomVariant(curId);
+      else if (e.key === "[" || e.key === "]" || e.key === "," || e.key === ".")
+        next = decorStore.neighbor(curId, e.key === "[" || e.key === "," ? -1 : 1);
+      if (next) {
+        const fields = decorStore.variantPatch(obj, next);
+        if (fields) editStore.commit([{ kind: "patchObject", id: obj.id, fields }]);
+        e.preventDefault();
+        return;
+      }
+    }
+  }
+  // decor tool: cycle the picked variant ([ ] , .) or roll a random look (R).
+  if (toolStore.tool === "decor") {
+    if (e.key === "[" || e.key === "]" || e.key === "," || e.key === ".") {
+      const dir = e.key === "[" || e.key === "," ? -1 : 1;
+      const next = decorStore.neighbor(toolStore.decorId, dir);
+      if (next) toolStore.setDecor(next);
+      e.preventDefault();
+      return;
+    }
+    if (e.key === "r" || e.key === "R") {
+      const next = decorStore.randomVariant(toolStore.decorId);
+      if (next) toolStore.setDecor(next);
+      e.preventDefault();
+      return;
+    }
+  }
   switch (e.key.toLowerCase()) {
     case "t": view.setLayerVisible("terrain", !view.terrainVisible); break;
     case "o": view.setLayerVisible("objects", !view.objectsVisible); break;
@@ -31,6 +96,7 @@ function onKey(e: KeyboardEvent): void {
     case "p": view.toggleObjectPanel(); break;
     case "d": view.toggleDebugOverlay(); break;
     case "f": getScene()?.fitView(); break;
+    case "/": view.focusCopilot(); break;
     default: return;
   }
   e.preventDefault();
@@ -53,8 +119,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <LeftObjectPanel />
       </el-aside>
       <el-main class="app-main">
+        <EditToolsBar />
         <MapCanvasHost />
+        <ObjectActionBar v-if="toolStore.tool === 'move'" />
+        <CopilotBar v-show="view.copilotVisible" />
       </el-main>
+      <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="300px">
+        <DecorPalette />
+      </el-aside>
     </el-container>
     <el-footer class="app-footer" height="28px">
       <StatusBar />
@@ -78,6 +150,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   flex: 0 0 auto;
 }
 .app-aside {
+  padding: 0;
+  overflow: hidden;
+}
+.app-decor {
   padding: 0;
   overflow: hidden;
 }

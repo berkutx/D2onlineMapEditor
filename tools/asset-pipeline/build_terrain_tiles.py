@@ -51,16 +51,24 @@ def _offsets(ts):
 
 
 def base_frames(tiles):
-    """Every distinct base tile as a decode_images.Frame (untrimmed 64x32)."""
+    """Every distinct base tile as a decode_images.Frame (untrimmed 64x32).
+
+    We bake EACH ground variant separately ("T<tid>_<rx>_<ry>_<v>"), each as a
+    PURE single-variant cut. The game varies the variant per 192px source block
+    via MapRegionExtractor::calculateTileIndex (variant_index); a single seed-0
+    bake would tile the same block forever (visible 6x6 repeat). The renderer picks
+    the per-block variant at runtime, so a flat fill no longer repeats."""
     frames = []
     dia = tiles.diamond
     rxs, rys = _offsets(GROUND_TILE)
     for tid, variants in sorted(tiles.base.items()):
-        ex = RegionExtractor(variants, 0)  # ts = 192
-        for rx in rxs:
-            for ry in rys:
-                tile = _diamond_tile(ex.extract(rx, ry), dia)
-                frames.append(Frame("T%d_%d_%d" % (tid, rx, ry), tile, DW, DH, 0, 0, "default"))
+        for vi in range(len(variants)):
+            ex = RegionExtractor([variants[vi]], 0)  # pure variant vi (ts = 192)
+            for rx in rxs:
+                for ry in rys:
+                    tile = _diamond_tile(ex.extract(rx, ry), dia)
+                    frames.append(
+                        Frame("T%d_%d_%d_%d" % (tid, rx, ry, vi), tile, DW, DH, 0, 0, "default"))
     if tiles.water:
         wex = RegionExtractor(tiles.water, 0)  # ts = 128
         wrxs, wrys = _offsets(WATER_TILE)

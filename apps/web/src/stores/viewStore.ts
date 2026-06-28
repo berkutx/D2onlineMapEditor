@@ -43,6 +43,11 @@ export const useViewStore = defineStore("view", () => {
   const objectPanelVisible = ref(bool(p.objectPanelVisible, false));
   /** Debug HUD overlay (FPS / render ms / iso engine). On by default for now. */
   const debugOverlay = ref(bool(p.debugOverlay, true));
+  /** Copilot floating command input. Always shown on load (NOT persisted, so it can't get
+   *  "lost"); toggle for the session via the toolbar / ✕, "/" reveals + focuses it. */
+  const copilotVisible = ref(true);
+  /** Bumped to ask the copilot input to take focus (the "/" hotkey). Not persisted. */
+  const copilotFocusTick = ref(0);
   /** Editor-assist tint overlays — all off by default (opt-in like the editor). */
   const overlayTints = ref<OverlayTints>({
     passable: bool(pt.passable, false),
@@ -82,6 +87,16 @@ export const useViewStore = defineStore("view", () => {
 
   function toggleDebugOverlay(): void {
     debugOverlay.value = !debugOverlay.value;
+  }
+
+  function toggleCopilot(): void {
+    copilotVisible.value = !copilotVisible.value;
+  }
+
+  /** Reveal the copilot input and ask it to take focus ("/" hotkey). */
+  function focusCopilot(): void {
+    copilotVisible.value = true;
+    copilotFocusTick.value++;
   }
 
   function toggleOverlayTint(cat: OverlayTint): void {
@@ -127,6 +142,8 @@ export const useViewStore = defineStore("view", () => {
     animate,
     objectPanelVisible,
     debugOverlay,
+    copilotVisible,
+    copilotFocusTick,
     overlayTints,
     zoom,
     cursorCell,
@@ -136,6 +153,8 @@ export const useViewStore = defineStore("view", () => {
     toggleLocations,
     toggleObjectPanel,
     toggleDebugOverlay,
+    toggleCopilot,
+    focusCopilot,
     toggleOverlayTint,
     setZoom,
     setCursorCell,

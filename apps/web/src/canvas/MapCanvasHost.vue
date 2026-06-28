@@ -14,16 +14,33 @@
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { Scene } from "@d2/pixi-render";
-import type { CameraSnapshot, DebugStats } from "@d2/pixi-render";
-import { worldToCell } from "@d2/pixi-render";
+import type { CameraSnapshot, DebugStats, LandmarkFootprints } from "@d2/pixi-render";
+import { worldToCell, objectFootprint, objectZBase, objectSprites } from "@d2/pixi-render";
+import type { MapObject } from "@d2/map-schema";
+import {
+  terrainBrush,
+  roadBrush,
+  eraseBrush,
+  placeMountainOps,
+  placeLandmarkOps,
+  selectRoadSegment,
+  type BrushKind,
+  type EditOp,
+} from "@d2/map-edit";
 import { useMapStore } from "../stores/mapStore";
 import { useAssetStore } from "../stores/assetStore";
 import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
+import { useToolStore } from "../stores/toolStore";
+import { useEditStore } from "../stores/editStore";
+import { useDecorStore, type DecorEntry } from "../stores/decorStore";
 import { getAssetStore, getScene, setScene, destroyScene } from "./sceneHolder";
 
 const mapStore = useMapStore();
 const assetStore = useAssetStore();
 const viewStore = useViewStore();
+const toolStore = useToolStore();
+const editStore = useEditStore();
+const decorStore = useDecorStore();
 
 const { currentMap } = storeToRefs(mapStore);
 const { manifest } = storeToRefs(assetStore);
@@ -61,6 +78,12 @@ const VISIBLE_OBJECT_TYPES = new Set([
 const mountEl = ref<HTMLDivElement | null>(null);
 const building = ref(false);
 const buildError = ref<string | null>(null);
+/** Landmark footprints (cx,cy) from objectdata.json — for object hit-testing (move tool). */
+let landmarkFootprints: LandmarkFootprints | undefined;
+/** objectdata.json sprite-key tables (race codes / boats) — for deriving a move ghost sprite. */
+let spriteTables:
+  | { graceFortCodes?: Record<number, string>; graceRaceType?: Record<number, number>; unitBoat?: Record<string, number> }
+  | undefined;
 
 // Debug HUD: poll the Scene's live perf/engine numbers ~4x/s (setInterval works
 // even when the page is backgrounded; rAF would not).
@@ -87,7 +110,14 @@ async function rebuild(): Promise<void> {
     const objectData = await (
       await fetch(`/assets/objectdata.json`, { cache: "no-store" })
     ).json();
+    landmarkFootprints = objectData?.landmarkFootprints;
+    spriteTables = objectData;
     await scene.buildScene(doc, man, getAssetStore(), VISIBLE_OBJECT_TYPES, objectData);
+    // editor: this map's project + base doc (liveDoc = base + persisted edits, which
+    // the rev watcher re-tiles onto the freshly-built terrain).
+    editStore.ensureProject(id);
+    editStore.setBaseDoc(doc);
+    scene.setPanEnabled(toolStore.tool === "select");
     // apply the current view state to the freshly-built scene
     scene.setLayerVisibility("terrain", terrainVisible.value);
     scene.setLayerVisibility("objects", objectsVisible.value);
@@ -129,7 +159,11 @@ onMounted(async () => {
   if (canvas) {
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerleave", onPointerLeave);
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointerup", onPointerUp);
   }
+  // make the catalog ready before the user opens the decor palette
+  void decorStore.load();
 
   // poll debug stats for the HUD
   debugTimer = window.setInterval(() => {
@@ -140,29 +174,322 @@ onMounted(async () => {
   if (currentMap.value && manifest.value) await rebuild();
 });
 
-function onPointerMove(e: PointerEvent): void {
+/** Map a pointer event to a cell, or null when off-map. */
+function cellFromEvent(e: PointerEvent): { x: number; y: number } | null {
   const scene = getScene();
   const cam = scene?.getCamera();
   const doc = currentMap.value;
   const canvas = scene?.canvas;
-  if (!cam || !doc || !canvas) return;
+  if (!cam || !doc || !canvas) return null;
   const rect = canvas.getBoundingClientRect();
   const world = cam.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
   const frac = worldToCell(world.x, world.y);
-  const cx = Math.floor(frac.x);
-  const cy = Math.floor(frac.y);
-  if (cx >= 0 && cy >= 0 && cx < doc.size && cy < doc.size) {
-    viewStore.setCursorCell({ x: cx, y: cy });
-    scene?.setCursorCell({ x: cx, y: cy });
-  } else {
-    viewStore.setCursorCell(null);
-    scene?.setCursorCell(null);
+  const x = Math.floor(frac.x);
+  const y = Math.floor(frac.y);
+  return x >= 0 && y >= 0 && x < doc.size && y < doc.size ? { x, y } : null;
+}
+
+// --- terrain painting --------------------------------------------------------
+let painting = false;
+let strokeOps: EditOp[] = [];
+/** Last hovered cell (null = off-map); used to refresh the decor ghost on cycle. */
+let lastCell: { x: number; y: number } | null = null;
+
+// --- decoration placement (decor tool) ---------------------------------------
+/** Footprint in cells. MOMNE mountains are square (verified across all game maps),
+ *  with w encoded in the id (chars 5-6); landmarks use the catalog cx/cy. */
+function decorFootprint(entry: DecorEntry): { w: number; h: number } {
+  if (entry.id.startsWith("MOMNE")) {
+    const w = parseInt(entry.id.slice(5, 7), 10) || 1;
+    return { w, h: w };
+  }
+  return { w: entry.cx || 1, h: entry.cy || 1 };
+}
+
+/** EditOps to place a decoration at (cx,cy): MidMountains for MOMNE, else a landmark. */
+function decorPlaceOps(entry: DecorEntry, cx: number, cy: number): EditOp[] {
+  const doc = editStore.liveDoc;
+  if (!doc) return [];
+  if (entry.id.startsWith("MOMNE")) {
+    const w = parseInt(entry.id.slice(5, 7), 10) || 1;
+    const image = parseInt(entry.id.slice(7, 9), 10) || 0;
+    return placeMountainOps(doc, cx, cy, w, w, image);
+  }
+  return placeLandmarkOps(doc, cx, cy, entry.id);
+}
+
+// --- object move (move tool) -------------------------------------------------
+/** Is the cell water (ground bits == 3)? */
+function isWaterCell(x: number, y: number): boolean {
+  const doc = editStore.liveDoc;
+  if (!doc) return false;
+  const c = doc.terrain.cells[y * doc.size + x];
+  return c ? ((c.value >> 3) & 7) === 3 : false;
+}
+
+/** The primary sprite atlas key for an object's ghost — derived the SAME way the renderer
+ *  draws it (objectSprites accessor port), so a chest/treasure/ruin/site/fort all preview.
+ *  Returns null for non-drawables (garrisoned stack) or unresolved data — footprint still shows. */
+function objectGhostKey(obj: MapObject, cell: { x: number; y: number } | null): string | null {
+  try {
+    const subs = objectSprites(obj, {
+      graceFortCodes: spriteTables?.graceFortCodes,
+      graceRaceType: spriteTables?.graceRaceType,
+      unitBoat: spriteTables?.unitBoat,
+      water: cell ? isWaterCell(cell.x, cell.y) : false,
+    });
+    return subs.length ? subs[0]!.key : null;
+  } catch {
+    return null; // missing accessor data -> footprint-only preview
   }
 }
 
+/** Topmost rendered object whose footprint covers (cx,cy), for the move tool's pick. */
+function objectAtCell(cx: number, cy: number): MapObject | null {
+  const doc = editStore.liveDoc;
+  if (!doc) return null;
+  let best: MapObject | null = null;
+  let bestZ = -Infinity;
+  for (const o of doc.objects) {
+    if (!VISIBLE_OBJECT_TYPES.has(o.type)) continue;
+    const { w, h } = objectFootprint(o, landmarkFootprints);
+    if (cx >= o.pos.x && cx < o.pos.x + w && cy >= o.pos.y && cy < o.pos.y + h) {
+      const z = objectZBase(o) + o.pos.x + o.pos.y + h;
+      if (z >= bestZ) {
+        bestZ = z;
+        best = o;
+      }
+    }
+  }
+  return best;
+}
+
+/** The in-bounds cells of a w×h footprint anchored at (cx,cy). */
+function footprintCells(cx: number, cy: number, w: number, h: number): { x: number; y: number }[] {
+  const n = editStore.liveDoc?.size ?? currentMap.value?.size ?? 0;
+  const out: { x: number; y: number }[] = [];
+  for (let y = cy; y < cy + h; y++)
+    for (let x = cx; x < cx + w; x++) if (x >= 0 && y >= 0 && x < n && y < n) out.push({ x, y });
+  return out;
+}
+
+/** Clear both placement previews (sprite ghost + footprint diamonds). */
+function clearPreview(): void {
+  const s = getScene();
+  s?.setGhost(null);
+  s?.setFootprint([]);
+}
+
+// --- placement validity (ported from d2mapeditorqt PlaceObjectTool/ObjectMoveTool) ----
+// Rule: a footprint is valid iff every cell is in bounds AND not occupied by ANOTHER
+// object's footprint (terrain — water/mountain/forest/roads — never blocks). Occupancy is
+// the union of all object footprints, cached and rebuilt only when objects change.
+let occRev = -1;
+let occMap = new Map<string, Set<string>>();
+function occupancy(): Map<string, Set<string>> {
+  const doc = editStore.liveDoc;
+  if (!doc) return occMap;
+  if (occRev === editStore.objectsRev) return occMap;
+  const m = new Map<string, Set<string>>();
+  const n = doc.size;
+  for (const o of doc.objects) {
+    // editor occupancy (objBinging) excludes locations (separate locationsBinging) and
+    // units (leaders inside stacks, not independently grid-placed).
+    if (o.type === "location" || o.type === "unit") continue;
+    const { w, h } = objectFootprint(o, landmarkFootprints);
+    for (let y = o.pos.y; y < o.pos.y + h; y++)
+      for (let x = o.pos.x; x < o.pos.x + w; x++) {
+        if (x < 0 || y < 0 || x >= n || y >= n) continue;
+        const k = `${x},${y}`;
+        let s = m.get(k);
+        if (!s) {
+          s = new Set();
+          m.set(k, s);
+        }
+        s.add(o.id);
+      }
+  }
+  occMap = m;
+  occRev = editStore.objectsRev;
+  return occMap;
+}
+
+/** Can a w×h footprint be placed at (cx,cy)? Bounds + no other object occupies it
+ *  (`excludeId` = the object being moved, which may overlap its own cells). */
+function canPlaceFootprint(cx: number, cy: number, w: number, h: number, excludeId?: string): boolean {
+  const doc = editStore.liveDoc;
+  if (!doc || w <= 0 || h <= 0) return false;
+  const n = doc.size;
+  const occ = occupancy();
+  for (let y = cy; y < cy + h; y++)
+    for (let x = cx; x < cx + w; x++) {
+      if (x < 0 || y < 0 || x >= n || y >= n) return false;
+      const s = occ.get(`${x},${y}`);
+      if (s) for (const id of s) if (id !== excludeId) return false;
+    }
+  return true;
+}
+
+/**
+ * Show/refresh the placement/move preview at `cell`: a translucent sprite ghost (when a
+ * sprite key is derivable) PLUS a footprint "fitting" outline (always — so even a camp /
+ * fort / site shows exactly where it will land, green=valid, red=out of bounds).
+ */
+function refreshGhost(cell: { x: number; y: number } | null): void {
+  const s = getScene();
+  if (!s) return;
+  const doc = editStore.liveDoc;
+  if (toolStore.tool === "decor") {
+    const entry = decorStore.get(toolStore.decorId);
+    if (!entry || !cell || !doc) return clearPreview();
+    const { w, h } = decorFootprint(entry);
+    const valid = canPlaceFootprint(cell.x, cell.y, w, h);
+    s.setGhost(entry.id, cell, { w, h }, valid);
+    s.setFootprint(footprintCells(cell.x, cell.y, w, h), valid);
+    return;
+  }
+  if (toolStore.tool === "move" && toolStore.moveId) {
+    const obj = doc?.objects.find((o) => o.id === toolStore.moveId);
+    if (!obj || !cell || !doc) return clearPreview();
+    const { w, h } = objectFootprint(obj, landmarkFootprints);
+    const valid = canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined);
+    s.setGhost(objectGhostKey(obj, cell), cell, { w, h }, valid); // null key => footprint only
+    s.setFootprint(footprintCells(cell.x, cell.y, w, h), valid);
+    return;
+  }
+  clearPreview();
+}
+
+function brushKind(): BrushKind | null {
+  switch (toolStore.tool) {
+    case "terrain": return { type: "terrain", terrain: toolStore.terrainId };
+    case "water": return { type: "water" };
+    case "forest": return { type: "forest" };
+    case "erase": return { type: "erase" };
+    default: return null;
+  }
+}
+
+/** Apply the brush at a cell against the LIVE doc (preview); accumulate stroke ops. */
+function paintAt(cx: number, cy: number): void {
+  const doc = editStore.liveDoc;
+  if (!doc) return;
+  let ops: EditOp[];
+  if (toolStore.tool === "road") {
+    ops = roadBrush(doc, cx, cy); // connectivity-based, ignores brush size
+  } else if (toolStore.tool === "erase") {
+    ops = eraseBrush(doc, cx, cy, toolStore.size); // clears terrain + roads (+ neighbour recompute)
+  } else {
+    const kind = brushKind();
+    if (!kind) return;
+    ops = terrainBrush(doc, cx, cy, toolStore.size, kind);
+  }
+  if (ops.length) {
+    editStore.applyPreview(ops);
+    strokeOps.push(...ops);
+  }
+}
+
+// road-select: re-clicking the same anchor cell bumps the level (segment -> strand -> net).
+let roadAnchor: { x: number; y: number } | null = null;
+let roadLevel = 0;
+
+function onPointerDown(e: PointerEvent): void {
+  if (e.ctrlKey) return; // Ctrl+drag pans the camera (handled by Scene), not a tool action
+  // road-select tool: click a road to select its segment; click the same cell to grow.
+  if (toolStore.tool === "roadsel") {
+    const cell = cellFromEvent(e);
+    const doc = editStore.liveDoc;
+    if (!cell || !doc) return;
+    if (roadAnchor && roadAnchor.x === cell.x && roadAnchor.y === cell.y) {
+      roadLevel = Math.min(roadLevel + 1, 2);
+    } else {
+      roadAnchor = cell;
+      roadLevel = 0;
+    }
+    const sel = selectRoadSegment(doc, cell.x, cell.y, roadLevel);
+    if (sel.length === 0) roadAnchor = null;
+    toolStore.setRoadSel(sel);
+    return;
+  }
+  // decor tool: a single click stamps the picked decoration (no drag stroke).
+  if (toolStore.tool === "decor") {
+    const cell = cellFromEvent(e);
+    const entry = decorStore.get(toolStore.decorId);
+    if (cell && entry && editStore.liveDoc) {
+      const { w, h } = decorFootprint(entry);
+      if (canPlaceFootprint(cell.x, cell.y, w, h)) {
+        const ops = decorPlaceOps(entry, cell.x, cell.y);
+        if (ops.length) editStore.commit(ops); // objectsRev watcher re-renders objects
+      }
+    }
+    return;
+  }
+  // move tool: 1st click picks the topmost object; 2nd click drops it at the new cell.
+  if (toolStore.tool === "move") {
+    const cell = cellFromEvent(e);
+    if (!cell) return;
+    if (!toolStore.moveId) {
+      const hit = objectAtCell(cell.x, cell.y);
+      if (hit) {
+        toolStore.setMoveId(hit.id);
+        refreshGhost(cell);
+      }
+    } else {
+      const obj = editStore.liveDoc?.objects.find((o) => o.id === toolStore.moveId);
+      if (obj) {
+        const { w, h } = objectFootprint(obj, landmarkFootprints);
+        // invalid drop (off-map / onto another object) -> keep carrying, like the editor
+        if (!canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined)) return;
+        if (obj.pos.x !== cell.x || obj.pos.y !== cell.y) {
+          editStore.commit([{ kind: "moveObject", id: toolStore.moveId, x: cell.x, y: cell.y }]);
+        }
+      }
+      toolStore.setMoveId(null);
+      clearPreview();
+    }
+    return;
+  }
+  if (toolStore.tool === "select") return;
+  const cell = cellFromEvent(e);
+  if (!cell) return;
+  painting = true;
+  strokeOps = [];
+  paintAt(cell.x, cell.y);
+  getScene()?.canvas?.setPointerCapture(e.pointerId);
+}
+
+function onPointerUp(e: PointerEvent): void {
+  if (!painting) return;
+  painting = false;
+  if (strokeOps.length) editStore.commitStroke(strokeOps);
+  strokeOps = [];
+  try {
+    getScene()?.canvas?.releasePointerCapture(e.pointerId);
+  } catch {
+    /* pointer already released */
+  }
+}
+
+function onPointerMove(e: PointerEvent): void {
+  const cell = cellFromEvent(e);
+  lastCell = cell;
+  if (cell) {
+    viewStore.setCursorCell({ x: cell.x, y: cell.y });
+    getScene()?.setCursorCell({ x: cell.x, y: cell.y });
+    if (painting) paintAt(cell.x, cell.y);
+  } else {
+    viewStore.setCursorCell(null);
+    getScene()?.setCursorCell(null);
+  }
+  if (toolStore.tool === "decor" || toolStore.tool === "move") refreshGhost(cell);
+}
+
 function onPointerLeave(): void {
+  lastCell = null;
   viewStore.setCursorCell(null);
   getScene()?.setCursorCell(null);
+  clearPreview();
 }
 
 onBeforeUnmount(() => {
@@ -171,6 +498,8 @@ onBeforeUnmount(() => {
   if (canvas) {
     canvas.removeEventListener("pointermove", onPointerMove);
     canvas.removeEventListener("pointerleave", onPointerLeave);
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointerup", onPointerUp);
   }
   destroyScene();
 });
@@ -179,6 +508,70 @@ onBeforeUnmount(() => {
 watch([currentMap, manifest], () => {
   void rebuild();
 });
+
+// Re-tile the terrain after an edit (coalesced to one rebuild per frame).
+let retileScheduled = false;
+watch(
+  () => editStore.rev,
+  () => {
+    if (retileScheduled) return;
+    retileScheduled = true;
+    requestAnimationFrame(() => {
+      retileScheduled = false;
+      const s = getScene();
+      if (s && editStore.liveDoc) s.updateTerrain(editStore.liveDoc);
+    });
+  },
+);
+
+// Re-render the OBJECT layer after an object edit (place/move/delete/undo/redo),
+// coalesced to one rebuild per frame. Terrain strokes don't bump objectsRev.
+let objRebuildScheduled = false;
+watch(
+  () => editStore.objectsRev,
+  () => {
+    if (objRebuildScheduled) return;
+    objRebuildScheduled = true;
+    requestAnimationFrame(() => {
+      objRebuildScheduled = false;
+      const s = getScene();
+      if (s && editStore.liveDoc) s.updateObjects(editStore.liveDoc);
+    });
+  },
+);
+
+// A paint tool owns the drag; "select" restores camera pan. The decor tool also owns
+// the drag (no pan) and clears its ghost when deselected.
+watch(
+  () => toolStore.tool,
+  (t, prev) => {
+    const s = getScene();
+    s?.setPanEnabled(t === "select");
+    if (prev === "move") toolStore.setMoveId(null); // leaving move drops the carry
+    if (prev === "roadsel") {
+      toolStore.setRoadSel([]); // leaving road-select clears the highlight
+      roadAnchor = null;
+      roadLevel = 0;
+    }
+    if (t === "decor" || t === "move") refreshGhost(lastCell);
+    else clearPreview();
+  },
+);
+
+// Mirror the road-segment selection onto the Scene highlight.
+watch(
+  () => toolStore.roadSel,
+  (cells) => getScene()?.setRoadSelection(cells),
+  { deep: true },
+);
+
+// Refresh the ghost when the picked decoration or carried object changes.
+watch(
+  () => [toolStore.decorId, toolStore.moveId],
+  () => {
+    if (toolStore.tool === "decor" || toolStore.tool === "move") refreshGhost(lastCell);
+  },
+);
 
 // Imperatively reflect layer/animation toggles onto the live Scene.
 watch(terrainVisible, (v) => getScene()?.setLayerVisibility("terrain", v));

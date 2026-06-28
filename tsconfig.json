@@ -5,6 +5,7 @@
     { "path": "packages/asset-manifest" },
     { "path": "packages/socket-contract" },
     { "path": "packages/sg-parser" },
+    { "path": "packages/map-edit" },
     { "path": "packages/pixi-render" }
   ]
 }

@@ -110,6 +110,20 @@ export class MapStore {
     return { doc, etag, mtimeMs: st.mtimeMs };
   }
 
+  /**
+   * Read the original `.sg` bytes for an id (the editor's patch base). Not cached
+   * — the writer needs a fresh, unparsed buffer. Returns undefined for unknown ids.
+   */
+  async getRawBytes(
+    id: string,
+  ): Promise<{ bytes: Uint8Array; etag: string; mtimeMs: number } | undefined> {
+    const rec = await this.resolve(id);
+    if (!rec) return undefined;
+    const st = await stat(rec.realPath);
+    const bytes = new Uint8Array(await readFile(rec.realPath));
+    return { bytes, etag: etagFor(id, st.mtimeMs), mtimeMs: st.mtimeMs };
+  }
+
   /** Cheap header-derived meta for an id (uses the full parse cache if warm). */
   async getMeta(id: string): Promise<MapMeta | undefined> {
     const loaded = await this.getMap(id);

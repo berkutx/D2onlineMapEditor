@@ -1,0 +1,30 @@
+{
+  "name": "@d2/map-edit",
+  "version": "0.1.0",
+  "description": "Editor model: EditOp application, terrain bits, relations, project (diff/undo) format, and the byte-writer + semantic round-trip bridge",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "@d2/map-schema": "workspace:*",
+    "@d2/socket-contract": "workspace:*",
+    "@d2/sg-parser": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

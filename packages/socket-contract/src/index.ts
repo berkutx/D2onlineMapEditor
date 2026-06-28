@@ -1,4 +1,4 @@
-export { ScenarioEntry, MapMeta, REST } from "./rest.js";
+export { ScenarioEntry, MapMeta, ValidationReport, REST } from "./rest.js";
 export { EditOp, OpAck } from "./ops.js";
 export { UserPresence } from "./presence.js";
 export {

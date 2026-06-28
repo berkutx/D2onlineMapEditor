@@ -18,6 +18,7 @@
     "socket.io": "^4.8.1",
     "@d2/map-schema": "workspace:*",
     "@d2/sg-parser": "workspace:*",
+    "@d2/map-edit": "workspace:*",
     "@d2/socket-contract": "workspace:*"
   },
   "devDependencies": {

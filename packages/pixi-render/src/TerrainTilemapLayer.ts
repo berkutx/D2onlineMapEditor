@@ -16,8 +16,14 @@
  * Touches `pixi.js` + `@pixi/tilemap` -> COMPILE-ONLY under vitest.
  */
 import { Container, Sprite } from "pixi.js";
-import { CompositeTilemap } from "@pixi/tilemap";
+import { CompositeTilemap, settings as tilemapSettings } from "@pixi/tilemap";
 import type { MapDocument } from "@d2/map-schema";
+
+// A single tilemap layer uses a 16-bit index buffer by default -> max 16383 tiles.
+// Large maps exceed that (144x144 = 20736 base tiles) and the tail (bottom iso rows)
+// silently fails to draw. Enable 32-bit indices so one layer holds the whole map.
+// Must be set before the renderer initializes (module load runs before app.init()).
+tilemapSettings.use32bitIndex = true;
 import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
 import type { AssetStore } from "./AssetStore.js";
 
@@ -28,6 +34,50 @@ const pad = (n: number, w: number): string => String(n).padStart(w, "0");
 
 /** Lterrain id -> 2-letter terrain race code (for the forest/tree sprite key). */
 export type TerrainCodes = Record<number, string>;
+
+/**
+ * std::mt19937 + MapRegionExtractor::calculateTileIndex, ported from the asset
+ * pipeline (compose_terrain.variant_index). Picks which ground VARIANT a 192px
+ * source block uses, so a flat fill varies per block instead of repeating 6x6.
+ * MSVC uniform_int reduction: engine_output % n with single-bucket rejection.
+ */
+function mt19937(seed: number): () => number {
+  const mt = new Uint32Array(624);
+  mt[0] = seed >>> 0;
+  for (let i = 1; i < 624; i++) {
+    const prev = mt[i - 1]! ^ (mt[i - 1]! >>> 30);
+    mt[i] = (Math.imul(1812433253, prev) + i) >>> 0;
+  }
+  let idx = 624;
+  return () => {
+    if (idx >= 624) {
+      for (let i = 0; i < 624; i++) {
+        const y = (mt[i]! & 0x80000000) + (mt[(i + 1) % 624]! & 0x7fffffff);
+        let v = mt[(i + 397) % 624]! ^ (y >>> 1);
+        if (y & 1) v ^= 0x9908b0df;
+        mt[i] = v >>> 0;
+      }
+      idx = 0;
+    }
+    let y = mt[idx++]!;
+    y ^= y >>> 11;
+    y ^= (y << 7) & 0x9d2c5680;
+    y ^= (y << 15) & 0xefc60000;
+    y ^= y >>> 18;
+    return y >>> 0;
+  };
+}
+
+const VAR_MASK = 0xffffffff;
+function variantIndex(seed: number, tx: number, ty: number, n: number): number {
+  if (n <= 1) return 0;
+  const s = (seed + Math.imul(tx, 73856093) + Math.imul(ty, 19349663)) >>> 0;
+  const next = mt19937(s);
+  for (;;) {
+    const ret = next();
+    if (Math.floor(ret / n) < Math.floor(VAR_MASK / n) || VAR_MASK % n === n - 1) return ret % n;
+  }
+}
 
 /** orthogonal neighbours: [dx, dy, maskType] (W/N/E/S). */
 const ORTHO: ReadonlyArray<readonly [number, number, number]> = [
@@ -49,6 +99,8 @@ export class TerrainTilemapLayer {
   private readonly missing = new Set<string>();
   /** cached variant counts per mask key ("E<mt>" / "W<type>"), discovered from the atlas. */
   private readonly varCount = new Map<string, number>();
+  /** cached base-ground variant count per terrain id (discovered from the atlas). */
+  private readonly baseVar = new Map<number, number>();
 
   private assets!: AssetStore;
   private n = 0;
@@ -69,6 +121,7 @@ export class TerrainTilemapLayer {
     this.treeLayer.removeChildren().forEach((c) => c.destroy());
     this.missing.clear();
     this.varCount.clear();
+    this.baseVar.clear();
     const n = (this.n = doc.size);
     const cells = doc.terrain.cells;
     this.val = new Int32Array(n * n);
@@ -128,6 +181,16 @@ export class TerrainTilemapLayer {
     this.varCount.set(k, c);
     return c;
   }
+  /** number of base-ground variants for a terrain id (global; discovered once, cached). */
+  private baseVarCount(tid: number, rx: number, ry: number): number {
+    const cached = this.baseVar.get(tid);
+    if (cached !== undefined) return cached;
+    let c = 0;
+    while (this.resolves(`T${tid}_${rx}_${ry}_${c}`)) c++;
+    this.baseVar.set(tid, c);
+    return c;
+  }
+
   private waCount(type: number): number {
     const k = `W${type}`;
     const cached = this.varCount.get(k);
@@ -141,9 +204,21 @@ export class TerrainTilemapLayer {
   private placeBase(x: number, y: number, v: number): void {
     const nx = (this.n + x - y - 1) * HALF_W;
     const ny = (x + y) * HALF_H;
-    const key = this.isWater(v)
-      ? `TW_${nx % TS_WATER}_${ny % TS_WATER}`
-      : `T${v & 7}_${nx % TS_LAND}_${ny % TS_LAND}`;
+    let key: string;
+    if (this.isWater(v)) {
+      key = `TW_${nx % TS_WATER}_${ny % TS_WATER}`;
+    } else {
+      const tid = v & 7;
+      const rx = nx % TS_LAND;
+      const ry = ny % TS_LAND;
+      // pick the ground variant per 192px source block (matches the game; breaks the
+      // flat-fill 6x6 repeat). Variant count is discovered from the atlas per terrain.
+      const nVar = this.baseVarCount(tid, rx, ry);
+      const vi = nVar > 1
+        ? variantIndex(0, Math.floor(nx / TS_LAND), Math.floor(ny / TS_LAND), nVar)
+        : 0;
+      key = `T${tid}_${rx}_${ry}_${vi}`;
+    }
     const tex = this.assets.resolveTexture(key);
     if (tex.label === "EMPTY") {
       this.missing.add(key);

@@ -21,6 +21,7 @@
     "@d2/map-schema": "workspace:*",
     "@d2/asset-manifest": "workspace:*",
     "@d2/socket-contract": "workspace:*",
+    "@d2/map-edit": "workspace:*",
     "@d2/pixi-render": "workspace:*"
   },
   "devDependencies": {

@@ -1,0 +1,127 @@
+<script setup lang="ts">
+/**
+ * ObjectActionBar — a light floating panel shown while the Move tool is carrying an
+ * object, for RE-ROLLING its look (keeping its footprint), like the game's "change
+ * appearance". 🎲 picks a random variant of the same group; the strip picks a specific
+ * one; R / [ ] also work from the keyboard (AppLayout). Drops a `patchObject` commit.
+ * Only appears for re-rollable objects (landmarks / mountains with >1 variant).
+ */
+import { computed } from "vue";
+import { Refresh } from "@element-plus/icons-vue";
+import { useToolStore } from "../stores/toolStore";
+import { useEditStore } from "../stores/editStore";
+import { useDecorStore } from "../stores/decorStore";
+import DecorThumb from "./DecorThumb.vue";
+
+const toolStore = useToolStore();
+const editStore = useEditStore();
+const decorStore = useDecorStore();
+
+const carried = computed(() =>
+  toolStore.moveId ? editStore.liveDoc?.objects.find((o) => o.id === toolStore.moveId) ?? null : null,
+);
+const curId = computed(() => (carried.value ? decorStore.catalogIdOf(carried.value) : null));
+const group = computed(() => decorStore.groupOf(curId.value));
+const reRollable = computed(() => !!group.value && group.value.variants.length > 1);
+
+function reroll(variantId: string): void {
+  const obj = carried.value;
+  if (!obj) return;
+  const fields = decorStore.variantPatch(obj, variantId);
+  if (fields) editStore.commit([{ kind: "patchObject", id: obj.id, fields }]);
+}
+function random(): void {
+  const next = decorStore.randomVariant(curId.value);
+  if (next) reroll(next);
+}
+</script>
+
+<template>
+  <div v-if="carried && reRollable" class="obj-actions">
+    <DecorThumb :thumb="decorStore.get(curId)?.thumb ?? group!.rep.thumb" :size="40" />
+    <div class="oa-info">
+      <div class="oa-name">{{ group!.label }}</div>
+      <div class="oa-hint">Облик · R — случайный · [ ] — листать</div>
+    </div>
+    <el-button class="oa-roll" size="small" :icon="Refresh" circle title="Случайный облик (R)" @click="random()" />
+    <el-scrollbar class="oa-strip">
+      <div class="oa-row">
+        <button
+          v-for="v in group!.variants"
+          :key="v.id"
+          type="button"
+          class="oa-cell"
+          :class="{ sel: v.id === curId }"
+          :title="v.desc_en"
+          @click="reroll(v.id)"
+        >
+          <DecorThumb :thumb="v.thumb" :size="30" />
+        </button>
+      </div>
+    </el-scrollbar>
+  </div>
+</template>
+
+<style scoped>
+.obj-actions {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  max-width: min(640px, 92%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--el-bg-color) 70%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid color-mix(in srgb, var(--el-border-color) 55%, transparent);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+}
+.oa-info {
+  min-width: 0;
+}
+.oa-name {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.oa-hint {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+.oa-roll {
+  flex: 0 0 auto;
+}
+.oa-strip {
+  flex: 1;
+  min-width: 0;
+  max-width: 360px;
+}
+.oa-row {
+  display: flex;
+  gap: 4px;
+  padding-bottom: 4px;
+}
+.oa-cell {
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: repeating-conic-gradient(var(--el-fill-color) 0% 25%, transparent 0% 50%) 0 / 12px 12px;
+  cursor: pointer;
+}
+.oa-cell:hover {
+  border-color: var(--el-border-color);
+}
+.oa-cell.sel {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 2px var(--el-color-primary-light-7);
+}
+</style>

@@ -6,14 +6,14 @@
  */
 import { storeToRefs } from "pinia";
 import {
-  Picture, Box, Grid, Location, VideoPlay, Menu, Monitor,
+  Picture, Box, Grid, Location, VideoPlay, Menu, Monitor, MagicStick,
 } from "@element-plus/icons-vue";
 import { useViewStore } from "../stores/viewStore";
 
 const view = useViewStore();
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
-  animate, objectPanelVisible, debugOverlay,
+  animate, objectPanelVisible, debugOverlay, copilotVisible,
 } = storeToRefs(view);
 
 const tools = [
@@ -24,6 +24,7 @@ const tools = [
   { label: "Animation", key: "A", icon: VideoPlay, active: animate, toggle: () => view.toggleAnimate() },
   { label: "Objects panel", key: "P", icon: Menu, active: objectPanelVisible, toggle: () => view.toggleObjectPanel() },
   { label: "Debug HUD", key: "D", icon: Monitor, active: debugOverlay, toggle: () => view.toggleDebugOverlay() },
+  { label: "Copilot", key: "/", icon: MagicStick, active: copilotVisible, toggle: () => view.toggleCopilot() },
 ];
 </script>
 

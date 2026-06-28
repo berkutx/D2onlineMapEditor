@@ -23,6 +23,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@d2/map-edit':
+        specifier: workspace:*
+        version: link:../../packages/map-edit
       '@d2/map-schema':
         specifier: workspace:*
         version: link:../../packages/map-schema
@@ -60,6 +63,9 @@ importers:
       '@d2/asset-manifest':
         specifier: workspace:*
         version: link:../../packages/asset-manifest
+      '@d2/map-edit':
+        specifier: workspace:*
+        version: link:../../packages/map-edit
       '@d2/map-schema':
         specifier: workspace:*
         version: link:../../packages/map-schema
@@ -116,6 +122,25 @@ importers:
       zod-to-json-schema:
         specifier: ^3.23.5
         version: 3.25.2(zod@3.25.76)
+
+  packages/map-edit:
+    dependencies:
+      '@d2/map-schema':
+        specifier: workspace:*
+        version: link:../map-schema
+      '@d2/sg-parser':
+        specifier: workspace:*
+        version: link:../sg-parser
+      '@d2/socket-contract':
+        specifier: workspace:*
+        version: link:../socket-contract
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
 
   packages/map-schema:
     dependencies:

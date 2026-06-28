@@ -5,6 +5,9 @@ dist/
 coverage/
 *.log
 
+# runtime data (server uploads / temp maps)
+var/
+
 # generated assets (large; regenerate via tools/asset-pipeline)
 public/assets/
 tools/asset-pipeline/spikes/out/
