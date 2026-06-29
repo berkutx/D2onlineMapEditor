@@ -67,6 +67,9 @@ interface Accumulated {
   subraceBanners: Map<number, number>;
   /** MidItem instance id -> ITEM_TYPE global template id (for chest item resolution). */
   itemInstances: Record<string, string>;
+  /** MidUnit instance id -> {impl Gunit id, level, hp} (for garrison + stack-leader resolution).
+   *  Units are NOT placed objects (they live inside stacks/forts), so they stay out of objects. */
+  unitInstances: Record<string, { implId?: string; level?: number; hp?: number }>;
 }
 
 /** Single-object readers keyed by TypeName. */
@@ -85,7 +88,6 @@ const SINGLE_READERS: Record<
   MidCrystal: readCrystal,
   MidLocation: readLocation,
   MidLandmark: readLandmark,
-  MidUnit: readUnit,
   MidBag: readTreasure,
   MidRod: readRod,
   MidTomb: readTomb,
@@ -137,6 +139,13 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       if (type) acc.itemInstances[obj.id] = type;
       return;
     }
+    case "MidUnit": {
+      // a scenario unit instance (inside a stack/fort, not a placed object). Collect its
+      // impl/level/hp for garrison + stack-leader resolution; do NOT add to objects.
+      const u = readUnit(buf, obj);
+      if (u.type === "unit") acc.unitInstances[obj.id] = { implId: u.implId, level: u.level, hp: u.hp };
+      return;
+    }
     default: {
       const reader = SINGLE_READERS[obj.typeName];
       acc.objects.push(reader ? reader(buf, obj) : readGeneric(buf, obj));
@@ -175,6 +184,7 @@ export function assembleDocument(
     roads: [],
     subraceBanners: new Map(),
     itemInstances: {},
+    unitInstances: {},
   };
 
   for (const obj of iterateObjects(buf)) consume(buf, obj, acc);
@@ -183,8 +193,8 @@ export function assembleDocument(
   // (a Gunit id like G000UU7624). The editor's stack sprite is leaderImpl + "STOP" +
   // facing (StackObjectAccessor), so the renderer needs the impl on the stack itself.
   const unitImpl = new Map<string, string>();
-  for (const o of acc.objects) {
-    if (o.type === "unit" && o.implId) unitImpl.set(o.id, o.implId);
+  for (const [id, u] of Object.entries(acc.unitInstances)) {
+    if (u.implId) unitImpl.set(id, u.implId);
   }
   for (const o of acc.objects) {
     if (o.type === "stack" && o.leaderUnitId) {
@@ -196,21 +206,25 @@ export function assembleDocument(
   // Resolve fort garrisons: the fort's embedded UNIT_0..5/POS_0..5 (MidUnit instances) →
   // global Gunit ids by formation cell; if the fort uses the legacy linked form (embedded
   // empty + STACK set), source from that MidStack's formation instead.
-  const stackById = new Map<string, MapObject>();
-  for (const o of acc.objects) if (o.type === "stack") stackById.set(o.id, o);
+  const stackGarrison = new Map<string, (string | null)[]>(); // stack id -> by-cell instance ids
+  for (const o of acc.objects) {
+    if (o.type === "stack" && o.garrison) stackGarrison.set(o.id, o.garrison as (string | null)[]);
+    if (o.type === "stack") delete o.garrison; // internal: only needed to resolve linked forts
+  }
   for (const o of acc.objects) {
     if (o.type !== "village" && o.type !== "capital") continue;
-    let cells = o.garrison ?? null;
+    let cells = o.garrisonRaw ?? null;
     if ((!cells || cells.every((c) => c == null)) && o.stackRef) {
-      const s = stackById.get(o.stackRef);
-      if (s && s.type === "stack" && s.garrison) cells = s.garrison;
+      cells = stackGarrison.get(o.stackRef) ?? cells;
     }
-    o.garrison = (cells ?? [null, null, null, null, null, null]).map(
-      (inst) => (inst ? unitImpl.get(inst) ?? inst : null),
-    );
+    o.garrison = (cells ?? [null, null, null, null, null, null]).map((inst) => {
+      if (!inst) return null;
+      const u = acc.unitInstances[inst];
+      if (u) return { unit: u.implId ?? inst, level: u.level ?? 1, hp: u.hp ?? 0 };
+      return { unit: inst, level: 1, hp: 0 };
+    });
+    delete o.garrisonRaw;
   }
-  // the stack's by-cell instance list was only needed to resolve linked garrisons — drop it
-  for (const o of acc.objects) if (o.type === "stack") delete o.garrison;
 
   // Resolve each fort/capital/village's sprite race from its OWNER player. The
   // editor sets FortObject.raceId = player.raceId (MapConverter.cpp:380) and builds

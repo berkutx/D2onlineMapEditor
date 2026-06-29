@@ -11,6 +11,15 @@ const base = {
   z: z.number().int().optional(),
 };
 
+/** One garrison/army slot's unit: a global Gunit id + its level and (max) HP. The .sg stores
+ *  these as a MidUnit instance; the editor model carries the resolved global id + stats. */
+export const GarrisonUnit = z.object({
+  unit: z.string(), // global Gunit id (G###UU####)
+  level: z.number().int().default(1),
+  hp: z.number().int().default(0), // current HP (== max for a freshly placed unit)
+});
+export type GarrisonUnit = z.infer<typeof GarrisonUnit>;
+
 export const StackObject = z.object({
   ...base,
   type: z.literal("stack"),
@@ -43,9 +52,10 @@ export const CapitalObject = z.object({
   subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (banner)
   bannerIndex: z.number().int().optional(), // resolved subrace banner number
   name: z.string().default(""),
-  // garrison: formation cell (POS 0..5) -> global Gunit id (resolved from the embedded
-  // UNIT_0..5/POS_0..5 MidUnit instances, or the linked STACK fort-stack). null = empty cell.
-  garrison: z.array(z.string().nullable()).optional(),
+  // garrison: formation cell (POS 0..5) -> {unit (global Gunit id), level, hp}, resolved from
+  // the embedded UNIT_0..5/POS_0..5 MidUnit instances (or the linked STACK). null = empty cell.
+  garrison: z.array(GarrisonUnit.nullable()).optional(),
+  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   stackRef: z.string().optional(), // STACK uid (linked-stack garrison form), if any
 });
 export const VillageObject = z.object({
@@ -62,8 +72,9 @@ export const VillageObject = z.object({
   morale: z.number().int().optional(), // MORALE
   regen: z.number().int().optional(), // REGEN_B garrison regen
   growth: z.number().int().optional(), // GROWTH_T unit growth timer
-  garrison: z.array(z.string().nullable()).optional(), // formation cell -> Gunit id (see CapitalObject)
-  stackRef: z.string().optional(), // STACK uid (linked-stack garrison form)
+  garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit (see CapitalObject)
+  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
+  stackRef: z.string().optional(),
 });
 
 export const RuinObject = z.object({
@@ -134,6 +145,8 @@ export const UnitObject = z.object({
   ...base,
   type: z.literal("unit"),
   implId: z.string().optional(), // unit impl -> IsoUnit/IsoStill sprite
+  level: z.number().int().optional(), // MidUnit LEVEL
+  hp: z.number().int().optional(), // MidUnit HP (current)
 });
 export const TreasureObject = z.object({
   ...base,

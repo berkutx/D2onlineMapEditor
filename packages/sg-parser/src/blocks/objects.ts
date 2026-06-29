@@ -185,7 +185,7 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(morale !== null ? { morale } : {}),
     ...(regen !== null ? { regen } : {}),
     ...(growth !== null ? { growth } : {}),
-    garrison: readGarrison(buf, f, e), // embedded; resolved instance->Gunit in assemble post-pass
+    garrisonRaw: readGarrison(buf, f, e), // embedded instance ids; resolved in assemble post-pass
     ...(stackRef ? { stackRef } : {}),
   };
 }
@@ -207,7 +207,7 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(owner ? { owner } : {}),
     ...(subRace ? { subRace } : {}),
     name,
-    garrison: readGarrison(buf, f, e),
+    garrisonRaw: readGarrison(buf, f, e),
     ...(stackRef ? { stackRef } : {}),
   };
 }
@@ -346,11 +346,17 @@ export function readTomb(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readUnit(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const implId = refOrUndef(readDefaultString(buf, "TYPE", f, e));
+  // LEVEL precedes DYNLEVEL in the body so the first "LEVEL" match is the real one; HP is the
+  // current hit points (== max for a freshly placed unit).
+  const level = readDefaultInt(buf, "LEVEL", f, e);
+  const hp = readDefaultInt(buf, "HP", f, e);
   return {
     type: "unit",
     id: obj.id,
     pos: { x: 0, y: 0 }, // units carry no map position; placed via their stack/city
     ...(implId ? { implId } : {}),
+    ...(level !== null ? { level } : {}),
+    ...(hp !== null ? { hp } : {}),
   };
 }
 

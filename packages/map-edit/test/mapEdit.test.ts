@@ -422,6 +422,72 @@ describe("@d2/map-edit site / capital / crystal edits", () => {
   });
 });
 
+describe("@d2/map-edit garrison + site stocks", () => {
+  const dragon = new Uint8Array(readFileSync(DRAGON));
+
+  it("fort garrison: change a cell's unit -> new MidUnit instance, round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const cap = doc.objects.find(
+      (o) => o.type === "capital" && (o as { garrison?: unknown[] }).garrison?.some(Boolean),
+    ) as { id: string; garrison: ({ unit: string; level: number; hp: number } | null)[] };
+    expect(cap).toBeTruthy();
+    const g = [...cap.garrison];
+    g[0] = { unit: "G000UU0001", level: 1, hp: 110 }; // Squire
+    const ops: EditOp[] = [{ kind: "patchObject", id: cap.id, fields: { garrison: g } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reCap = re.objects.find((o) => o.id === cap.id) as { garrison: ({ unit: string } | null)[] };
+    expect(reCap.garrison[0]?.unit).toBe("G000UU0001");
+    expect(re.objects.length).toBe(doc.objects.length); // MidUnit instances aren't placed objects
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("merchant stock: add an item -> QTY_ITEM list, round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const m = doc.objects.find((o) => o.type === "merchant" && (o as { items?: unknown[] }).items?.length) as {
+      id: string; items: { id: string; count: number }[];
+    };
+    const items = [...m.items, { id: "G000IG0001", count: 7 }];
+    const ops: EditOp[] = [{ kind: "patchObject", id: m.id, fields: { items } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reM = re.objects.find((o) => o.id === m.id) as { items: { id: string; count: number }[] };
+    expect(reM.items).toEqual(items);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("mage stock: drop a spell -> QTY_SPELL list, round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const m = doc.objects.find((o) => o.type === "mage" && (o as { spells?: unknown[] }).spells?.length) as {
+      id: string; spells: string[];
+    };
+    const spells = m.spells.slice(1);
+    const ops: EditOp[] = [{ kind: "patchObject", id: m.id, fields: { spells } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect((re.objects.find((o) => o.id === m.id) as { spells: string[] }).spells).toEqual(spells);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("mercenary stock: add a unit -> QTY_UNIT list, round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes); // Riders has a mercenary camp
+    const m = doc.objects.find((o) => o.type === "mercenary" && (o as { units?: unknown[] }).units?.length) as {
+      id: string; units: { id: string; level: number; unique: boolean }[];
+    };
+    expect(m).toBeTruthy();
+    const units = [...m.units, { id: "G000UU0093", level: 2, unique: false }];
+    const ops: EditOp[] = [{ kind: "patchObject", id: m.id, fields: { units } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect((re.objects.find((o) => o.id === m.id) as { units: unknown[] }).units).toEqual(units);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+});
+
 describe("@d2/map-edit project (journal + undo/redo)", () => {
   it("pushOp / undo / redo move the cursor and gate activeOps", () => {
     const op1: EditOp = { kind: "setCell", x: 1, y: 1, value: 1 };

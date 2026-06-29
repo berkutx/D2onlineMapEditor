@@ -79,6 +79,32 @@ export function itemFrame(version: string, second: number, templateId: string): 
   });
 }
 
+/** A MidUnit block frame (code 0x0f, short UN): a unit INSTANCE referenced by a fort garrison
+ *  or a stack. Minimal body verified on real bytes: UNIT_ID(self) + TYPE(global Gunit id) +
+ *  LEVEL + MODIF count(0, tag=self id) + CREATION(0) + NAME_TXT("") + TRANSF/DYNLEVEL(false) +
+ *  HP + XP. */
+export function unitFrame(
+  version: string,
+  second: number,
+  typeId: string,
+  level: number,
+  hp: number,
+  xp = 0,
+): Uint8Array {
+  return emitBlock(version, "MidUnit", 0x0f, "UN", second, (w, full) => {
+    w.refField("UNIT_ID", full);
+    w.refField("TYPE", typeId);
+    w.defaultInt("LEVEL", level);
+    w.defaultInt(full, 0); // MODIF_ID list count (count tag = the unit's own id) = no modifiers
+    w.defaultInt("CREATION", 0);
+    w.stringField("NAME_TXT", ""); // default name
+    w.bool("TRANSF", false);
+    w.bool("DYNLEVEL", false);
+    w.defaultInt("HP", hp);
+    w.defaultInt("XP", xp);
+  });
+}
+
 /** One mountain entry written into the MidMountains body. */
 export interface MountainEntry {
   x: number;
@@ -170,10 +196,54 @@ export interface ItemListEdit {
   instanceIds: readonly string[];
 }
 
+/** One site STOCK list edit (merchant items / mage spells / mercenary units). Unlike the
+ *  chest ITEM_ID list, the count is keyed by a LITERAL `qtyTag` (not the objId) and the
+ *  entries are GLOBAL template ids written directly (no MidItem/MidUnit instances). */
+export interface QtyListEdit {
+  fieldsFrom: number;
+  fieldsEnd: number;
+  qtyTag: string; // "QTY_ITEM" | "QTY_SPELL" | "QTY_UNIT"
+  /** the per-entry field layout, in order (used to walk the OLD entries + write the new). */
+  schema: { tag: string; kind: "str" | "int" | "bool" }[];
+  /** new entries; each row's values are aligned to `schema`. */
+  entries: (string | number | boolean)[][];
+}
+
 interface Splice {
   start: number;
   end: number;
   region: Uint8Array;
+}
+
+/** Build the splice that rewrites one site stock list (QTY_* tag + count + entries) in place. */
+function qtyListSplice(buf: ByteBuffer, e: QtyListEdit): Splice {
+  const at = buf.indexOf(e.qtyTag, e.fieldsFrom);
+  if (at < 0 || at >= e.fieldsEnd) {
+    throw new Error(`spliceVariableFields: stock tag ${e.qtyTag} not found in [${e.fieldsFrom},${e.fieldsEnd}]`);
+  }
+  // walk the OLD entries to find the span end (so we replace exactly the old list)
+  let p = at + e.qtyTag.length;
+  const oldCount = buf.readInt32LE(p);
+  p += 4;
+  for (let i = 0; i < oldCount; i++) {
+    for (const fld of e.schema) {
+      p += fld.tag.length;
+      if (fld.kind === "str") p += 4 + buf.readInt32LE(p);
+      else if (fld.kind === "int") p += 4;
+      else p += 1;
+    }
+  }
+  const w = new ByteWriter();
+  w.cp(e.qtyTag).i32(e.entries.length);
+  for (const row of e.entries) {
+    e.schema.forEach((fld, j) => {
+      const v = row[j];
+      if (fld.kind === "str") w.stringField(fld.tag, String(v));
+      else if (fld.kind === "int") w.defaultInt(fld.tag, Number(v));
+      else w.bool(fld.tag, Boolean(v));
+    });
+  }
+  return { start: at, end: p, region: w.toBytes() };
 }
 
 /** Build the splice for one variable-length string field (resize in place). */
@@ -235,12 +305,14 @@ export function spliceVariableFields(
   bytes: Uint8Array,
   stringEdits: readonly StringFieldEdit[],
   itemListEdits: readonly ItemListEdit[] = [],
+  qtyListEdits: readonly QtyListEdit[] = [],
 ): Uint8Array {
-  if (stringEdits.length === 0 && itemListEdits.length === 0) return bytes;
+  if (stringEdits.length === 0 && itemListEdits.length === 0 && qtyListEdits.length === 0) return bytes;
   const buf = new ByteBuffer(bytes);
   const splices = [
     ...stringEdits.map((e) => stringFieldSplice(buf, e)),
     ...itemListEdits.map((e) => itemListSplice(buf, e)),
+    ...qtyListEdits.map((e) => qtyListSplice(buf, e)),
   ];
   return applySplices(bytes, splices);
 }

@@ -15,12 +15,14 @@ import {
   landmarkFrame,
   mountainsFrame,
   itemFrame,
+  unitFrame,
   replaceBlock,
   spliceVariableFields,
   type SgRaw,
   type MountainEntry,
   type StringFieldEdit,
   type ItemListEdit,
+  type QtyListEdit,
 } from "@d2/sg-parser";
 import type { MapObject } from "@d2/map-schema";
 import type { EditOp } from "./ops.js";
@@ -31,6 +33,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   let nextRA = 0;
   let nextMM = 0;
   let nextIM = 0;
+  let nextUN = 0;
   for (const o of raw.objects) {
     if (o.typeName === "MidRoad") {
       const m = /RA([0-9a-fA-F]{4})$/.exec(o.id);
@@ -41,6 +44,9 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     } else if (o.typeName === "MidItem") {
       const m = /IM([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextIM = Math.max(nextIM, parseInt(m[1]!, 16) + 1);
+    } else if (o.typeName === "MidUnit") {
+      const m = /UN([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) nextUN = Math.max(nextUN, parseInt(m[1]!, 16) + 1);
     }
   }
   const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
@@ -59,6 +65,10 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   const listEdits: ItemListEdit[] = [];
   /** Chest items edits, keyed by objId so the LAST list per chest wins (no stray blocks). */
   const chestItemOps = new Map<string, string[]>();
+  /** Site stock list edits (merchant/mage/mercs) — literal QTY_ tag, global ids. */
+  const qtyListEdits: QtyListEdit[] = [];
+  /** Fort garrison edits, keyed by fort id (last wins): formation cell -> {unit,hp,level}|null. */
+  const garrisonOps = new Map<string, ({ unit: string; hp?: number; level?: number } | null)[]>();
 
   for (const op of ops) {
     switch (op.kind) {
@@ -149,14 +159,49 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
               handled.add(key);
             }
           }
-          // 3) chest ITEM_ID list — entries are global GItem TEMPLATE ids (the editor model
-          //    works with stable templates; the MidItem instance indirection is re-created on
-          //    export). Processed AFTER the loop (last write per chest wins) so superseded
-          //    edits emit no stray blocks.
+          // 3) list fields. `items` is a chest ITEM_ID list (MidBag — global templates, MidItem
+          //    instances re-created on export, processed after the loop) OR a merchant stock
+          //    (MidSiteMerchant — global ids written directly via the QTY_ITEM list).
           if (Array.isArray(f.items)) {
             if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
-            chestItemOps.set(op.id, (f.items as unknown[]).map(String));
+            if (o.typeName === "MidBag") {
+              chestItemOps.set(op.id, (f.items as unknown[]).map(String));
+            } else if (o.typeName === "MidSiteMerchant") {
+              qtyListEdits.push({
+                fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, qtyTag: "QTY_ITEM",
+                schema: [{ tag: "ITEM_ID", kind: "str" }, { tag: "ITEM_COUNT", kind: "int" }],
+                entries: (f.items as { id: string; count: number }[]).map((it) => [it.id, it.count]),
+              });
+            } else {
+              throw new Error(`applyEditsToBytes: 'items' on unexpected object ${o.typeName}`);
+            }
             handled.add("items");
+          }
+          // mage spell stock (QTY_SPELL — global Gspells ids).
+          if (Array.isArray(f.spells)) {
+            if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
+            qtyListEdits.push({
+              fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, qtyTag: "QTY_SPELL",
+              schema: [{ tag: "SPELL_ID", kind: "str" }],
+              entries: (f.spells as string[]).map((s) => [s]),
+            });
+            handled.add("spells");
+          }
+          // mercenary stock (QTY_UNIT — global Gunits ids + level + unique).
+          if (Array.isArray(f.units) && o?.typeName === "MidSiteMercs") {
+            qtyListEdits.push({
+              fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, qtyTag: "QTY_UNIT",
+              schema: [{ tag: "UNIT_ID", kind: "str" }, { tag: "UNIT_LEVEL", kind: "int" }, { tag: "UNIT_UNIQ", kind: "bool" }],
+              entries: (f.units as { id: string; level: number; unique: boolean }[]).map((u) => [u.id, u.level, u.unique]),
+            });
+            handled.add("units");
+          }
+          // fort garrison (village/capital) — 6 formation cells; deferred to after the loop
+          // (creates MidUnit instances + fixed-width fort slot splices).
+          if (Array.isArray(f.garrison)) {
+            if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
+            garrisonOps.set(op.id, f.garrison as ({ unit: string; hp?: number; level?: number } | null)[]);
+            handled.add("garrison");
           }
           // derived/render-only fields carry no .sg storage (resolved at parse from owner,
           // subrace, etc.) — patched only to refresh the live sprite; skip on export.
@@ -192,6 +237,28 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     listEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds });
   }
 
+  // Resolve each edited fort's FINAL garrison (last write won): create a fresh MidUnit instance
+  // per filled formation cell and write the fort's embedded UNIT_0..5/POS_0..5 (fixed-width
+  // refField/int splices). Old MidUnit instances are left orphaned (harmless). Filled cells
+  // pack into the low slots; POS_i carries the formation cell; empty slots = G000000000/-1.
+  for (const [fortId, cells] of garrisonOps) {
+    if (!raw.objectById.get(fortId)) throw new Error(`applyEditsToBytes: garrison edit for unknown object ${fortId}`);
+    let slot = 0;
+    for (let cell = 0; cell < 6; cell++) {
+      const gu = cells[cell];
+      if (!gu || !gu.unit) continue;
+      const second = nextUN++;
+      appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0));
+      w.setObjectString(fortId, `UNIT_${slot}`, `${raw.version}UN${hex4(second)}`);
+      w.setObjectInt(fortId, `POS_${slot}`, cell);
+      slot++;
+    }
+    for (; slot < 6; slot++) {
+      w.setObjectString(fortId, `UNIT_${slot}`, "G000000000");
+      w.setObjectInt(fortId, `POS_${slot}`, -1);
+    }
+  }
+
   // Emit added objects at their FINAL position (place + later moves coalesced).
   for (const o of addedObjects.values()) {
     if (o.type === "landmark") {
@@ -213,8 +280,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   // unchanged by the splice itself; new MidItem blocks are appended below). Done before the
   // append/replace passes; those re-scan markers + the header count (all preserved). Both
   // splice kinds share one highest-offset-first pass so cross-object offsets stay valid.
-  if (stringEdits.length || listEdits.length) {
-    bytes = spliceVariableFields(bytes, stringEdits, listEdits);
+  if (stringEdits.length || listEdits.length || qtyListEdits.length) {
+    bytes = spliceVariableFields(bytes, stringEdits, listEdits, qtyListEdits);
   }
   const frames = appends.filter((f): f is Uint8Array => f !== null);
   if (frames.length) bytes = appendBlocks(bytes, frames);
