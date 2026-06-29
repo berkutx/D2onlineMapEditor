@@ -270,6 +270,39 @@ describe("@d2/map-edit patchObject re-roll (look change, keeps footprint)", () =
     expect(res.reason).toBeUndefined();
     expect(res.ok).toBe(true);
   });
+
+  it("edits chest/ruin/city int fields (priority/image) in place and round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops: EditOp[] = [];
+    const checks: { id: string; field: "priority" | "image"; val: number }[] = [];
+    // priority is only set when AIPRIORITY exists (so setObjectInt will find the tag)
+    const withPrio = doc.objects.find(
+      (o) => ["treasure", "ruin", "village"].includes(o.type) && (o as { priority?: number }).priority !== undefined,
+    );
+    if (withPrio) {
+      const v = (((withPrio as { priority?: number }).priority ?? 0) + 1) % 7;
+      ops.push({ kind: "patchObject", id: withPrio.id, fields: { priority: v } });
+      checks.push({ id: withPrio.id, field: "priority", val: v });
+    }
+    // image only on a chest/ruin that actually carries IMAGE (mountains use a different path)
+    const withImg = doc.objects.find(
+      (o) => (o.type === "treasure" || o.type === "ruin") && (o as { image?: number }).image !== undefined,
+    );
+    if (withImg) {
+      const v = ((withImg as { image?: number }).image ?? 0) + 1;
+      ops.push({ kind: "patchObject", id: withImg.id, fields: { image: v } });
+      checks.push({ id: withImg.id, field: "image", val: v });
+    }
+    expect(ops.length).toBeGreaterThan(0); // Riders has cities with AIPRIORITY at least
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    for (const c of checks) {
+      expect((re.objects.find((o) => o.id === c.id) as Record<string, unknown>)[c.field]).toBe(c.val);
+    }
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
 });
 
 describe("@d2/map-edit project (journal + undo/redo)", () => {

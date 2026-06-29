@@ -234,6 +234,8 @@ function cellFromEvent(e: PointerEvent): { x: number; y: number } | null {
 // --- terrain painting --------------------------------------------------------
 let painting = false;
 let strokeOps: EditOp[] = [];
+/** Press position for the select tool (to tell a click from a pan-drag). */
+let selDown: { x: number; y: number } | null = null;
 /** Last hovered cell (null = off-map); used to refresh the decor ghost on cycle. */
 let lastCell: { x: number; y: number } | null = null;
 
@@ -582,7 +584,12 @@ function onPointerDown(e: PointerEvent): void {
     }
     return;
   }
-  if (toolStore.tool === "select") return;
+  // select/inspect tool: remember the press; a click (no drag) on pointerup selects the
+  // object under it (drag still pans the camera — we don't capture the pointer here).
+  if (toolStore.tool === "select") {
+    selDown = { x: e.clientX, y: e.clientY };
+    return;
+  }
   const cell = cellFromEvent(e);
   if (!cell) return;
   painting = true;
@@ -622,6 +629,17 @@ function onPointerUp(e: PointerEvent): void {
       getScene()?.canvas?.releasePointerCapture(e.pointerId);
     } catch {
       /* already released */
+    }
+    return;
+  }
+  // select/inspect tool: a click (negligible movement) picks the topmost object → inspector.
+  if (toolStore.tool === "select" && selDown) {
+    const moved = Math.abs(e.clientX - selDown.x) + Math.abs(e.clientY - selDown.y);
+    selDown = null;
+    if (moved < 6) {
+      const cell = cellFromEvent(e);
+      const hit = cell ? objectAtCell(cell.x, cell.y) : null;
+      toolStore.setSelectedId(hit ? hit.id : null);
     }
     return;
   }
@@ -687,6 +705,7 @@ onBeforeUnmount(() => {
 
 // Rebuild whenever the open document or the manifest changes.
 watch([currentMap, manifest], () => {
+  toolStore.setSelectedId(null); // a new map invalidates any selection
   void rebuild();
 });
 
@@ -720,6 +739,21 @@ watch(
       const s = getScene();
       if (s && editStore.liveDoc) s.updateObjects(editStore.liveDoc);
     }, 0);
+  },
+);
+
+// Persistent selection outline for the inspector's selected object (redraw when the
+// selection changes or the object moves/edits; clear when it's gone).
+watch(
+  [() => toolStore.selectedId, () => editStore.objectsRev],
+  () => {
+    const s = getScene();
+    if (!s) return;
+    const id = toolStore.selectedId;
+    const obj = id ? editStore.liveDoc?.objects.find((o) => o.id === id) : null;
+    if (!obj) { s.setSelection([]); return; }
+    const { w, h } = objectFootprint(obj, landmarkFootprints);
+    s.setSelection(footprintCells(obj.pos.x, obj.pos.y, w, h));
   },
 );
 

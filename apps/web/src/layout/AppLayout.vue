@@ -19,6 +19,7 @@ import TopMenuBar from "./TopMenuBar.vue";
 import ToolDock from "./ToolDock.vue";
 import ToolOptionsBar from "./ToolOptionsBar.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
+import ObjectInspector from "./ObjectInspector.vue";
 import StatusBar from "./StatusBar.vue";
 import CopilotBar from "./CopilotBar.vue";
 import DecorPalette from "./DecorPalette.vue";
@@ -138,6 +139,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       </el-main>
       <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="300px">
         <DecorPalette />
+      </el-aside>
+      <el-aside v-if="toolStore.selectedId" class="app-inspector" width="260px">
+        <ObjectInspector />
       </el-aside>
     </el-container>
     <el-footer class="app-footer" height="28px">

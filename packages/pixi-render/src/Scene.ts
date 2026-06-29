@@ -132,6 +132,8 @@ export class Scene {
   private roadSel?: Graphics;
   /** footprint "fitting" diamonds for the decor/move target (green=valid, red=invalid). */
   private footprint?: Graphics;
+  /** persistent selection outline (the inspector's selected object). */
+  private selection?: Graphics;
 
   private handlers: SceneEventHandlers = {};
   private resizeObserver?: ResizeObserver;
@@ -415,6 +417,31 @@ export class Scene {
     this.requestRender();
   }
 
+  /** Persistent SELECTION outline over `cells` (the inspector's selected object). A bold
+   *  cyan diamond border, distinct from the transient green/red footprint preview. Empty
+   *  array clears it. */
+  setSelection(cells: readonly CellRef[]): void {
+    if (!this.world) return;
+    if (!this.selection) {
+      this.selection = new Graphics();
+      this.selection.label = "selection";
+      this.selection.eventMode = "none";
+      this.world.addChild(this.selection);
+    }
+    const g = this.selection;
+    g.clear();
+    for (const c of cells) {
+      const p = cellToWorld(c.x, c.y);
+      const cy = p.y + HALF_H;
+      g.poly([p.x, cy - HALF_H, p.x + HALF_W, cy, p.x, cy + HALF_H, p.x - HALF_W, cy]);
+    }
+    if (cells.length) {
+      g.fill({ color: 0x33ddff, alpha: 0.12 });
+      g.stroke({ color: 0x33ddff, alpha: 0.95, width: 2 });
+    }
+    this.renderNow();
+  }
+
   /** Enable/disable drag-to-pan (disabled while a paint tool is active). */
   setPanEnabled(enabled: boolean): void {
     this.panEnabled = enabled;
@@ -669,6 +696,10 @@ export class Scene {
     if (this.footprint) {
       this.footprint.destroy();
       this.footprint = undefined;
+    }
+    if (this.selection) {
+      this.selection.destroy();
+      this.selection = undefined;
     }
     if (this.objects && this.anim) this.objects.destroy(this.anim);
     this.overlay?.destroy();

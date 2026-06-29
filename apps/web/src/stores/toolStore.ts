@@ -41,6 +41,9 @@ export const useToolStore = defineStore("tool", () => {
   const zoneHidden = ref(false);
   /** "👁 eye" mode: when on and no zone is drawn, the visible screen area IS the zone. */
   const eyeZone = ref(false);
+  /** Object selected for the property inspector (id of a doc object), null = none.
+   *  Set by a click in the "select" tool; drives ObjectInspector + the selection outline. */
+  const selectedId = ref<string | null>(null);
 
   const painting = (): boolean => tool.value !== "select";
 
@@ -83,6 +86,9 @@ export const useToolStore = defineStore("tool", () => {
   function setEyeZone(v: boolean): void {
     eyeZone.value = v;
   }
+  function setSelectedId(id: string | null): void {
+    selectedId.value = id;
+  }
   /** Clear the whole zone selection (region bbox + mask) — the "accept"/done action. */
   function clearZone(): void {
     region.value = null;
@@ -91,8 +97,8 @@ export const useToolStore = defineStore("tool", () => {
   }
 
   return {
-    tool, size, terrainId, decorId, moveId, roadSel, region, zoneMode, regionMask, zoneHidden, eyeZone,
+    tool, size, terrainId, decorId, moveId, roadSel, region, zoneMode, regionMask, zoneHidden, eyeZone, selectedId,
     painting, setTool, setSize, setTerrainId, setDecor, setMoveId, setRoadSel,
-    setRegion, setZoneMode, setRegionMask, setZoneHidden, setEyeZone, clearZone,
+    setRegion, setZoneMode, setRegionMask, setZoneHidden, setEyeZone, setSelectedId, clearZone,
   };
 });

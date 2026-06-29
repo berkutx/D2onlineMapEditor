@@ -106,9 +106,27 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           // landmark look = its TYPE string (a 10-char GLmark id -> fixed-width splice)
           w.setObjectString(op.id, "TYPE", f.baseType);
         } else {
-          throw new Error(
-            `applyEditsToBytes: patchObject ${op.id} fields [${Object.keys(f)}] not byte-writable yet`,
-          );
+          // chest/ruin/city numeric property edits — fixed-width int32 splices in place.
+          // field name -> .sg tag (the inspector only exposes fields the object actually has).
+          const INT_TAG: Record<string, string> = {
+            image: "IMAGE", tier: "SIZE", priority: "AIPRIORITY",
+            morale: "MORALE", regen: "REGEN_B", growth: "GROWTH_T",
+          };
+          const handled = new Set<string>();
+          for (const [key, tag] of Object.entries(INT_TAG)) {
+            if (typeof f[key] === "number") {
+              w.setObjectInt(op.id, tag, f[key] as number);
+              handled.add(key);
+            }
+          }
+          const left = Object.keys(f).filter((k) => !handled.has(k));
+          if (left.length) {
+            // variable-length fields (name/desc/reward/item/owner/looter/items) need the
+            // growable mid-stream splice (M4) — not yet wired. Fail loud rather than corrupt.
+            throw new Error(
+              `applyEditsToBytes: patchObject ${op.id} fields [${left}] not byte-writable yet (M4)`,
+            );
+          }
         }
         break;
       }
