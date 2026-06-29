@@ -18,20 +18,32 @@ import type { MapDocument } from "@d2/map-schema";
 import type { EditorProject } from "@d2/map-edit";
 import type { AssetManifest } from "@d2/asset-manifest";
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  if (!res.ok) {
-    let detail = "";
+/**
+ * GET + parse JSON, with a few retries on TRANSIENT failures (network error / empty body /
+ * 5xx). In dev the Vite proxy returns ECONNREFUSED/500/empty for a second or two whenever the
+ * backend restarts; without a retry that one blip leaves the app blank with no recovery.
+ * GETs are idempotent so retrying is safe (POSTs are NOT retried).
+ */
+async function getJson<T>(url: string, retries = 4): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      detail = await res.text();
-    } catch {
-      /* ignore */
+      const res = await fetch(url, { headers: { accept: "application/json" } });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(
+          `GET ${url} failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`,
+        );
+      }
+      const text = await res.text();
+      if (!text) throw new Error(`GET ${url}: empty response (backend restarting?)`);
+      return JSON.parse(text) as T;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
     }
-    throw new Error(
-      `GET ${url} failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`,
-    );
   }
-  return (await res.json()) as T;
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 /** GET /api/scenarios -> ScenarioEntry[] */
