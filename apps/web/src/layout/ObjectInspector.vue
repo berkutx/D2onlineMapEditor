@@ -80,6 +80,18 @@ const chestImageKey = computed(() => {
   return (i: number): string => `G000BG0000${water ? "0" : "1"}${String(i).padStart(2, "0")}`;
 });
 
+/** The selected object's own sprite key, for a thumbnail in the inspector header.
+ *  Village uses the race-free fallback (G000FT0000NE<tier>); capitals/units have no key here. */
+const headerSpriteKey = computed<string | null>(() => {
+  const o = obj.value;
+  if (!o) return null;
+  if (o.type === "ruin") return ruinImageKey(o.image ?? 0);
+  if (o.type === "treasure") return chestImageKey.value(o.image ?? 0);
+  if (o.type === "village") return `G000FT0000NE${o.tier ?? 1}`;
+  return null;
+});
+watch(headerSpriteKey, (k) => { if (k) void spriteStore.ensureKeys([k]); }, { immediate: true });
+
 /** Chest item-list edits — each is one undoable patchObject (commit applies optimistically). */
 function chestAddItem(template: string): void {
   patch({ items: [...(obj.value?.type === "treasure" ? obj.value.items ?? [] : []), template] });
@@ -144,6 +156,7 @@ function close(): void {
 <template>
   <div v-if="obj" class="inspector">
     <div class="ins-head">
+      <SpriteThumb v-if="headerSpriteKey" :sprite-key="headerSpriteKey" :size="34" class="ins-icon" />
       <span class="ins-title">{{ typeLabel }}</span>
       <span class="ins-id">{{ obj.id }}</span>
       <el-button class="ins-close" text :icon="Close" @click="close()" />
