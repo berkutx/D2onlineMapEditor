@@ -9,7 +9,7 @@
  * heavy wait of the session).
  */
 import { onMounted, ref } from "vue";
-import { ElMessage, ElButton } from "element-plus";
+import { ElMessage, ElButton, ElConfigProvider } from "element-plus";
 import { useMapStore } from "./stores/mapStore";
 import { useAssetStore } from "./stores/assetStore";
 import AppLayout from "./layout/AppLayout.vue";
@@ -56,7 +56,9 @@ onMounted(boot);
     :element-loading-text="bootMessage"
     class="app-shell"
   >
-    <AppLayout />
+    <el-config-provider :size="'default'" :z-index="3000">
+      <AppLayout />
+    </el-config-provider>
     <div v-if="bootError" class="boot-error">
       <div class="boot-error-title">Не удалось загрузить карту</div>
       <div class="boot-error-msg">{{ bootError }}</div>

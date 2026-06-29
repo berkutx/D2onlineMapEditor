@@ -37,7 +37,7 @@ function random(): void {
 </script>
 
 <template>
-  <div v-if="carried && reRollable" class="obj-actions">
+  <div v-if="carried && reRollable" class="obj-actions d2-float">
     <DecorThumb :thumb="decorStore.get(curId)?.thumb ?? group!.rep.thumb" :size="40" />
     <div class="oa-info">
       <div class="oa-name">{{ group!.label }}</div>
@@ -64,8 +64,9 @@ function random(): void {
 
 <style scoped>
 .obj-actions {
+  /* elevation/glass comes from the shared .d2-float */
   position: absolute;
-  top: 52px;
+  top: 16px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 25;
@@ -74,12 +75,6 @@ function random(): void {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--el-bg-color) 70%, transparent);
-  backdrop-filter: blur(14px) saturate(1.3);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
-  border: 1px solid color-mix(in srgb, var(--el-border-color) 55%, transparent);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
   font-size: 12px;
 }
 .oa-info {

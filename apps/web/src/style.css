@@ -1,6 +1,64 @@
+/* ============================================================================
+ * Design-token layer for the editor chrome. Light-first, hairline borders,
+ * low-chroma "lightness". One spacing grid + one radius + one elevation
+ * language (flat docked chrome, soft shadow only on the two true floats).
+ * EP component vars are overridden so Element Plus controls inherit the feel.
+ * Dark chrome is opt-in (View ▸ Appearance) via html.dark — the dark EP
+ * css-vars are imported in main.ts.
+ * ========================================================================== */
 :root {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color-scheme: light;
+  color-scheme: light dark; /* native form controls + scrollbars follow theme */
+
+  /* Spacing scale (8px grid) */
+  --d2-sp-1: 4px;
+  --d2-sp-2: 8px;
+  --d2-sp-3: 12px;
+  --d2-sp-4: 16px;
+  --d2-sp-6: 24px;
+
+  /* Radius — one calm value for chrome; lg reserved for the two true floats */
+  --d2-radius: 6px;
+  --d2-radius-lg: 12px;
+  --d2-radius-pill: 999px;
+
+  /* Single elevation language */
+  --d2-hairline: 1px solid var(--el-border-color-lighter);
+  --d2-shadow-float: 0 6px 18px rgba(0, 0, 0, 0.16); /* floats only */
+  --d2-glass-bg: color-mix(in srgb, var(--el-bg-color-overlay) 85%, transparent);
+  --d2-glass-blur: blur(16px) saturate(1.2);
+
+  /* Chrome geometry */
+  --d2-dock-w: 48px;
+  --d2-options-w: 220px;
+  --d2-header-h: 42px;
+  --d2-footer-h: 28px;
+  --d2-hit: 38px; /* trackpad-friendly target */
+
+  /* Restrained active state (NOT a saturated filled blue) */
+  --d2-active-bg: var(--el-color-primary-light-9);
+  --d2-active-fg: var(--el-color-primary);
+  --d2-active-bar: var(--el-color-primary);
+
+  /* ---- EP overrides: density + light feel ---- */
+  --el-border-radius-base: var(--d2-radius);
+  --el-border-radius-small: var(--d2-radius);
+  --el-font-size-base: 13px;
+  /* Pull the page off pure white so the dark canvas is the only dark mass */
+  --el-bg-color-page: #f4f6f8;
+
+  /* Segmented selected state = the same restrained wash (no filled blue) */
+  --el-segmented-item-selected-bg-color: var(--d2-active-bg);
+  --el-segmented-item-selected-color: var(--d2-active-fg);
+}
+
+/* Opt-in dark CHROME (View ▸ Appearance ▸ Dark). EP component vars come from
+ * the imported dark css-vars; we only retune the page bg + hairline here.
+ * No el-config-provider namespace override — keep EP's default `el-` prefix. */
+html.dark {
+  --el-bg-color-page: #15171c;
+  --d2-hairline: 1px solid color-mix(in srgb, var(--el-border-color) 60%, transparent);
+  --d2-shadow-float: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -15,4 +73,22 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
+}
+
+/* ---- Shared chrome primitives (use instead of per-file ad-hoc CSS) ---- */
+
+/* A floating overlay over the canvas: frosted glass, soft shadow, no extra
+ * border weight. The ONLY elevated surfaces in the app. */
+.d2-float {
+  background: var(--d2-glass-bg);
+  backdrop-filter: var(--d2-glass-blur);
+  -webkit-backdrop-filter: var(--d2-glass-blur);
+  border: var(--d2-hairline);
+  border-radius: var(--d2-radius-lg);
+  box-shadow: var(--d2-shadow-float);
+}
+
+/* Status digits / coordinates don't jitter as values change width. */
+.d2-num {
+  font-variant-numeric: tabular-nums;
 }

@@ -7,18 +7,20 @@
  * takes over a div and renders the map.
  */
 import { onMounted, onBeforeUnmount } from "vue";
+import { storeToRefs } from "pinia";
 import { eraseRoadCells } from "@d2/map-edit";
 import { useViewStore } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
 import { useDecorStore } from "../stores/decorStore";
 import { useEditStore } from "../stores/editStore";
+import { useMapStore } from "../stores/mapStore";
 import { getScene } from "../canvas/sceneHolder";
 import TopMenuBar from "./TopMenuBar.vue";
-import ToolbarPanel from "./ToolbarPanel.vue";
+import ToolDock from "./ToolDock.vue";
+import ToolOptionsPanel from "./ToolOptionsPanel.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import StatusBar from "./StatusBar.vue";
 import CopilotBar from "./CopilotBar.vue";
-import EditToolsBar from "./EditToolsBar.vue";
 import DecorPalette from "./DecorPalette.vue";
 import ObjectActionBar from "./ObjectActionBar.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
@@ -27,12 +29,24 @@ const view = useViewStore();
 const toolStore = useToolStore();
 const decorStore = useDecorStore();
 const editStore = useEditStore();
+const mapStore = useMapStore();
+const { currentScenarioId } = storeToRefs(mapStore);
 
 /** Global view hotkeys (single keys; ignored while typing or with modifiers). */
 function onKey(e: KeyboardEvent): void {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const t = e.target as HTMLElement | null;
-  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+  // Global undo/redo: Ctrl+Z / Ctrl+Shift+Z (and Ctrl+Y), the single source of truth.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")) {
+    if (typing) return;
+    const redo = (e.key === "y" || e.key === "Y") || e.shiftKey;
+    if (redo) editStore.redoEdit();
+    else editStore.undoEdit();
+    e.preventDefault();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (typing) return;
   // road-select tool: Delete erases the selected segment, Escape clears it.
   if (toolStore.tool === "roadsel" && toolStore.roadSel.length) {
     if (e.key === "Delete" || e.key === "Backspace") {
@@ -112,14 +126,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <TopMenuBar />
     </el-header>
     <el-container class="app-body">
-      <div class="app-toolbar">
-        <ToolbarPanel />
-      </div>
+      <ToolDock />
+      <ToolOptionsPanel v-if="currentScenarioId" />
       <el-aside v-if="view.objectPanelVisible" class="app-aside" width="220px">
         <LeftObjectPanel />
       </el-aside>
       <el-main class="app-main">
-        <EditToolsBar />
         <MapCanvasHost />
         <ObjectActionBar v-if="toolStore.tool === 'move'" />
         <CopilotBar v-show="view.copilotVisible" />
@@ -145,9 +157,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .app-body {
   flex: 1;
   min-height: 0;
-}
-.app-toolbar {
-  flex: 0 0 auto;
 }
 .app-aside {
   padding: 0;

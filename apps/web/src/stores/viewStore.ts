@@ -48,6 +48,16 @@ export const useViewStore = defineStore("view", () => {
   const copilotVisible = ref(true);
   /** Bumped to ask the copilot input to take focus (the "/" hotkey). Not persisted. */
   const copilotFocusTick = ref(0);
+  /** Dark chrome (panels/menus) — opt-in; the canvas is always dark. Applied to
+   *  <html class="dark"> so Element Plus' dark css-vars take over. Persisted. */
+  const dark = ref(bool(p.dark, false));
+  function applyDark(): void {
+    document.documentElement.classList.toggle("dark", dark.value);
+  }
+  function toggleDark(): void {
+    dark.value = !dark.value;
+    applyDark();
+  }
   /** Editor-assist tint overlays — all off by default (opt-in like the editor). */
   const overlayTints = ref<OverlayTints>({
     passable: bool(pt.passable, false),
@@ -122,10 +132,13 @@ export const useViewStore = defineStore("view", () => {
     visibleMask.value = cells && cells.length ? cells : null;
   }
 
+  // Apply persisted dark chrome immediately on store init (before first paint).
+  applyDark();
+
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
     [terrainVisible, objectsVisible, gridVisible, locationsVisible, animate,
-      objectPanelVisible, debugOverlay, overlayTints],
+      objectPanelVisible, debugOverlay, dark, overlayTints],
     () => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -136,6 +149,7 @@ export const useViewStore = defineStore("view", () => {
           animate: animate.value,
           objectPanelVisible: objectPanelVisible.value,
           debugOverlay: debugOverlay.value,
+          dark: dark.value,
           overlayTints: overlayTints.value,
         }));
       } catch {
@@ -155,6 +169,8 @@ export const useViewStore = defineStore("view", () => {
     debugOverlay,
     copilotVisible,
     copilotFocusTick,
+    dark,
+    toggleDark,
     overlayTints,
     zoom,
     cursorCell,
