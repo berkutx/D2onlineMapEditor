@@ -17,7 +17,7 @@ import { useMapStore } from "../stores/mapStore";
 import { getScene } from "../canvas/sceneHolder";
 import TopMenuBar from "./TopMenuBar.vue";
 import ToolDock from "./ToolDock.vue";
-import ToolOptionsPanel from "./ToolOptionsPanel.vue";
+import ToolOptionsBar from "./ToolOptionsBar.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import StatusBar from "./StatusBar.vue";
 import CopilotBar from "./CopilotBar.vue";
@@ -127,12 +127,12 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
     </el-header>
     <el-container class="app-body">
       <ToolDock />
-      <ToolOptionsPanel v-if="currentScenarioId" />
       <el-aside v-if="view.objectPanelVisible" class="app-aside" width="220px">
         <LeftObjectPanel />
       </el-aside>
       <el-main class="app-main">
         <MapCanvasHost />
+        <ToolOptionsBar v-if="currentScenarioId" />
         <ObjectActionBar v-if="toolStore.tool === 'move'" />
         <CopilotBar v-show="view.copilotVisible" />
       </el-main>

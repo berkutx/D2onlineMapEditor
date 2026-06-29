@@ -9,11 +9,14 @@ import { storeToRefs } from "pinia";
 import { View, MagicStick, Check } from "@element-plus/icons-vue";
 import { useViewStore } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
+import { useEditStore } from "../stores/editStore";
 import { EDIT_TOOLS } from "./tools";
 
 const view = useViewStore();
 const toolStore = useToolStore();
+const editStore = useEditStore();
 const { tool } = storeToRefs(toolStore);
+const { undoable, redoable } = storeToRefs(editStore);
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
   animate, objectPanelVisible, debugOverlay, copilotVisible,
@@ -68,6 +71,15 @@ const layers = [
     <div class="dock-spring" />
     <div class="dock-div" />
 
+    <el-tooltip content="Отменить (Ctrl+Z)" placement="right" :show-after="200">
+      <button class="d2-tool-btn dock-glyph" :disabled="!undoable" @click="editStore.undoEdit()">↶</button>
+    </el-tooltip>
+    <el-tooltip content="Вернуть (Ctrl+⇧Z)" placement="right" :show-after="200">
+      <button class="d2-tool-btn dock-glyph" :disabled="!redoable" @click="editStore.redoEdit()">↷</button>
+    </el-tooltip>
+
+    <div class="dock-div" />
+
     <el-tooltip content="Copilot ( / )" placement="right" :show-after="200">
       <button
         class="d2-tool-btn"
@@ -114,6 +126,16 @@ const layers = [
   background: var(--d2-active-bg);
   color: var(--d2-active-fg);
   box-shadow: inset 2px 0 0 var(--d2-active-bar);
+}
+.d2-tool-btn:disabled {
+  opacity: 0.32;
+  cursor: default;
+  background: transparent;
+  color: var(--el-text-color-regular);
+}
+.dock-glyph {
+  font-size: 18px;
+  line-height: 1;
 }
 .dock-div {
   width: 24px;
