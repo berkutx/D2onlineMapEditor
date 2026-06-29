@@ -23,6 +23,13 @@ export interface Recipe {
   /** cell scale: run the program on a grid this much coarser; each cell → a scale×scale
    *  block (decode places scale-sized pieces). Used by wall_maze (2 → 2×2 stone walls). */
   cellScale?: number;
+  /** PATH recipes (road / river): when the user HAND-DRAWS a stroke (a cell mask), the
+   *  drawn cells ARE the path — lay it along them directly instead of generating a random
+   *  MJ path and keeping only the fragments that cross the stroke. With no mask the recipe
+   *  still runs MJ normally (a winding path inside the region). `pathSymbol` = the decode
+   *  symbol to stamp on the masked cells. */
+  maskAsPath?: boolean;
+  pathSymbol?: string;
   /** symbols the recipe can emit (its alphabet). */
   alphabet: string;
   inputMode: RecipeInputMode;
@@ -57,6 +64,8 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<one values="BRW" origin="True" in="RBB" out="WWR"/>`,
     alphabet: "BRW",
+    maskAsPath: true,
+    pathSymbol: "W", // a hand-drawn river follows the stroke (W = water)
     inputMode: "zone",
     notes: "A winding river / watercourse across the zone.",
   },
@@ -158,6 +167,8 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<one values="BRP" origin="True" in="RBB" out="PPR"/>`,
     alphabet: "BRP",
+    maskAsPath: true,
+    pathSymbol: "P", // a hand-drawn road follows the stroke (P = path, auto-tiled)
     inputMode: "zone",
     notes: "A winding road / path across the zone.",
   },

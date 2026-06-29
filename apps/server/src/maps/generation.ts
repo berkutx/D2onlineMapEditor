@@ -123,7 +123,7 @@ export async function runGenerationSteps(
   let work = liveDoc;
   const all: EditOp[] = [];
   for (const step of steps) {
-    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; cellScale?: number };
+    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; cellScale?: number; maskAsPath?: boolean; pathSymbol?: string };
     let table: DecodeTable;
     if (step.recipeId) {
       const r = getRecipe(step.recipeId);
@@ -140,8 +140,19 @@ export async function runGenerationSteps(
     }
     const seed = Number.isInteger(step.seed) ? (step.seed as number) : defaultSeed;
     const scale = Number.isInteger(recipe.cellScale) && (recipe.cellScale as number) > 1 ? (recipe.cellScale as number) : 1;
-    const grid = await buildGrid(recipe, step.region, seed, scale);
-    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor, scale);
+    // PATH recipes (road / river) with a HAND-DRAWN mask: the drawn cells ARE the path —
+    // stamp the path symbol on the whole region and let the mask clip it to the stroke,
+    // instead of running MJ (which would generate a random path and keep only the bits that
+    // cross the stroke). With no mask, fall through to normal MJ generation in the region.
+    const asPath = !!mask && recipe.maskAsPath === true && typeof recipe.pathSymbol === "string";
+    const grid = asPath
+      ? {
+          width: step.region.w,
+          height: step.region.h,
+          rows: Array.from({ length: step.region.h }, () => recipe.pathSymbol!.repeat(step.region.w)),
+        }
+      : await buildGrid(recipe, step.region, seed, scale);
+    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor, asPath ? 1 : scale);
     all.push(...ops);
     work = applyOps(work, ops);
   }
