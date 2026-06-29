@@ -34,6 +34,7 @@ const open = ref(false);
 const query = ref("");
 type Mode = "cat" | "bonus" | "cost" | "alpha";
 const mode = ref<Mode>("cat");
+const subFilter = ref<string>("all"); // narrow to one sub-group of the active mode
 const MODE_OPTIONS = [
   { label: "Категория", value: "cat" },
   { label: "Бонус", value: "bonus" },
@@ -46,8 +47,10 @@ watch(open, (v) => {
     void itemStore.load();
     query.value = "";
     mode.value = "cat";
+    subFilter.value = "all";
   }
 });
+watch(mode, () => { subFilter.value = "all"; }); // sub-groups change with the mode
 
 const COST_BUCKETS = [
   { key: "c0", label: "Без стоимости", lo: 0, hi: 0 },
@@ -77,12 +80,17 @@ const baseGroups = computed<DisplayGroup[]>(() => {
   return itemStore.groups.map((g) => ({ key: g.catKey || String(g.cat), label: g.label, items: g.items }));
 });
 
-/** baseGroups filtered by the search query (matches name, effect, or id). */
+/** Sub-group options for the active mode (drives the subcategory combobox). */
+const subOptions = computed(() => baseGroups.value.map((g) => ({ value: g.key, label: `${g.label} (${g.items.length})` })));
+
+/** baseGroups narrowed to the chosen sub-group, then filtered by the search query. */
 const groups = computed<DisplayGroup[]>(() => {
   const q = query.value.trim().toLowerCase();
-  if (!q) return baseGroups.value.filter((g) => g.items.length);
+  let base = baseGroups.value;
+  if (subFilter.value !== "all") base = base.filter((g) => g.key === subFilter.value);
+  if (!q) return base.filter((g) => g.items.length);
   const out: DisplayGroup[] = [];
-  for (const g of baseGroups.value) {
+  for (const g of base) {
     const items = g.items.filter(
       (it) => it.name.toLowerCase().includes(q) || (it.effect ?? "").toLowerCase().includes(q) || it.id.toLowerCase().includes(q),
     );
@@ -149,6 +157,10 @@ function clear(): void {
           :prefix-icon="Search"
           class="ip-search"
         />
+        <el-select v-model="subFilter" filterable size="default" class="ip-sub" placeholder="Все">
+          <el-option label="Все" value="all" />
+          <el-option v-for="o in subOptions" :key="o.value" :label="o.label" :value="o.value" />
+        </el-select>
       </div>
       <el-segmented v-model="mode" :options="MODE_OPTIONS" size="small" class="ip-modes" />
 
@@ -218,6 +230,9 @@ function clear(): void {
 }
 .ip-search {
   flex: 1 1 auto;
+}
+.ip-sub {
+  flex: 0 0 190px;
 }
 .ip-modes {
   width: 100%;
