@@ -23,13 +23,15 @@ export interface Recipe {
   /** cell scale: run the program on a grid this much coarser; each cell → a scale×scale
    *  block (decode places scale-sized pieces). Used by wall_maze (2 → 2×2 stone walls). */
   cellScale?: number;
-  /** PATH recipes (road / river): when the user HAND-DRAWS a stroke (a cell mask), the
-   *  drawn cells ARE the path — lay it along them directly instead of generating a random
-   *  MJ path and keeping only the fragments that cross the stroke. With no mask the recipe
-   *  still runs MJ normally (a winding path inside the region). `pathSymbol` = the decode
-   *  symbol to stamp on the masked cells. */
-  maskAsPath?: boolean;
-  pathSymbol?: string;
+  /** "Follow the drawing": when the user HAND-DRAWS a stroke (a cell mask), stamp this
+   *  decode symbol on the drawn cells DIRECTLY instead of running MJ on the bounding box
+   *  and keeping only the fragments that cross the stroke. Used by paths (road/river — the
+   *  stroke IS the path) and scatter decor (rocks/bushes along the stroke). With no mask
+   *  the recipe still runs MJ normally inside the region. */
+  maskSymbol?: string;
+  /** fraction of the drawn cells to stamp (0..1, default 1). Paths use 1 (every cell);
+   *  scatter decor uses < 1 so it's sprinkled ALONG the stroke, not a solid wall. */
+  maskDensity?: number;
   /** symbols the recipe can emit (its alphabet). */
   alphabet: string;
   inputMode: RecipeInputMode;
@@ -64,8 +66,7 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<one values="BRW" origin="True" in="RBB" out="WWR"/>`,
     alphabet: "BRW",
-    maskAsPath: true,
-    pathSymbol: "W", // a hand-drawn river follows the stroke (W = water)
+    maskSymbol: "W", // a hand-drawn river follows the stroke (W = water), every cell
     inputMode: "zone",
     notes: "A winding river / watercourse across the zone.",
   },
@@ -167,8 +168,7 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<one values="BRP" origin="True" in="RBB" out="PPR"/>`,
     alphabet: "BRP",
-    maskAsPath: true,
-    pathSymbol: "P", // a hand-drawn road follows the stroke (P = path, auto-tiled)
+    maskSymbol: "P", // a hand-drawn road follows the stroke (P = path, auto-tiled), every cell
     inputMode: "zone",
     notes: "A winding road / path across the zone.",
   },
@@ -180,6 +180,8 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<prl values="BD" in="B" out="D" p="0.04" steps="1"/>`,
     alphabet: "BD",
+    maskSymbol: "D", // "rocks along this line": sprinkle decor along a hand-drawn stroke
+    maskDensity: 0.5,
     inputMode: "zone",
     notes: "Scattered rocks / boulders.",
   },
@@ -188,6 +190,8 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<prl values="BD" in="B" out="D" p="0.05" steps="1"/>`,
     alphabet: "BD",
+    maskSymbol: "D",
+    maskDensity: 0.5,
     inputMode: "zone",
     notes: "Scattered bushes / vegetation.",
   },
@@ -196,6 +200,8 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<prl values="BD" in="B" out="D" p="0.02" steps="1"/>`,
     alphabet: "BD",
+    maskSymbol: "D",
+    maskDensity: 0.3,
     inputMode: "zone",
     notes: "Scattered ruins / broken buildings.",
   },
@@ -204,6 +210,8 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<prl values="BD" in="B" out="D" p="0.03" steps="1"/>`,
     alphabet: "BD",
+    maskSymbol: "D",
+    maskDensity: 0.4,
     inputMode: "zone",
     notes: "A graveyard / scattered bones & graves.",
   },

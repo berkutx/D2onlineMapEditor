@@ -89,6 +89,32 @@ async function buildGrid(
   throw new Error(`unknown recipe kind '${recipe.kind}'`);
 }
 
+/** Cheap deterministic hash → [0,1) from a global cell + seed (stable across requests). */
+function rand01(x: number, y: number, seed: number): number {
+  let h = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(seed, 83492791)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0x5bd1e995) >>> 0;
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * Grid for "follow the drawing": each region cell gets `symbol` with probability `density`
+ * (1 = every cell), else a blank "." that no decode table maps. The caller clips this to the
+ * hand-drawn mask, so the symbol lands ALONG the drawn stroke — solid for paths (density 1),
+ * sprinkled for scatter decor (density < 1). Deterministic by (global cell, seed).
+ */
+function maskFillGrid(region: StepRegion, symbol: string, density: number, seed: number): SymbolGrid {
+  const rows: string[] = [];
+  for (let gy = 0; gy < region.h; gy++) {
+    let row = "";
+    for (let gx = 0; gx < region.w; gx++) {
+      row += density >= 1 || rand01(region.x + gx, region.y + gy, seed) < density ? symbol : ".";
+    }
+    rows.push(row);
+  }
+  return { width: region.w, height: region.h, rows };
+}
+
 /** The allowed decode-action kinds (mirrors @d2/map-edit DecodeAction) — guards inline tables. */
 const DECODE_KINDS = new Set(["skip", "terrain", "water", "forest", "wall"]);
 
@@ -123,7 +149,7 @@ export async function runGenerationSteps(
   let work = liveDoc;
   const all: EditOp[] = [];
   for (const step of steps) {
-    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; cellScale?: number; maskAsPath?: boolean; pathSymbol?: string };
+    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; cellScale?: number; maskSymbol?: string; maskDensity?: number };
     let table: DecodeTable;
     if (step.recipeId) {
       const r = getRecipe(step.recipeId);
@@ -140,19 +166,15 @@ export async function runGenerationSteps(
     }
     const seed = Number.isInteger(step.seed) ? (step.seed as number) : defaultSeed;
     const scale = Number.isInteger(recipe.cellScale) && (recipe.cellScale as number) > 1 ? (recipe.cellScale as number) : 1;
-    // PATH recipes (road / river) with a HAND-DRAWN mask: the drawn cells ARE the path —
-    // stamp the path symbol on the whole region and let the mask clip it to the stroke,
-    // instead of running MJ (which would generate a random path and keep only the bits that
-    // cross the stroke). With no mask, fall through to normal MJ generation in the region.
-    const asPath = !!mask && recipe.maskAsPath === true && typeof recipe.pathSymbol === "string";
-    const grid = asPath
-      ? {
-          width: step.region.w,
-          height: step.region.h,
-          rows: Array.from({ length: step.region.h }, () => recipe.pathSymbol!.repeat(step.region.w)),
-        }
+    // "Follow the drawing": with a HAND-DRAWN mask, recipes that declare a maskSymbol stamp
+    // it on the drawn cells directly (paths at density 1 = every cell; scatter decor at
+    // density < 1 = sprinkled along the stroke) instead of running MJ on the bounding box and
+    // keeping only the fragments that cross the stroke. No mask → normal MJ in the region.
+    const maskFill = !!mask && typeof recipe.maskSymbol === "string";
+    const grid = maskFill
+      ? maskFillGrid(step.region, recipe.maskSymbol!, recipe.maskDensity ?? 1, seed)
       : await buildGrid(recipe, step.region, seed, scale);
-    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor, asPath ? 1 : scale);
+    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor, maskFill ? 1 : scale);
     all.push(...ops);
     work = applyOps(work, ops);
   }
