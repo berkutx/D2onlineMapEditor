@@ -15,6 +15,8 @@ import { useItemStore } from "../stores/itemStore";
 import ItemPicker from "./ItemPicker.vue";
 import ItemIcon from "./ItemIcon.vue";
 import ImagePicker from "./ImagePicker.vue";
+import SpriteThumb from "./SpriteThumb.vue";
+import { useSpriteStore } from "../stores/spriteStore";
 
 /** RuinObjectAccessor sprite key: "G000RU0000" + image(3) (base look; looted adds +100). */
 const ruinImageKey = (i: number): string => `G000RU0000${String(i).padStart(3, "0")}`;
@@ -23,6 +25,7 @@ const toolStore = useToolStore();
 const editStore = useEditStore();
 const itemStore = useItemStore();
 void itemStore.load();
+const spriteStore = useSpriteStore();
 const { selectedId } = storeToRefs(toolStore);
 
 /** Retry the catalog load when a chest/ruin is selected but it failed to load earlier
@@ -94,9 +97,16 @@ function chestMoveItem(idx: number, dir: number): void {
   patch({ items });
 }
 
-/** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts. */
+/** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts.
+ *  Letter order = the resource enum (CrystalIdByResource): Gold, Demons(Inferno), Empire(Life),
+ *  Undead(Death), Clans(Runic), Elves(Nature) — so E=Death, B=Nature (NOT the other way). */
 const REWARD_ORDER = ["G", "R", "Y", "E", "W", "B"] as const;
-const REWARD_LABELS: Record<string, string> = { G: "Золото", R: "Инферно", Y: "Жизнь", E: "Природа", W: "Руны", B: "Смерть" };
+const REWARD_LABELS: Record<string, string> = { G: "Золото", R: "Инферно", Y: "Жизнь", E: "Смерть", W: "Руны", B: "Природа" };
+/** mana-school crystal sprite per reward letter (the game's coloured mana crystal). */
+const REWARD_CRYSTAL: Record<string, string> = {
+  G: "G000CR0000GL", R: "G000CR0000RD", Y: "G000CR0000YE", E: "G000CR0000RG", W: "G000CR0000WH", B: "G000CR0000GR",
+};
+void spriteStore.ensureKeys(Object.values(REWARD_CRYSTAL));
 const reward = computed(() => {
   const r = obj.value?.type === "ruin" ? obj.value.reward : undefined;
   if (!r) return null;
@@ -192,6 +202,7 @@ function close(): void {
           <div class="ro-label">Награда (золото и мана)</div>
           <div class="reward-edit">
             <div v-for="r in reward" :key="r.k" class="rw-edit">
+              <SpriteThumb :sprite-key="REWARD_CRYSTAL[r.k]" :size="20" :title="r.label" />
               <span class="rw-lbl">{{ r.label }}</span>
               <el-input-number :model-value="r.v" :min="0" :max="9999" size="small" controls-position="right" @change="(v: number) => setReward(r.k, v)" />
             </div>
@@ -323,16 +334,16 @@ function close(): void {
 }
 .reward-edit {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 8px;
+  grid-template-columns: 1fr;
+  gap: 4px;
 }
 .rw-edit {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 4px;
 }
 .rw-lbl {
+  flex: 1 1 auto;
   font-size: 11px;
   color: var(--el-text-color-secondary);
 }
