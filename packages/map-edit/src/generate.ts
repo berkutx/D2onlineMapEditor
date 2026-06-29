@@ -81,12 +81,15 @@ export interface WallPieces {
   "NW-SE": string[];
   corner: string[];
 }
-/** One wall art set (a faction's stone/wood walls): its 1×1 pieces (s1) + 2×2 pieces (s2).
- *  The game faces castles with the 2×2 stone set in long lines — that's what a maze uses. */
+/** One wall art set (a faction's stone/wood walls): its 1×1 pieces (s1) + 2×2 pieces (s2),
+ *  plus an optional matching corner TOWER. The game faces castles with the 2×2 stone set in
+ *  long lines + towers at the corners — that's what a maze uses. */
 export interface WallStyle {
   key: string;
   s1: WallPieces;
   s2: WallPieces;
+  /** a plain stone turret of the same faction (placed at corners/junctions). */
+  tower?: string;
 }
 /** Available wall styles. A maze uses ONE so the art doesn't mix; the 2×2 stone set wins. */
 export interface WallSet {
@@ -103,6 +106,8 @@ interface WallCatalogEntry {
   cx: number;
   cy: number;
   iso?: { orient?: string };
+  tone?: string;
+  tags?: string[];
 }
 
 /**
@@ -127,7 +132,19 @@ export function buildWallSet(
     if (o === "NE-SW" || o === "NW-SE") pieces[o].push(e.id);
     else pieces.corner.push(e.id);
   }
+  // matching corner TOWER per faction: a 1×1 plain stone turret (prefer tone "neutral", so a
+  // grey turret that matches the wall — not the red-roof / snowy 2×2 watchtowers).
+  const towerByFaction = new Map<string, { id: string; score: number }>();
+  for (const e of arr) {
+    if (e.shape !== "tower" || (e.cx ?? 1) !== 1 || (e.cy ?? 1) !== 1) continue;
+    const fac = e.id.slice(0, 4);
+    const score = e.tone === "neutral" || (e.tags ?? []).includes("neutral") ? 1 : 0;
+    const cur = towerByFaction.get(fac);
+    if (!cur || score > cur.score) towerByFaction.set(fac, { id: e.id, score });
+  }
+
   const styles = [...byKey.values()].filter((s) => wallComplete(s.s1) || wallComplete(s.s2));
+  for (const s of styles) s.tower = towerByFaction.get(s.key.split("|")[1] ?? "")?.id;
   // prefer "wall" (stone) over "fence", then faction desc, so the stone sets sort first.
   styles.sort((a, b) =>
     (a.key.startsWith("wall|") ? 0 : 1) - (b.key.startsWith("wall|") ? 0 : 1) || (a.key < b.key ? 1 : -1));
@@ -256,7 +273,9 @@ export function decodeGrid(
       const [x, y] = key.split(",").map(Number) as [number, number];
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
-      const baseType = wallPiece(m, pieces);
+      // a corner / junction / lone post (not a straight run) → a tower, else a wall piece.
+      const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
+      const baseType = !straight && style?.tower ? style.tower : wallPiece(m, pieces);
       if (!baseType) continue;
       const placeOps = placeLandmarkOps(work, x, y, baseType);
       ops.push(...placeOps);
