@@ -278,12 +278,20 @@ export function decodeGrid(
       const [x, y] = key.split(",").map(Number) as [number, number];
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
-      // Corner / junction / lone post (not a straight run) → a TOWER, which on its own
-      // covers the corner; do NOT also lay a wall corner piece there (that left a stray
-      // wall bit beside the tower). Straight runs/ends → the matching straight wall piece.
       const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
-      const baseType = !straight && style?.tower ? style.tower : wallPiece(m, pieces);
-      if (baseType) place(x, y, baseType);
+      if (!straight && style?.tower) {
+        // Corner/junction → a TOWER (it covers the corner; no wall piece there). A 1×1
+        // tower anchored at the corner cell renders ~half the 2×2 block too far up-left
+        // (it centres on the block's BACK cell), so nudge it onto the block's FRONT cell
+        // (+scale-1) to seat it where the wall arms actually meet. scale 1 → no nudge.
+        const d = scale - 1;
+        const tx = x + d < doc.size ? x + d : x;
+        const ty = y + d < doc.size ? y + d : y;
+        place(tx, ty, style.tower);
+      } else {
+        const wallType = wallPiece(m, pieces);
+        if (wallType) place(x, y, wallType);
+      }
     }
   }
 
