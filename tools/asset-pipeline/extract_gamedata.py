@@ -30,6 +30,12 @@ def read_dbf(path):
         off = hlen + r * rlen
         if off + rlen > len(d):
             break
+        # DBF record marker: 0x20 (space) = active, 0x2A ('*') = deleted. Several game DBFs carry
+        # deleted records (GMabi 558, Lrace 8, GLmark 6, Lterrain 1, Gunits 4); reading them leaks
+        # stale data into the extract — e.g. a deleted Lterrain GO=0 row into terrainCodes. Skip
+        # them so the extracted maps reflect only live game data, matching the engine.
+        if d[off] == 0x2A:
+            continue
         pos = off + 1
         row = {}
         for (name, flen) in fields:

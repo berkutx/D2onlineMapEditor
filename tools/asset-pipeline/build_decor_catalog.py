@@ -42,6 +42,12 @@ def read_dbf(path):
         off = hlen + r * rlen
         if off + rlen > len(d):
             break
+        # DBF record marker: 0x20 (space) = active, 0x2A ('*') = deleted. GLmark.dbf carries
+        # 6 deleted ghost records (e.g. G000MG8014, whose stale empty-NAME_TXT copy comes after
+        # its live twin and would otherwise win the last-wins `cat` dict -> a nameless landmark).
+        # Skipping deleted rows keeps the catalog to live game landmarks.
+        if d[off] == 0x2A:
+            continue
         pos = off + 1
         row = {}
         for (name, flen) in fields:
