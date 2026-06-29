@@ -9,8 +9,9 @@
  * game-faithful placement / Plan entries are a later refinement.)
  */
 
-import { ByteBuffer } from "../bytebuffer.js";
+import { ByteBuffer, tagValueOffset } from "../bytebuffer.js";
 import { ByteWriter } from "./byteWriter.js";
+import { encodeCp1251 } from "./cp1251.js";
 
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
 
@@ -132,6 +133,54 @@ export function replaceBlock(bytes: Uint8Array, objId: string, newFrame: Uint8Ar
   out.set(bytes.subarray(0, f.start), 0);
   out.set(newFrame, f.start);
   out.set(bytes.subarray(f.end), f.start + newFrame.length);
+  return out;
+}
+
+/** One variable-length string field edit: where to find it + the new value. */
+export interface StringFieldEdit {
+  /** the object's BEGOBJECT+1 offset (raw.objectById fieldsFrom) */
+  fieldsFrom: number;
+  /** the object's ENDOBJECT offset (raw.objectById fieldsEnd) */
+  fieldsEnd: number;
+  /** the field tag, e.g. "NAME_TXT" / "TITLE" / "DESC_TXT" / "DESC" */
+  tag: string;
+  /** the new string value (CP1251-encoded; stored as int32 len(+NUL) + bytes + NUL) */
+  value: string;
+}
+
+/**
+ * M4 growable edit: rewrite variable-length STRING fields in place, resizing the file.
+ * The `.sg` is purely marker-delimited (BEGOBJECT/ENDOBJECT + tag scans) with only a
+ * header object-count and NO byte offset/size tables, so a field can grow/shrink and the
+ * file stays valid — no fixups beyond the splice itself. Object count is unchanged (we
+ * edit values, not add/remove blocks). All field offsets are computed UP FRONT on the
+ * input bytes, then splices applied HIGHEST-offset-first so each lower range stays valid.
+ */
+export function spliceStringFields(bytes: Uint8Array, edits: readonly StringFieldEdit[]): Uint8Array {
+  if (edits.length === 0) return bytes;
+  const buf = new ByteBuffer(bytes);
+  const splices = edits.map((e) => {
+    const at = tagValueOffset(buf, e.tag, e.fieldsFrom, e.fieldsEnd);
+    if (at === null) {
+      throw new Error(`spliceStringFields: field ${e.tag} not found in [${e.fieldsFrom},${e.fieldsEnd}]`);
+    }
+    const oldLen = buf.readInt32LE(at); // stored length = byteLen + 1 (incl trailing NUL)
+    const enc = encodeCp1251(e.value);
+    const region = new Uint8Array(4 + enc.length + 1); // int32 len + bytes + NUL(0)
+    new DataView(region.buffer).setInt32(0, enc.length + 1, true);
+    region.set(enc, 4);
+    return { start: at, end: at + 4 + oldLen, region };
+  });
+  // overlapping ranges would mean two edits to the same field — reject (caller dedups).
+  splices.sort((a, b) => b.start - a.start);
+  let out = bytes;
+  for (const s of splices) {
+    const next = new Uint8Array(out.length - (s.end - s.start) + s.region.length);
+    next.set(out.subarray(0, s.start), 0);
+    next.set(s.region, s.start);
+    next.set(out.subarray(s.end), s.start + s.region.length);
+    out = next;
+  }
   return out;
 }
 

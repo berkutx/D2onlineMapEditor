@@ -22,8 +22,10 @@ export {
   landmarkFrame,
   mountainsFrame,
   replaceBlock,
+  spliceStringFields,
   emitBlock,
   type MountainEntry,
+  type StringFieldEdit,
 } from "./sgRebuild.js";
 export { ByteWriter, EMPTY_REF } from "./byteWriter.js";
 export { encodeCp1251, cp1251Length } from "./cp1251.js";

@@ -303,6 +303,24 @@ describe("@d2/map-edit patchObject re-roll (look change, keeps footprint)", () =
     expect(res.reason).toBeUndefined();
     expect(res.ok).toBe(true);
   });
+
+  it("edits a city NAME_TXT (variable-length) via the M4 growable splice — grow + shrink", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    // a village whose NAME_TXT is present (non-empty) so the field exists to resize
+    const village = doc.objects.find((o) => o.type === "village" && ((o as { name?: string }).name?.length ?? 0) > 0);
+    expect(village).toBeTruthy();
+    const id = village!.id;
+    for (const newName of ["Новый город с очень длинным именем", "Х"]) {
+      const ops: EditOp[] = [{ kind: "patchObject", id, fields: { name: newName } }];
+      const out = applyEditsToBytes(raw, ops);
+      const re = parseScenario(out);
+      expect((re.objects.find((o) => o.id === id) as { name?: string }).name).toBe(newName);
+      expect(re.objects.length).toBe(doc.objects.length); // no object added/lost
+      const res = roundTripSemantic(doc, out, ops);
+      expect(res.reason).toBeUndefined();
+      expect(res.ok).toBe(true);
+    }
+  });
 });
 
 describe("@d2/map-edit project (journal + undo/redo)", () => {

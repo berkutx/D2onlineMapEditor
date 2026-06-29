@@ -30,12 +30,13 @@ const TYPE_LABEL: Record<string, string> = {
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
 const editable = computed(() => !!obj.value && ["treasure", "ruin", "village"].includes(obj.value.type));
 
-/** Commit one undoable patch of fixed-width int fields. */
-function patch(fields: Record<string, number>): void {
+/** Commit one undoable patch (int or string fields). */
+function patch(fields: Record<string, number | string>): void {
   if (obj.value) editStore.commit([{ kind: "patchObject", id: obj.value.id, fields }]);
 }
 
 /** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts. */
+const REWARD_ORDER = ["G", "R", "Y", "E", "W", "B"] as const;
 const REWARD_LABELS: Record<string, string> = { G: "Золото", R: "Инферно", Y: "Жизнь", E: "Природа", W: "Руны", B: "Смерть" };
 const reward = computed(() => {
   const r = obj.value?.type === "ruin" ? obj.value.reward : undefined;
@@ -43,6 +44,14 @@ const reward = computed(() => {
   return r.split(":").map((p) => ({ k: p[0] ?? "", label: REWARD_LABELS[p[0] ?? ""] ?? p[0] ?? "", v: parseInt(p.slice(1), 10) || 0 }))
     .filter((e) => e.label);
 });
+
+/** Rebuild the fixed-width 35-char CASH string with one resource changed, then patch it. */
+function setReward(k: string, v: number): void {
+  const cur: Record<string, number> = {};
+  for (const r of reward.value ?? []) cur[r.k] = r.v;
+  cur[k] = Math.max(0, Math.min(9999, Math.round(v || 0))); // 4-digit field keeps CASH length constant
+  patch({ reward: REWARD_ORDER.map((o) => o + String(cur[o] ?? 0).padStart(4, "0")).join(":") });
+}
 
 function close(): void {
   toolStore.setSelectedId(null);
@@ -80,7 +89,14 @@ function close(): void {
 
       <!-- 🏚 RUIN -->
       <template v-else-if="obj.type === 'ruin'">
-        <div class="ro-row"><label>Название</label><span class="ro-val">{{ obj.name || "—" }} <el-icon class="lock"><Lock /></el-icon></span></div>
+        <div class="col">
+          <label>Название</label>
+          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+        </div>
+        <div v-if="obj.desc !== undefined" class="col">
+          <label>Описание</label>
+          <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" @change="(v: string) => patch({ desc: v })" />
+        </div>
         <div class="row">
           <label>Картинка</label>
           <el-input-number :model-value="obj.image ?? 0" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ image: v ?? 0 })" />
@@ -89,19 +105,29 @@ function close(): void {
           <label>Приоритет ИИ</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
-        <div class="ro-row"><label>Разграблена</label><span class="ro-val">{{ obj.looted ? "да" : "нет" }} <el-icon class="lock"><Lock /></el-icon></span></div>
         <div v-if="reward" class="ro-block">
-          <div class="ro-label">Награда <el-icon class="lock"><Lock /></el-icon></div>
-          <div class="reward">
-            <span v-for="r in reward" :key="r.k" class="rw" :class="{ zero: r.v === 0 }">{{ r.label }}: <b>{{ r.v }}</b></span>
+          <div class="ro-label">Награда (золото и мана)</div>
+          <div class="reward-edit">
+            <div v-for="r in reward" :key="r.k" class="rw-edit">
+              <span class="rw-lbl">{{ r.label }}</span>
+              <el-input-number :model-value="r.v" :min="0" :max="9999" size="small" controls-position="right" @change="(v: number) => setReward(r.k, v)" />
+            </div>
           </div>
         </div>
         <div class="ro-row"><label>Артефакт</label><span class="ro-val">{{ obj.item || "—" }} <el-icon class="lock"><Lock /></el-icon></span></div>
+        <div class="ro-row"><label>Разграблена</label><span class="ro-val">{{ obj.looted ? "да" : "нет" }} <el-icon class="lock"><Lock /></el-icon></span></div>
       </template>
 
       <!-- 🏘 CITY -->
       <template v-else-if="obj.type === 'village'">
-        <div class="ro-row"><label>Название</label><span class="ro-val">{{ obj.name || "—" }} <el-icon class="lock"><Lock /></el-icon></span></div>
+        <div class="col">
+          <label>Название</label>
+          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+        </div>
+        <div v-if="obj.desc !== undefined" class="col">
+          <label>Описание</label>
+          <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" @change="(v: string) => patch({ desc: v })" />
+        </div>
         <div class="ro-row"><label>Владелец</label><span class="ro-val">{{ obj.owner || "нейтрал" }} <el-icon class="lock"><Lock /></el-icon></span></div>
         <div class="row">
           <label>Уровень</label>
@@ -125,7 +151,7 @@ function close(): void {
         </div>
       </template>
 
-      <p class="ins-note"><el-icon><Lock /></el-icon> поля с замком — только просмотр; правка текста/золота/предметов/владельца появится с M4-райтером.</p>
+      <p class="ins-note"><el-icon><Lock /></el-icon> поля с замком пока только для просмотра (владелец, артефакт, списки предметов) — скоро.</p>
     </div>
 
     <div v-else class="ins-body">
@@ -183,6 +209,33 @@ function close(): void {
 .row label {
   font-size: 12px;
   color: var(--el-text-color-regular);
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.col label {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+.reward-edit {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+.rw-edit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.rw-lbl {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+.rw-edit :deep(.el-input-number) {
+  width: 86px;
 }
 .ro-row {
   display: flex;

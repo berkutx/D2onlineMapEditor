@@ -15,8 +15,10 @@ import {
   landmarkFrame,
   mountainsFrame,
   replaceBlock,
+  spliceStringFields,
   type SgRaw,
   type MountainEntry,
+  type StringFieldEdit,
 } from "@d2/sg-parser";
 import type { MapObject } from "@d2/map-schema";
 import type { EditOp } from "./ops.js";
@@ -44,6 +46,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
    *  Emitted after the op loop so place-then-move of the same object exports correctly
    *  (a moveObject can't setObjectPos a block that's only appended at the end). */
   const addedObjects = new Map<string, MapObject>();
+  /** M4 growable edits: variable-length string fields (names/descriptions) to splice. */
+  const stringEdits: StringFieldEdit[] = [];
 
   for (const op of ops) {
     switch (op.kind) {
@@ -106,25 +110,41 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           // landmark look = its TYPE string (a 10-char GLmark id -> fixed-width splice)
           w.setObjectString(op.id, "TYPE", f.baseType);
         } else {
-          // chest/ruin/city numeric property edits — fixed-width int32 splices in place.
-          // field name -> .sg tag (the inspector only exposes fields the object actually has).
+          // chest/ruin/city property edits. field name -> .sg tag, by storage kind:
+          const o = raw.objectById.get(op.id);
+          const isRuin = o?.typeName === "MidRuin";
+          // 1) fixed-width int32 — splice in place.
           const INT_TAG: Record<string, string> = {
             image: "IMAGE", tier: "SIZE", priority: "AIPRIORITY",
             morale: "MORALE", regen: "REGEN_B", growth: "GROWTH_T",
           };
+          // 2) fixed-width strings — compound ids (10 chars) + CASH (35 chars): same-length splice.
+          const FIXED_STR: Record<string, string> = {
+            owner: "OWNER", subRace: "SUBRACE", item: "ITEM", looter: "LOOTER", reward: "CASH",
+          };
+          // 3) variable-length strings — user text → M4 growable splice (tag differs by type).
+          const VAR_STR: Record<string, string> = {
+            name: isRuin ? "TITLE" : "NAME_TXT", desc: isRuin ? "DESC" : "DESC_TXT",
+          };
           const handled = new Set<string>();
           for (const [key, tag] of Object.entries(INT_TAG)) {
-            if (typeof f[key] === "number") {
-              w.setObjectInt(op.id, tag, f[key] as number);
+            if (typeof f[key] === "number") { w.setObjectInt(op.id, tag, f[key] as number); handled.add(key); }
+          }
+          for (const [key, tag] of Object.entries(FIXED_STR)) {
+            if (typeof f[key] === "string") { w.setObjectString(op.id, tag, f[key] as string); handled.add(key); }
+          }
+          for (const [key, tag] of Object.entries(VAR_STR)) {
+            if (typeof f[key] === "string") {
+              if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
+              stringEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, tag, value: f[key] as string });
               handled.add(key);
             }
           }
           const left = Object.keys(f).filter((k) => !handled.has(k));
           if (left.length) {
-            // variable-length fields (name/desc/reward/item/owner/looter/items) need the
-            // growable mid-stream splice (M4) — not yet wired. Fail loud rather than corrupt.
+            // e.g. `items` (ITEM_ID list) — count-prefixed list editing is a later step.
             throw new Error(
-              `applyEditsToBytes: patchObject ${op.id} fields [${left}] not byte-writable yet (M4)`,
+              `applyEditsToBytes: patchObject ${op.id} fields [${left}] not byte-writable yet`,
             );
           }
         }
@@ -152,6 +172,9 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   }
 
   let bytes = w.toBytes();
+  // M4: resize variable-length string fields in place (object count unchanged). Done before
+  // the append/replace passes; those re-scan markers + the header count (all preserved).
+  if (stringEdits.length) bytes = spliceStringFields(bytes, stringEdits);
   const frames = appends.filter((f): f is Uint8Array => f !== null);
   if (frames.length) bytes = appendBlocks(bytes, frames);
   if (addedMountains.length || mountainPatches.size) {
