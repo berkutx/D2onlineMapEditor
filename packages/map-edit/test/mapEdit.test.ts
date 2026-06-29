@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { parseScenarioRaw, parseScenario } from "@d2/sg-parser";
+import { parseScenarioRaw, parseScenario, validateMap } from "@d2/sg-parser";
 import {
   setTerrain,
   setGround,
@@ -320,6 +320,59 @@ describe("@d2/map-edit patchObject re-roll (look change, keeps footprint)", () =
       expect(res.reason).toBeUndefined();
       expect(res.ok).toBe(true);
     }
+  });
+});
+
+describe("@d2/map-edit chest item list (M4 growable list — items are GItem templates)", () => {
+  it("adds an item: list grows, new entry resolves to the chosen template, semantic round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const chest = doc.objects.find(
+      (o) => o.type === "treasure" && ((o as { items?: string[] }).items?.length ?? 0) >= 1,
+    ) as { id: string; items: string[] };
+    expect(chest).toBeTruthy();
+    const baseItems = chest.items; // already resolved to template ids
+    const TEMPLATE = "G001IG0108";
+    const desired = [...baseItems, TEMPLATE];
+    const ops: EditOp[] = [{ kind: "patchObject", id: chest.id, fields: { items: desired } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reChest = re.objects.find((o) => o.id === chest.id) as { items: string[] };
+    // the chest's items (resolved to templates) equal the desired list, in order
+    expect(reChest.items).toEqual(desired);
+    expect(validateMap(re).ok).toBe(true);
+    const sem = roundTripSemantic(doc, out, ops);
+    expect(sem.reason).toBeUndefined();
+    expect(sem.ok).toBe(true);
+  });
+
+  it("removes an item: list shrinks, semantic round-trips, stays valid", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const chest = doc.objects.find(
+      (o) => o.type === "treasure" && ((o as { items?: string[] }).items?.length ?? 0) >= 2,
+    ) as { id: string; items: string[] };
+    expect(chest).toBeTruthy();
+    const kept = chest.items.slice(1); // drop the first item
+    const ops: EditOp[] = [{ kind: "patchObject", id: chest.id, fields: { items: kept } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reChest = re.objects.find((o) => o.id === chest.id) as { items?: string[] };
+    expect(reChest.items ?? []).toEqual(kept);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("clears all items: list count goes to zero, semantic round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const chest = doc.objects.find(
+      (o) => o.type === "treasure" && ((o as { items?: string[] }).items?.length ?? 0) >= 1,
+    ) as { id: string };
+    const ops: EditOp[] = [{ kind: "patchObject", id: chest.id, fields: { items: [] } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reChest = re.objects.find((o) => o.id === chest.id) as { items?: string[] };
+    expect(reChest.items ?? []).toEqual([]);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
   });
 });
 

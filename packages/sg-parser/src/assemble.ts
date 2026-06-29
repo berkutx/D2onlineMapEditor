@@ -212,6 +212,15 @@ export function assembleDocument(
     }
   }
 
+  // Resolve each chest's item list from MidItem instance ids to their global GItem
+  // template ids (e.g. "S143IM000a" -> "G000IG0006"), so the editor works with stable
+  // catalog templates. The instance indirection is re-created on export (new MidItems).
+  for (const o of acc.objects) {
+    if (o.type === "treasure" && o.items) {
+      o.items = o.items.map((inst) => acc.itemInstances[inst] ?? inst);
+    }
+  }
+
   // Resolve each stack/fort's STACK_BANNER number from its linked MidSubRace block
   // (the editor reads subrace.banner, NOT the stack's own BANNER field).
   for (const o of acc.objects) {
@@ -252,7 +261,6 @@ export function assembleDocument(
     terrain: { size, cells },
     objects: acc.objects,
     players: acc.players,
-    ...(Object.keys(acc.itemInstances).length ? { itemInstances: acc.itemInstances } : {}),
   };
 }
 

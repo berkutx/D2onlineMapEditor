@@ -21,11 +21,14 @@ export {
   roadFrame,
   landmarkFrame,
   mountainsFrame,
+  itemFrame,
   replaceBlock,
   spliceStringFields,
+  spliceVariableFields,
   emitBlock,
   type MountainEntry,
   type StringFieldEdit,
+  type ItemListEdit,
 } from "./sgRebuild.js";
 export { ByteWriter, EMPTY_REF } from "./byteWriter.js";
 export { encodeCp1251, cp1251Length } from "./cp1251.js";

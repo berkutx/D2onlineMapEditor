@@ -70,6 +70,15 @@ export function landmarkFrame(
   });
 }
 
+/** A MidItem block frame (code 0x0f, short IM): ITEM_ID (self) + ITEM_TYPE (global
+ *  GItem template id). A scenario item instance referenced by chests/heroes. */
+export function itemFrame(version: string, second: number, templateId: string): Uint8Array {
+  return emitBlock(version, "MidItem", 0x0f, "IM", second, (w, full) => {
+    w.refField("ITEM_ID", full);
+    w.refField("ITEM_TYPE", templateId);
+  });
+}
+
 /** One mountain entry written into the MidMountains body. */
 export interface MountainEntry {
   x: number;
@@ -148,30 +157,59 @@ export interface StringFieldEdit {
   value: string;
 }
 
+/** One count-prefixed ITEM_ID list edit (the chest item list). The new ordered list of
+ *  MidItem instance ids replaces the whole `objId + int32(count) + N×ITEM_ID` tail. */
+export interface ItemListEdit {
+  /** the object's fieldsFrom (raw.objectById) */
+  fieldsFrom: number;
+  /** the object's fieldsEnd (raw.objectById) */
+  fieldsEnd: number;
+  /** the object's full 10-char compound id — the list count's tag (D2's writeDefaultInt(objId,count)). */
+  objId: string;
+  /** the new ordered list of MidItem instance ids (each a 10-char compound id). */
+  instanceIds: readonly string[];
+}
+
+interface Splice {
+  start: number;
+  end: number;
+  region: Uint8Array;
+}
+
+/** Build the splice for one variable-length string field (resize in place). */
+function stringFieldSplice(buf: ByteBuffer, e: StringFieldEdit): Splice {
+  const at = tagValueOffset(buf, e.tag, e.fieldsFrom, e.fieldsEnd);
+  if (at === null) {
+    throw new Error(`spliceVariableFields: field ${e.tag} not found in [${e.fieldsFrom},${e.fieldsEnd}]`);
+  }
+  const oldLen = buf.readInt32LE(at); // stored length = byteLen + 1 (incl trailing NUL)
+  const enc = encodeCp1251(e.value);
+  const region = new Uint8Array(4 + enc.length + 1); // int32 len + bytes + NUL(0)
+  new DataView(region.buffer).setInt32(0, enc.length + 1, true);
+  region.set(enc, 4);
+  return { start: at, end: at + 4 + oldLen, region };
+}
+
 /**
- * M4 growable edit: rewrite variable-length STRING fields in place, resizing the file.
- * The `.sg` is purely marker-delimited (BEGOBJECT/ENDOBJECT + tag scans) with only a
- * header object-count and NO byte offset/size tables, so a field can grow/shrink and the
- * file stays valid — no fixups beyond the splice itself. Object count is unchanged (we
- * edit values, not add/remove blocks). All field offsets are computed UP FRONT on the
- * input bytes, then splices applied HIGHEST-offset-first so each lower range stays valid.
+ * Build the splice for one ITEM_ID list. The list is `objId + int32(count) + N×ITEM_ID`
+ * written LAST in the object (verified against D2Bag), so the count's objId-tag (the
+ * editor's writeDefaultInt(header.version+objId, count)) is the LAST occurrence of objId
+ * in the field range, and [thatOffset, fieldsEnd] is exactly the count+items region.
  */
-export function spliceStringFields(bytes: Uint8Array, edits: readonly StringFieldEdit[]): Uint8Array {
-  if (edits.length === 0) return bytes;
-  const buf = new ByteBuffer(bytes);
-  const splices = edits.map((e) => {
-    const at = tagValueOffset(buf, e.tag, e.fieldsFrom, e.fieldsEnd);
-    if (at === null) {
-      throw new Error(`spliceStringFields: field ${e.tag} not found in [${e.fieldsFrom},${e.fieldsEnd}]`);
-    }
-    const oldLen = buf.readInt32LE(at); // stored length = byteLen + 1 (incl trailing NUL)
-    const enc = encodeCp1251(e.value);
-    const region = new Uint8Array(4 + enc.length + 1); // int32 len + bytes + NUL(0)
-    new DataView(region.buffer).setInt32(0, enc.length + 1, true);
-    region.set(enc, 4);
-    return { start: at, end: at + 4 + oldLen, region };
-  });
-  // overlapping ranges would mean two edits to the same field — reject (caller dedups).
+function itemListSplice(buf: ByteBuffer, e: ItemListEdit): Splice {
+  const start = buf.lastIndexOf(e.objId, e.fieldsEnd);
+  if (start < e.fieldsFrom) {
+    throw new Error(`spliceVariableFields: item-list count tag ${e.objId} not found in [${e.fieldsFrom},${e.fieldsEnd}]`);
+  }
+  const w = new ByteWriter();
+  w.cp(e.objId).i32(e.instanceIds.length);
+  for (const id of e.instanceIds) w.refField("ITEM_ID", id);
+  return { start, end: e.fieldsEnd, region: w.toBytes() };
+}
+
+/** Apply pre-computed splices to `bytes`, HIGHEST-offset-first so lower ranges stay valid. */
+function applySplices(bytes: Uint8Array, splices: Splice[]): Uint8Array {
+  if (splices.length === 0) return bytes;
   splices.sort((a, b) => b.start - a.start);
   let out = bytes;
   for (const s of splices) {
@@ -182,6 +220,34 @@ export function spliceStringFields(bytes: Uint8Array, edits: readonly StringFiel
     out = next;
   }
   return out;
+}
+
+/**
+ * M4 growable edit: rewrite variable-length STRING fields and count-prefixed ITEM_ID
+ * lists in place, resizing the file. The `.sg` is purely marker-delimited (BEGOBJECT/
+ * ENDOBJECT + tag scans) with only a header object-count and NO byte offset/size tables,
+ * so a field can grow/shrink and the file stays valid — no fixups beyond the splice
+ * itself. Object count is unchanged here (callers add/remove MidItem blocks separately
+ * via appendBlocks). ALL offsets are computed UP FRONT on the input bytes, then splices
+ * applied HIGHEST-offset-first so each lower range stays valid even across both kinds.
+ */
+export function spliceVariableFields(
+  bytes: Uint8Array,
+  stringEdits: readonly StringFieldEdit[],
+  itemListEdits: readonly ItemListEdit[] = [],
+): Uint8Array {
+  if (stringEdits.length === 0 && itemListEdits.length === 0) return bytes;
+  const buf = new ByteBuffer(bytes);
+  const splices = [
+    ...stringEdits.map((e) => stringFieldSplice(buf, e)),
+    ...itemListEdits.map((e) => itemListSplice(buf, e)),
+  ];
+  return applySplices(bytes, splices);
+}
+
+/** Back-compat: string-field-only splice (used by existing callers/tests). */
+export function spliceStringFields(bytes: Uint8Array, edits: readonly StringFieldEdit[]): Uint8Array {
+  return spliceVariableFields(bytes, edits, []);
 }
 
 /** Append block frames to a `.sg` and bump the header object count. */

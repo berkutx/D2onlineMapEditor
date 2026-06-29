@@ -6,9 +6,9 @@
  * description, reward, items, owner) are shown read-only until the M4 growable writer
  * lands. Scope: chests / ruins / cities — capitals + units are view-only here.
  */
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { Close, Lock } from "@element-plus/icons-vue";
+import { Close, Delete } from "@element-plus/icons-vue";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
@@ -19,6 +19,12 @@ const editStore = useEditStore();
 const itemStore = useItemStore();
 void itemStore.load();
 const { selectedId } = storeToRefs(toolStore);
+
+/** Retry the catalog load when a chest/ruin is selected but it failed to load earlier
+ *  (e.g. a transient error while the dev server was reloading). */
+watch(selectedId, () => {
+  if (!itemStore.loaded && !itemStore.loading) void itemStore.load();
+});
 
 /** the live selected object (or null) */
 const obj = computed(() =>
@@ -40,20 +46,36 @@ const players = computed(() =>
   (editStore.liveDoc?.players ?? []).map((p) => ({ id: p.id, label: p.name || `Игрок ${p.playerNo}` })),
 );
 
-/** Commit one undoable patch (int / string / derived-bool fields). */
-function patch(fields: Record<string, number | string | boolean>): void {
+/** Commit one undoable patch (int / string / derived-bool / list fields). */
+function patch(fields: Record<string, number | string | boolean | string[]>): void {
   if (obj.value) editStore.commit([{ kind: "patchObject", id: obj.value.id, fields }]);
 }
 
-/** Chest items resolved through the MidItem table: instance id -> template -> catalog name. */
+/** Chest items are global GItem template ids (the parser resolves the MidItem instance
+ *  indirection away); the picker + display work directly on templates. */
 const chestItems = computed(() => {
-  if (obj.value?.type !== "treasure" || !obj.value.items?.length) return [];
-  const instances = editStore.liveDoc?.itemInstances ?? {};
-  return obj.value.items.map((instId) => {
-    const template = instances[instId] ?? "";
-    return { instance: instId, template, name: itemStore.nameOf(template) || template || instId };
-  });
+  if (obj.value?.type !== "treasure") return [];
+  return (obj.value.items ?? []).map((template, idx) => ({
+    idx, key: `${template}#${idx}`, template, name: itemStore.nameOf(template) || template,
+  }));
 });
+
+/** Chest item-list edits — each is one undoable patchObject (commit applies optimistically). */
+function chestAddItem(template: string): void {
+  patch({ items: [...(obj.value?.type === "treasure" ? obj.value.items ?? [] : []), template] });
+}
+function chestRemoveItem(idx: number): void {
+  if (obj.value?.type !== "treasure") return;
+  patch({ items: (obj.value.items ?? []).filter((_, i) => i !== idx) });
+}
+function chestMoveItem(idx: number, dir: number): void {
+  if (obj.value?.type !== "treasure") return;
+  const items = [...(obj.value.items ?? [])];
+  const j = idx + dir;
+  if (j < 0 || j >= items.length) return;
+  [items[idx], items[j]] = [items[j]!, items[idx]!];
+  patch({ items });
+}
 
 /** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts. */
 const REWARD_ORDER = ["G", "R", "Y", "E", "W", "B"] as const;
@@ -113,15 +135,21 @@ function close(): void {
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div class="ro-block">
-          <div class="ro-label">Предметы <span class="muted">({{ chestItems.length }})</span> <el-icon class="lock"><Lock /></el-icon></div>
+          <div class="ro-label">Предметы <span class="muted">({{ chestItems.length }})</span></div>
           <div v-if="chestItems.length" class="items-list">
-            <div v-for="it in chestItems" :key="it.instance" class="item-line">
+            <div v-for="(it, i) in chestItems" :key="it.key" class="item-line">
               <span class="ip-dot" :data-cat="itemStore.get(it.template)?.cat ?? -1" />
-              <span class="item-name">{{ it.name }}</span>
+              <span class="item-name" :title="it.name">{{ it.name }}</span>
               <span v-if="itemStore.get(it.template)?.gold" class="item-gold">{{ itemStore.get(it.template)?.gold }}</span>
+              <span class="item-acts">
+                <el-button class="item-act" size="small" text :disabled="i === 0" title="Выше" @click="chestMoveItem(it.idx, -1)">↑</el-button>
+                <el-button class="item-act" size="small" text :disabled="i === chestItems.length - 1" title="Ниже" @click="chestMoveItem(it.idx, 1)">↓</el-button>
+                <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="chestRemoveItem(it.idx)" />
+              </span>
             </div>
           </div>
           <div v-else class="muted sm">пусто</div>
+          <ItemPicker class="item-add" trigger-label="+ Добавить предмет" title="Добавить предмет в сундук" @pick="chestAddItem" />
         </div>
       </template>
 
@@ -209,7 +237,6 @@ function close(): void {
         </div>
       </template>
 
-      <p v-if="obj.type === 'treasure' && obj.items?.length" class="ins-note"><el-icon><Lock /></el-icon> список предметов пока только просмотр — правка списка скоро.</p>
     </div>
 
     <div v-else class="ins-body">
@@ -366,6 +393,19 @@ function close(): void {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--el-color-warning);
+}
+.item-acts {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+.item-act {
+  padding: 0 3px;
+  min-height: 22px;
+  height: 22px;
+}
+.item-add {
+  margin-top: 6px;
 }
 .ip-dot {
   flex: 0 0 auto;

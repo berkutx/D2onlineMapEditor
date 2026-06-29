@@ -207,7 +207,7 @@ export function readTreasure(buf: ByteBuffer, obj: FramedObject): MapObject {
     pos: pos(buf, obj),
     ...(image !== null ? { image } : {}),
     ...(priority !== null ? { priority } : {}),
-    ...(items.length ? { items } : {}),
+    items, // always present (possibly empty) so add/clear round-trips have a stable shape
   };
 }
 

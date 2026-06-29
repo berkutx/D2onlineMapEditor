@@ -14,11 +14,13 @@ import {
   roadFrame,
   landmarkFrame,
   mountainsFrame,
+  itemFrame,
   replaceBlock,
-  spliceStringFields,
+  spliceVariableFields,
   type SgRaw,
   type MountainEntry,
   type StringFieldEdit,
+  type ItemListEdit,
 } from "@d2/sg-parser";
 import type { MapObject } from "@d2/map-schema";
 import type { EditOp } from "./ops.js";
@@ -28,6 +30,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
 
   let nextRA = 0;
   let nextMM = 0;
+  let nextIM = 0;
   for (const o of raw.objects) {
     if (o.typeName === "MidRoad") {
       const m = /RA([0-9a-fA-F]{4})$/.exec(o.id);
@@ -35,8 +38,12 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     } else if (o.typeName === "MidLandmark") {
       const m = /MM([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextMM = Math.max(nextMM, parseInt(m[1]!, 16) + 1);
+    } else if (o.typeName === "MidItem") {
+      const m = /IM([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) nextIM = Math.max(nextIM, parseInt(m[1]!, 16) + 1);
     }
   }
+  const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
   const appends: (Uint8Array | null)[] = []; // null = a removed/superseded pending block
   const pendingRoad = new Map<string, { idx: number; ra: number }>();
   const addedMountains: MountainEntry[] = [];
@@ -48,6 +55,10 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   const addedObjects = new Map<string, MapObject>();
   /** M4 growable edits: variable-length string fields (names/descriptions) to splice. */
   const stringEdits: StringFieldEdit[] = [];
+  /** M4 growable edits: count-prefixed ITEM_ID lists (chest contents) to rewrite. */
+  const listEdits: ItemListEdit[] = [];
+  /** Chest items edits, keyed by objId so the LAST list per chest wins (no stray blocks). */
+  const chestItemOps = new Map<string, string[]>();
 
   for (const op of ops) {
     switch (op.kind) {
@@ -136,6 +147,15 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
               handled.add(key);
             }
           }
+          // 3) chest ITEM_ID list — entries are global GItem TEMPLATE ids (the editor model
+          //    works with stable templates; the MidItem instance indirection is re-created on
+          //    export). Processed AFTER the loop (last write per chest wins) so superseded
+          //    edits emit no stray blocks.
+          if (Array.isArray(f.items)) {
+            if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
+            chestItemOps.set(op.id, (f.items as unknown[]).map(String));
+            handled.add("items");
+          }
           // derived/render-only fields carry no .sg storage (resolved at parse from owner,
           // subrace, etc.) — patched only to refresh the live sprite; skip on export.
           const DERIVED = new Set(["race", "bannerIndex", "imageName", "footprint", "z", "looted"]);
@@ -152,6 +172,22 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       case "deleteObject":
         throw new Error("applyEditsToBytes: deleteObject requires a mid-stream splice (M4)");
     }
+  }
+
+  // Resolve each edited chest's FINAL item list (last write won): the list holds global
+  // GItem template ids, so instantiate a fresh MidItem block per entry and point the bag's
+  // ITEM_ID list at the new instances. The chest's original instances are left in place
+  // (orphaned) — harmless (each still references a valid template); GC of unreferenced
+  // MidItems is a later refinement. Object count bumps by the number of new MidItems.
+  for (const [objId, templates] of chestItemOps) {
+    const o = raw.objectById.get(objId);
+    if (!o) throw new Error(`applyEditsToBytes: chest items edit for unknown object ${objId}`);
+    const instanceIds = templates.map((template) => {
+      const second = nextIM++;
+      appends.push(itemFrame(raw.version, second, template));
+      return `${raw.version}IM${hex4(second)}`;
+    });
+    listEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds });
   }
 
   // Emit added objects at their FINAL position (place + later moves coalesced).
@@ -171,9 +207,13 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   }
 
   let bytes = w.toBytes();
-  // M4: resize variable-length string fields in place (object count unchanged). Done before
-  // the append/replace passes; those re-scan markers + the header count (all preserved).
-  if (stringEdits.length) bytes = spliceStringFields(bytes, stringEdits);
+  // M4: resize variable-length string fields + ITEM_ID lists in place (object count
+  // unchanged by the splice itself; new MidItem blocks are appended below). Done before the
+  // append/replace passes; those re-scan markers + the header count (all preserved). Both
+  // splice kinds share one highest-offset-first pass so cross-object offsets stay valid.
+  if (stringEdits.length || listEdits.length) {
+    bytes = spliceVariableFields(bytes, stringEdits, listEdits);
+  }
   const frames = appends.filter((f): f is Uint8Array => f !== null);
   if (frames.length) bytes = appendBlocks(bytes, frames);
   if (addedMountains.length || mountainPatches.size) {
