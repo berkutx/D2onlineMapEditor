@@ -155,6 +155,33 @@ export function readDefaultString(
 }
 
 /**
+ * Read EVERY length-prefixed CP1251 string for raw ASCII `tag` in [from, end), in
+ * order (e.g. a repeated `ITEM_ID` list). Advances past each string so consecutive
+ * entries are all collected. Empty when the tag is absent.
+ */
+export function readAllStrings(
+  buf: ByteBuffer,
+  tag: string,
+  from: number,
+  end: number,
+): string[] {
+  const out: string[] = [];
+  let cursor = from;
+  for (;;) {
+    const i = buf.indexOf(tag, cursor);
+    if (i < 0 || i >= end) break;
+    let at = i + tag.length;
+    if (at + 4 > buf.length) break;
+    const len = buf.readInt32LE(at);
+    at += 4;
+    if (len < 0 || at + len > buf.length) break;
+    out.push(stripTrailingNul(buf.cp1251Slice(at, at + len)));
+    cursor = at + len;
+  }
+  return out;
+}
+
+/**
  * Boolean field: VERIFIED that bool tags carry no value, so the tag's mere
  * presence in [from, end) means `true`.
  */

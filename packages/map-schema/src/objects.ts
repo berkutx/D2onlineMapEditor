@@ -50,15 +50,25 @@ export const VillageObject = z.object({
   subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (banner)
   bannerIndex: z.number().int().optional(), // resolved subrace banner number
   name: z.string().default(""),
-  tier: z.number().int().default(1), // city level 1..5 -> City.ff sprite
+  desc: z.string().optional(), // DESC_TXT
+  tier: z.number().int().default(1), // city level 1..5 (SIZE) -> City.ff sprite
+  priority: z.number().int().optional(), // AIPRIORITY 0..6
+  morale: z.number().int().optional(), // MORALE
+  regen: z.number().int().optional(), // REGEN_B garrison regen
+  growth: z.number().int().optional(), // GROWTH_T unit growth timer
 });
 
 export const RuinObject = z.object({
   ...base,
   type: z.literal("ruin"),
-  name: z.string().default(""),
+  name: z.string().default(""), // TITLE
+  desc: z.string().optional(), // DESC
   image: z.number().int().optional(),
-  looted: z.boolean().default(false),
+  looted: z.boolean().default(false), // derived: LOOTER != none
+  looter: z.string().optional(), // raw LOOTER id (player uid / "000000")
+  reward: z.string().optional(), // CASH reward string "G####:R####:Y####:E####:W####:B####"
+  item: z.string().optional(), // ITEM single artifact reward id ("000000" = none)
+  priority: z.number().int().optional(), // AIPRIORITY 0..6
 });
 
 const SiteCommon = {
@@ -106,6 +116,8 @@ export const TreasureObject = z.object({
   ...base,
   type: z.literal("treasure"),
   image: z.number().int().optional(), // MidBag IMAGE -> G000BG0000{0|1}{image}
+  priority: z.number().int().optional(), // AIPRIORITY 0..6
+  items: z.array(z.string()).optional(), // ITEM_ID list — the bag's contents
 });
 
 export const RodObject = z.object({

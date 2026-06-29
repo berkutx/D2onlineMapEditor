@@ -11,6 +11,7 @@ import {
   ByteBuffer,
   readDefaultInt,
   readDefaultString,
+  readAllStrings,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import type { MapObject } from "@d2/map-schema";
@@ -68,7 +69,12 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
   const subRace = refOrUndef(readDefaultString(buf, "SUBRACE", f, e));
   const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
+  const desc = readDefaultString(buf, "DESC_TXT", f, e);
   const tier = readDefaultInt(buf, "SIZE", f, e) ?? 1;
+  const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
+  const morale = readDefaultInt(buf, "MORALE", f, e);
+  const regen = readDefaultInt(buf, "REGEN_B", f, e);
+  const growth = readDefaultInt(buf, "GROWTH_T", f, e);
   return {
     type: "village",
     id: obj.id,
@@ -76,7 +82,12 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(owner ? { owner } : {}),
     ...(subRace ? { subRace } : {}),
     name,
+    ...(desc ? { desc } : {}),
     tier,
+    ...(priority !== null ? { priority } : {}),
+    ...(morale !== null ? { morale } : {}),
+    ...(regen !== null ? { regen } : {}),
+    ...(growth !== null ? { growth } : {}),
   };
 }
 
@@ -105,16 +116,25 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readRuin(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const name = readDefaultString(buf, "TITLE", f, e) ?? "";
+  const desc = readDefaultString(buf, "DESC", f, e);
   const image = readDefaultInt(buf, "IMAGE", f, e);
   const looter = readDefaultString(buf, "LOOTER", f, e);
   const looted = !!looter && looter !== "000000" && looter !== NULL_ID;
+  const reward = readDefaultString(buf, "CASH", f, e); // "G####:R####:Y####:E####:W####:B####"
+  const item = refOrUndef(readDefaultString(buf, "ITEM", f, e)); // single artifact ("000000" = none)
+  const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   return {
     type: "ruin",
     id: obj.id,
     pos: pos(buf, obj),
     name,
+    ...(desc ? { desc } : {}),
     ...(image !== null ? { image } : {}),
     looted,
+    ...(looter ? { looter } : {}),
+    ...(reward ? { reward } : {}),
+    ...(item ? { item } : {}),
+    ...(priority !== null ? { priority } : {}),
   };
 }
 
@@ -179,11 +199,15 @@ export function readLandmark(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readTreasure(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const image = readDefaultInt(buf, "IMAGE", f, e);
+  const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
+  const items = readAllStrings(buf, "ITEM_ID", f, e).filter((s) => s && s !== NULL_ID && s !== "000000");
   return {
     type: "treasure",
     id: obj.id,
     pos: pos(buf, obj),
     ...(image !== null ? { image } : {}),
+    ...(priority !== null ? { priority } : {}),
+    ...(items.length ? { items } : {}),
   };
 }
 
