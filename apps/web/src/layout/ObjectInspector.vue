@@ -11,9 +11,13 @@ import { storeToRefs } from "pinia";
 import { Close, Lock } from "@element-plus/icons-vue";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
+import { useItemStore } from "../stores/itemStore";
+import ItemPicker from "./ItemPicker.vue";
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
+const itemStore = useItemStore();
+void itemStore.load();
 const { selectedId } = storeToRefs(toolStore);
 
 /** the live selected object (or null) */
@@ -40,6 +44,16 @@ const players = computed(() =>
 function patch(fields: Record<string, number | string | boolean>): void {
   if (obj.value) editStore.commit([{ kind: "patchObject", id: obj.value.id, fields }]);
 }
+
+/** Chest items resolved through the MidItem table: instance id -> template -> catalog name. */
+const chestItems = computed(() => {
+  if (obj.value?.type !== "treasure" || !obj.value.items?.length) return [];
+  const instances = editStore.liveDoc?.itemInstances ?? {};
+  return obj.value.items.map((instId) => {
+    const template = instances[instId] ?? "";
+    return { instance: instId, template, name: itemStore.nameOf(template) || template || instId };
+  });
+});
 
 /** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts. */
 const REWARD_ORDER = ["G", "R", "Y", "E", "W", "B"] as const;
@@ -99,9 +113,13 @@ function close(): void {
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div class="ro-block">
-          <div class="ro-label">Предметы <span class="muted">({{ obj.items?.length ?? 0 }})</span> <el-icon class="lock"><Lock /></el-icon></div>
-          <div v-if="obj.items?.length" class="items">
-            <span v-for="it in obj.items" :key="it" class="item-tag">{{ it }}</span>
+          <div class="ro-label">Предметы <span class="muted">({{ chestItems.length }})</span> <el-icon class="lock"><Lock /></el-icon></div>
+          <div v-if="chestItems.length" class="items-list">
+            <div v-for="it in chestItems" :key="it.instance" class="item-line">
+              <span class="ip-dot" :data-cat="itemStore.get(it.template)?.cat ?? -1" />
+              <span class="item-name">{{ it.name }}</span>
+              <span v-if="itemStore.get(it.template)?.gold" class="item-gold">{{ itemStore.get(it.template)?.gold }}</span>
+            </div>
           </div>
           <div v-else class="muted sm">пусто</div>
         </div>
@@ -134,9 +152,14 @@ function close(): void {
             </div>
           </div>
         </div>
-        <div v-if="obj.item !== undefined" class="col">
-          <label>Артефакт <span class="muted sm">(id; пикер — позже)</span></label>
-          <el-input :model-value="obj.item ?? ''" size="small" placeholder="G000000000 = нет" @change="(v: string) => patch({ item: v.trim() || NEUTRAL })" />
+        <div class="col">
+          <label>Артефакт</label>
+          <ItemPicker
+            :model-value="obj.item ?? NEUTRAL"
+            nullable
+            title="Артефакт руины"
+            @update:model-value="(v: string | null) => patch({ item: v || NEUTRAL })"
+          />
         </div>
         <div class="row">
           <label>Разграблена</label>
@@ -313,21 +336,59 @@ function close(): void {
 .rw.zero {
   opacity: 0.45;
 }
-.items {
+.items-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  max-height: 140px;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
   overflow-y: auto;
 }
-.item-tag {
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: var(--el-text-color-regular);
-  background: var(--el-fill-color-light);
+.item-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
   border-radius: 4px;
-  padding: 1px 5px;
 }
+.item-line:hover {
+  background: var(--el-fill-color-light);
+}
+.item-name {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.item-gold {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-color-warning);
+}
+.ip-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--el-color-info);
+}
+.ip-dot[data-cat="0"] { background: #8d99ae; }
+.ip-dot[data-cat="1"] { background: #c08457; }
+.ip-dot[data-cat="2"] { background: #d1495b; }
+.ip-dot[data-cat="3"] { background: #6a994e; }
+.ip-dot[data-cat="4"] { background: #4895ef; }
+.ip-dot[data-cat="5"] { background: #43aa8b; }
+.ip-dot[data-cat="6"] { background: #90be6d; }
+.ip-dot[data-cat="7"] { background: #577590; }
+.ip-dot[data-cat="8"] { background: #b5838d; }
+.ip-dot[data-cat="9"] { background: #9d4edd; }
+.ip-dot[data-cat="10"] { background: #f9c74f; }
+.ip-dot[data-cat="11"] { background: #4cc9f0; }
+.ip-dot[data-cat="12"] { background: #f3722c; }
+.ip-dot[data-cat="13"] { background: #adb5bd; }
+.ip-dot[data-cat="14"] { background: #b08968; }
 .lock {
   color: var(--el-text-color-secondary);
   font-size: 11px;

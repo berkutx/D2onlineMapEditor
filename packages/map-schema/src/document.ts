@@ -36,5 +36,9 @@ export const MapDocument = z.object({
   terrain: TerrainGrid,
   objects: z.array(MapObject),
   players: z.array(PlayerInfo).default([]),
+  /** MidItem table: scenario item-instance id (e.g. "S143IM000a") -> global GItem
+   *  template id (e.g. "G000IG0006"). Chests/heroes reference instances; this resolves
+   *  them to catalog templates for the inspector. Absent on docs without item data. */
+  itemInstances: z.record(z.string(), z.string()).optional(),
 });
 export type MapDocument = z.infer<typeof MapDocument>;

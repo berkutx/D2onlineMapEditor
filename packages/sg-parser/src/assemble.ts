@@ -31,7 +31,7 @@ import {
   readGeneric,
   type RoadRecord,
 } from "./blocks/index.js";
-import { readDefaultInt } from "./bytebuffer.js";
+import { readDefaultInt, readDefaultString } from "./bytebuffer.js";
 import type { MapDocument, MapObject, PlayerInfo, MapHeader } from "@d2/map-schema";
 
 const DEFAULT_SG_VERSION = "S143";
@@ -65,6 +65,8 @@ interface Accumulated {
   roads: RoadRecord[];
   /** MidSubRace block index -> banner number (for stack/fort STACK_BANNER sprites). */
   subraceBanners: Map<number, number>;
+  /** MidItem instance id -> ITEM_TYPE global template id (for chest item resolution). */
+  itemInstances: Record<string, string>;
 }
 
 /** Single-object readers keyed by TypeName. */
@@ -129,6 +131,12 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       for (const m of readMountains(buf, obj)) acc.objects.push(m);
       return;
     }
+    case "MidItem": {
+      // a scenario item instance: ITEM_ID = its own id, ITEM_TYPE = the global template.
+      const type = readDefaultString(buf, "ITEM_TYPE", obj.fieldsFrom, obj.fieldsEnd);
+      if (type) acc.itemInstances[obj.id] = type;
+      return;
+    }
     default: {
       const reader = SINGLE_READERS[obj.typeName];
       acc.objects.push(reader ? reader(buf, obj) : readGeneric(buf, obj));
@@ -166,6 +174,7 @@ export function assembleDocument(
     blocks: [],
     roads: [],
     subraceBanners: new Map(),
+    itemInstances: {},
   };
 
   for (const obj of iterateObjects(buf)) consume(buf, obj, acc);
@@ -243,6 +252,7 @@ export function assembleDocument(
     terrain: { size, cells },
     objects: acc.objects,
     players: acc.players,
+    ...(Object.keys(acc.itemInstances).length ? { itemInstances: acc.itemInstances } : {}),
   };
 }
 
