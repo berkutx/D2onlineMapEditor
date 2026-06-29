@@ -16,6 +16,8 @@ export interface ItemEntry {
   gold: number;
   image: string;
   desc?: string;
+  bonus?: string[]; // coarse effect tags (armor/attack/heal/spell/summon/…) for grouping
+  effect?: string; // short "what it does" string derived from the modifier/spell tables
 }
 
 export interface ItemCatGroup {
@@ -24,6 +26,35 @@ export interface ItemCatGroup {
   label: string;
   items: ItemEntry[];
 }
+
+/** A generic picker group (category OR bonus OR cost bucket). */
+export interface ItemGroup {
+  key: string;
+  label: string;
+  items: ItemEntry[];
+}
+
+/** RU labels for the derived bonus tags. */
+export const ITEM_BONUS_LABELS: Record<string, string> = {
+  attack: "Атака / урон",
+  armor: "Броня",
+  hp: "Здоровье",
+  heal: "Лечение",
+  regen: "Регенерация",
+  immunity: "Иммунитет",
+  initiative: "Инициатива",
+  spell: "Заклинание",
+  summon: "Призыв",
+  move: "Ход",
+  scout: "Обзор",
+  leadership: "Лидерство",
+  morale: "Мораль",
+  ability: "Способности",
+  drain: "Вытягивание жизни",
+  retreat: "Отступление",
+  cost: "Стоимость",
+};
+const BONUS_ORDER = Object.keys(ITEM_BONUS_LABELS);
 
 /** RU labels for the authoritative LmagItm.dbf category enum. */
 export const ITEM_CAT_LABELS: Record<string, string> = {
@@ -101,5 +132,35 @@ export const useItemStore = defineStore("item", () => {
     return out;
   });
 
-  return { catalog, loaded, loading, error, load, all, get, nameOf, groups };
+  /** Items grouped by bonus tag (multi-membership: an item appears under every bonus it has);
+   *  items with no bonus fall into a trailing "Без бонуса" group. */
+  const bonusGroups = computed<ItemGroup[]>(() => {
+    const by = new Map<string, ItemEntry[]>();
+    const none: ItemEntry[] = [];
+    for (const e of all.value) {
+      if (e.bonus?.length) {
+        for (const b of e.bonus) {
+          if (!by.has(b)) by.set(b, []);
+          by.get(b)!.push(e);
+        }
+      } else {
+        none.push(e);
+      }
+    }
+    const out: ItemGroup[] = [];
+    for (const b of BONUS_ORDER) {
+      const items = by.get(b);
+      if (items) {
+        items.sort((a, c) => a.name.localeCompare(c.name, "ru"));
+        out.push({ key: b, label: ITEM_BONUS_LABELS[b] ?? b, items });
+      }
+    }
+    if (none.length) {
+      none.sort((a, c) => a.name.localeCompare(c.name, "ru"));
+      out.push({ key: "none", label: "Без бонуса", items: none });
+    }
+    return out;
+  });
+
+  return { catalog, loaded, loading, error, load, all, get, nameOf, groups, bonusGroups };
 });

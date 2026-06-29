@@ -10,7 +10,7 @@
  */
 import { ref, computed, watch } from "vue";
 import { Search, CircleClose } from "@element-plus/icons-vue";
-import { useItemStore, ITEM_CAT_LABELS } from "../stores/itemStore";
+import { useItemStore, type ItemEntry } from "../stores/itemStore";
 import ItemIcon from "./ItemIcon.vue";
 
 const props = withDefaults(
@@ -32,35 +32,65 @@ const NULL_ID = "G000000000";
 
 const open = ref(false);
 const query = ref("");
-const catFilter = ref<number | "all">("all");
+type Mode = "cat" | "bonus" | "cost" | "alpha";
+const mode = ref<Mode>("cat");
+const MODE_OPTIONS = [
+  { label: "Категория", value: "cat" },
+  { label: "Бонус", value: "bonus" },
+  { label: "Цена", value: "cost" },
+  { label: "А-Я", value: "alpha" },
+];
 
 watch(open, (v) => {
   if (v) {
     void itemStore.load();
     query.value = "";
-    catFilter.value = "all";
+    mode.value = "cat";
   }
 });
 
-/** The flat, filtered, grouped result. */
-const groups = computed(() => {
+const COST_BUCKETS = [
+  { key: "c0", label: "Без стоимости", lo: 0, hi: 0 },
+  { key: "c1", label: "1–499", lo: 1, hi: 499 },
+  { key: "c2", label: "500–1499", lo: 500, hi: 1499 },
+  { key: "c3", label: "1500–2999", lo: 1500, hi: 2999 },
+  { key: "c4", label: "3000+", lo: 3000, hi: Infinity },
+];
+
+interface DisplayGroup { key: string; label: string; items: ItemEntry[] }
+
+/** Groups for the active mode, before the search filter. */
+const baseGroups = computed<DisplayGroup[]>(() => {
+  if (mode.value === "bonus") return itemStore.bonusGroups;
+  if (mode.value === "alpha") {
+    return [{ key: "all", label: "Все предметы", items: [...itemStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
+  }
+  if (mode.value === "cost") {
+    return COST_BUCKETS.map((b) => ({
+      key: b.key,
+      label: b.label,
+      items: itemStore.all
+        .filter((e) => e.gold >= b.lo && e.gold <= b.hi)
+        .sort((a, c) => c.gold - a.gold || a.name.localeCompare(c.name, "ru")),
+    })).filter((g) => g.items.length);
+  }
+  return itemStore.groups.map((g) => ({ key: g.catKey || String(g.cat), label: g.label, items: g.items }));
+});
+
+/** baseGroups filtered by the search query (matches name, effect, or id). */
+const groups = computed<DisplayGroup[]>(() => {
   const q = query.value.trim().toLowerCase();
-  const out = [];
-  for (const g of itemStore.groups) {
-    if (catFilter.value !== "all" && g.cat !== catFilter.value) continue;
-    const items = q
-      ? g.items.filter((it) => it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q))
-      : g.items;
+  if (!q) return baseGroups.value.filter((g) => g.items.length);
+  const out: DisplayGroup[] = [];
+  for (const g of baseGroups.value) {
+    const items = g.items.filter(
+      (it) => it.name.toLowerCase().includes(q) || (it.effect ?? "").toLowerCase().includes(q) || it.id.toLowerCase().includes(q),
+    );
     if (items.length) out.push({ ...g, items });
   }
   return out;
 });
 const resultCount = computed(() => groups.value.reduce((n, g) => n + g.items.length, 0));
-
-/** Category options for the filter dropdown. */
-const catOptions = computed(() =>
-  itemStore.groups.map((g) => ({ value: g.cat, label: `${g.label} (${g.items.length})` })),
-);
 
 const triggerText = computed(() => {
   if (props.triggerLabel) return props.triggerLabel;
@@ -75,10 +105,6 @@ function choose(id: string): void {
 function clear(): void {
   emit("update:modelValue", props.nullable ? null : NULL_ID);
   open.value = false;
-}
-
-function catLabel(catKey: string): string {
-  return ITEM_CAT_LABELS[catKey] ?? "";
 }
 </script>
 
@@ -117,23 +143,20 @@ function catLabel(catKey: string): string {
       <div class="ip-controls">
         <el-input
           v-model="query"
-          placeholder="Поиск по названию…"
+          placeholder="Поиск по названию или эффекту…"
           size="default"
           clearable
           :prefix-icon="Search"
           class="ip-search"
         />
-        <el-select v-model="catFilter" size="default" class="ip-cat">
-          <el-option label="Все категории" value="all" />
-          <el-option v-for="c in catOptions" :key="c.value" :label="c.label" :value="c.value" />
-        </el-select>
       </div>
+      <el-segmented v-model="mode" :options="MODE_OPTIONS" size="small" class="ip-modes" />
 
       <div v-if="itemStore.loading" class="ip-status">Загрузка каталога…</div>
       <div v-else-if="itemStore.error" class="ip-status err">Ошибка: {{ itemStore.error }}</div>
       <div v-else class="ip-list">
         <div v-if="!resultCount" class="ip-status">Ничего не найдено</div>
-        <template v-for="g in groups" :key="g.cat">
+        <template v-for="g in groups" :key="g.key">
           <div class="ip-group">{{ g.label }} <span class="ip-count">{{ g.items.length }}</span></div>
           <button
             v-for="it in g.items"
@@ -141,10 +164,14 @@ function catLabel(catKey: string): string {
             class="ip-row"
             :class="{ active: it.id === modelValue }"
             type="button"
+            :title="it.desc || it.name"
             @click="choose(it.id)"
           >
-            <ItemIcon :id="it.id" :cat="it.cat" :size="24" />
-            <span class="ip-name">{{ it.name || it.id }}</span>
+            <ItemIcon :id="it.id" :cat="it.cat" :size="28" />
+            <span class="ip-text">
+              <span class="ip-name">{{ it.name || it.id }}</span>
+              <span v-if="it.effect" class="ip-effect">{{ it.effect }}</span>
+            </span>
             <span v-if="it.gold > 0" class="ip-gold">{{ it.gold }}</span>
           </button>
         </template>
@@ -192,8 +219,9 @@ function catLabel(catKey: string): string {
 .ip-search {
   flex: 1 1 auto;
 }
-.ip-cat {
-  flex: 0 0 200px;
+.ip-modes {
+  width: 100%;
+  margin-bottom: var(--d2-sp-2);
 }
 .ip-list {
   max-height: 52vh;
@@ -251,12 +279,25 @@ function catLabel(catKey: string): string {
   margin-right: 4px;
   vertical-align: -4px;
 }
-.ip-name {
+.ip-text {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ip-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+}
+.ip-effect {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
 }
 .ip-gold {
   flex: 0 0 auto;

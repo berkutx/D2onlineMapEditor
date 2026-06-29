@@ -22,6 +22,7 @@ GOTCHA: Tglobal.dbf is CP866 (like the decoration names), NOT CP1251 like .sg st
 import argparse
 import json
 import os
+import re
 import struct
 
 
@@ -83,6 +84,78 @@ def parse_gold(value_bytes):
     return 0
 
 
+# GmodifL.TYPE (= LmodifE enum) -> (bonusKind, RU label, value mode).
+#   value mode: True = use PERCENT ("+N%"), False = use NUMBER ("+N"), "auto" = NUMBER else
+#   PERCENT, None = flag/special (label only). RU labels are from the in-game UI (no Tglobal
+#   tokens for the enum); per-modifier prose lives in Gmodif.DESC_TXT.
+SOURCE_MAP = {
+    1: ("scout", "обзор", False),
+    2: ("leadership", "лидерство", False),
+    3: ("attack", "точность", True),
+    4: ("attack", "урон", True),
+    5: ("armor", "броня", False),
+    6: ("hp", "здоровье", "auto"),
+    7: ("move", "ход", True),
+    8: ("morale", "мораль", False),
+    9: ("initiative", "инициатива", True),
+    10: ("move", "передвижение", None),
+    11: ("ability", "способность лидера", None),
+    12: ("immunity", "иммунитет", None),
+    13: ("regen", "регенерация", True),
+    14: ("immunity", "иммунитет", None),
+    15: ("drain", "вытягивание жизни", True),
+    16: ("retreat", "отступление", None),
+    17: ("cost", "стоимость", True),
+}
+NULL_REF = "G000000000"
+SUMMON_CATS = {"L_TALISMAN", "L_ORB", "L_SPECIAL"}
+
+
+def _int(b):
+    try:
+        return int(ascii_(b) or "0")
+    except ValueError:
+        return 0
+
+
+def clean_desc(texts, token):
+    """Resolve a Tglobal token, stripping the leading rich-text prefix (e.g. '\\fNormal;')."""
+    t = texts.get(token.lower(), "")
+    return re.sub(r"^\\f\w+;", "", t).strip() if t else ""
+
+
+def resolve_modif(modif_id, gmodif, gmodifL, texts):
+    """A Gmodif id -> (bonusKind set, [human effect parts]). Structured (GmodifL) modifiers
+    yield stat+magnitude; .lua-scripted ones fall back to the modifier's DESC_TXT prose."""
+    mid = modif_id.lower()
+    kinds, parts = set(), []
+    details = gmodifL.get(mid, [])
+    for d in details:
+        sm = SOURCE_MAP.get(_int(d["TYPE"]))
+        if not sm:
+            continue
+        kind, ru, use_pct = sm
+        kinds.add(kind)
+        pct, num = _int(d["PERCENT"]), _int(d["NUMBER"])
+        if use_pct is None:
+            parts.append(ru)
+        elif use_pct == "auto":
+            parts.append("+%d к %s" % (num, ru) if num else ("+%d%% к %s" % (pct, ru) if pct else ru))
+        elif use_pct:
+            v = pct or num
+            parts.append("+%d%% к %s" % (v, ru) if v else ru)
+        else:
+            v = num or pct
+            parts.append("+%d к %s" % (v, ru) if v else ru)
+    if not parts:  # scripted modifier or no structured detail -> prose fallback
+        m = gmodif.get(mid)
+        if m:
+            cd = clean_desc(texts, ascii_(m["DESC_TXT"]))
+            if cd:
+                parts.append(cd)
+    return kinds, parts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
@@ -93,6 +166,14 @@ def main():
     gitem = read_dbf(_find(globals_dir, "GItem.DBF"))
     tglobal = read_dbf(_find(globals_dir, "Tglobal.dbf"))
     lmagitm = read_dbf(_find(globals_dir, "LmagItm.dbf"))
+
+    # effect-resolution tables (bonus tags + "what it does" string)
+    gmodif = {ascii_(r["MODIF_ID"]).lower(): r for r in read_dbf(_find(globals_dir, "Gmodif.dbf"))}
+    gmodifL = {}
+    for r in read_dbf(_find(globals_dir, "GmodifL.dbf")):
+        gmodifL.setdefault(ascii_(r["BELONGS_TO"]).lower(), []).append(r)
+    gspells = {ascii_(r["SPELL_ID"]).lower(): r for r in read_dbf(_find(globals_dir, "Gspells.dbf"))}
+    gunits = {ascii_(r["UNIT_ID"]).lower(): r for r in read_dbf(_find(globals_dir, "Gunits.dbf"))}
 
     texts = {}
     for row in tglobal:
@@ -123,15 +204,54 @@ def main():
             cat = int(ascii_(row["ITEM_CAT"]) or "0")
         except ValueError:
             cat = 0
+        catKey = cat_keys.get(cat, "")
         entry = {
             "id": iid,
             "name": texts.get(name_key, ""),
             "cat": cat,
-            "catKey": cat_keys.get(cat, ""),
+            "catKey": catKey,
             "gold": parse_gold(row["VALUE"]),
             "image": ascii_(row["IMAGE_ID"]),
         }
+
+        # --- bonus tags + "what it does" string (from the GItem effect fields) ---
+        kinds, parts = set(), []
+        for fld in ("MOD_EQUIP", "MOD_POTION"):
+            ref = ascii_(row[fld])
+            if ref and ref.upper() != NULL_REF:
+                k, p = resolve_modif(ref, gmodif, gmodifL, texts)
+                kinds |= k
+                parts += p
+        hp = _int(row["HP_POTION"])
+        if hp > 0:
+            kinds.add("heal")
+            parts.append("Лечит %d ОЗ" % hp)
+        spell = ascii_(row["SPELL_ID"])
+        if spell and spell.upper() != NULL_REF:
+            gs = gspells.get(spell.lower())
+            if gs:
+                nm = texts.get(ascii_(gs["NAME_TXT"]).lower(), "")
+                kinds.add("spell")
+                parts.append("Сотворяет: %s" % nm if nm else "заклинание")
+        unit = ascii_(row["UNIT_ID"])
+        if unit and unit.upper() != NULL_REF and catKey in SUMMON_CATS:
+            gu = gunits.get(unit.lower())
+            if gu:
+                nm = texts.get(ascii_(gu["NAME_TXT"]).lower(), "")
+                kinds.add("summon")
+                parts.append("Призывает: %s" % nm if nm else "призыв")
+        if kinds:
+            entry["bonus"] = sorted(kinds)
+        effect = "; ".join(dict.fromkeys(parts))  # dedup, keep order
+        if effect:
+            entry["effect"] = effect
+
+        # desc: prefer Tglobal[DESC_TXT]; fall back to the spell desc, then the derived effect
         desc = texts.get(desc_key, "")
+        if not desc and gspells.get(spell.lower()):
+            desc = texts.get(ascii_(gspells[spell.lower()]["DESC_TXT"]).lower(), "")
+        if not desc and effect:
+            desc = effect
         if desc:
             entry["desc"] = desc
         out.append(entry)
