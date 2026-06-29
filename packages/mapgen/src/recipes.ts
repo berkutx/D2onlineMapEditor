@@ -20,6 +20,9 @@ export interface Recipe {
   fillSymbol?: string;
   /** for growth recipes: fraction of the region area to grow (replaces `STEPS`). */
   fillFrac?: number;
+  /** cell scale: run the program on a grid this much coarser; each cell → a scale×scale
+   *  block (decode places scale-sized pieces). Used by wall_maze (2 → 2×2 stone walls). */
+  cellScale?: number;
   /** symbols the recipe can emit (its alphabet). */
   alphabet: string;
   inputMode: RecipeInputMode;
@@ -112,9 +115,10 @@ export const RECIPES: Record<string, Recipe> = {
     id: "wall_maze",
     kind: "mj",
     xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
+    cellScale: 2, // coarse maze + 2×2 stone wall pieces (matches how the game faces castles)
     alphabet: "BWA",
     inputMode: "zone",
-    notes: "Maze of wall/fence decorations (sparse — prefer hedge/mountain maze).",
+    notes: "Maze of stone walls (2×2 pieces, like castle walls).",
   },
 
   // --- mountains & hills (decoded to 1×1 mountain objects) -------------------

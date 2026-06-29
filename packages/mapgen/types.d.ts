@@ -26,6 +26,8 @@ export interface Recipe {
   fillSymbol?: string;
   /** mj growth: fraction of region area to grow (replaces the `STEPS` token in xml). */
   fillFrac?: number;
+  /** mj: run on a grid this much coarser; decode places scale-sized pieces (wall_maze=2). */
+  cellScale?: number;
   alphabet: string;
   inputMode: RecipeInputMode;
   notes?: string;

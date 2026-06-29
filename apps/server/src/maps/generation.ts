@@ -30,6 +30,8 @@ export interface InlineRecipe {
   xml?: string;
   /** mj growth: fraction of region area to grow — replaces the `STEPS` token in the XML. */
   fillFrac?: number;
+  /** mj: run on a grid this much coarser; decode places scale-sized pieces (wall_maze=2). */
+  cellScale?: number;
 }
 
 /**
@@ -55,11 +57,13 @@ interface SymbolGrid {
   rows: string[];
 }
 
-/** Build the symbol grid for one step: uniform fill, or run the MJ program at region size. */
+/** Build the symbol grid for one step: uniform fill, or run the MJ program (at region size,
+ *  or `scale`× coarser for coarse recipes like the 2×2 wall maze). */
 async function buildGrid(
   recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number },
   region: StepRegion,
   seed: number,
+  scale: number,
 ): Promise<SymbolGrid> {
   if (recipe.kind === "fill") {
     const sym = recipe.fillSymbol ?? "X";
@@ -71,14 +75,16 @@ async function buildGrid(
   }
   if (recipe.kind === "mj") {
     if (!recipe.xml) throw new Error("mj recipe missing xml");
+    const gw = Math.max(1, Math.floor(region.w / scale));
+    const gh = Math.max(1, Math.floor(region.h / scale));
     let xml = recipe.xml;
-    // growth recipes scale to the region: STEPS = round(area * fillFrac)
+    // growth recipes scale to the (coarse) grid: STEPS = round(area * fillFrac)
     if (xml.includes("STEPS")) {
       const frac = typeof recipe.fillFrac === "number" ? recipe.fillFrac : 0.4;
-      const steps = Math.max(1, Math.round(region.w * region.h * frac));
+      const steps = Math.max(1, Math.round(gw * gh * frac));
       xml = xml.split("STEPS").join(String(steps));
     }
-    return await runRecipe(xml, region.w, region.h, seed);
+    return await runRecipe(xml, gw, gh, seed);
   }
   throw new Error(`unknown recipe kind '${recipe.kind}'`);
 }
@@ -117,7 +123,7 @@ export async function runGenerationSteps(
   let work = liveDoc;
   const all: EditOp[] = [];
   for (const step of steps) {
-    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number };
+    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; cellScale?: number };
     let table: DecodeTable;
     if (step.recipeId) {
       const r = getRecipe(step.recipeId);
@@ -133,8 +139,9 @@ export async function runGenerationSteps(
       throw new Error("step needs a recipeId, or an inline recipe + decode");
     }
     const seed = Number.isInteger(step.seed) ? (step.seed as number) : defaultSeed;
-    const grid = await buildGrid(recipe, step.region, seed);
-    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor);
+    const scale = Number.isInteger(recipe.cellScale) && (recipe.cellScale as number) > 1 ? (recipe.cellScale as number) : 1;
+    const grid = await buildGrid(recipe, step.region, seed, scale);
+    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor, scale);
     all.push(...ops);
     work = applyOps(work, ops);
   }

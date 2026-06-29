@@ -75,17 +75,27 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   grass_fill: { G: { kind: "terrain", terrain: 5 } }, // 5 = neutral land
 };
 
-/** One wall art set's 1×1 pieces grouped by iso orientation. */
-export interface WallStyle {
+/** Wall piece ids grouped by iso orientation (straights + corners). */
+export interface WallPieces {
   "NE-SW": string[];
   "NW-SE": string[];
   corner: string[];
 }
-/** Available wall styles (each a consistent art set). A maze uses ONE style so the walls
- *  don't mix faction art cell-to-cell; styles[0] = the preferred (stone) set. */
+/** One wall art set (a faction's stone/wood walls): its 1×1 pieces (s1) + 2×2 pieces (s2).
+ *  The game faces castles with the 2×2 stone set in long lines — that's what a maze uses. */
+export interface WallStyle {
+  key: string;
+  s1: WallPieces;
+  s2: WallPieces;
+}
+/** Available wall styles. A maze uses ONE so the art doesn't mix; the 2×2 stone set wins. */
 export interface WallSet {
   styles: WallStyle[];
 }
+
+const emptyWallPieces = (): WallPieces => ({ "NE-SW": [], "NW-SE": [], corner: [] });
+const wallComplete = (p: WallPieces): boolean =>
+  p.corner.length > 0 && (p["NE-SW"].length > 0 || p["NW-SE"].length > 0);
 
 interface WallCatalogEntry {
   id: string;
@@ -104,21 +114,24 @@ export function buildWallSet(
   catalog: Record<string, WallCatalogEntry> | WallCatalogEntry[],
 ): WallSet {
   const arr = Array.isArray(catalog) ? catalog : Object.values(catalog);
-  const byStyle = new Map<string, WallStyle>();
+  const byKey = new Map<string, WallStyle>();
   for (const e of arr) {
-    if ((e.shape !== "wall" && e.shape !== "fence") || e.cx !== 1 || e.cy !== 1) continue;
+    if (e.shape !== "wall" && e.shape !== "fence") continue;
+    const cx = e.cx ?? 1, cy = e.cy ?? 1;
+    if (!((cx === 1 && cy === 1) || (cx === 2 && cy === 2))) continue; // 1×1 + 2×2 only
     const key = `${e.shape}|${e.id.slice(0, 4)}`; // one art set = shape + faction prefix
-    let st = byStyle.get(key);
-    if (!st) { st = { "NE-SW": [], "NW-SE": [], corner: [] }; byStyle.set(key, st); }
+    let st = byKey.get(key);
+    if (!st) { st = { key, s1: emptyWallPieces(), s2: emptyWallPieces() }; byKey.set(key, st); }
+    const pieces = cx === 2 ? st.s2 : st.s1;
     const o = e.iso?.orient;
-    if (o === "NE-SW" || o === "NW-SE") st[o].push(e.id);
-    else st.corner.push(e.id);
+    if (o === "NE-SW" || o === "NW-SE") pieces[o].push(e.id);
+    else pieces.corner.push(e.id);
   }
-  const score = (k: string, s: WallStyle): number =>
-    (s["NE-SW"].length && s["NW-SE"].length ? 2 : 0) + Math.min(s.corner.length, 2) + (k.startsWith("wall|") ? 1 : 0);
-  const usable = [...byStyle.entries()].filter(([, s]) => (s["NE-SW"].length || s["NW-SE"].length) && s.corner.length);
-  usable.sort(([ka, a], [kb, b]) => score(kb, b) - score(ka, a) || (ka < kb ? 1 : -1)); // tie -> faction desc (stone G003 first)
-  return { styles: usable.map(([, s]) => s) };
+  const styles = [...byKey.values()].filter((s) => wallComplete(s.s1) || wallComplete(s.s2));
+  // prefer "wall" (stone) over "fence", then faction desc, so the stone sets sort first.
+  styles.sort((a, b) =>
+    (a.key.startsWith("wall|") ? 0 : 1) - (b.key.startsWith("wall|") ? 0 : 1) || (a.key < b.key ? 1 : -1));
+  return { styles };
 }
 
 /** 1×1 decoration landmark ids grouped by catalog `shape` (rock / vegetation / …). */
@@ -151,10 +164,10 @@ const N4: ReadonlyArray<readonly [number, number, number]> = [
  * cap/T/cross sprites exist), so: straight runs AND ends use a straight; corners/T/cross/
  * post use a corner (the 2 rotations split across the 4 corner directions as a best fit).
  */
-function wallPiece(mask: number, style: WallStyle): string | undefined {
+function wallPiece(mask: number, pieces: WallPieces): string | undefined {
   const n = mask & 1, e = mask & 2, s = mask & 4, w = mask & 8;
   const ns = n || s, ew = e || w;
-  const NE = style["NE-SW"], NW = style["NW-SE"], CO = style.corner;
+  const NE = pieces["NE-SW"], NW = pieces["NW-SE"], CO = pieces.corner;
   if (ns && !ew) return NE[0] ?? NW[0] ?? CO[0]; // N–S run, or a N/S end
   if (ew && !ns) return NW[0] ?? NE[0] ?? CO[0]; // E–W run, or an E/W end
   if (CO.length) {
@@ -182,43 +195,49 @@ export function decodeGrid(
   protect?: boolean,
   /** Decoration ids grouped by shape (for the "decor" action). */
   decor?: DecorSet,
+  /** Cell scale: the symbol grid is `scale`× coarser than the region. Each grid cell maps to
+   *  a scale×scale block (terrain fills the block; objects anchor at its corner + use a
+   *  scale×scale sprite). Used by the wall maze (scale 2 → 2×2 stone wall pieces). */
+  scale = 1,
 ): EditOp[] {
   const n = doc.size;
   const inb = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < n && y < n;
+  const isProtected = (v: number): boolean => ((v >> 3) & 7) === 3 || v === 37;
+  const allowed = (x: number, y: number): boolean =>
+    inb(x, y) && !(mask && !mask.has(`${x},${y}`)) && !(protect && isProtected(doc.terrain.cells[y * n + x]!.value));
   const ops: EditOp[] = [];
   const wallCells = new Set<string>();
   const mountainCells: { x: number; y: number }[] = [];
   const roadCells: { x: number; y: number }[] = [];
   const decorCells: { x: number; y: number; shape: string }[] = [];
 
-  // pass 1: terrain ops + collect wall cells
+  // pass 1: terrain ops (fill the scale×scale block) + collect object anchors.
   for (let gy = 0; gy < grid.height; gy++) {
     for (let gx = 0; gx < grid.width; gx++) {
-      const x = region.x + gx;
-      const y = region.y + gy;
-      if (!inb(x, y)) continue;
-      if (mask && !mask.has(`${x},${y}`)) continue;
-      const cell = doc.terrain.cells[y * n + x]!;
-      if (protect && (((cell.value >> 3) & 7) === 3 || cell.value === 37)) continue;
+      const ax = region.x + gx * scale;
+      const ay = region.y + gy * scale;
       const action = table[grid.rows[gy]?.[gx] ?? ""] ?? { kind: "skip" };
-      if (action.kind === "terrain") {
-        const v = brushValue(cell.value, { type: "terrain", terrain: action.terrain }, x, y);
-        if (v !== cell.value) ops.push({ kind: "setCell", x, y, value: v });
-      } else if (action.kind === "water") {
-        const v = brushValue(cell.value, { type: "water" }, x, y);
-        if (v !== cell.value) ops.push({ kind: "setCell", x, y, value: v });
-      } else if (action.kind === "forest") {
-        const v = brushValue(cell.value, { type: "forest" }, x, y);
-        if (v !== cell.value) ops.push({ kind: "setCell", x, y, value: v });
-      } else if (action.kind === "wall") {
-        wallCells.add(`${x},${y}`);
-      } else if (action.kind === "mountain") {
-        mountainCells.push({ x, y });
-      } else if (action.kind === "road") {
-        roadCells.push({ x, y });
-      } else if (action.kind === "decor") {
-        decorCells.push({ x, y, shape: action.shape });
+      if (action.kind === "skip") continue;
+      if (action.kind === "terrain" || action.kind === "water" || action.kind === "forest") {
+        for (let dy = 0; dy < scale; dy++)
+          for (let dx = 0; dx < scale; dx++) {
+            const x = ax + dx, y = ay + dy;
+            if (!allowed(x, y)) continue;
+            const cv = doc.terrain.cells[y * n + x]!.value;
+            const v =
+              action.kind === "terrain" ? brushValue(cv, { type: "terrain", terrain: action.terrain }, x, y)
+              : action.kind === "water" ? brushValue(cv, { type: "water" }, x, y)
+              : brushValue(cv, { type: "forest" }, x, y);
+            if (v !== cv) ops.push({ kind: "setCell", x, y, value: v });
+          }
+        continue;
       }
+      // object actions: anchor at the block's corner
+      if (!allowed(ax, ay)) continue;
+      if (action.kind === "wall") wallCells.add(`${ax},${ay}`);
+      else if (action.kind === "mountain") mountainCells.push({ x: ax, y: ay });
+      else if (action.kind === "road") roadCells.push({ x: ax, y: ay });
+      else if (action.kind === "decor") decorCells.push({ x: ax, y: ay, shape: action.shape });
     }
   }
 
@@ -226,14 +245,18 @@ export function decodeGrid(
   // id (they read the current max/count from the doc).
   let work = doc;
 
-  // 2a: wall landmarks — ONE consistent style, auto-tiled by the 4-neighbour mask.
-  const style = walls.styles[0];
-  if (style) {
+  // 2a: wall landmarks — ONE consistent art set, auto-tiled by the 4-neighbour mask. At
+  // scale 2 the maze is coarse and uses the 2×2 stone wall pieces (like the game's castles);
+  // neighbours are checked at the coarse `scale` spacing.
+  const wantS2 = scale >= 2;
+  const style = walls.styles.find((s) => wallComplete(wantS2 ? s.s2 : s.s1)) ?? walls.styles[0];
+  const pieces = style ? (wantS2 && wallComplete(style.s2) ? style.s2 : style.s1) : undefined;
+  if (pieces && wallComplete(pieces)) {
     for (const key of wallCells) {
       const [x, y] = key.split(",").map(Number) as [number, number];
-      let mask = 0;
-      for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx},${y + dy}`)) mask |= bit;
-      const baseType = wallPiece(mask, style);
+      let m = 0;
+      for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
+      const baseType = wallPiece(m, pieces);
       if (!baseType) continue;
       const placeOps = placeLandmarkOps(work, x, y, baseType);
       ops.push(...placeOps);
