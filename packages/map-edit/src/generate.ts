@@ -269,17 +269,26 @@ export function decodeGrid(
   const style = walls.styles.find((s) => wallComplete(wantS2 ? s.s2 : s.s1)) ?? walls.styles[0];
   const pieces = style ? (wantS2 && wallComplete(style.s2) ? style.s2 : style.s1) : undefined;
   if (pieces && wallComplete(pieces)) {
+    const place = (x: number, y: number, type: string): void => {
+      const op = placeLandmarkOps(work, x, y, type);
+      ops.push(...op);
+      work = applyOps(work, op);
+    };
     for (const key of wallCells) {
       const [x, y] = key.split(",").map(Number) as [number, number];
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
-      // a corner / junction / lone post (not a straight run) → a tower, else a wall piece.
       const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
-      const baseType = !straight && style?.tower ? style.tower : wallPiece(m, pieces);
-      if (!baseType) continue;
-      const placeOps = placeLandmarkOps(work, x, y, baseType);
-      ops.push(...placeOps);
-      work = applyOps(work, placeOps);
+      // Always lay the matching wall piece (straight run vs corner bend) so the maze
+      // CONNECTS — a corner cell gets the corner piece, filling its whole footprint
+      // (at scale 2 that's the 2×2 block). The old code dropped the wall at corners and
+      // left only a 1×1 tower, which under-filled the 2×2 corner → the "off by one" gap.
+      const wallType = wallPiece(m, pieces);
+      if (wallType) place(x, y, wallType);
+      // Corners/junctions also get a stone turret accent rising from the filled corner.
+      // (The tower is 1×1 — there is no 2×2 stone tower, only lighthouses — so it sits on
+      // top of the corner piece rather than replacing it.)
+      if (!straight && style?.tower) place(x, y, style.tower);
     }
   }
 
