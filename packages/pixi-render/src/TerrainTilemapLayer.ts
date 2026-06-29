@@ -225,7 +225,10 @@ export class TerrainTilemapLayer {
       return;
     }
     const w = cellToWorld(x, y);
-    this.baseTM.tile(tex, w.x - HALF_W, w.y - HALF_H);
+    // cellToWorld(x,y) is the cell's TOP vertex (editor origin convention, matching
+    // objects/overlays). The 64×32 ground diamond's top vertex sits there, so its
+    // top-left corner is one half-height BELOW — i.e. py = w.y (not w.y - HALF_H).
+    this.baseTM.tile(tex, w.x - HALF_W, w.y);
   }
 
   private placeBorders(x: number, y: number, v: number): void {
@@ -234,7 +237,7 @@ export class TerrainTilemapLayer {
     if (!border && !extra) return;
     const w = cellToWorld(x, y);
     const px = w.x - HALF_W;
-    const py = w.y - HALF_H;
+    const py = w.y; // origin convention — aligns the border diamond with the base tile
     const wtr = this.isWater(v);
     const seed = x * y + x + y;
 
@@ -313,7 +316,8 @@ export class TerrainTilemapLayer {
     const sprite = new Sprite(tex);
     sprite.anchor.set(0.5, 0.5);
     const w = cellToWorld(x, y);
-    sprite.position.set(w.x, w.y);
+    // cell visual centre = top vertex + half-height (origin convention)
+    sprite.position.set(w.x, w.y + HALF_H);
     layer.addChild(sprite);
   }
 

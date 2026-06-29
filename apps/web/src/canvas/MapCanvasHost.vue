@@ -208,7 +208,7 @@ function updateVisibleCells(snap: CameraSnapshot): void {
   const mask: string[] = [];
   for (let y = y0; y <= y1; y++)
     for (let x = x0; x <= x1; x++) {
-      const wx = (x - y) * HALF_W, wy = (x + y) * HALF_H + HALF_H; // cell centre
+      const wx = (x - y) * HALF_W, wy = (x + y) * HALF_H + HALF_H; // cell centre (origin conv)
       if (wx >= snap.x && wx <= snap.x + snap.width && wy >= snap.y && wy <= snap.y + snap.height) mask.push(`${x},${y}`);
     }
   viewStore.setVisibleMask(mask);
@@ -224,6 +224,8 @@ function cellFromEvent(e: PointerEvent): { x: number; y: number } | null {
   const rect = canvas.getBoundingClientRect();
   const world = cam.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
   const frac = worldToCell(world.x, world.y);
+  // cellToWorld(x,y) is the cell's TOP vertex (editor origin convention), so a cell
+  // spans frac [x,x+1) — floor() picks the cell the point falls in.
   const x = Math.floor(frac.x);
   const y = Math.floor(frac.y);
   return x >= 0 && y >= 0 && x < doc.size && y < doc.size ? { x, y } : null;

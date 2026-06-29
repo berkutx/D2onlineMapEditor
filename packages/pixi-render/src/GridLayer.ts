@@ -22,18 +22,19 @@ export class GridLayer {
     const g = new Graphics();
     const N = size;
 
-    // cell boundaries sit at half-integer cartesian coords (-0.5 .. N-0.5).
+    // cellToWorld(x,y) is the cell's TOP vertex (editor origin convention), so cell
+    // (x,y) spans [x,x+1)×[y,y+1) and its boundaries are at INTEGER coords 0..N. This
+    // makes the diamond lattice line up with the terrain tiles + objects + cursor.
     for (let i = 0; i <= N; i++) {
-      const a = i - 0.5;
       // constant-x boundary line
-      let p = cellToWorld(a, -0.5);
+      let p = cellToWorld(i, 0);
       g.moveTo(p.x, p.y);
-      p = cellToWorld(a, N - 0.5);
+      p = cellToWorld(i, N);
       g.lineTo(p.x, p.y);
       // constant-y boundary line
-      p = cellToWorld(-0.5, a);
+      p = cellToWorld(0, i);
       g.moveTo(p.x, p.y);
-      p = cellToWorld(N - 0.5, a);
+      p = cellToWorld(N, i);
       g.lineTo(p.x, p.y);
     }
     g.stroke({ width: 1, color, alpha });
