@@ -124,16 +124,18 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           // chest/ruin/city property edits. field name -> .sg tag, by storage kind:
           const o = raw.objectById.get(op.id);
           const isRuin = o?.typeName === "MidRuin";
-          // 1) fixed-width int32 — splice in place.
+          const isSite = !!o && o.typeName.startsWith("MidSite"); // Merchant/Mage/Trainer/Mercs
+          // 1) fixed-width int32 — splice in place. Sites store their image as IMG_ISO (not
+          //    IMAGE); crystals store the mana school as RESOURCE.
           const INT_TAG: Record<string, string> = {
-            image: "IMAGE", tier: "SIZE", priority: "AIPRIORITY",
-            morale: "MORALE", regen: "REGEN_B", growth: "GROWTH_T",
+            image: isSite ? "IMG_ISO" : "IMAGE", tier: "SIZE", priority: "AIPRIORITY",
+            morale: "MORALE", regen: "REGEN_B", growth: "GROWTH_T", resource: "RESOURCE",
           };
           // 2) string fields — ALL via the growable splice (handles same-length compound
           //    ids / CASH AND variable-length user text uniformly; never length-throws).
-          //    name/desc tags differ by type (ruin = TITLE/DESC, city = NAME_TXT/DESC_TXT).
+          //    name tag differs by type (ruin = TITLE, site = TXT_TITLE, else = NAME_TXT).
           const STR_TAG: Record<string, string> = {
-            name: isRuin ? "TITLE" : "NAME_TXT", desc: isRuin ? "DESC" : "DESC_TXT",
+            name: isRuin ? "TITLE" : isSite ? "TXT_TITLE" : "NAME_TXT", desc: isRuin ? "DESC" : "DESC_TXT",
             owner: "OWNER", subRace: "SUBRACE", item: "ITEM", looter: "LOOTER", reward: "CASH",
           };
           const handled = new Set<string>();

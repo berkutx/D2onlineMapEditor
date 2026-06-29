@@ -46,7 +46,22 @@ const TYPE_LABEL: Record<string, string> = {
   rod: "Жезл", tomb: "Могила", unit: "Юнит", location: "Локация",
 };
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
-const editable = computed(() => !!obj.value && ["treasure", "ruin", "village"].includes(obj.value.type));
+const SITE_TYPES = ["merchant", "mage", "trainer", "mercenary"];
+const editable = computed(
+  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", ...SITE_TYPES].includes(obj.value.type),
+);
+
+/** Site sprite key: "G000SI0000" + 4-char type code + image(2). */
+const SITE_CODE: Record<string, string> = { merchant: "MERH", mage: "MAGE", trainer: "TRAI", mercenary: "MERC" };
+const siteImageKey = computed(() => {
+  const code = obj.value ? SITE_CODE[obj.value.type] ?? "MERH" : "MERH";
+  return (i: number): string => `G000SI0000${code}${String(i).padStart(2, "0")}`;
+});
+
+/** Mana-crystal: RESOURCE int 0-5 (CrystalIdByResource order) -> RU label + sprite suffix. */
+const CRYSTAL_LABELS = ["Золото", "Инферно", "Жизнь", "Смерть", "Руны", "Природа"];
+const CRYSTAL_SUFFIX = ["GL", "RD", "YE", "RG", "WH", "GR"];
+const crystalKey = (r: number): string => `G000CR0000${CRYSTAL_SUFFIX[r] ?? "GL"}`;
 
 /** Players for the owner dropdown (id is the full compound uid = the stored OWNER value). */
 const NEUTRAL = "G000000000";
@@ -88,6 +103,8 @@ const headerSpriteKey = computed<string | null>(() => {
   if (o.type === "ruin") return ruinImageKey(o.image ?? 0);
   if (o.type === "treasure") return chestImageKey.value(o.image ?? 0);
   if (o.type === "village") return `G000FT0000NE${o.tier ?? 1}`;
+  if (o.type === "crystal") return crystalKey(o.resource ?? 0);
+  if (SITE_TYPES.includes(o.type)) return siteImageKey.value(o.image ?? 0);
   return null;
 });
 watch(headerSpriteKey, (k) => { if (k) void spriteStore.ensureKeys([k]); }, { immediate: true });
@@ -275,6 +292,43 @@ function close(): void {
         <div v-if="obj.growth !== undefined" class="row">
           <label>Прирост</label>
           <el-input-number :model-value="obj.growth" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ growth: v ?? 0 })" />
+        </div>
+      </template>
+
+      <!-- 🏰 CAPITAL (столица) -->
+      <template v-else-if="obj.type === 'capital'">
+        <div class="col">
+          <label>Название</label>
+          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+        </div>
+        <div class="row">
+          <label>Владелец</label>
+          <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="setOwner">
+            <el-option label="Нейтрал" :value="NEUTRAL" />
+            <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
+          </el-select>
+        </div>
+      </template>
+
+      <!-- 🏪 SITE (торговец / маг / тренер / наёмники) -->
+      <template v-else-if="SITE_TYPES.includes(obj.type)">
+        <div class="col">
+          <label>Название</label>
+          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+        </div>
+        <div class="row">
+          <label>Картинка</label>
+          <ImagePicker :object-id="obj.id" :key-fn="siteImageKey" :count="20" />
+        </div>
+      </template>
+
+      <!-- 💎 CRYSTAL (кристалл маны) -->
+      <template v-else-if="obj.type === 'crystal'">
+        <div class="row">
+          <label>Тип маны</label>
+          <el-select :model-value="obj.resource ?? 0" size="small" class="owner-sel" @change="(v: number) => patch({ resource: v })">
+            <el-option v-for="(lbl, i) in CRYSTAL_LABELS" :key="i" :label="lbl" :value="i" />
+          </el-select>
         </div>
       </template>
 

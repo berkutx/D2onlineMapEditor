@@ -32,6 +32,7 @@ import {
 } from "../src/index";
 
 const RIDERS = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Riders.sg`;
+const DRAGON = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Dragon_s teeth.sg`;
 const bytes = new Uint8Array(readFileSync(RIDERS));
 
 describe("@d2/map-edit bits", () => {
@@ -371,6 +372,51 @@ describe("@d2/map-edit chest item list (M4 growable list — items are GItem tem
     const re = parseScenario(out);
     const reChest = re.objects.find((o) => o.id === chest.id) as { items?: string[] };
     expect(reChest.items ?? []).toEqual([]);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+});
+
+describe("@d2/map-edit site / capital / crystal edits", () => {
+  const dragon = new Uint8Array(readFileSync(DRAGON));
+
+  it("site (merchant/mage/…) name + image -> TXT_TITLE/IMG_ISO, round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const site = doc.objects.find(
+      (o) => ["merchant", "mage", "trainer", "mercenary"].includes(o.type) && (o as { name?: string }).name !== undefined,
+    ) as { id: string };
+    expect(site).toBeTruthy();
+    const ops: EditOp[] = [{ kind: "patchObject", id: site.id, fields: { name: "Лавка диковин", image: 2 } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reSite = re.objects.find((o) => o.id === site.id) as { name?: string; image?: number };
+    expect(reSite.name).toBe("Лавка диковин");
+    expect(reSite.image).toBe(2);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("crystal RESOURCE (mana school) round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const cr = doc.objects.find((o) => o.type === "crystal") as { id: string; resource?: number };
+    expect(cr).toBeTruthy();
+    const newR = ((cr.resource ?? 0) + 1) % 6;
+    const ops: EditOp[] = [{ kind: "patchObject", id: cr.id, fields: { resource: newR } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect((re.objects.find((o) => o.id === cr.id) as { resource?: number }).resource).toBe(newR);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("capital name (NAME_TXT, variable-length) round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const cap = doc.objects.find((o) => o.type === "capital") as { id: string };
+    expect(cap).toBeTruthy();
+    const ops: EditOp[] = [{ kind: "patchObject", id: cap.id, fields: { name: "Оплот героев" } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect((re.objects.find((o) => o.id === cap.id) as { name?: string }).name).toBe("Оплот героев");
     expect(validateMap(re).ok).toBe(true);
     expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
   });
