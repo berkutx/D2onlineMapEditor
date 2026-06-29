@@ -7,7 +7,7 @@
  */
 import { ref, nextTick, watch } from "vue";
 import { ElInput, ElPopover, ElSegmented } from "element-plus";
-import { Promotion, Close, RefreshRight, Reading, Setting } from "@element-plus/icons-vue";
+import { Promotion, Close, RefreshRight, Reading } from "@element-plus/icons-vue";
 import { computed } from "vue";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
@@ -67,8 +67,6 @@ function markActive(): void {
 const inputFocused = ref(false);
 /** Effective translucency: only fade when idle AND not actively typing. */
 const idleEffective = computed(() => idle.value && !inputFocused.value && !input.value.trim());
-/** Any generation mode active → show a dot on the settings cog. */
-const modesOn = computed(() => llmMode.value || protect.value || toolStore.eyeZone);
 
 /** Format the last generation's timing/debug for the chat (client round-trip + server detail). */
 function debugLine(clientMs: number): string {
@@ -522,34 +520,18 @@ watch(
         </div>
       </el-popover>
 
-      <el-popover :width="248" placement="top-start" trigger="click" popper-class="cp-set-pop">
-        <template #reference>
-          <el-button class="cp-ico" text :icon="Setting" title="Настройки генерации">
-            <span v-if="modesOn" class="cp-dot" />
-          </el-button>
-        </template>
-        <div class="cp-set-head">Настройки генерации</div>
-        <button class="cp-set-row" :class="{ on: llmMode }" @click="llmMode = !llmMode">
-          <span class="cp-set-ck">{{ llmMode ? "✓" : "" }}</span>
-          <span class="cp-set-main"><b>LLM-режим</b><small>через агента, не по ключевым словам</small></span>
-        </button>
-        <button class="cp-set-row" :class="{ on: protect }" @click="protect = !protect">
-          <span class="cp-set-ck">{{ protect ? "✓" : "" }}</span>
-          <span class="cp-set-main"><b>Беречь рельеф</b><small>не перетирать воду и горы</small></span>
-        </button>
-        <button class="cp-set-row" :class="{ on: eyeActive }" @click="toggleEye()">
-          <span class="cp-set-ck">{{ eyeActive ? "✓" : "" }}</span>
-          <span class="cp-set-main"><b>Глаз = зона</b><small>видимая область как зона{{ eyeActive && visibleMaskLen ? " · " + visibleMaskLen + " кл" : "" }}</small></span>
-        </button>
-      </el-popover>
-
-      <el-button
-        class="cp-ico"
-        text
-        :type="zoneActive ? 'primary' : 'default'"
-        title="Выделить зону для генерации"
-        @click="toggleZone()"
-      >⛶<span v-if="region" class="cp-badge">{{ region.w }}×{{ region.h }}</span></el-button>
+      <el-tooltip content="LLM-режим — генерация через агента (иначе офлайн-роутер)" placement="top" :show-after="300">
+        <el-button class="cp-ico" text :type="llmMode ? 'primary' : 'default'" @click="llmMode = !llmMode">🧠</el-button>
+      </el-tooltip>
+      <el-tooltip content="Беречь рельеф — не перетирать воду и горы" placement="top" :show-after="300">
+        <el-button class="cp-ico" text :type="protect ? 'primary' : 'default'" @click="protect = !protect">🛡</el-button>
+      </el-tooltip>
+      <el-tooltip content="Глаз: видимая область экрана = зона генерации" placement="top" :show-after="300">
+        <el-button class="cp-ico" text :type="eyeActive ? 'primary' : 'default'" @click="toggleEye()">👁<span v-if="eyeActive && visibleMaskLen" class="cp-badge">{{ visibleMaskLen }}</span></el-button>
+      </el-tooltip>
+      <el-tooltip content="Выделить зону для генерации" placement="top" :show-after="300">
+        <el-button class="cp-ico" text :type="zoneActive ? 'primary' : 'default'" @click="toggleZone()">⛶<span v-if="region" class="cp-badge">{{ region.w }}×{{ region.h }}</span></el-button>
+      </el-tooltip>
 
       <el-input
         ref="inputRef"
@@ -641,7 +623,7 @@ watch(
 .copilot-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   padding: 5px 8px;
   border-radius: 999px;
 }
@@ -664,13 +646,6 @@ watch(
   margin-left: 3px;
   font-size: 10px;
   opacity: 0.8;
-}
-.cp-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--el-color-primary);
-  margin-left: 2px;
 }
 .cp-close {
   color: var(--el-text-color-secondary);
@@ -726,53 +701,8 @@ watch(
 }
 </style>
 
-<!-- Unscoped: the popovers are teleported to <body>, so scoped styles won't reach them. -->
+<!-- Unscoped: the examples popover is teleported to <body>, so scoped styles won't reach it. -->
 <style>
-.cp-set-pop.el-popover.el-popper {
-  padding: 6px;
-  border-radius: var(--d2-radius);
-}
-.cp-set-head {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  padding: 2px 6px 6px;
-}
-.cp-set-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  border: none;
-  background: transparent;
-  text-align: left;
-  padding: 8px;
-  border-radius: var(--d2-radius);
-  cursor: pointer;
-}
-.cp-set-row:hover {
-  background: var(--el-fill-color-light);
-}
-.cp-set-ck {
-  flex: 0 0 12px;
-  color: var(--el-color-primary);
-  font-weight: 700;
-}
-.cp-set-main {
-  display: flex;
-  flex-direction: column;
-}
-.cp-set-main b {
-  font-size: 13px;
-  color: var(--el-text-color-primary);
-  font-weight: 600;
-}
-.cp-set-row.on .cp-set-main b {
-  color: var(--el-color-primary);
-}
-.cp-set-main small {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-}
 .cp-ex-pop.el-popover.el-popper {
   padding: 8px;
   border-radius: 12px;

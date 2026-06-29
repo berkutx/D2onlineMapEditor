@@ -48,9 +48,10 @@ export const useViewStore = defineStore("view", () => {
   const copilotVisible = ref(true);
   /** Bumped to ask the copilot input to take focus (the "/" hotkey). Not persisted. */
   const copilotFocusTick = ref(0);
-  /** Dark chrome (panels/menus) — opt-in; the canvas is always dark. Applied to
-   *  <html class="dark"> so Element Plus' dark css-vars take over. Persisted. */
-  const dark = ref(bool(p.dark, false));
+  /** Dark chrome (panels/menus) — default ON to match the dark canvas; the user
+   *  can switch to light via View ▸ Appearance. Applied to <html class="dark">
+   *  so Element Plus' dark css-vars take over. Persisted. */
+  const dark = ref(bool(p.dark, true));
   function applyDark(): void {
     document.documentElement.classList.toggle("dark", dark.value);
   }

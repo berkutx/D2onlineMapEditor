@@ -99,7 +99,7 @@ const layers = [
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--d2-sp-1);
+  gap: 2px;
   padding: var(--d2-sp-2) 0;
   background: var(--el-bg-color-page);
   border-right: var(--d2-hairline);
