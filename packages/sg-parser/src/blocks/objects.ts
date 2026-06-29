@@ -29,6 +29,101 @@ function refOrUndef(s: string | null): string | undefined {
   return s;
 }
 
+/** Read a fort/stack garrison formation: UNIT_0..5 (MidUnit instance) + POS_0..5 (cell 0..5).
+ *  Returns a 6-element array indexed by FORMATION CELL -> instance id (null = empty cell). */
+function readGarrison(buf: ByteBuffer, f: number, e: number): (string | null)[] {
+  const cells: (string | null)[] = [null, null, null, null, null, null];
+  const pending: string[] = []; // filled slots whose POS is -1/duplicate (legacy linked stacks)
+  for (let i = 0; i < 6; i++) {
+    const inst = refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e));
+    if (!inst) continue;
+    const pos = readDefaultInt(buf, `POS_${i}`, f, e);
+    if (pos !== null && pos >= 0 && pos < 6 && cells[pos] == null) cells[pos] = inst;
+    else pending.push(inst);
+  }
+  for (const inst of pending) {
+    const free = cells.indexOf(null);
+    if (free >= 0) cells[free] = inst;
+  }
+  return cells;
+}
+
+/** A cursor over contiguous site-stock entries. After the literal QTY_* int32, the count
+ *  entries are written back-to-back; we walk them by tag. Returns null if the tag mismatches. */
+function readStrAt(buf: ByteBuffer, p: number, tag: string): { value: string; next: number } | null {
+  if (buf.asciiSlice(p, p + tag.length) !== tag) return null;
+  p += tag.length;
+  const len = buf.readInt32LE(p);
+  p += 4;
+  const value = buf.asciiSlice(p, p + Math.max(0, len - 1)); // compound ids are ASCII; drop the NUL
+  return { value, next: p + len };
+}
+function readIntAt(buf: ByteBuffer, p: number, tag: string): { value: number; next: number } | null {
+  if (buf.asciiSlice(p, p + tag.length) !== tag) return null;
+  return { value: buf.readInt32LE(p + tag.length), next: p + tag.length + 4 };
+}
+function readBoolAt(buf: ByteBuffer, p: number, tag: string): { value: boolean; next: number } | null {
+  if (buf.asciiSlice(p, p + tag.length) !== tag) return null;
+  return { value: buf.bytes[p + tag.length] !== 0, next: p + tag.length + 1 };
+}
+
+/** Merchant stock: QTY_ITEM count, then [ITEM_ID(global) + ITEM_COUNT] × N. */
+function readMerchantItems(buf: ByteBuffer, f: number, e: number): { id: string; count: number }[] {
+  const at = buf.indexOf("QTY_ITEM", f);
+  if (at < 0 || at >= e) return [];
+  let p = at + "QTY_ITEM".length;
+  const count = buf.readInt32LE(p);
+  p += 4;
+  const out: { id: string; count: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = readStrAt(buf, p, "ITEM_ID");
+    if (!id) break;
+    const qty = readIntAt(buf, id.next, "ITEM_COUNT");
+    if (!qty) break;
+    out.push({ id: id.value, count: qty.value });
+    p = qty.next;
+  }
+  return out;
+}
+
+/** Mage stock: QTY_SPELL count, then [SPELL_ID(global)] × N. */
+function readMageSpells(buf: ByteBuffer, f: number, e: number): string[] {
+  const at = buf.indexOf("QTY_SPELL", f);
+  if (at < 0 || at >= e) return [];
+  let p = at + "QTY_SPELL".length;
+  const count = buf.readInt32LE(p);
+  p += 4;
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const sp = readStrAt(buf, p, "SPELL_ID");
+    if (!sp) break;
+    out.push(sp.value);
+    p = sp.next;
+  }
+  return out;
+}
+
+/** Mercenary stock: QTY_UNIT count, then [UNIT_ID(global) + UNIT_LEVEL + UNIT_UNIQ] × N. */
+function readMercUnits(buf: ByteBuffer, f: number, e: number): { id: string; level: number; unique: boolean }[] {
+  const at = buf.indexOf("QTY_UNIT", f);
+  if (at < 0 || at >= e) return [];
+  let p = at + "QTY_UNIT".length;
+  const count = buf.readInt32LE(p);
+  p += 4;
+  const out: { id: string; level: number; unique: boolean }[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = readStrAt(buf, p, "UNIT_ID");
+    if (!id) break;
+    const lvl = readIntAt(buf, id.next, "UNIT_LEVEL");
+    if (!lvl) break;
+    const uniq = readBoolAt(buf, lvl.next, "UNIT_UNIQ");
+    if (!uniq) break;
+    out.push({ id: id.value, level: lvl.value, unique: uniq.value });
+    p = uniq.next;
+  }
+  return out;
+}
+
 /** MidStack: a moving army. Verified fields: UNIT_0..5, LEADER_ID, OWNER, FACING, BANNER, POS_X/Y. */
 export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
@@ -58,6 +153,7 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(facing !== null ? { facing } : {}),
     ...(order !== null ? { order } : {}),
     units,
+    garrison: readGarrison(buf, f, e), // by-cell instance ids (used to resolve linked fort garrisons)
   };
 }
 
@@ -75,6 +171,7 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
   const morale = readDefaultInt(buf, "MORALE", f, e);
   const regen = readDefaultInt(buf, "REGEN_B", f, e);
   const growth = readDefaultInt(buf, "GROWTH_T", f, e);
+  const stackRef = refOrUndef(readDefaultString(buf, "STACK", f, e));
   return {
     type: "village",
     id: obj.id,
@@ -88,6 +185,8 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(morale !== null ? { morale } : {}),
     ...(regen !== null ? { regen } : {}),
     ...(growth !== null ? { growth } : {}),
+    garrison: readGarrison(buf, f, e), // embedded; resolved instance->Gunit in assemble post-pass
+    ...(stackRef ? { stackRef } : {}),
   };
 }
 
@@ -100,6 +199,7 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
   const subRace = refOrUndef(readDefaultString(buf, "SUBRACE", f, e));
   const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
+  const stackRef = refOrUndef(readDefaultString(buf, "STACK", f, e));
   return {
     type: "capital",
     id: obj.id,
@@ -107,6 +207,8 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(owner ? { owner } : {}),
     ...(subRace ? { subRace } : {}),
     name,
+    garrison: readGarrison(buf, f, e),
+    ...(stackRef ? { stackRef } : {}),
   };
 }
 
@@ -146,12 +248,19 @@ export function readSite(type: SiteType) {
     const { fieldsFrom: f, fieldsEnd: e } = obj;
     const name = readDefaultString(buf, "TXT_TITLE", f, e) ?? "";
     const image = readDefaultInt(buf, "IMG_ISO", f, e);
+    // stock list (global template ids) — merchant items, mage spells, mercenary units.
+    const stock =
+      type === "merchant" ? { items: readMerchantItems(buf, f, e) } :
+      type === "mage" ? { spells: readMageSpells(buf, f, e) } :
+      type === "mercenary" ? { units: readMercUnits(buf, f, e) } :
+      {};
     return {
       type,
       id: obj.id,
       pos: pos(buf, obj),
       name,
       ...(image !== null ? { image } : {}),
+      ...stock,
     };
   };
 }

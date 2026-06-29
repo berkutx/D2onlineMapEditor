@@ -193,6 +193,25 @@ export function assembleDocument(
     }
   }
 
+  // Resolve fort garrisons: the fort's embedded UNIT_0..5/POS_0..5 (MidUnit instances) →
+  // global Gunit ids by formation cell; if the fort uses the legacy linked form (embedded
+  // empty + STACK set), source from that MidStack's formation instead.
+  const stackById = new Map<string, MapObject>();
+  for (const o of acc.objects) if (o.type === "stack") stackById.set(o.id, o);
+  for (const o of acc.objects) {
+    if (o.type !== "village" && o.type !== "capital") continue;
+    let cells = o.garrison ?? null;
+    if ((!cells || cells.every((c) => c == null)) && o.stackRef) {
+      const s = stackById.get(o.stackRef);
+      if (s && s.type === "stack" && s.garrison) cells = s.garrison;
+    }
+    o.garrison = (cells ?? [null, null, null, null, null, null]).map(
+      (inst) => (inst ? unitImpl.get(inst) ?? inst : null),
+    );
+  }
+  // the stack's by-cell instance list was only needed to resolve linked garrisons — drop it
+  for (const o of acc.objects) if (o.type === "stack") delete o.garrison;
+
   // Resolve each fort/capital/village's sprite race from its OWNER player. The
   // editor sets FortObject.raceId = player.raceId (MapConverter.cpp:380) and builds
   // the image key from Grace[player.raceId] (NOT from the block's SUBRACE, which is

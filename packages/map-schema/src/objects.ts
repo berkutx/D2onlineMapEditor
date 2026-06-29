@@ -24,6 +24,8 @@ export const StackObject = z.object({
   garrisoned: z.boolean().optional(), // INSIDE a fort -> editor draws nothing
   order: z.number().int().optional(), // ORDER (1=Normal..3=Guard..); Guard => guard-range overlay
   units: z.array(z.string()).default([]),
+  // formation by cell (POS 0..5) -> MidUnit INSTANCE id; used to resolve a linked fort garrison
+  garrison: z.array(z.string().nullable()).optional(),
 });
 
 export const FortObject = z.object({
@@ -41,6 +43,10 @@ export const CapitalObject = z.object({
   subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (banner)
   bannerIndex: z.number().int().optional(), // resolved subrace banner number
   name: z.string().default(""),
+  // garrison: formation cell (POS 0..5) -> global Gunit id (resolved from the embedded
+  // UNIT_0..5/POS_0..5 MidUnit instances, or the linked STACK fort-stack). null = empty cell.
+  garrison: z.array(z.string().nullable()).optional(),
+  stackRef: z.string().optional(), // STACK uid (linked-stack garrison form), if any
 });
 export const VillageObject = z.object({
   ...base,
@@ -56,6 +62,8 @@ export const VillageObject = z.object({
   morale: z.number().int().optional(), // MORALE
   regen: z.number().int().optional(), // REGEN_B garrison regen
   growth: z.number().int().optional(), // GROWTH_T unit growth timer
+  garrison: z.array(z.string().nullable()).optional(), // formation cell -> Gunit id (see CapitalObject)
+  stackRef: z.string().optional(), // STACK uid (linked-stack garrison form)
 });
 
 export const RuinObject = z.object({
@@ -76,10 +84,25 @@ const SiteCommon = {
   name: z.string().default(""),
   image: z.number().int().optional(),
 };
-export const MerchantObject = z.object({ ...SiteCommon, type: z.literal("merchant") });
-export const MageObject = z.object({ ...SiteCommon, type: z.literal("mage") });
+// Site STOCK lists carry GLOBAL template ids (NOT MidItem/MidUnit instances), count-prefixed
+// by a literal QTY_* tag. Merchant sells items (+qty), mage sells spells, mercs hire units
+// (+level/unique). Trainer has no stock.
+export const MerchantObject = z.object({
+  ...SiteCommon,
+  type: z.literal("merchant"),
+  items: z.array(z.object({ id: z.string(), count: z.number().int() })).optional(),
+});
+export const MageObject = z.object({
+  ...SiteCommon,
+  type: z.literal("mage"),
+  spells: z.array(z.string()).optional(),
+});
 export const TrainerObject = z.object({ ...SiteCommon, type: z.literal("trainer") });
-export const MercenaryObject = z.object({ ...SiteCommon, type: z.literal("mercenary") });
+export const MercenaryObject = z.object({
+  ...SiteCommon,
+  type: z.literal("mercenary"),
+  units: z.array(z.object({ id: z.string(), level: z.number().int(), unique: z.boolean() })).optional(),
+});
 
 export const MountainsObject = z.object({
   ...base,
