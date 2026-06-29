@@ -14,6 +14,10 @@ import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
 import ItemPicker from "./ItemPicker.vue";
 import ItemIcon from "./ItemIcon.vue";
+import ImagePicker from "./ImagePicker.vue";
+
+/** RuinObjectAccessor sprite key: "G000RU0000" + image(3) (base look; looted adds +100). */
+const ruinImageKey = (i: number): string => `G000RU0000${String(i).padStart(3, "0")}`;
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
@@ -166,7 +170,7 @@ function close(): void {
         </div>
         <div class="row">
           <label>Картинка</label>
-          <el-input-number :model-value="obj.image ?? 0" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ image: v ?? 0 })" />
+          <ImagePicker :model-value="obj.image ?? 0" :key-fn="ruinImageKey" :count="40" @update:model-value="(v: number) => patch({ image: v })" />
         </div>
         <div class="row">
           <label>Приоритет ИИ</label>
