@@ -40,6 +40,12 @@ def read_dbf(path):
         off = hlen + r * rlen
         if off + rlen > len(d):
             break
+        # DBF record marker: 0x20 (space) = active, 0x2A ('*') = deleted. GItem.DBF carries
+        # 22 deleted records — stale ghost duplicates of live items (same ITEM_ID, usually with
+        # an empty DESC_TXT) plus a few removed-from-game rows. Skipping them keeps the catalog
+        # to live game items only and drops the desc-less ghosts (e.g. the summon scrolls).
+        if d[off] == 0x2A:
+            continue
         pos = off + 1
         row = {}
         for (name, flen) in fields:
