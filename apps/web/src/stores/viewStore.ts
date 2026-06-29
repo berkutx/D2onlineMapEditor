@@ -63,6 +63,9 @@ export const useViewStore = defineStore("view", () => {
   const cursorCell = ref<CursorCell | null>(null);
   /** Bounding box (cells) of what's currently visible on screen — drives the "👁 eye" zone. */
   const visibleCells = ref<{ x: number; y: number; w: number; h: number } | null>(null);
+  /** Exact visible cells ("x,y") — the iso diamond on screen (the bbox over-covers it). The
+   *  eye zone uses this as a mask so generation matches what you actually see. */
+  const visibleMask = ref<string[] | null>(null);
 
   function setLayerVisible(layer: LayerName, visible: boolean): void {
     if (layer === "terrain") terrainVisible.value = visible;
@@ -115,6 +118,9 @@ export const useViewStore = defineStore("view", () => {
   function setVisibleCells(r: { x: number; y: number; w: number; h: number } | null): void {
     visibleCells.value = r;
   }
+  function setVisibleMask(cells: string[] | null): void {
+    visibleMask.value = cells && cells.length ? cells : null;
+  }
 
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
@@ -153,6 +159,7 @@ export const useViewStore = defineStore("view", () => {
     zoom,
     cursorCell,
     visibleCells,
+    visibleMask,
     setLayerVisible,
     toggleGrid,
     toggleAnimate,
@@ -165,6 +172,7 @@ export const useViewStore = defineStore("view", () => {
     setZoom,
     setCursorCell,
     setVisibleCells,
+    setVisibleMask,
   };
 });
 

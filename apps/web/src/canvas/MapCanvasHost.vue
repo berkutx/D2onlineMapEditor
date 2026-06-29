@@ -195,8 +195,23 @@ function updateVisibleCells(snap: CameraSnapshot): void {
   }
   const x0 = Math.max(0, Math.floor(mnx)), y0 = Math.max(0, Math.floor(mny));
   const x1 = Math.min(n - 1, Math.ceil(mxx)), y1 = Math.min(n - 1, Math.ceil(mxy));
-  if (x1 < x0 || y1 < y0) return viewStore.setVisibleCells(null);
+  if (x1 < x0 || y1 < y0) { viewStore.setVisibleCells(null); viewStore.setVisibleMask(null); return; }
   viewStore.setVisibleCells({ x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 });
+
+  // Precise visible cells (the iso diamond) — only when the eye zone is on (it's the only
+  // consumer, and this is per-camera-move work). The bbox over-covers because a screen
+  // rectangle maps to a diamond in cell space; the mask is what's actually on screen.
+  if (!toolStore.eyeZone) { viewStore.setVisibleMask(null); return; }
+  const HALF_W = 32, HALF_H = 16;
+  const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+  if (area > 16000) { viewStore.setVisibleMask(null); return; } // whole-map view: bbox is fine
+  const mask: string[] = [];
+  for (let y = y0; y <= y1; y++)
+    for (let x = x0; x <= x1; x++) {
+      const wx = (x - y) * HALF_W, wy = (x + y) * HALF_H + HALF_H; // cell centre
+      if (wx >= snap.x && wx <= snap.x + snap.width && wy >= snap.y && wy <= snap.y + snap.height) mask.push(`${x},${y}`);
+    }
+  viewStore.setVisibleMask(mask);
 }
 
 /** Map a pointer event to a cell, or null when off-map. */
@@ -732,6 +747,15 @@ watch(
     if (toolStore.tool === "region") showZone();
   },
   { deep: true },
+);
+
+// Recompute the visible-cell set immediately when the 👁 eye toggles (don't wait for a pan).
+watch(
+  () => toolStore.eyeZone,
+  () => {
+    const cam = getScene()?.getCamera();
+    if (cam) updateVisibleCells(cam.snapshot());
+  },
 );
 
 // Mirror the road-segment selection onto the Scene highlight.

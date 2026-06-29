@@ -7,7 +7,7 @@
  */
 import { ref, nextTick, watch } from "vue";
 import { ElInput, ElPopover } from "element-plus";
-import { MagicStick, Promotion, Close, RefreshRight, Reading } from "@element-plus/icons-vue";
+import { Promotion, Close, RefreshRight, Reading } from "@element-plus/icons-vue";
 import { computed } from "vue";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
@@ -53,6 +53,25 @@ const llmMode = ref(false);
 const protect = ref(false);
 type Region = { x: number; y: number; w: number; h: number };
 
+/** Readability: the bar is SOLID while in use, and fades to translucent after 25s idle so it
+ *  doesn't obscure the map. Any interaction (hover / focus / click / command) wakes it. */
+const idle = ref(true);
+let idleTimer: number | undefined;
+function markActive(): void {
+  idle.value = false;
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = window.setTimeout(() => { idle.value = true; }, 25000);
+}
+
+/** Undo the last generation (its own one-step commit), without re-rolling. */
+const canUndo = computed(() => editStore.undoable);
+function undoLast(): void {
+  if (!editStore.undoable) return;
+  markActive();
+  editStore.undoEdit();
+  pushAi("↩ Отменено.");
+}
+
 /** Format the last generation's timing/debug for the chat (client round-trip + server detail). */
 function debugLine(clientMs: number): string {
   const d = editStore.genDebug;
@@ -85,8 +104,14 @@ const regionMask = computed(() => toolStore.regionMask);
 const zoneHidden = computed(() => toolStore.zoneHidden);
 const eyeActive = computed(() => toolStore.eyeZone);
 const visibleCells = computed(() => view.visibleCells);
+const visibleMaskLen = computed(() => view.visibleMask?.length ?? null);
 function toggleEye(): void {
+  markActive();
   toolStore.setEyeZone(!toolStore.eyeZone);
+}
+function onFocus(): void {
+  expanded.value = true;
+  markActive();
 }
 function setZoneMode(m: "rect" | "brush" | "line" | "frame"): void {
   toolStore.setZoneMode(m);
@@ -106,18 +131,10 @@ const zoneHelp = computed(() => {
   }
 });
 
-/** The drawn cell mask as [x,y] pairs (null if no freehand mask). */
-function maskCells(): [number, number][] | null {
-  const m = toolStore.regionMask;
-  if (!m || !m.length) return null;
-  return m.map((k) => { const [x, y] = k.split(",").map(Number); return [x, y] as [number, number]; });
-}
-function sameRegion(a: Region | null, b: Region | null): boolean {
-  return !!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
-}
-/** Send the mask only when the resolved region IS the drawn selection (not a size/direction). */
-function maskFor(region: Region): [number, number][] | null {
-  return sameRegion(region, toolStore.region) ? maskCells() : null;
+/** "x,y"[] -> [x,y][] pairs (the server's cell-mask shape); null if empty. */
+function toPairs(cells: string[] | null | undefined): [number, number][] | null {
+  if (!cells || !cells.length) return null;
+  return cells.map((k) => { const [x, y] = k.split(",").map(Number); return [x, y] as [number, number]; });
 }
 
 /** Examples browser (the 💡 popover). Click an example -> fills the input. */
@@ -249,15 +266,17 @@ function pushAi(text: string): void {
   });
 }
 
+type Zone = { region: Region; cells: [number, number][] | null };
+
 /**
- * Resolve the target zone. Priority:
- *  1. point-anchored "… вокруг этой точки NxM" — centre NxM on the clicked point / cursor;
- *     also triggered when there's a tiny (point) selection + a size.
- *  2. an explicit drag selection (⛶).
+ * Resolve the target zone — its bbox `region` + an optional cell `cells` mask. Priority:
+ *  1. point-anchored "… вокруг этой точки NxM" — centre NxM on the clicked point / cursor.
+ *  2. an explicit drag selection (⛶) — with its drawn mask (brush/line/frame).
  *  3. "NxM" centred on the map.
  *  4. a direction ("север/юг/запад/восток") -> half the map.
+ *  5. 👁 eye -> the EXACT visible cells (diamond mask), so it matches what you see.
  */
-function resolveRegion(text: string, size: number): Region | null {
+function resolveZone(text: string, size: number): Zone | null {
   const clamp = (n: number): number => Math.max(2, Math.min(n, size));
   const m = /(\d{1,3})\s*[x×х*]\s*(\d{1,3})/i.exec(text);
   const around = /вокруг|около|возле|здесь|тут|это[йм]\s*точк|в\s*точк|в\s*этом\s*месте/i.test(text);
@@ -273,23 +292,23 @@ function resolveRegion(text: string, size: number): Region | null {
     const w = clamp(+m[1]!), h = clamp(+m[2]!);
     const x = Math.max(0, Math.min(anchor.x - Math.floor(w / 2), size - w));
     const y = Math.max(0, Math.min(anchor.y - Math.floor(h / 2), size - h));
-    return { x, y, w, h };
+    return { region: { x, y, w, h }, cells: null };
   }
-  // 2) an explicit drag selection
-  if (sel) return sel;
+  // 2) an explicit drag selection (+ its drawn mask)
+  if (sel) return { region: sel, cells: toPairs(toolStore.regionMask) };
   // 3) "NxM" centred
   if (m) {
     const w = clamp(+m[1]!), h = clamp(+m[2]!);
-    return { x: Math.floor((size - w) / 2), y: Math.floor((size - h) / 2), w, h };
+    return { region: { x: Math.floor((size - w) / 2), y: Math.floor((size - h) / 2), w, h }, cells: null };
   }
   // 4) direction halves
   const half = Math.floor(size / 2);
-  if (/север|сверху|вверх/i.test(text)) return { x: 0, y: 0, w: size, h: half };
-  if (/юг|снизу|вниз/i.test(text)) return { x: 0, y: size - half, w: size, h: half };
-  if (/запад|слев/i.test(text)) return { x: 0, y: 0, w: half, h: size };
-  if (/восток|справ/i.test(text)) return { x: size - half, y: 0, w: half, h: size };
-  // 5) 👁 eye: nothing drawn/specified -> the currently visible screen area is the zone
-  if (toolStore.eyeZone && view.visibleCells) return view.visibleCells;
+  if (/север|сверху|вверх/i.test(text)) return { region: { x: 0, y: 0, w: size, h: half }, cells: null };
+  if (/юг|снизу|вниз/i.test(text)) return { region: { x: 0, y: size - half, w: size, h: half }, cells: null };
+  if (/запад|слев/i.test(text)) return { region: { x: 0, y: 0, w: half, h: size }, cells: null };
+  if (/восток|справ/i.test(text)) return { region: { x: size - half, y: 0, w: half, h: size }, cells: null };
+  // 5) 👁 eye: the exact visible cells (diamond mask), bbox as the region
+  if (toolStore.eyeZone && view.visibleCells) return { region: view.visibleCells, cells: toPairs(view.visibleMask) };
   return null;
 }
 
@@ -310,8 +329,8 @@ async function sendLlm(text: string): Promise<void> {
     if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
   });
   try {
-    const mask = maskCells();
-    const res = await editStore.copilot(text, toolStore.region, mask, protect.value);
+    const zone = editStore.liveDoc ? resolveZone(text, editStore.liveDoc.size) : null;
+    const res = await editStore.copilot(text, zone?.region ?? null, zone?.cells ?? null, protect.value);
     if (!res) {
       thinking.text = "Карта не загружена.";
       return;
@@ -321,7 +340,7 @@ async function sendLlm(text: string): Promise<void> {
     thinking.text = res.report?.ok
       ? `${head} · ${debugLine(ms)}`
       : `${head} — валидация не прошла, откатил. · ${debugLine(ms)}`;
-    if (res.report?.ok) lastGen.value = { mode: "llm", text, cells: mask, protect: protect.value };
+    if (res.report?.ok) lastGen.value = { mode: "llm", text, cells: zone?.cells ?? null, protect: protect.value };
   } catch (e) {
     thinking.text = "⚠ " + (e instanceof Error ? e.message : String(e));
   } finally {
@@ -336,6 +355,7 @@ async function sendLlm(text: string): Promise<void> {
 async function send(): Promise<void> {
   const text = input.value.trim();
   if (!text || sending.value) return;
+  markActive();
   log.value.push({ role: "user", text });
   input.value = "";
   expanded.value = true;
@@ -355,18 +375,18 @@ async function send(): Promise<void> {
     pushAi("Карта не загружена.");
     return;
   }
-  const region = resolveRegion(text, doc.size);
-  if (!region) {
-    pushAi("Сначала выдели зону кнопкой ⛶ — или укажи размер/сторону (напр. «25x25» или «север»).");
+  const zone = resolveZone(text, doc.size);
+  if (!zone) {
+    pushAi("Сначала выдели зону кнопкой ⛶ (или 👁) — или укажи размер/сторону (напр. «25x25» или «север»).");
     return;
   }
+  const { region, cells } = zone;
   sending.value = true;
   const t0 = performance.now();
   try {
-    const mask = maskFor(region);
-    const rep = await editStore.generate(recipeId, region, undefined, mask, protect.value);
+    const rep = await editStore.generate(recipeId, region, undefined, cells, protect.value);
     const ms = Math.round(performance.now() - t0);
-    if (rep?.ok) lastGen.value = { mode: "keyword", text, recipeId, region, cells: mask, protect: protect.value };
+    if (rep?.ok) lastGen.value = { mode: "keyword", text, recipeId, region, cells, protect: protect.value };
     pushAi(
       rep?.ok
         ? `Готово: ${recipeId.replace(/_/g, " ")} ${region.w}×${region.h} · ${debugLine(ms)} (↻ другой вариант)`
@@ -427,15 +447,16 @@ watch(
   () => view.copilotFocusTick,
   () => {
     expanded.value = true;
+    markActive();
     void nextTick(() => inputRef.value?.focus());
   },
 );
 </script>
 
 <template>
-  <div class="copilot-float">
+  <div class="copilot-float" @mouseenter="markActive()" @pointerdown="markActive()">
     <transition name="cp-fade">
-      <div v-if="expanded" ref="scroller" class="copilot-log">
+      <div v-if="expanded" ref="scroller" class="copilot-log" :class="{ idle }">
         <div v-for="(m, i) in log" :key="i" class="cp-msg" :class="m.role">
           <span class="cp-who">{{ m.role === "user" ? "you" : "ai" }}</span>
           <span class="cp-text">{{ m.text }}</span>
@@ -443,7 +464,7 @@ watch(
       </div>
     </transition>
 
-    <div v-if="zoneActive" class="cp-zonehint">
+    <div v-if="zoneActive" class="cp-zonehint" :class="{ idle }">
       <div class="cp-zrow">
         <span class="cp-zlabel">Зона:</span>
         <el-button-group size="small">
@@ -470,7 +491,7 @@ watch(
         </template>
       </div>
     </div>
-    <div class="copilot-bar">
+    <div class="copilot-bar" :class="{ idle }">
       <el-popover
         ref="exPop"
         :width="328"
@@ -520,7 +541,7 @@ watch(
         :type="eyeActive ? 'primary' : 'default'"
         title="Глаз: если зона не выделена — вся видимая область экрана = зона генерации"
         @click="toggleEye()"
-      >👁<span v-if="eyeActive && visibleCells" class="cp-eye-n">{{ visibleCells.w }}×{{ visibleCells.h }}</span></el-button>
+      >👁<span v-if="eyeActive" class="cp-eye-n">{{ visibleMaskLen ? visibleMaskLen + " кл" : visibleCells ? visibleCells.w + "×" + visibleCells.h : "" }}</span></el-button>
       <el-button
         class="cp-zone"
         size="small"
@@ -529,15 +550,23 @@ watch(
         title="Выделить зону для генерации"
         @click="toggleZone()"
       >⛶<span v-if="region" class="cp-zone-size">{{ region.w }}×{{ region.h }}</span></el-button>
-      <el-icon class="cp-spark"><MagicStick /></el-icon>
       <el-input
         ref="inputRef"
         v-model="input"
         class="cp-input"
         :placeholder="placeholder"
-        @focus="expanded = true"
+        @focus="onFocus"
+        @input="markActive()"
         @keyup.enter="send()"
       />
+      <el-button
+        v-if="canUndo"
+        class="cp-undo"
+        text
+        :disabled="sending"
+        title="Отменить последнюю генерацию"
+        @click="undoLast()"
+      >↩</el-button>
       <el-button
         v-if="lastGen"
         class="cp-retry"
@@ -577,11 +606,19 @@ watch(
 .copilot-log,
 .copilot-bar {
   pointer-events: auto;
-  background: color-mix(in srgb, var(--el-bg-color) 68%, transparent);
+  /* SOLID + readable while in use; fades to translucent when idle (.idle). */
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+.copilot-log.idle,
+.copilot-bar.idle {
+  background: color-mix(in srgb, var(--el-bg-color) 62%, transparent);
   backdrop-filter: blur(14px) saturate(1.3);
   -webkit-backdrop-filter: blur(14px) saturate(1.3);
-  border: 1px solid color-mix(in srgb, var(--el-border-color) 55%, transparent);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+  border-color: color-mix(in srgb, var(--el-border-color) 50%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 .copilot-log {
   max-height: 220px;
@@ -619,11 +656,6 @@ watch(
   padding: 5px 8px;
   border-radius: 999px;
 }
-.cp-spark {
-  color: var(--el-color-primary);
-  font-size: 16px;
-  flex: 0 0 auto;
-}
 .cp-input {
   flex: 1;
 }
@@ -640,6 +672,7 @@ watch(
 .cp-protect,
 .cp-eye,
 .cp-zone,
+.cp-undo,
 .cp-retry,
 .cp-send {
   flex: 0 0 auto;
@@ -658,13 +691,18 @@ watch(
   border-radius: 10px;
   font-size: 11px;
   color: var(--el-color-primary);
-  background: color-mix(in srgb, var(--el-bg-color) 68%, transparent);
-  backdrop-filter: blur(14px) saturate(1.3);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 40%, transparent);
+  background: var(--el-bg-color);
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 55%, transparent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.26);
+  transition: background 0.4s ease;
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+.cp-zonehint.idle {
+  background: color-mix(in srgb, var(--el-bg-color) 62%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
 }
 .cp-zrow {
   display: flex;
