@@ -278,17 +278,12 @@ export function decodeGrid(
       const [x, y] = key.split(",").map(Number) as [number, number];
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
+      // Corner / junction / lone post (not a straight run) → a TOWER, which on its own
+      // covers the corner; do NOT also lay a wall corner piece there (that left a stray
+      // wall bit beside the tower). Straight runs/ends → the matching straight wall piece.
       const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
-      // Always lay the matching wall piece (straight run vs corner bend) so the maze
-      // CONNECTS — a corner cell gets the corner piece, filling its whole footprint
-      // (at scale 2 that's the 2×2 block). The old code dropped the wall at corners and
-      // left only a 1×1 tower, which under-filled the 2×2 corner → the "off by one" gap.
-      const wallType = wallPiece(m, pieces);
-      if (wallType) place(x, y, wallType);
-      // Corners/junctions also get a stone turret accent rising from the filled corner.
-      // (The tower is 1×1 — there is no 2×2 stone tower, only lighthouses — so it sits on
-      // top of the corner piece rather than replacing it.)
-      if (!straight && style?.tower) place(x, y, style.tower);
+      const baseType = !straight && style?.tower ? style.tower : wallPiece(m, pieces);
+      if (baseType) place(x, y, baseType);
     }
   }
 
