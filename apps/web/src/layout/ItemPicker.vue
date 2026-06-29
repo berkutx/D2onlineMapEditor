@@ -11,6 +11,7 @@
 import { ref, computed, watch } from "vue";
 import { Search, CircleClose } from "@element-plus/icons-vue";
 import { useItemStore, ITEM_CAT_LABELS } from "../stores/itemStore";
+import ItemIcon from "./ItemIcon.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -84,6 +85,13 @@ function catLabel(catKey: string): string {
 <template>
   <span class="ip-wrap">
     <el-button class="ip-trigger" size="small" @click="open = true">
+      <ItemIcon
+        v-if="!triggerLabel && itemStore.nameOf(modelValue)"
+        :id="modelValue"
+        :cat="itemStore.get(modelValue)?.cat ?? -1"
+        :size="18"
+        class="ip-trigger-icon"
+      />
       <span class="ip-trigger-text" :class="{ empty: !triggerLabel && !itemStore.nameOf(modelValue) }">
         {{ triggerText }}
       </span>
@@ -135,7 +143,7 @@ function catLabel(catKey: string): string {
             type="button"
             @click="choose(it.id)"
           >
-            <span class="ip-dot" :data-cat="it.cat" />
+            <ItemIcon :id="it.id" :cat="it.cat" :size="24" />
             <span class="ip-name">{{ it.name || it.id }}</span>
             <span v-if="it.gold > 0" class="ip-gold">{{ it.gold }}</span>
           </button>
@@ -239,29 +247,10 @@ function catLabel(catKey: string): string {
   background: var(--el-color-primary-light-9);
   outline: 1px solid var(--el-color-primary-light-5);
 }
-.ip-dot {
-  flex: 0 0 auto;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--el-color-info);
+.ip-trigger-icon {
+  margin-right: 4px;
+  vertical-align: -4px;
 }
-/* category accents (one per LmagItm enum index) so the eye can sort the list */
-.ip-dot[data-cat="0"] { background: #8d99ae; }
-.ip-dot[data-cat="1"] { background: #c08457; }
-.ip-dot[data-cat="2"] { background: #d1495b; }
-.ip-dot[data-cat="3"] { background: #6a994e; }
-.ip-dot[data-cat="4"] { background: #4895ef; }
-.ip-dot[data-cat="5"] { background: #43aa8b; }
-.ip-dot[data-cat="6"] { background: #90be6d; }
-.ip-dot[data-cat="7"] { background: #577590; }
-.ip-dot[data-cat="8"] { background: #b5838d; }
-.ip-dot[data-cat="9"] { background: #9d4edd; }
-.ip-dot[data-cat="10"] { background: #f9c74f; }
-.ip-dot[data-cat="11"] { background: #4cc9f0; }
-.ip-dot[data-cat="12"] { background: #f3722c; }
-.ip-dot[data-cat="13"] { background: #adb5bd; }
-.ip-dot[data-cat="14"] { background: #b08968; }
 .ip-name {
   flex: 1 1 auto;
   overflow: hidden;

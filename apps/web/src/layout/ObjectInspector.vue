@@ -13,6 +13,7 @@ import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
 import ItemPicker from "./ItemPicker.vue";
+import ItemIcon from "./ItemIcon.vue";
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
@@ -138,7 +139,7 @@ function close(): void {
           <div class="ro-label">Предметы <span class="muted">({{ chestItems.length }})</span></div>
           <div v-if="chestItems.length" class="items-list">
             <div v-for="(it, i) in chestItems" :key="it.key" class="item-line">
-              <span class="ip-dot" :data-cat="itemStore.get(it.template)?.cat ?? -1" />
+              <ItemIcon :id="it.template" :cat="itemStore.get(it.template)?.cat ?? -1" :size="24" />
               <span class="item-name" :title="it.name">{{ it.name }}</span>
               <span v-if="itemStore.get(it.template)?.gold" class="item-gold">{{ itemStore.get(it.template)?.gold }}</span>
               <span class="item-acts">
@@ -407,28 +408,6 @@ function close(): void {
 .item-add {
   margin-top: 6px;
 }
-.ip-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--el-color-info);
-}
-.ip-dot[data-cat="0"] { background: #8d99ae; }
-.ip-dot[data-cat="1"] { background: #c08457; }
-.ip-dot[data-cat="2"] { background: #d1495b; }
-.ip-dot[data-cat="3"] { background: #6a994e; }
-.ip-dot[data-cat="4"] { background: #4895ef; }
-.ip-dot[data-cat="5"] { background: #43aa8b; }
-.ip-dot[data-cat="6"] { background: #90be6d; }
-.ip-dot[data-cat="7"] { background: #577590; }
-.ip-dot[data-cat="8"] { background: #b5838d; }
-.ip-dot[data-cat="9"] { background: #9d4edd; }
-.ip-dot[data-cat="10"] { background: #f9c74f; }
-.ip-dot[data-cat="11"] { background: #4cc9f0; }
-.ip-dot[data-cat="12"] { background: #f3722c; }
-.ip-dot[data-cat="13"] { background: #adb5bd; }
-.ip-dot[data-cat="14"] { background: #b08968; }
 .lock {
   color: var(--el-text-color-secondary);
   font-size: 11px;
