@@ -16,7 +16,7 @@ const store = useSpriteStore();
 const rect = computed(() => store.frameOf(props.spriteKey));
 const scale = computed(() => {
   const r = rect.value;
-  return r ? Math.min(props.size / r.w, props.size / r.h, 2) : 1;
+  return r ? Math.min(props.size / r.w, props.size / r.h, 3) : 1;
 });
 const cropStyle = computed(() => {
   const r = rect.value;

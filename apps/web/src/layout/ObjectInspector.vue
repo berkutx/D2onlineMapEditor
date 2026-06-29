@@ -65,6 +65,18 @@ const chestItems = computed(() => {
   }));
 });
 
+/** TreasureObjectAccessor key: "G000BG0000" + (water ? 0 : 1) + image(2). Water chests have
+ *  4 looks, land chests 8; the picker filters to the variants that actually have a frame. */
+function waterAt(x: number, y: number): boolean {
+  const doc = editStore.liveDoc;
+  const c = doc ? doc.terrain.cells[y * doc.size + x] : undefined;
+  return !!c?.isWater;
+}
+const chestImageKey = computed(() => {
+  const water = obj.value?.type === "treasure" ? waterAt(obj.value.pos.x, obj.value.pos.y) : false;
+  return (i: number): string => `G000BG0000${water ? "0" : "1"}${String(i).padStart(2, "0")}`;
+});
+
 /** Chest item-list edits — each is one undoable patchObject (commit applies optimistically). */
 function chestAddItem(template: string): void {
   patch({ items: [...(obj.value?.type === "treasure" ? obj.value.items ?? [] : []), template] });
@@ -133,7 +145,7 @@ function close(): void {
       <template v-if="obj.type === 'treasure'">
         <div class="row">
           <label>Картинка</label>
-          <el-input-number :model-value="obj.image ?? 0" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ image: v ?? 0 })" />
+          <ImagePicker :object-id="obj.id" :key-fn="chestImageKey" :count="8" />
         </div>
         <div class="row">
           <label>Приоритет ИИ</label>
@@ -170,7 +182,7 @@ function close(): void {
         </div>
         <div class="row">
           <label>Картинка</label>
-          <ImagePicker :model-value="obj.image ?? 0" :key-fn="ruinImageKey" :count="40" @update:model-value="(v: number) => patch({ image: v })" />
+          <ImagePicker :object-id="obj.id" :key-fn="ruinImageKey" :count="40" />
         </div>
         <div class="row">
           <label>Приоритет ИИ</label>

@@ -1,63 +1,95 @@
 <script setup lang="ts">
 /**
- * ImagePicker — a visual chooser for an object's IMAGE index. The trigger shows the current
- * sprite thumbnail + index; clicking opens a popover grid of all available variants (rendered
- * from the atlas via SpriteThumb). Reusable: caller supplies a keyFn(index)->spriteKey + count.
+ * ImagePicker — a reusable visual chooser for an object's sprite-index field (ruin/chest
+ * "Картинка", and any future object with an image variant). Self-contained: given the
+ * objectId + field + a keyFn(index)->spriteKey, it drives the edit itself via editStore.
+ *
+ * Interaction (per request): hovering a variant PREVIEWS it live on the map immediately
+ * (applyPreview, no journal entry); it only COMMITS when you click a cell. Leaving the grid
+ * or closing the popover without a click reverts to the committed value.
  */
 import { ref, computed, watch } from "vue";
 import { ArrowDown } from "@element-plus/icons-vue";
 import { useSpriteStore } from "../stores/spriteStore";
+import { useEditStore } from "../stores/editStore";
 import SpriteThumb from "./SpriteThumb.vue";
 
 const props = withDefaults(
-  defineProps<{ modelValue: number; keyFn: (i: number) => string; count: number; size?: number }>(),
-  { size: 40 },
+  defineProps<{ objectId: string; field?: string; keyFn: (i: number) => string; count: number; size?: number }>(),
+  { field: "image", size: 52 },
 );
-const emit = defineEmits<{ "update:modelValue": [number] }>();
 
-const store = useSpriteStore();
+const sprites = useSpriteStore();
+const editStore = useEditStore();
 const open = ref(false);
 
 const indices = computed(() => Array.from({ length: props.count }, (_, i) => i));
 function ensure(): void {
-  void store.ensureKeys(indices.value.map(props.keyFn));
+  void sprites.ensureKeys(indices.value.map(props.keyFn));
 }
 watch([() => props.count, () => props.keyFn], ensure, { immediate: true });
 
-/** variants that actually have a frame (skips gaps); the current value is always shown. */
+/** the object's current field value, read from the LIVE doc (so it follows the preview). */
+const current = computed<number>(() => {
+  const o = editStore.liveDoc?.objects.find((x) => x.id === props.objectId) as Record<string, unknown> | undefined;
+  return (o?.[props.field] as number | undefined) ?? 0;
+});
+
+/** variants that have a frame; the current value is always included. */
 const available = computed(() => {
-  const list = indices.value.filter((i) => store.frameOf(props.keyFn(i)));
-  if (!list.includes(props.modelValue)) list.unshift(props.modelValue);
+  const list = indices.value.filter((i) => sprites.frameOf(props.keyFn(i)));
+  if (!list.includes(current.value)) list.unshift(current.value);
   return list;
 });
-const currentKey = computed(() => props.keyFn(props.modelValue));
 
+// --- hover preview / commit-on-click ---------------------------------------
+let committed: number | null = null; // the real value, captured before the first preview
+function patchField(i: number): { kind: "patchObject"; id: string; fields: Record<string, number> }[] {
+  return [{ kind: "patchObject", id: props.objectId, fields: { [props.field]: i } }];
+}
+function preview(i: number): void {
+  if (i === current.value) return;
+  if (committed === null) committed = current.value;
+  editStore.applyPreview(patchField(i));
+}
+function endPreview(): void {
+  if (committed !== null) {
+    editStore.applyPreview(patchField(committed));
+    committed = null;
+  }
+}
 function pick(i: number): void {
-  emit("update:modelValue", i);
+  committed = null; // this becomes the committed value
+  editStore.commit(patchField(i));
   open.value = false;
 }
+watch(open, (v) => {
+  if (v) ensure();
+  else endPreview();
+});
 </script>
 
 <template>
-  <el-popover v-model:visible="open" trigger="click" :width="300" placement="bottom-end" :persistent="false">
+  <el-popover v-model:visible="open" trigger="click" :width="392" placement="bottom-end" :persistent="false">
     <template #reference>
       <button class="img-trigger" type="button">
-        <SpriteThumb :sprite-key="currentKey" :size="size" />
-        <span class="img-idx">#{{ modelValue }}</span>
+        <SpriteThumb :sprite-key="keyFn(current)" :size="size" />
+        <span class="img-idx">#{{ current }}</span>
         <el-icon class="img-caret"><ArrowDown /></el-icon>
       </button>
     </template>
-    <div class="img-grid">
+    <div class="img-grid" @mouseleave="endPreview()">
       <button
         v-for="i in available"
         :key="i"
         class="img-cell"
-        :class="{ active: i === modelValue }"
+        :class="{ active: i === current }"
         type="button"
         :title="`#${i}`"
+        @mouseenter="preview(i)"
         @click="pick(i)"
       >
-        <SpriteThumb :sprite-key="keyFn(i)" :size="44" />
+        <SpriteThumb :sprite-key="keyFn(i)" :size="76" />
         <span class="cell-idx">{{ i }}</span>
       </button>
     </div>
@@ -90,9 +122,9 @@ function pick(i: number): void {
 }
 .img-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 4px;
-  max-height: 320px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  max-height: 60vh;
   overflow-y: auto;
 }
 .img-cell {
@@ -108,6 +140,7 @@ function pick(i: number): void {
 }
 .img-cell:hover {
   background: var(--el-fill-color);
+  border-color: var(--el-color-primary-light-5);
 }
 .img-cell.active {
   border-color: var(--el-color-primary);
