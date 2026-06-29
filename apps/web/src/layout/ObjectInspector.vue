@@ -12,8 +12,15 @@ import { Close, Delete } from "@element-plus/icons-vue";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
+import { useUnitStore } from "../stores/unitStore";
+import { useSpellStore } from "../stores/spellStore";
 import ItemPicker from "./ItemPicker.vue";
 import ItemIcon from "./ItemIcon.vue";
+import UnitPicker from "./UnitPicker.vue";
+import UnitIcon from "./UnitIcon.vue";
+import SpellPicker from "./SpellPicker.vue";
+import SpellIcon from "./SpellIcon.vue";
+import GarrisonEditor from "./GarrisonEditor.vue";
 import ImagePicker from "./ImagePicker.vue";
 import SpriteThumb from "./SpriteThumb.vue";
 import { useSpriteStore } from "../stores/spriteStore";
@@ -24,14 +31,19 @@ const ruinImageKey = (i: number): string => `G000RU0000${String(i).padStart(3, "
 const toolStore = useToolStore();
 const editStore = useEditStore();
 const itemStore = useItemStore();
+const unitStore = useUnitStore();
+const spellStore = useSpellStore();
 void itemStore.load();
 const spriteStore = useSpriteStore();
 const { selectedId } = storeToRefs(toolStore);
 
-/** Retry the catalog load when a chest/ruin is selected but it failed to load earlier
- *  (e.g. a transient error while the dev server was reloading). */
+/** Retry the catalog loads when an object is selected but a catalog failed to load earlier
+ *  (e.g. a transient error while the dev server was reloading). Unit/spell catalogs are
+ *  needed eagerly so garrison cells + stock rows can show names without opening a picker. */
 watch(selectedId, () => {
   if (!itemStore.loaded && !itemStore.loading) void itemStore.load();
+  if (!unitStore.loaded && !unitStore.loading) void unitStore.load();
+  if (!spellStore.loaded && !spellStore.loading) void spellStore.load();
 });
 
 /** the live selected object (or null) */
@@ -69,8 +81,10 @@ const players = computed(() =>
   (editStore.liveDoc?.players ?? []).map((p) => ({ id: p.id, label: p.name || `Игрок ${p.playerNo}` })),
 );
 
-/** Commit one undoable patch (int / string / derived-bool / list fields). */
-function patch(fields: Record<string, number | string | boolean | string[]>): void {
+/** Commit one undoable patch (int / string / derived-bool / list / structured fields).
+ *  `unknown` covers the garrison + site-stock arrays ((GarrisonUnit|null)[], {id,count}[],
+ *  {id,level,unique}[]) which the bytes writer resolves by field name. */
+function patch(fields: Record<string, unknown>): void {
   if (obj.value) editStore.commit([{ kind: "patchObject", id: obj.value.id, fields }]);
 }
 
@@ -124,6 +138,81 @@ function chestMoveItem(idx: number, dir: number): void {
   if (j < 0 || j >= items.length) return;
   [items[idx], items[j]] = [items[j]!, items[idx]!];
   patch({ items });
+}
+
+/** ── Garrison (city + capital): a 2×3 formation by cell 0..5. Even = front line, odd = back
+ *  (the D2 convention). Each cell carries a global Gunit id + level + current HP; the bytes
+ *  writer re-creates the MidUnit instance + fort UNIT_/POS_ slots on export. */
+type GarrUnit = { unit: string; level: number; hp: number };
+const GARRISON_CELLS = [
+  { cell: 0, label: "Фронт · лево" },
+  { cell: 2, label: "Фронт · центр" },
+  { cell: 4, label: "Фронт · право" },
+  { cell: 1, label: "Тыл · лево" },
+  { cell: 3, label: "Тыл · центр" },
+  { cell: 5, label: "Тыл · право" },
+];
+function curGarrison(): (GarrUnit | null)[] {
+  const o = obj.value;
+  const g = o && (o.type === "capital" || o.type === "village") ? o.garrison : undefined;
+  const out: (GarrUnit | null)[] = [null, null, null, null, null, null];
+  (g ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { unit: c.unit, level: c.level, hp: c.hp }; });
+  return out;
+}
+const garrison = computed(() => curGarrison());
+const garrisonCount = computed(() => garrison.value.filter(Boolean).length);
+function setGarrisonUnit(cell: number, unitId: string): void {
+  const g = curGarrison();
+  g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
+  patch({ garrison: g });
+}
+function clearGarrisonCell(cell: number): void {
+  const g = curGarrison();
+  g[cell] = null;
+  patch({ garrison: g });
+}
+function setGarrisonStat(cell: number, key: "level" | "hp", v: number): void {
+  const g = curGarrison();
+  const c = g[cell];
+  if (!c) return;
+  g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  patch({ garrison: g });
+}
+
+/** ── Merchant stock: a list of {id (global GItem), count}. */
+const merchantItems = computed(() => (obj.value?.type === "merchant" ? obj.value.items ?? [] : []));
+function merchantAddItem(id: string): void {
+  patch({ items: [...merchantItems.value, { id, count: 1 }] });
+}
+function merchantRemove(i: number): void {
+  patch({ items: merchantItems.value.filter((_, k) => k !== i) });
+}
+function merchantSetCount(i: number, v: number): void {
+  patch({ items: merchantItems.value.map((it, k) => (k === i ? { ...it, count: Math.max(1, Math.round(v || 1)) } : it)) });
+}
+
+/** ── Mage stock: a list of global Gspell ids. */
+const mageSpells = computed(() => (obj.value?.type === "mage" ? obj.value.spells ?? [] : []));
+function mageAddSpell(id: string): void {
+  patch({ spells: [...mageSpells.value, id] });
+}
+function mageRemove(i: number): void {
+  patch({ spells: mageSpells.value.filter((_, k) => k !== i) });
+}
+
+/** ── Mercenary stock: a list of {id (global Gunit), level, unique}. */
+const mercUnits = computed(() => (obj.value?.type === "mercenary" ? obj.value.units ?? [] : []));
+function mercAddUnit(id: string): void {
+  patch({ units: [...mercUnits.value, { id, level: unitStore.get(id)?.level ?? 1, unique: false }] });
+}
+function mercRemove(i: number): void {
+  patch({ units: mercUnits.value.filter((_, k) => k !== i) });
+}
+function mercSetLevel(i: number, v: number): void {
+  patch({ units: mercUnits.value.map((u, k) => (k === i ? { ...u, level: Math.max(1, Math.round(v || 1)) } : u)) });
+}
+function mercSetUnique(i: number, v: boolean): void {
+  patch({ units: mercUnits.value.map((u, k) => (k === i ? { ...u, unique: v } : u)) });
 }
 
 /** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts.
@@ -293,6 +382,13 @@ function close(): void {
           <label>Прирост</label>
           <el-input-number :model-value="obj.growth" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ growth: v ?? 0 })" />
         </div>
+        <GarrisonEditor
+          :garrison="garrison"
+          :count="garrisonCount"
+          @set-unit="setGarrisonUnit"
+          @clear="clearGarrisonCell"
+          @set-stat="setGarrisonStat"
+        />
       </template>
 
       <!-- 🏰 CAPITAL (столица) -->
@@ -308,6 +404,13 @@ function close(): void {
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
+        <GarrisonEditor
+          :garrison="garrison"
+          :count="garrisonCount"
+          @set-unit="setGarrisonUnit"
+          @clear="clearGarrisonCell"
+          @set-stat="setGarrisonStat"
+        />
       </template>
 
       <!-- 🏪 SITE (торговец / маг / тренер / наёмники) -->
@@ -319,6 +422,74 @@ function close(): void {
         <div class="row">
           <label>Картинка</label>
           <ImagePicker :object-id="obj.id" :key-fn="siteImageKey" :count="20" />
+        </div>
+
+        <!-- Торговец: список товаров (предмет + количество) -->
+        <div v-if="obj.type === 'merchant'" class="ro-block">
+          <div class="ro-label">Товары <span class="muted">({{ merchantItems.length }})</span></div>
+          <div v-if="merchantItems.length" class="items-list">
+            <div v-for="(it, i) in merchantItems" :key="`${it.id}#${i}`" class="item-line">
+              <ItemIcon :id="it.id" :cat="itemStore.get(it.id)?.cat ?? -1" :size="24" />
+              <span class="item-name" :title="itemStore.nameOf(it.id) || it.id">{{ itemStore.nameOf(it.id) || it.id }}</span>
+              <el-input-number
+                :model-value="it.count"
+                :min="1"
+                :max="99"
+                size="small"
+                controls-position="right"
+                class="qty-input"
+                @change="(v: number) => merchantSetCount(i, v)"
+              />
+              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="merchantRemove(i)" />
+            </div>
+          </div>
+          <div v-else class="muted sm">пусто</div>
+          <ItemPicker class="item-add" trigger-label="+ Добавить товар" title="Добавить товар торговцу" @pick="merchantAddItem" />
+        </div>
+
+        <!-- Маг: список заклинаний -->
+        <div v-else-if="obj.type === 'mage'" class="ro-block">
+          <div class="ro-label">Заклинания <span class="muted">({{ mageSpells.length }})</span></div>
+          <div v-if="mageSpells.length" class="items-list">
+            <div v-for="(sid, i) in mageSpells" :key="`${sid}#${i}`" class="item-line">
+              <SpellIcon :id="sid" :level="spellStore.get(sid)?.level" :cat="spellStore.get(sid)?.cat ?? -1" :size="24" />
+              <span class="item-name" :title="spellStore.get(sid)?.desc || spellStore.nameOf(sid) || sid">{{ spellStore.nameOf(sid) || sid }}</span>
+              <span v-if="spellStore.get(sid)?.level" class="item-gold">ур.{{ spellStore.get(sid)?.level }}</span>
+              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="mageRemove(i)" />
+            </div>
+          </div>
+          <div v-else class="muted sm">пусто</div>
+          <SpellPicker class="item-add" trigger-label="+ Добавить заклинание" title="Добавить заклинание магу" @pick="mageAddSpell" />
+        </div>
+
+        <!-- Наёмники: список юнитов (юнит + уровень + уникальность) -->
+        <div v-else-if="obj.type === 'mercenary'" class="ro-block">
+          <div class="ro-label">Наёмники <span class="muted">({{ mercUnits.length }})</span></div>
+          <div v-if="mercUnits.length" class="merc-list">
+            <div v-for="(u, i) in mercUnits" :key="`${u.id}#${i}`" class="merc-line">
+              <UnitIcon :id="u.id" :level="u.level" :subrace-id="unitStore.get(u.id)?.subraceId ?? -1" :size="26" />
+              <span class="item-name" :title="unitStore.get(u.id)?.desc || unitStore.nameOf(u.id) || u.id">{{ unitStore.nameOf(u.id) || u.id }}</span>
+              <el-input-number
+                :model-value="u.level"
+                :min="1"
+                :max="50"
+                size="small"
+                controls-position="right"
+                class="qty-input"
+                title="Уровень"
+                @change="(v: number) => mercSetLevel(i, v)"
+              />
+              <el-checkbox
+                :model-value="u.unique"
+                size="small"
+                title="Уникальный (нанимается один раз)"
+                @change="(v: boolean) => mercSetUnique(i, v)"
+              >★</el-checkbox>
+              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="mercRemove(i)" />
+            </div>
+          </div>
+          <div v-else class="muted sm">пусто</div>
+          <UnitPicker class="item-add" trigger-label="+ Добавить наёмника" title="Добавить наёмника в лагерь" @pick="mercAddUnit" />
         </div>
       </template>
 
@@ -501,6 +672,36 @@ function close(): void {
 }
 .item-add {
   margin-top: 6px;
+}
+.qty-input {
+  flex: 0 0 auto;
+}
+.qty-input :deep(.el-input-number) {
+  width: 72px;
+}
+.qty-input.el-input-number {
+  width: 72px;
+}
+.merc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.merc-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+.merc-line:hover {
+  background: var(--el-fill-color-light);
+}
+.merc-line :deep(.el-checkbox) {
+  flex: 0 0 auto;
+  margin-right: 0;
 }
 .lock {
   color: var(--el-text-color-secondary);
