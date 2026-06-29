@@ -30,6 +30,12 @@ const TYPE_LABEL: Record<string, string> = {
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
 const editable = computed(() => !!obj.value && ["treasure", "ruin", "village"].includes(obj.value.type));
 
+/** Players for the owner dropdown (id is the full compound uid = the stored OWNER value). */
+const NEUTRAL = "G000000000";
+const players = computed(() =>
+  (editStore.liveDoc?.players ?? []).map((p) => ({ id: p.id, label: p.name || `Игрок ${p.playerNo}` })),
+);
+
 /** Commit one undoable patch (int or string fields). */
 function patch(fields: Record<string, number | string>): void {
   if (obj.value) editStore.commit([{ kind: "patchObject", id: obj.value.id, fields }]);
@@ -44,6 +50,14 @@ const reward = computed(() => {
   return r.split(":").map((p) => ({ k: p[0] ?? "", label: REWARD_LABELS[p[0] ?? ""] ?? p[0] ?? "", v: parseInt(p.slice(1), 10) || 0 }))
     .filter((e) => e.label);
 });
+
+/** Change a city's owner; also refresh the live race/banner sprite (race is derived, not stored). */
+function setOwner(v: string): void {
+  const fields: Record<string, number | string> = { owner: v };
+  const pr = (editStore.liveDoc?.players ?? []).find((p) => p.id === v)?.race;
+  if (pr !== undefined) fields.race = pr; // live re-render only; applyBytes skips derived fields
+  patch(fields);
+}
 
 /** Rebuild the fixed-width 35-char CASH string with one resource changed, then patch it. */
 function setReward(k: string, v: number): void {
@@ -128,7 +142,13 @@ function close(): void {
           <label>Описание</label>
           <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" @change="(v: string) => patch({ desc: v })" />
         </div>
-        <div class="ro-row"><label>Владелец</label><span class="ro-val">{{ obj.owner || "нейтрал" }} <el-icon class="lock"><Lock /></el-icon></span></div>
+        <div class="row">
+          <label>Владелец</label>
+          <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="setOwner">
+            <el-option label="Нейтрал" :value="NEUTRAL" />
+            <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
+          </el-select>
+        </div>
         <div class="row">
           <label>Уровень</label>
           <el-input-number :model-value="obj.tier ?? 1" :min="1" :max="5" size="small" controls-position="right" @change="(v: number) => patch({ tier: v ?? 1 })" />
@@ -314,5 +334,8 @@ function close(): void {
 }
 .row :deep(.el-input-number) {
   width: 110px;
+}
+.owner-sel {
+  width: 150px;
 }
 </style>

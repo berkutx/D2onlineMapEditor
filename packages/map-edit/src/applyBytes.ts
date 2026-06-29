@@ -118,29 +118,28 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
             image: "IMAGE", tier: "SIZE", priority: "AIPRIORITY",
             morale: "MORALE", regen: "REGEN_B", growth: "GROWTH_T",
           };
-          // 2) fixed-width strings — compound ids (10 chars) + CASH (35 chars): same-length splice.
-          const FIXED_STR: Record<string, string> = {
-            owner: "OWNER", subRace: "SUBRACE", item: "ITEM", looter: "LOOTER", reward: "CASH",
-          };
-          // 3) variable-length strings — user text → M4 growable splice (tag differs by type).
-          const VAR_STR: Record<string, string> = {
+          // 2) string fields — ALL via the growable splice (handles same-length compound
+          //    ids / CASH AND variable-length user text uniformly; never length-throws).
+          //    name/desc tags differ by type (ruin = TITLE/DESC, city = NAME_TXT/DESC_TXT).
+          const STR_TAG: Record<string, string> = {
             name: isRuin ? "TITLE" : "NAME_TXT", desc: isRuin ? "DESC" : "DESC_TXT",
+            owner: "OWNER", subRace: "SUBRACE", item: "ITEM", looter: "LOOTER", reward: "CASH",
           };
           const handled = new Set<string>();
           for (const [key, tag] of Object.entries(INT_TAG)) {
             if (typeof f[key] === "number") { w.setObjectInt(op.id, tag, f[key] as number); handled.add(key); }
           }
-          for (const [key, tag] of Object.entries(FIXED_STR)) {
-            if (typeof f[key] === "string") { w.setObjectString(op.id, tag, f[key] as string); handled.add(key); }
-          }
-          for (const [key, tag] of Object.entries(VAR_STR)) {
+          for (const [key, tag] of Object.entries(STR_TAG)) {
             if (typeof f[key] === "string") {
               if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
               stringEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, tag, value: f[key] as string });
               handled.add(key);
             }
           }
-          const left = Object.keys(f).filter((k) => !handled.has(k));
+          // derived/render-only fields carry no .sg storage (resolved at parse from owner,
+          // subrace, etc.) — patched only to refresh the live sprite; skip on export.
+          const DERIVED = new Set(["race", "bannerIndex", "imageName", "footprint", "z"]);
+          const left = Object.keys(f).filter((k) => !handled.has(k) && !DERIVED.has(k));
           if (left.length) {
             // e.g. `items` (ITEM_ID list) — count-prefixed list editing is a later step.
             throw new Error(
