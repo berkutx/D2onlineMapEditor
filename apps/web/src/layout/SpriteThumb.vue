@@ -48,6 +48,10 @@ const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px
   flex: 0 0 auto;
 }
 .crop {
+  /* flex:none so the centering flex parent never shrinks the fixed frame width/height —
+     otherwise a sprite wider than the box gets its right side clipped ("half" sprites). */
+  flex: none;
+  display: block;
   background-repeat: no-repeat;
   transform-origin: center center;
   image-rendering: pixelated;

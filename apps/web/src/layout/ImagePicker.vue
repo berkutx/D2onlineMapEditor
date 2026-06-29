@@ -16,7 +16,7 @@ import SpriteThumb from "./SpriteThumb.vue";
 
 const props = withDefaults(
   defineProps<{ objectId: string; field?: string; keyFn: (i: number) => string; count: number; size?: number }>(),
-  { field: "image", size: 52 },
+  { field: "image", size: 60 },
 );
 
 const sprites = useSpriteStore();
@@ -70,7 +70,7 @@ watch(open, (v) => {
 </script>
 
 <template>
-  <el-popover v-model:visible="open" trigger="click" :width="392" placement="bottom-end" :persistent="false">
+  <el-popover v-model:visible="open" trigger="click" :width="440" placement="bottom-end" :persistent="false">
     <template #reference>
       <button class="img-trigger" type="button">
         <SpriteThumb :sprite-key="keyFn(current)" :size="size" />
@@ -89,7 +89,7 @@ watch(open, (v) => {
         @mouseenter="preview(i)"
         @click="pick(i)"
       >
-        <SpriteThumb :sprite-key="keyFn(i)" :size="76" />
+        <SpriteThumb :sprite-key="keyFn(i)" :size="88" />
         <span class="cell-idx">{{ i }}</span>
       </button>
     </div>

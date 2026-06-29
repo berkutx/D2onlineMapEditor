@@ -39,6 +39,7 @@ const boxStyle = computed(() => ({ width: `${props.size}px`, height: `${props.si
   flex: 0 0 auto;
 }
 .crop {
+  flex: none; /* don't let the centering flex parent shrink the fixed frame (clips wide sprites) */
   background-repeat: no-repeat;
   transform-origin: center center;
   image-rendering: pixelated;
