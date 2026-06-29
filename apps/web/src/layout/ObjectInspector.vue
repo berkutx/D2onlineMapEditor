@@ -36,8 +36,8 @@ const players = computed(() =>
   (editStore.liveDoc?.players ?? []).map((p) => ({ id: p.id, label: p.name || `Игрок ${p.playerNo}` })),
 );
 
-/** Commit one undoable patch (int or string fields). */
-function patch(fields: Record<string, number | string>): void {
+/** Commit one undoable patch (int / string / derived-bool fields). */
+function patch(fields: Record<string, number | string | boolean>): void {
   if (obj.value) editStore.commit([{ kind: "patchObject", id: obj.value.id, fields }]);
 }
 
@@ -57,6 +57,12 @@ function setOwner(v: string): void {
   const pr = (editStore.liveDoc?.players ?? []).find((p) => p.id === v)?.race;
   if (pr !== undefined) fields.race = pr; // live re-render only; applyBytes skips derived fields
   patch(fields);
+}
+
+/** Set a ruin's looter (a player, or neutral = not looted). `looted` is derived for the
+ *  live destroyed-sprite (image+100); not persisted (the LOOTER id is). */
+function setLooter(v: string): void {
+  patch({ looter: v, looted: v !== NEUTRAL });
 }
 
 /** Rebuild the fixed-width 35-char CASH string with one resource changed, then patch it. */
@@ -128,8 +134,17 @@ function close(): void {
             </div>
           </div>
         </div>
-        <div class="ro-row"><label>Артефакт</label><span class="ro-val">{{ obj.item || "—" }} <el-icon class="lock"><Lock /></el-icon></span></div>
-        <div class="ro-row"><label>Разграблена</label><span class="ro-val">{{ obj.looted ? "да" : "нет" }} <el-icon class="lock"><Lock /></el-icon></span></div>
+        <div v-if="obj.item !== undefined" class="col">
+          <label>Артефакт <span class="muted sm">(id; пикер — позже)</span></label>
+          <el-input :model-value="obj.item ?? ''" size="small" placeholder="G000000000 = нет" @change="(v: string) => patch({ item: v.trim() || NEUTRAL })" />
+        </div>
+        <div class="row">
+          <label>Разграблена</label>
+          <el-select :model-value="obj.looter ?? NEUTRAL" size="small" class="owner-sel" @change="setLooter">
+            <el-option label="Нет" :value="NEUTRAL" />
+            <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
+          </el-select>
+        </div>
       </template>
 
       <!-- 🏘 CITY -->
@@ -171,7 +186,7 @@ function close(): void {
         </div>
       </template>
 
-      <p class="ins-note"><el-icon><Lock /></el-icon> поля с замком пока только для просмотра (владелец, артефакт, списки предметов) — скоро.</p>
+      <p v-if="obj.type === 'treasure' && obj.items?.length" class="ins-note"><el-icon><Lock /></el-icon> список предметов пока только просмотр — правка списка скоро.</p>
     </div>
 
     <div v-else class="ins-body">

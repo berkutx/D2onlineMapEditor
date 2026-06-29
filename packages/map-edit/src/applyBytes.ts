@@ -138,7 +138,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           }
           // derived/render-only fields carry no .sg storage (resolved at parse from owner,
           // subrace, etc.) — patched only to refresh the live sprite; skip on export.
-          const DERIVED = new Set(["race", "bannerIndex", "imageName", "footprint", "z"]);
+          const DERIVED = new Set(["race", "bannerIndex", "imageName", "footprint", "z", "looted"]);
           const left = Object.keys(f).filter((k) => !handled.has(k) && !DERIVED.has(k));
           if (left.length) {
             // e.g. `items` (ITEM_ID list) — count-prefixed list editing is a later step.
