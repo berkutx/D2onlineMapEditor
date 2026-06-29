@@ -690,34 +690,36 @@ watch([currentMap, manifest], () => {
   void rebuild();
 });
 
-// Re-tile the terrain after an edit (coalesced to one rebuild per frame).
+// Re-tile the terrain after an edit. Coalesced via setTimeout (NOT requestAnimationFrame):
+// rAF is throttled when the pointer sits off-canvas (e.g. on the Copilot panel), which made
+// "↻ another variant" not repaint until you moved onto the map. updateTerrain paints now.
 let retileScheduled = false;
 watch(
   () => editStore.rev,
   () => {
     if (retileScheduled) return;
     retileScheduled = true;
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       retileScheduled = false;
       const s = getScene();
       if (s && editStore.liveDoc) s.updateTerrain(editStore.liveDoc);
-    });
+    }, 0);
   },
 );
 
-// Re-render the OBJECT layer after an object edit (place/move/delete/undo/redo),
-// coalesced to one rebuild per frame. Terrain strokes don't bump objectsRev.
+// Re-render the OBJECT layer after an object edit (place/move/delete/undo/redo).
+// Same setTimeout coalescing for the same reason. Terrain strokes don't bump objectsRev.
 let objRebuildScheduled = false;
 watch(
   () => editStore.objectsRev,
   () => {
     if (objRebuildScheduled) return;
     objRebuildScheduled = true;
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       objRebuildScheduled = false;
       const s = getScene();
       if (s && editStore.liveDoc) s.updateObjects(editStore.liveDoc);
-    });
+    }, 0);
   },
 );
 

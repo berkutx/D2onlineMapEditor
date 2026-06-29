@@ -296,7 +296,7 @@ export class Scene {
   updateTerrain(map: MapDocument): void {
     if (!this.terrain || !this.assets) return;
     this.terrain.build(map, this.assets, this.terrainCodes);
-    this.requestRender();
+    this.renderNow(); // paint immediately — rAF is throttled when the pointer is off-canvas
   }
 
   /**
@@ -309,7 +309,7 @@ export class Scene {
     if (!this.objects || !this.assets || !this.anim) return;
     this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
     this.updateRenderMode();
-    this.requestRender();
+    this.renderNow(); // paint immediately — rAF is throttled when the pointer is off-canvas
   }
 
   /**
