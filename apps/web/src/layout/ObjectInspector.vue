@@ -15,6 +15,8 @@ import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
 import { useUnitStore } from "../stores/unitStore";
 import { useSpellStore } from "../stores/spellStore";
+import { useDecorStore } from "../stores/decorStore";
+import DecorThumb from "./DecorThumb.vue";
 import ItemPicker from "./ItemPicker.vue";
 import ItemIcon from "./ItemIcon.vue";
 import UnitPicker from "./UnitPicker.vue";
@@ -34,6 +36,7 @@ const editStore = useEditStore();
 const itemStore = useItemStore();
 const unitStore = useUnitStore();
 const spellStore = useSpellStore();
+const decorStore = useDecorStore();
 void itemStore.load();
 const spriteStore = useSpriteStore();
 const { selectedId } = storeToRefs(toolStore);
@@ -45,6 +48,7 @@ watch(selectedId, () => {
   if (!itemStore.loaded && !itemStore.loading) void itemStore.load();
   if (!unitStore.loaded && !unitStore.loading) void unitStore.load();
   if (!spellStore.loaded && !spellStore.loading) void spellStore.load();
+  if (!decorStore.loaded && !decorStore.loading) void decorStore.load();
 });
 
 /** the live selected object (or null) */
@@ -61,11 +65,30 @@ const TYPE_LABEL: Record<string, string> = {
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
 const SITE_TYPES = ["merchant", "mage", "trainer", "mercenary"];
 const editable = computed(
-  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", "location", ...SITE_TYPES].includes(obj.value.type),
+  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", "location",
+    "rod", "landmark", "mountains", ...SITE_TYPES].includes(obj.value.type),
 );
 
 /** MidLocation radius is a size step r → a (2r+1)×(2r+1) cell square. */
 const locationSpan = (r: number): string => `${2 * r + 1}×${2 * r + 1} клеток`;
+
+/** ── Decor (landmark / mountains): appearance = a decorCatalog variant. Show name/footprint +
+ *  cycle/re-roll the look (the catalog groups interchangeable variants). */
+const decorVariantId = computed(() =>
+  obj.value && (obj.value.type === "landmark" || obj.value.type === "mountains")
+    ? decorStore.catalogIdOf(obj.value)
+    : null,
+);
+const decorEntry = computed(() => decorStore.get(decorVariantId.value));
+const decorVariantCount = computed(() => decorStore.groupOf(decorVariantId.value)?.variants.length ?? 0);
+function cycleDecor(dir: number): void {
+  const next = decorStore.neighbor(decorVariantId.value, dir);
+  if (next && obj.value) { const p = decorStore.variantPatch(obj.value, next); if (p) patch(p); }
+}
+function rerollDecor(): void {
+  const r = decorStore.randomVariant(decorVariantId.value);
+  if (r && obj.value) { const p = decorStore.variantPatch(obj.value, r); if (p) patch(p); }
+}
 
 /** Site sprite key: "G000SI0000" + 4-char type code + image(2). */
 const SITE_CODE: Record<string, string> = { merchant: "MERH", mage: "MAGE", trainer: "TRAI", mercenary: "MERC" };
@@ -702,6 +725,36 @@ function close(): void {
         </div>
       </template>
 
+      <!-- 🪄 ROD (жезл власти) -->
+      <template v-else-if="obj.type === 'rod'">
+        <div class="row">
+          <label>Владелец</label>
+          <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="setOwner">
+            <el-option label="Нейтрал" :value="NEUTRAL" />
+            <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
+          </el-select>
+        </div>
+      </template>
+
+      <!-- 🌲 DECOR (декор / горы) — appearance variant -->
+      <template v-else-if="obj.type === 'landmark' || obj.type === 'mountains'">
+        <div class="decor-head">
+          <DecorThumb v-if="decorEntry" :thumb="decorEntry.thumb" :size="48" />
+          <div class="decor-info">
+            <div class="decor-name">{{ decorEntry?.name_ru || decorVariantId || "—" }}</div>
+            <div v-if="decorEntry" class="muted xs">{{ decorEntry.cx }}×{{ decorEntry.cy }} клеток</div>
+          </div>
+        </div>
+        <div class="row">
+          <label>Вид <span class="muted">{{ decorVariantCount }}</span></label>
+          <span class="decor-cycle">
+            <el-button size="small" :disabled="decorVariantCount < 2" title="Предыдущий" @click="cycleDecor(-1)">‹</el-button>
+            <el-button size="small" text title="Случайный вид" @click="rerollDecor()">⟳</el-button>
+            <el-button size="small" :disabled="decorVariantCount < 2" title="Следующий" @click="cycleDecor(1)">›</el-button>
+          </span>
+        </div>
+      </template>
+
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
       <template v-if="obj.type === 'village' || obj.type === 'capital'">
         <div class="section-head">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
@@ -875,6 +928,25 @@ function close(): void {
 }
 .xs {
   font-size: 10px;
+}
+.decor-head {
+  display: flex;
+  align-items: center;
+  gap: var(--d2-sp-2, 8px);
+}
+.decor-info {
+  min-width: 0;
+}
+.decor-name {
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.decor-cycle {
+  display: inline-flex;
+  gap: 2px;
 }
 .ro-label {
   font-size: 12px;
