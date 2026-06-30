@@ -55,3 +55,9 @@ jobs:
             # scoped to THIS project, so the existing app + tunnel are untouched.
             docker compose up -d --build --remove-orphans
             docker image prune -f
+            # surface the container's own logs + fail the deploy if it isn't actually serving
+            sleep 6
+            echo "=== d2editor logs (tail) ==="
+            docker logs --tail 120 d2editor 2>&1 || true
+            echo "=== health check (inside the container) ==="
+            docker exec d2editor node -e "fetch('http://localhost:3000/map/api/health').then(r=>r.text()).then(t=>{console.log('HEALTH OK',t)}).catch(e=>{console.error('HEALTH FAIL',e.message);process.exit(1)})"

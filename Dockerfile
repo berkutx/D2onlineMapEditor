@@ -24,7 +24,6 @@ RUN pnpm install --frozen-lockfile \
 # ---- runtime ----
 FROM node:22-alpine
 WORKDIR /app
-RUN corepack enable
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
@@ -40,4 +39,6 @@ ENV NODE_ENV=production \
 COPY --from=build /app /app
 
 EXPOSE 3000
-CMD ["pnpm", "--filter", "@d2/server", "run", "start"]
+# run node directly (no corepack/pnpm at runtime); node resolves @d2/* via the workspace
+# node_modules symlinks. WORKDIR /app so config.REPO_ROOT resolves to /app.
+CMD ["node", "apps/server/dist/index.js"]
