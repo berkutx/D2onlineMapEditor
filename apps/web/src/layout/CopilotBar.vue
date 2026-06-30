@@ -87,6 +87,21 @@ function debugLine(clientMs: number): string {
   return s;
 }
 
+/** The PRECISE reason the last validation failed (semantic reason + structural errors), from
+ *  the full report. Empty string when it passed / no report. Shown so failures are actionable. */
+function validationReason(): string {
+  const r = editStore.report;
+  if (!r || r.ok) return "";
+  const parts: string[] = [];
+  if (!r.identity) parts.push("identity: байтовый round-trip не сошёлся");
+  if (r.semantic && !r.semantic.ok) parts.push(`semantic: ${r.semantic.reason ?? "несоответствие после применения"}`);
+  if (r.structural && !r.structural.ok && r.structural.errors?.length) {
+    const errs = r.structural.errors;
+    parts.push(`structural: ${errs.slice(0, 3).join("; ")}${errs.length > 3 ? ` (+${errs.length - 3})` : ""}`);
+  }
+  return parts.length ? `\n↳ ${parts.join("\n↳ ")}` : "";
+}
+
 const placeholder = computed(() =>
   llmMode.value
     ? "🧠 опиши, что сгенерировать: «озеро на севере и гряда гор по диагонали»  ( / )"
@@ -374,7 +389,7 @@ async function sendLlm(text: string): Promise<void> {
     const head = res.reasoning?.trim() || "Готово.";
     thinking.text = res.report?.ok
       ? `${head} · ${debugLine(ms)}`
-      : `${head} — валидация не прошла, откатил. · ${debugLine(ms)}`;
+      : `${head} — валидация не прошла, откатил. · ${debugLine(ms)}${validationReason()}`;
     if (res.report?.ok) lastGen.value = { mode: "llm", text, cells: zone?.cells ?? null, protect: protect.value };
   } catch (e) {
     thinking.text = "⚠ " + (e instanceof Error ? e.message : String(e));
@@ -425,7 +440,7 @@ async function send(): Promise<void> {
     pushAi(
       rep?.ok
         ? `Готово: ${recipeId.replace(/_/g, " ")} ${region.w}×${region.h} · ${debugLine(ms)} (↻ другой вариант)`
-        : `Валидация не прошла — откатил. · ${debugLine(ms)}`,
+        : `Валидация не прошла — откатил. · ${debugLine(ms)}${validationReason()}`,
     );
   } catch (e) {
     pushAi("⚠ " + (e instanceof Error ? e.message : String(e)));
@@ -450,7 +465,7 @@ async function retry(): Promise<void> {
       pushAi(
         rep?.ok
           ? `↻ ${g.recipeId.replace(/_/g, " ")} ${g.region.w}×${g.region.h} · ${debugLine(ms)}`
-          : `Не прошло — откатил. · ${debugLine(ms)}`,
+          : `Не прошло — откатил. · ${debugLine(ms)}${validationReason()}`,
       );
     } catch (e) {
       pushAi("⚠ " + (e instanceof Error ? e.message : String(e)));
@@ -635,6 +650,11 @@ watch(
   text-transform: uppercase;
   padding-top: 2px;
   color: var(--el-text-color-secondary);
+}
+.cp-text {
+  /* preserve the "↳ reason" line breaks in validation failure details */
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .cp-msg.user .cp-text {
   color: var(--el-text-color-primary);

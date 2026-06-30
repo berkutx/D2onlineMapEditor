@@ -83,6 +83,15 @@ function buildAndValidate(
     opCount: ops.length,
     byteLength: bytes?.length ?? 0,
   };
+  if (!report.ok) {
+    // surface WHY in the server log (docker logs d2editor) — not just which tier
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[validate] FAILED opCount=${ops.length} identity=${identity}` +
+        (semantic.ok ? "" : ` | semantic: ${semantic.reason ?? "?"}`) +
+        (structural.ok ? "" : ` | structural: ${structural.errors.slice(0, 6).join(" ; ")}`),
+    );
+  }
   return { report, bytes };
 }
 
