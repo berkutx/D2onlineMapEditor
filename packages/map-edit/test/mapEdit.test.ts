@@ -595,6 +595,66 @@ describe("@d2/map-edit garrison + site stocks", () => {
   });
 });
 
+describe("@d2/map-edit stack (Отряд) editor", () => {
+  it("formation + leader round-trip (units recreate, LEADER_ID follows the leader cell)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes); // Riders
+    const st = doc.objects.find(
+      (o) => o.type === "stack" && !(o as { garrisoned?: boolean }).garrisoned &&
+        (o as { garrison?: ({ unit: string } | null)[] }).garrison?.some(Boolean),
+    ) as { id: string; garrison: ({ unit: string; level: number; hp: number } | null)[] };
+    expect(st).toBeTruthy();
+    const g = st.garrison.map((c) => (c ? { unit: c.unit, level: c.level, hp: c.hp } : null));
+    while (g.length < 6) g.push(null);
+    const free = g.findIndex((c) => !c);
+    if (free >= 0) g[free] = { unit: "G000UU0001", level: 1, hp: 110 };
+    const leaderCell = g.findIndex(Boolean);
+    const leaderImage = g[leaderCell]!.unit;
+    const ops: EditOp[] = [{ kind: "patchObject", id: st.id, fields: { garrison: g, leaderCell, leaderImage } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reSt = re.objects.find((o) => o.id === st.id) as {
+      leaderCell?: number; leaderImage?: string; garrison: ({ unit: string } | null)[];
+    };
+    expect(reSt.leaderCell).toBe(leaderCell);
+    expect(reSt.leaderImage).toBe(leaderImage);
+    if (free >= 0) expect(reSt.garrison[free]?.unit).toBe("G000UU0001");
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("scalar fields (order/facing/morale/move) round-trip", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const st = doc.objects.find(
+      (o) => o.type === "stack" &&
+        ["order", "facing", "morale", "move"].every((k) => (o as Record<string, unknown>)[k] !== undefined),
+    ) as { id: string };
+    expect(st).toBeTruthy();
+    const ops: EditOp[] = [{ kind: "patchObject", id: st.id, fields: { order: 3, facing: 4, morale: 2, move: 25 } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reSt = re.objects.find((o) => o.id === st.id) as { order: number; facing: number; morale: number; move: number };
+    expect([reSt.order, reSt.facing, reSt.morale, reSt.move]).toEqual([3, 4, 2, 25]);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("leader equipment round-trip (set an artifact slot)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const st = doc.objects.find((o) => o.type === "stack" && (o as { equip?: object }).equip) as {
+      id: string; equip: Record<string, string | undefined>;
+    };
+    expect(st).toBeTruthy();
+    const equip = { ...st.equip, artifact1: "G000IG0001" };
+    const ops: EditOp[] = [{ kind: "patchObject", id: st.id, fields: { equip } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reSt = re.objects.find((o) => o.id === st.id) as { equip: Record<string, string | undefined> };
+    expect(reSt.equip.artifact1).toBe("G000IG0001");
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+});
+
 describe("@d2/map-edit project (journal + undo/redo)", () => {
   it("pushOp / undo / redo move the cursor and gate activeOps", () => {
     const op1: EditOp = { kind: "setCell", x: 1, y: 1, value: 1 };

@@ -122,23 +122,35 @@ function readMercUnits(buf: ByteBuffer, f: number, e: number): { id: string; lev
   return out;
 }
 
-/** MidStack: a moving army. Verified fields: UNIT_0..5, LEADER_ID, OWNER, FACING, BANNER, POS_X/Y. */
+/** MidStack: a moving army (D2Stack). Formation = UNIT_0..5 + POS_0..5 (cell-indexed, like a
+ *  garrison). LEADER_ID names which UNIT_ instance is the hero — we resolve it to a leaderCell
+ *  (0..5) in the post-pass so the leader survives formation edits (instance ids aren't stable).
+ *  Leader equipment (TOME/BATTLE/ARTIFACT/BOOTS) + the carried ITEM_ID inventory are read too. */
 export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
-  const units: string[] = [];
-  for (let i = 0; i < 6; i++) {
-    const u = refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e));
-    if (u) units.push(u);
-  }
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
-  const leaderUnitId = refOrUndef(readDefaultString(buf, "LEADER_ID", f, e));
+  const leaderUnitId = refOrUndef(readDefaultString(buf, "LEADER_ID", f, e)); // temp → leaderCell
   const banner = refOrUndef(readDefaultString(buf, "BANNER", f, e));
-  const facing = readDefaultInt(buf, "FACING", f, e);
-  // SUBRACE -> MidSubRace (faction/banner); INSIDE -> the fort this stack garrisons.
-  // A garrisoned stack draws NOTHING (the editor's StackObjectAccessor returns early).
+  const facing = readDefaultInt(buf, "FACING", f, e); // 8 iso directions 0..7
   const subRace = refOrUndef(readDefaultString(buf, "SUBRACE", f, e));
   const inside = refOrUndef(readDefaultString(buf, "INSIDE", f, e));
-  const order = readDefaultInt(buf, "ORDER", f, e); // 1=Normal..3=Guard (D2Stack::Order)
+  const order = readDefaultInt(buf, "ORDER", f, e); // D2Stack::Order 1=Normal,2=Stand,3=Guard,…
+  const morale = readDefaultInt(buf, "MORALE", f, e);
+  const move = readDefaultInt(buf, "MOVE", f, e);
+  const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
+  const creatLvl = readDefaultInt(buf, "CREAT_LVL", f, e);
+  // Leader equipment slots — each a global item ref; empty = the "000000"/"G000000000"
+  // sentinel. TOME = spellbook, BATTLE1/2 = battle items, ARTIFACT1/2 = artifacts, BOOTS = boots.
+  // Only FILLED slots are kept (empty omitted) so the object survives JSON transport (which drops
+  // undefined) and an equip edit round-trips key-for-key.
+  const equip: Record<string, string> = {};
+  for (const [k, tag] of [
+    ["tome", "TOME"], ["battle1", "BATTLE1"], ["battle2", "BATTLE2"],
+    ["artifact1", "ARTIFACT1"], ["artifact2", "ARTIFACT2"], ["boots", "BOOTS"],
+  ] as const) {
+    const s = readDefaultString(buf, tag, f, e);
+    if (s && s !== NULL_ID && s !== "000000") equip[k] = s;
+  }
   return {
     type: "stack",
     id: obj.id,
@@ -150,7 +162,14 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(inside ? { garrisoned: true, inside } : {}),
     ...(facing !== null ? { facing } : {}),
     ...(order !== null ? { order } : {}),
-    units,
+    ...(morale !== null ? { morale } : {}),
+    ...(move !== null ? { move } : {}),
+    ...(priority !== null ? { priority } : {}),
+    ...(creatLvl !== null ? { creatLvl } : {}),
+    equip,
+    // Carried inventory: an ITEM_ID list (MidItem instances → resolved to templates in the
+    // post-pass, like a chest). All shipped Riders stacks carry 0, but the structure is real.
+    inventory: readAllStrings(buf, "ITEM_ID", f, e).filter((s) => s && s !== NULL_ID && s !== "000000"),
     garrisonRaw: readGarrison(buf, f, e), // by-cell instance ids; resolved to garrison in post-pass
   };
 }

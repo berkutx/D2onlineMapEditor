@@ -67,8 +67,10 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   const chestItemOps = new Map<string, string[]>();
   /** Site stock list edits (merchant/mage/mercs) — literal QTY_ tag, global ids. */
   const qtyListEdits: QtyListEdit[] = [];
-  /** Fort garrison edits, keyed by fort id (last wins): formation cell -> {unit,hp,level}|null. */
-  const garrisonOps = new Map<string, ({ unit: string; hp?: number; level?: number } | null)[]>();
+  /** Garrison/formation edits, keyed by object id (last wins): the 6 formation cells, plus an
+   *  optional leaderCell (stacks only) → which cell's unit becomes LEADER_ID. */
+  type GarrCell = { unit: string; hp?: number; level?: number } | null;
+  const garrisonOps = new Map<string, { cells: GarrCell[]; leaderCell?: number }>();
 
   for (const op of ops) {
     switch (op.kind) {
@@ -140,6 +142,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           const INT_TAG: Record<string, string> = {
             image: isSite ? "IMG_ISO" : "IMAGE", tier: "SIZE", priority: "AIPRIORITY",
             morale: "MORALE", regen: "REGEN_B", growth: "GROWTH_T", resource: "RESOURCE",
+            // stack (Отряд) scalar fields:
+            order: "ORDER", facing: "FACING", move: "MOVE", creatLvl: "CREAT_LVL",
           };
           // 2) string fields — ALL via the growable splice (handles same-length compound
           //    ids / CASH AND variable-length user text uniformly; never length-throws).
@@ -158,6 +162,25 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
               stringEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, tag, value: f[key] as string });
               handled.add(key);
             }
+          }
+          // 2c) stack leader equipment — 6 item-ref slots, via the growable string path so an
+          //     empty "000000" slot can grow to a 10-char ref (and shrink back). Always write all
+          //     6 (empty -> "000000") so the edit round-trips against the cleared (undefined) model.
+          if (f.equip && typeof f.equip === "object") {
+            if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
+            const EQUIP_TAG: Record<string, string> = {
+              tome: "TOME", battle1: "BATTLE1", battle2: "BATTLE2",
+              artifact1: "ARTIFACT1", artifact2: "ARTIFACT2", boots: "BOOTS",
+            };
+            const eq = f.equip as Record<string, unknown>;
+            for (const [k, tag] of Object.entries(EQUIP_TAG)) {
+              const v = eq[k];
+              stringEdits.push({
+                fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, tag,
+                value: typeof v === "string" && v ? v : "000000",
+              });
+            }
+            handled.add("equip");
           }
           // 3) list fields. `items` is a chest ITEM_ID list (MidBag — global templates, MidItem
           //    instances re-created on export, processed after the loop) OR a merchant stock
@@ -200,12 +223,16 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           // (creates MidUnit instances + fixed-width fort slot splices).
           if (Array.isArray(f.garrison)) {
             if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
-            garrisonOps.set(op.id, f.garrison as ({ unit: string; hp?: number; level?: number } | null)[]);
+            garrisonOps.set(op.id, {
+              cells: f.garrison as GarrCell[],
+              leaderCell: typeof f.leaderCell === "number" ? f.leaderCell : undefined,
+            });
             handled.add("garrison");
+            if ("leaderCell" in f) handled.add("leaderCell");
           }
           // derived/render-only fields carry no .sg storage (resolved at parse from owner,
           // subrace, etc.) — patched only to refresh the live sprite; skip on export.
-          const DERIVED = new Set(["race", "bannerIndex", "imageName", "footprint", "z", "looted"]);
+          const DERIVED = new Set(["race", "bannerIndex", "imageName", "footprint", "z", "looted", "leaderImage"]);
           const left = Object.keys(f).filter((k) => !handled.has(k) && !DERIVED.has(k));
           if (left.length) {
             // e.g. `items` (ITEM_ID list) — count-prefixed list editing is a later step.
@@ -243,21 +270,31 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   // two PARALLEL arrays: UNIT_j = units in insertion order (filled cells packed into the low
   // slots), and POS_i = indexed by FORMATION CELL i, holding the UNIT_ slot of cell i's unit
   // (-1 = empty cell). So cell i = UNIT_[POS_i] — verified vs D2RSG group.cpp serialize().
-  for (const [fortId, cells] of garrisonOps) {
-    if (!raw.objectById.get(fortId)) throw new Error(`applyEditsToBytes: garrison edit for unknown object ${fortId}`);
+  for (const [fortId, { cells, leaderCell }] of garrisonOps) {
+    const fo = raw.objectById.get(fortId);
+    if (!fo) throw new Error(`applyEditsToBytes: garrison edit for unknown object ${fortId}`);
     const slotOfCell: number[] = [-1, -1, -1, -1, -1, -1];
+    const instOfCell: (string | null)[] = [null, null, null, null, null, null];
     let slot = 0;
     for (let cell = 0; cell < 6; cell++) {
       const gu = cells[cell];
       if (!gu || !gu.unit) continue;
       const second = nextUN++;
+      const inst = `${raw.version}UN${hex4(second)}`;
       appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0));
-      w.setObjectString(fortId, `UNIT_${slot}`, `${raw.version}UN${hex4(second)}`);
+      w.setObjectString(fortId, `UNIT_${slot}`, inst);
       slotOfCell[cell] = slot;
+      instOfCell[cell] = inst;
       slot++;
     }
     for (let s = slot; s < 6; s++) w.setObjectString(fortId, `UNIT_${s}`, "G000000000");
     for (let cell = 0; cell < 6; cell++) w.setObjectInt(fortId, `POS_${cell}`, slotOfCell[cell] ?? -1);
+    // Stacks (Отряд): LEADER_ID names the leader cell's new instance (or none). Via the growable
+    // string path so a no-leader stack's short "000000" sentinel can grow to a 10-char ref.
+    if (leaderCell !== undefined) {
+      const li = leaderCell >= 0 && leaderCell < 6 ? instOfCell[leaderCell] : null;
+      stringEdits.push({ fieldsFrom: fo.fieldsFrom, fieldsEnd: fo.fieldsEnd, tag: "LEADER_ID", value: li ?? "G000000000" });
+    }
   }
 
   // Emit added objects at their FINAL position (place + later moves coalesced).

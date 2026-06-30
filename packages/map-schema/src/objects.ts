@@ -20,19 +20,37 @@ export const GarrisonUnit = z.object({
 });
 export type GarrisonUnit = z.infer<typeof GarrisonUnit>;
 
+/** A stack leader's equipment slots — each a global item id ("000000"/undefined = empty). */
+export const StackEquip = z.object({
+  tome: z.string().optional(), // spellbook
+  battle1: z.string().optional(),
+  battle2: z.string().optional(),
+  artifact1: z.string().optional(),
+  artifact2: z.string().optional(),
+  boots: z.string().optional(),
+});
+export type StackEquip = z.infer<typeof StackEquip>;
+
 export const StackObject = z.object({
   ...base,
   type: z.literal("stack"),
   owner: z.string().optional(), // player uid
-  leaderUnitId: z.string().optional(),
+  leaderUnitId: z.string().optional(), // raw LEADER_ID instance (reader → leaderCell post-pass)
+  leaderCell: z.number().int().optional(), // formation cell (0..5) holding the leader/hero
   leaderImage: z.string().optional(), // resolved iso sprite of the lead unit
-  facing: z.number().int().optional(),
+  facing: z.number().int().optional(), // 8 iso directions 0..7
   banner: z.string().optional(),
   subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (faction/banner)
   bannerIndex: z.number().int().optional(), // resolved subrace banner number
   garrisoned: z.boolean().optional(), // INSIDE a fort -> editor draws nothing
-  order: z.number().int().optional(), // ORDER (1=Normal..3=Guard..); Guard => guard-range overlay
-  units: z.array(z.string()).default([]),
+  order: z.number().int().optional(), // ORDER (1=Normal,2=Stand,3=Guard,4=Attack,7=Roam,8=Move,9=Defend,10=Berserk)
+  morale: z.number().int().optional(),
+  move: z.number().int().optional(), // movement points
+  priority: z.number().int().optional(), // AIPRIORITY 0..6
+  creatLvl: z.number().int().optional(), // CREAT_LVL creature level
+  equip: StackEquip.optional(), // leader equipment slots
+  inventory: z.array(z.string()).optional(), // carried items (global GItem template ids)
+  units: z.array(z.string()).optional(), // legacy/unused (formation lives in `garrison` now)
   inside: z.string().optional(), // INSIDE: a city/fort uid this stack is stationed in (a "visitor")
   // formation by cell (POS 0..5) -> {unit (global Gunit id), level, hp}; the stack's own army.
   // For a garrisoned/visiting stack this IS the city's "visitor" garrison (edited via the stack id).

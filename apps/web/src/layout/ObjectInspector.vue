@@ -60,7 +60,7 @@ const TYPE_LABEL: Record<string, string> = {
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
 const SITE_TYPES = ["merchant", "mage", "trainer", "mercenary"];
 const editable = computed(
-  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", ...SITE_TYPES].includes(obj.value.type),
+  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", ...SITE_TYPES].includes(obj.value.type),
 );
 
 /** Site sprite key: "G000SI0000" + 4-char type code + image(2). */
@@ -218,6 +218,64 @@ function mercSetLevel(i: number, v: number): void {
 }
 function mercSetUnique(i: number, v: boolean): void {
   patch({ units: mercUnits.value.map((u, k) => (k === i ? { ...u, unique: v } : u)) });
+}
+
+/** ── Stack («Отряд»): formation (with leader) + order + leader equipment + inventory.
+ *  Editing the formation rewrites UNIT_/POS_ (new MidUnit instances) + LEADER_ID; we always send
+ *  garrison + leaderCell + the recomputed leaderImage so the live doc + writer stay in sync. */
+const ORDER_OPTIONS = [
+  { value: 1, label: "Обычный" }, { value: 2, label: "Стоять" }, { value: 3, label: "Охранять" },
+  { value: 4, label: "Атаковать" }, { value: 7, label: "Бродить" }, { value: 8, label: "Идти" },
+  { value: 9, label: "Защищать" }, { value: 10, label: "Берсерк" },
+];
+const EQUIP_SLOTS = [
+  { key: "tome", label: "Книга" }, { key: "battle1", label: "Боевой 1" }, { key: "battle2", label: "Боевой 2" },
+  { key: "artifact1", label: "Артефакт 1" }, { key: "artifact2", label: "Артефакт 2" }, { key: "boots", label: "Сапоги" },
+];
+const stackGarrison = computed(() => garr6(obj.value?.type === "stack" ? (obj.value as { garrison?: (GarrUnit | null)[] }) : null));
+const stackCount = computed(() => stackGarrison.value.filter(Boolean).length);
+const stackLeaderCell = computed(() => (obj.value?.type === "stack" ? obj.value.leaderCell ?? -1 : -1));
+
+function commitStack(g: (GarrUnit | null)[], leaderCell: number): void {
+  if (obj.value?.type !== "stack") return;
+  let lc = leaderCell;
+  if (lc < 0 || !g[lc]) lc = g.findIndex(Boolean); // keep the leader on a filled cell
+  const leaderImage = lc >= 0 ? g[lc]?.unit : undefined;
+  editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { garrison: g, leaderCell: lc, leaderImage } }]);
+}
+function setStackUnit(cell: number, unitId: string): void {
+  const g = stackGarrison.value.map((c) => (c ? { ...c } : null));
+  g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
+  commitStack(g, stackLeaderCell.value);
+}
+function clearStackCell(cell: number): void {
+  const g = stackGarrison.value.map((c) => (c ? { ...c } : null));
+  g[cell] = null;
+  commitStack(g, stackLeaderCell.value);
+}
+function setStackStat(cell: number, key: "level" | "hp", v: number): void {
+  const g = stackGarrison.value.map((c) => (c ? { ...c } : null));
+  const c = g[cell];
+  if (!c) return;
+  g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  commitStack(g, stackLeaderCell.value);
+}
+function setStackLeader(cell: number): void {
+  commitStack(stackGarrison.value.map((c) => (c ? { ...c } : null)), cell);
+}
+function equipVal(slot: string): string {
+  const eq = obj.value?.type === "stack" ? (obj.value.equip as Record<string, string | undefined> | undefined) : undefined;
+  return eq?.[slot] ?? NEUTRAL;
+}
+function setStackEquip(slot: string, id: string | null): void {
+  if (obj.value?.type !== "stack") return;
+  const cur = (obj.value.equip ?? {}) as Record<string, string | undefined>;
+  const equip: Record<string, string> = {}; // only filled slots (matches the reader)
+  for (const s of EQUIP_SLOTS) {
+    const v = s.key === slot ? (id && id !== NEUTRAL ? id : undefined) : cur[s.key];
+    if (v) equip[s.key] = v;
+  }
+  editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { equip } }]);
 }
 
 /** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts.
@@ -495,6 +553,69 @@ function close(): void {
         </div>
       </template>
 
+      <!-- ⚔ STACK (отряд) -->
+      <template v-else-if="obj.type === 'stack'">
+        <div class="row">
+          <label>Владелец</label>
+          <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="(v: string) => patch({ owner: v })">
+            <el-option label="Нейтрал" :value="NEUTRAL" />
+            <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
+          </el-select>
+        </div>
+        <div class="row">
+          <label>Приказ</label>
+          <el-select :model-value="obj.order ?? 1" size="small" class="owner-sel" @change="(v: number) => patch({ order: v })">
+            <el-option v-for="o in ORDER_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
+        </div>
+        <div v-if="obj.facing !== undefined" class="row">
+          <label>Направление</label>
+          <el-input-number :model-value="obj.facing" :min="0" :max="7" size="small" controls-position="right" @change="(v: number) => patch({ facing: v ?? 0 })" />
+        </div>
+        <div v-if="obj.morale !== undefined" class="row">
+          <label>Мораль</label>
+          <el-input-number :model-value="obj.morale" size="small" controls-position="right" @change="(v: number) => patch({ morale: v ?? 0 })" />
+        </div>
+        <div v-if="obj.move !== undefined" class="row">
+          <label>Ход</label>
+          <el-input-number :model-value="obj.move" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ move: v ?? 0 })" />
+        </div>
+        <div v-if="obj.priority !== undefined" class="row">
+          <label>Приоритет ИИ</label>
+          <el-input-number :model-value="obj.priority" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
+        </div>
+
+        <div class="section-head">Состав отряда <span class="muted">({{ stackCount }}/6)</span></div>
+        <GarrisonEditor
+          :garrison="stackGarrison"
+          :count="stackCount"
+          :leader-cell="stackLeaderCell"
+          @set-unit="setStackUnit"
+          @clear="clearStackCell"
+          @set-stat="setStackStat"
+          @set-leader="setStackLeader"
+        />
+
+        <div class="section-head">Экипировка лидера</div>
+        <div class="equip-grid">
+          <div v-for="s in EQUIP_SLOTS" :key="s.key" class="equip-row">
+            <label>{{ s.label }}</label>
+            <ItemPicker :model-value="equipVal(s.key)" nullable :title="s.label" @update:model-value="(v: string | null) => setStackEquip(s.key, v)" />
+          </div>
+        </div>
+
+        <div class="ro-block">
+          <div class="ro-label">Инвентарь <span class="muted">({{ (obj.inventory ?? []).length }})</span></div>
+          <div v-if="(obj.inventory ?? []).length" class="items-list">
+            <div v-for="(it, i) in obj.inventory" :key="`${it}#${i}`" class="item-line">
+              <ItemIcon :id="it" :cat="itemStore.get(it)?.cat ?? -1" :size="22" />
+              <span class="item-name" :title="itemStore.nameOf(it) || it">{{ itemStore.nameOf(it) || it }}</span>
+            </div>
+          </div>
+          <div v-else class="muted sm">пусто</div>
+        </div>
+      </template>
+
       <!-- 💎 CRYSTAL (кристалл маны) -->
       <template v-else-if="obj.type === 'crystal'">
         <div class="row">
@@ -641,6 +762,28 @@ function close(): void {
 .section-divider {
   border-top: var(--d2-hairline, 1px solid var(--el-border-color-lighter));
   margin: var(--d2-sp-2, 8px) 0 0;
+}
+.equip-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+.equip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--d2-sp-2);
+}
+.equip-row label {
+  flex: 0 0 84px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+.equip-row :deep(.ip-wrap) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.equip-row :deep(.ip-trigger) {
+  width: 100%;
 }
 .xs {
   font-size: 10px;

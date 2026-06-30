@@ -17,13 +17,15 @@ withDefaults(
     garrison: (GarrUnit | null)[]; // length 6, by formation cell
     count: number;
     readonly?: boolean; // visitor garrison is shown read-only until the full Отряд editor lands
+    leaderCell?: number; // when set (stack mode), shows a ★ leader toggle on filled cells
   }>(),
-  { readonly: false },
+  { readonly: false, leaderCell: undefined },
 );
 const emit = defineEmits<{
   setUnit: [cell: number, unitId: string];
   clear: [cell: number];
   setStat: [cell: number, key: "level" | "hp", value: number];
+  setLeader: [cell: number];
 }>();
 
 const unitStore = useUnitStore();
@@ -56,12 +58,22 @@ function onPick(cell: number, v: string | null): void {
           <div v-if="garrison[cell]" class="garr-ro-stats">ур.{{ garrison[cell]!.level }} · {{ garrison[cell]!.hp }} HP</div>
         </template>
         <template v-else>
-          <UnitPicker
-            :model-value="garrison[cell]?.unit ?? null"
-            nullable
-            :title="`Юнит — ${cell % 2 === 0 ? 'передняя' : 'задняя'} линия`"
-            @update:model-value="(v) => onPick(cell, v)"
-          />
+          <div class="garr-pick">
+            <UnitPicker
+              :model-value="garrison[cell]?.unit ?? null"
+              nullable
+              :title="`Юнит — ${cell % 2 === 0 ? 'передняя' : 'задняя'} линия`"
+              @update:model-value="(v) => onPick(cell, v)"
+            />
+            <button
+              v-if="leaderCell !== undefined && garrison[cell]"
+              type="button"
+              class="garr-leader"
+              :class="{ active: leaderCell === cell }"
+              :title="leaderCell === cell ? 'Лидер отряда' : 'Сделать лидером'"
+              @click="emit('setLeader', cell)"
+            >★</button>
+          </div>
           <div v-if="garrison[cell]" class="garr-stats">
           <span class="garr-stat">
             <label>ур.</label>
@@ -151,6 +163,25 @@ function onPick(cell: number, v: string | null): void {
 .garr-cell :deep(.up-wrap) { width: 100%; }
 .garr-cell :deep(.up-trigger) { width: 100%; justify-content: flex-start; padding: 4px 6px; }
 .garr-cell :deep(.up-trigger-text) { max-width: 100%; }
+.garr-pick {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+.garr-pick :deep(.up-wrap) { flex: 1 1 auto; min-width: 0; }
+.garr-leader {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px;
+  color: var(--el-text-color-placeholder);
+}
+.garr-leader:hover { color: var(--el-color-warning); }
+.garr-leader.active { color: var(--el-color-warning); }
 .garr-stats {
   display: flex;
   align-items: center;

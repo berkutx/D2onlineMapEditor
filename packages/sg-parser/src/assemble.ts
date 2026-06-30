@@ -189,20 +189,6 @@ export function assembleDocument(
 
   for (const obj of iterateObjects(buf)) consume(buf, obj, acc);
 
-  // Resolve each stack's leader sprite base: leaderUnitId -> the MidUnit's implId
-  // (a Gunit id like G000UU7624). The editor's stack sprite is leaderImpl + "STOP" +
-  // facing (StackObjectAccessor), so the renderer needs the impl on the stack itself.
-  const unitImpl = new Map<string, string>();
-  for (const [id, u] of Object.entries(acc.unitInstances)) {
-    if (u.implId) unitImpl.set(id, u.implId);
-  }
-  for (const o of acc.objects) {
-    if (o.type === "stack" && o.leaderUnitId) {
-      const impl = unitImpl.get(o.leaderUnitId);
-      if (impl) o.leaderImage = impl;
-    }
-  }
-
   // Resolve garrison formations from their by-cell MidUnit-instance ids to {global Gunit id,
   // level, hp}. Two DISTINCT armies (verified vs toolsqt D2Capital/D2Village/D2Stack + Riders.sg):
   //   • a city/capital's embedded UNIT_0..5/POS_0..5 = the city's OWN DEFENSE garrison;
@@ -218,7 +204,20 @@ export function assembleDocument(
       return { unit: inst, level: 1, hp: 0 };
     });
   for (const o of acc.objects) {
-    if (o.type === "stack" || o.type === "village" || o.type === "capital") {
+    if (o.type === "stack") {
+      const raw = o.garrisonRaw;
+      // LEADER_ID names a MidUnit instance; map it to its formation CELL so the leader survives
+      // formation edits (instance ids aren't stable). leaderImage = that cell's unit impl —
+      // the editor's stack sprite is leaderImpl + "STOP" + facing (StackObjectAccessor).
+      if (o.leaderUnitId && raw) {
+        const lc = raw.indexOf(o.leaderUnitId);
+        if (lc >= 0) o.leaderCell = lc;
+      }
+      o.garrison = resolveCells(raw);
+      if (o.leaderCell !== undefined) o.leaderImage = o.garrison[o.leaderCell]?.unit;
+      delete o.garrisonRaw;
+      delete o.leaderUnitId;
+    } else if (o.type === "village" || o.type === "capital") {
       o.garrison = resolveCells(o.garrisonRaw);
       delete o.garrisonRaw;
     }
@@ -243,12 +242,15 @@ export function assembleDocument(
     }
   }
 
-  // Resolve each chest's item list from MidItem instance ids to their global GItem
-  // template ids (e.g. "S143IM000a" -> "G000IG0006"), so the editor works with stable
-  // catalog templates. The instance indirection is re-created on export (new MidItems).
+  // Resolve item lists from MidItem instance ids to their global GItem template ids (e.g.
+  // "S143IM000a" -> "G000IG0006") so the editor works with stable catalog templates. The
+  // instance indirection is re-created on export (new MidItems). Chest contents + a stack's
+  // carried inventory both use this MidItem-instance ITEM_ID list.
   for (const o of acc.objects) {
     if (o.type === "treasure" && o.items) {
       o.items = o.items.map((inst) => acc.itemInstances[inst] ?? inst);
+    } else if (o.type === "stack" && o.inventory) {
+      o.inventory = o.inventory.map((inst) => acc.itemInstances[inst] ?? inst);
     }
   }
 

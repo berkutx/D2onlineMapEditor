@@ -37,7 +37,7 @@ const { currentScenarioId } = storeToRefs(mapStore);
 const inspectorWidth = computed(() => {
   const id = toolStore.selectedId;
   const o = id ? editStore.liveDoc?.objects.find((x) => x.id === id) : null;
-  return o && (o.type === "capital" || o.type === "village") ? "320px" : "260px";
+  return o && (o.type === "capital" || o.type === "village" || o.type === "stack") ? "320px" : "260px";
 });
 
 /** Global view hotkeys (single keys; ignored while typing or with modifiers). */
