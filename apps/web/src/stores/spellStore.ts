@@ -78,6 +78,19 @@ export const useSpellStore = defineStore("spell", () => {
     return catalog.value[id]?.name || id;
   }
 
+  /** A short, scannable "what it does" line synthesized from the catalog fields (school +
+   *  damage/heal/summon magnitudes), for picker/shop rows. The full game `desc` stays as the
+   *  hover tooltip. */
+  function effectOf(id: string | null | undefined): string {
+    const s = get(id);
+    if (!s) return "";
+    const school = SPELL_CAT_LABELS[s.catKey] ?? "";
+    const bits: string[] = []; // magnitudes only — the school already names the kind of effect
+    if (s.damage) bits.push(`${s.damage} урона`);
+    if (s.heal) bits.push(`${s.heal} HP`);
+    return bits.length ? `${school} · ${bits.join(", ")}` : school;
+  }
+
   /** Spells grouped by category (Lspell). */
   const byCat = computed<SpellGroup[]>(() => {
     const by = new Map<number, SpellEntry[]>();
@@ -111,5 +124,5 @@ export const useSpellStore = defineStore("spell", () => {
     return out;
   });
 
-  return { catalog, loaded, loading, error, load, all, get, nameOf, byCat, byLevel };
+  return { catalog, loaded, loading, error, load, all, get, nameOf, effectOf, byCat, byLevel };
 });

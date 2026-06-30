@@ -452,8 +452,11 @@ function close(): void {
           <div class="ro-label">Заклинания <span class="muted">({{ mageSpells.length }})</span></div>
           <div v-if="mageSpells.length" class="items-list">
             <div v-for="(sid, i) in mageSpells" :key="`${sid}#${i}`" class="item-line">
-              <SpellIcon :id="sid" :level="spellStore.get(sid)?.level" :cat="spellStore.get(sid)?.cat ?? -1" :size="24" />
-              <span class="item-name" :title="spellStore.get(sid)?.desc || spellStore.nameOf(sid) || sid">{{ spellStore.nameOf(sid) || sid }}</span>
+              <SpellIcon :id="sid" :level="spellStore.get(sid)?.level" :cat="spellStore.get(sid)?.cat ?? -1" :size="26" />
+              <span class="stk-text">
+                <span class="item-name" :title="spellStore.get(sid)?.desc || spellStore.nameOf(sid) || sid">{{ spellStore.nameOf(sid) || sid }}</span>
+                <span class="stk-sub">{{ spellStore.effectOf(sid) }}</span>
+              </span>
               <span v-if="spellStore.get(sid)?.level" class="item-gold">ур.{{ spellStore.get(sid)?.level }}</span>
               <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="mageRemove(i)" />
             </div>
@@ -650,6 +653,23 @@ function close(): void {
   flex: 1 1 auto;
   font-size: 12px;
   color: var(--el-text-color-regular);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stk-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.stk-text .item-name {
+  flex: 0 0 auto;
+}
+.stk-sub {
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
