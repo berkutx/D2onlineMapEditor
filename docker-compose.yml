@@ -1,0 +1,43 @@
+# d2-web-editor — its OWN isolated stack on the shared server (separate compose project,
+# does NOT touch the existing d2mapeditor stack). Joins the EXISTING d2map_net so the running
+# Cloudflare Tunnel can reach this container by name; the Zero-Trust dashboard routes
+# d2mapeditor.online path /map -> http://d2editor:3000. No host ports are published.
+name: d2editor
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        VITE_BASE: "/map/"
+        VITE_COPILOT_LLM: "off"
+    image: d2editor:local
+    container_name: d2editor
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3000"
+      BASE_PATH: /map
+      COPILOT_LLM: "off"
+      WEB_DIST: /app/apps/web/dist
+      ASSETS_DIR: /app/public/assets
+      SCENARIO_ROOTS: /app/deploy/scenarios
+      UPLOAD_DIR: /app/var/uploads
+      LLM_DIR: /app/var/llm
+    volumes:
+      # atlases (253 MB) are NOT in git — populate this volume once from the dev box (see README)
+      - d2editor_assets:/app/public/assets:ro
+      - d2editor_uploads:/app/var/uploads
+    networks: [d2map_net]
+
+networks:
+  d2map_net:
+    external: true
+    name: d2map_net
+
+volumes:
+  d2editor_assets:
+    name: d2editor_assets
+  d2editor_uploads:
+    name: d2editor_uploads

@@ -6,6 +6,7 @@
  * leader-subtype enums live here so the catalog stays pure game-sourced data.
  */
 import { defineStore } from "pinia";
+import { assetUrl } from "../services/api";
 import { ref, computed } from "vue";
 
 export interface UnitEntry {
@@ -75,7 +76,7 @@ export const useUnitStore = defineStore("unit", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch("/assets/unitCatalog.json", { cache: "no-store" });
+      const res = await fetch(assetUrl("unitCatalog.json"), { cache: "no-store" });
       if (!res.ok) throw new Error(`unitCatalog.json ${res.status}`);
       const arr = (await res.json()) as UnitEntry[];
       const map: Record<string, UnitEntry> = {};

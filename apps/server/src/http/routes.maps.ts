@@ -394,6 +394,11 @@ export async function registerMapRoutes(
   // the SAME generation executor + 3-tier validator as /generate; the client commits {ops}
   // as one undoable edit. (Stands in for a real LLM endpoint, none configured.)
   app.post<{ Params: { id: string } }>(REST.mapCopilot(":id"), async (req, reply) => {
+    // The LLM bridge needs a local agent watching var/llm — absent in production. Disabled
+    // there (COPILOT_LLM=off); the no-LLM recipe/keyword generation (/generate) still works.
+    if (!config.COPILOT_LLM) {
+      return reply.code(503).send({ error: "LLM Copilot disabled on this deployment" });
+    }
     const { id } = req.params;
     const body = (req.body ?? {}) as Record<string, unknown>;
 

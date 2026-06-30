@@ -18,6 +18,13 @@ import type { MapDocument } from "@d2/map-schema";
 import type { EditorProject } from "@d2/map-edit";
 import type { AssetManifest } from "@d2/asset-manifest";
 
+// The base path the app is served under: '/' in dev, '/map/' in the production build (Vite
+// `base`, surfaced as import.meta.env.BASE_URL). Every same-origin URL the client builds is
+// prefixed with it so /api, /assets and /socket.io resolve under /map behind the tunnel.
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, ""); // '' or '/map'
+/** Prefix an absolute server path (e.g. REST.scenarios) with the deploy base. */
+const u = (p: string): string => BASE + p;
+
 /**
  * GET + parse JSON, with a few retries on TRANSIENT failures (network error / empty body /
  * 5xx). In dev the Vite proxy returns ECONNREFUSED/500/empty for a second or two whenever the
@@ -48,27 +55,27 @@ async function getJson<T>(url: string, retries = 4): Promise<T> {
 
 /** GET /api/scenarios -> ScenarioEntry[] */
 export function fetchScenarios(): Promise<ScenarioEntry[]> {
-  return getJson<ScenarioEntry[]>(REST.scenarios);
+  return getJson<ScenarioEntry[]>(u(REST.scenarios));
 }
 
 /** GET /api/scenarios/:id -> ScenarioEntry */
 export function fetchScenario(id: string): Promise<ScenarioEntry> {
-  return getJson<ScenarioEntry>(REST.scenario(id));
+  return getJson<ScenarioEntry>(u(REST.scenario(id)));
 }
 
 /** GET /api/maps/:id -> MapDocument (the render-ready neutral document) */
 export function fetchMapDocument(id: string): Promise<MapDocument> {
-  return getJson<MapDocument>(REST.map(id));
+  return getJson<MapDocument>(u(REST.map(id)));
 }
 
 /** GET /api/maps/:id/meta -> MapMeta (cheap header for listings) */
 export function fetchMapMeta(id: string): Promise<MapMeta> {
-  return getJson<MapMeta>(REST.mapMeta(id));
+  return getJson<MapMeta>(u(REST.mapMeta(id)));
 }
 
 /** GET /api/assets/manifest -> AssetManifest (fetched once, cached in the store) */
 export function fetchAssetManifest(): Promise<AssetManifest> {
-  return getJson<AssetManifest>(REST.assetsManifest);
+  return getJson<AssetManifest>(u(REST.assetsManifest));
 }
 
 /** POST /api/maps/:id/validate -> ValidationReport (apply the project's ops, validate, no bytes). */
@@ -76,7 +83,7 @@ export async function validateProject(
   id: string,
   project: EditorProject,
 ): Promise<ValidationReport> {
-  const res = await fetch(REST.mapValidate(id), {
+  const res = await fetch(u(REST.mapValidate(id)), {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(project),
@@ -98,7 +105,7 @@ export type ExportResult =
  * on a validation failure (422) returns the report so the UI can explain why.
  */
 export async function exportProject(id: string, project: EditorProject): Promise<ExportResult> {
-  const res = await fetch(REST.mapExport(id), {
+  const res = await fetch(u(REST.mapExport(id)), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(project),
@@ -129,7 +136,7 @@ export async function generateRegion(
   cells?: [number, number][] | null,
   protect?: boolean,
 ): Promise<GenerateResult> {
-  const res = await fetch(REST.mapGenerate(id), {
+  const res = await fetch(u(REST.mapGenerate(id)), {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ project, recipeId, region, seed, cells: cells ?? undefined, protect: protect || undefined }),
@@ -161,7 +168,7 @@ export async function copilotLlm(
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(REST.mapCopilot(id), {
+    res = await fetch(u(REST.mapCopilot(id)), {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify({ project, text, selection: selection ?? null, cells: cells ?? undefined, protect: protect || undefined }),
@@ -188,7 +195,7 @@ export async function createNewMap(opts: {
   fill: string; // a TerrainFill id; the server validates + defaults
   name: string;
 }): Promise<string> {
-  const res = await fetch(REST.mapNew, {
+  const res = await fetch(u(REST.mapNew), {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(opts),
@@ -201,4 +208,7 @@ export async function createNewMap(opts: {
 }
 
 /** Base URL the AssetStore prepends to every manifest-relative path. */
-export const ASSET_BASE_URL = "/assets";
+export const ASSET_BASE_URL = `${BASE}/assets`;
+
+/** Build a URL for a file under the atlas/asset mount (catalogs, icons, sprite sheets). */
+export const assetUrl = (rel: string): string => `${ASSET_BASE_URL}/${rel.replace(/^\//, "")}`;

@@ -12,6 +12,7 @@
  * element, a loading flag). Pixi objects never enter Vue's reactive graph.
  */
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { assetUrl } from "../services/api";
 import { storeToRefs } from "pinia";
 import { Scene } from "@d2/pixi-render";
 import type { CameraSnapshot, DebugStats, LandmarkFootprints } from "@d2/pixi-render";
@@ -110,7 +111,7 @@ async function rebuild(): Promise<void> {
     // A pipeline output like the manifest -> fetch fresh (the static mount serves
     // /assets with a long immutable cache, which would otherwise pin a stale copy).
     const objectData = await (
-      await fetch(`/assets/objectdata.json`, { cache: "no-store" })
+      await fetch(assetUrl("objectdata.json"), { cache: "no-store" })
     ).json();
     landmarkFootprints = objectData?.landmarkFootprints;
     spriteTables = objectData;

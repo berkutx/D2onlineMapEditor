@@ -5,6 +5,7 @@
  * coloured by subrace when the unit ships no face asset (~half the roster has none).
  */
 import { ref, computed, watch } from "vue";
+import { assetUrl } from "../services/api";
 
 const props = withDefaults(
   defineProps<{ id?: string | null; level?: number; subraceId?: number; size?: number }>(),
@@ -14,7 +15,7 @@ const props = withDefaults(
 const failed = ref(false);
 watch(() => props.id, () => { failed.value = false; });
 
-const src = computed(() => (props.id ? `/assets/uniticons/${props.id.toLowerCase()}.png` : ""));
+const src = computed(() => (props.id ? assetUrl(`uniticons/${props.id.toLowerCase()}.png`) : ""));
 const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px` }));
 </script>
 

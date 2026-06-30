@@ -1,0 +1,55 @@
+name: Deploy
+
+# Push to main/master -> ship code to the server, rebuild & restart the d2editor container.
+# Isolated from the existing d2mapeditor stack (separate compose project + dir). Public access
+# is via the EXISTING Cloudflare Tunnel: add a Zero-Trust public-hostname rule routing
+# d2mapeditor.online path /map -> http://d2editor:3000 (placed ABOVE the catch-all).
+#
+# The 253 MB atlas set is NOT shipped here (it is gitignored + not reproducible in CI without
+# the game install) — populate the d2editor_assets volume once from the dev box (see README).
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-d2editor
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ship code (tar over ssh; server has no rsync)
+        env:
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
+        run: |
+          set -euo pipefail
+          install -m 600 /dev/null key
+          printf '%s\n' "$SSH_KEY" > key
+          SSHOPTS="-i key -p 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          REMOTE="$SERVER_USERNAME@$SERVER_HOST"
+          ssh $SSHOPTS "$REMOTE" 'mkdir -p ~/d2editor'
+          # ship code only; node_modules/dist/assets/volumes are excluded (built in-image / persisted)
+          tar czf - \
+            --exclude='.git' --exclude='.github' --exclude='node_modules' \
+            --exclude='**/node_modules' --exclude='dist' --exclude='**/dist' \
+            --exclude='public/assets' --exclude='var' --exclude='scratchpad' \
+            . | ssh $SSHOPTS "$REMOTE" 'tar xzf - -C ~/d2editor'
+
+      - name: Build & restart on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd ~/d2editor
+            # project name "d2editor" is separate from "d2mapeditor"; --remove-orphans is
+            # scoped to THIS project, so the existing app + tunnel are untouched.
+            docker compose up -d --build --remove-orphans
+            docker image prune -f

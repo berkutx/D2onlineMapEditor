@@ -5,6 +5,7 @@
  * spell ships no icon asset.
  */
 import { ref, computed, watch } from "vue";
+import { assetUrl } from "../services/api";
 
 const props = withDefaults(
   defineProps<{ id?: string | null; level?: number; cat?: number; size?: number }>(),
@@ -14,7 +15,7 @@ const props = withDefaults(
 const failed = ref(false);
 watch(() => props.id, () => { failed.value = false; });
 
-const src = computed(() => (props.id ? `/assets/spellicons/${props.id.toLowerCase()}.png` : ""));
+const src = computed(() => (props.id ? assetUrl(`spellicons/${props.id.toLowerCase()}.png`) : ""));
 const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px` }));
 </script>
 

@@ -1,0 +1,12 @@
+# keep the build context small + force a clean install/build inside the image
+.git
+.github
+**/node_modules
+**/dist
+**/.turbo
+public/assets
+var
+*.log
+scratchpad
+tools/asset-pipeline/spikes
+**/*.tsbuildinfo

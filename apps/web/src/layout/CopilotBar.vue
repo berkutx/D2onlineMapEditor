@@ -49,6 +49,8 @@ const sending = ref(false);
 /** LLM mode (Phase-4 POC): route the command through the server's LLM file-bridge instead
  *  of the offline keyword router. Off by default (keyword router needs no agent watching). */
 const llmMode = ref(false);
+/** Whether the LLM bridge is available on this deployment (disabled in prod: no agent). */
+const LLM_AVAILABLE = import.meta.env.VITE_COPILOT_LLM !== "off";
 /** Protect existing features: generation skips cells that already hold water/mountains. */
 const protect = ref(false);
 type Region = { x: number; y: number; w: number; h: number };
@@ -241,6 +243,13 @@ const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: bool
   ] },
 ];
 
+/** Examples shown in the UI — drops the LLM-only items/groups when the bridge is disabled. */
+const displayExamples = computed(() =>
+  LLM_AVAILABLE
+    ? EXAMPLES
+    : EXAMPLES.map((g) => ({ ...g, items: g.items.filter((i) => !i.llm) })).filter((g) => g.items.length),
+);
+
 function regionCenter(r: Region): { x: number; y: number } {
   return { x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) };
 }
@@ -386,7 +395,7 @@ async function send(): Promise<void> {
   input.value = "";
   expanded.value = true;
 
-  if (llmMode.value) {
+  if (llmMode.value && LLM_AVAILABLE) {
     await sendLlm(text);
     return;
   }
@@ -522,7 +531,7 @@ watch(
           <div class="cp-ex-legend"><b class="cp-ex-mj">MJ</b> марковская (↻ — новый вид) · <b class="cp-ex-llm">LLM</b> через агента · <b>✎</b> по рисунку</div>
         </div>
         <div class="cp-ex-scroll">
-          <div v-for="g in EXAMPLES" :key="g.group" class="cp-ex-group">
+          <div v-for="g in displayExamples" :key="g.group" class="cp-ex-group">
             <div class="cp-ex-gtitle">{{ g.group }}</div>
             <button v-for="it in g.items" :key="it.text" class="cp-ex-item" @click="applyExample(it)">
               <span>{{ it.text }}</span>
@@ -533,7 +542,7 @@ watch(
         </div>
       </el-popover>
 
-      <el-tooltip content="LLM-режим — генерация через агента (иначе офлайн-роутер)" placement="top" :show-after="300">
+      <el-tooltip v-if="LLM_AVAILABLE" content="LLM-режим — генерация через агента (иначе офлайн-роутер)" placement="top" :show-after="300">
         <el-button class="cp-ico" text :type="llmMode ? 'primary' : 'default'" @click="llmMode = !llmMode">🧠</el-button>
       </el-tooltip>
       <el-tooltip content="Беречь рельеф — не перетирать воду и горы" placement="top" :show-after="300">

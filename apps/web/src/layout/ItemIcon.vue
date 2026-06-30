@@ -6,6 +6,7 @@
  * not ship as per-item PNGs).
  */
 import { ref, computed, watch } from "vue";
+import { assetUrl } from "../services/api";
 
 const props = withDefaults(defineProps<{ id?: string | null; cat?: number; size?: number }>(), {
   id: null,
@@ -16,7 +17,7 @@ const props = withDefaults(defineProps<{ id?: string | null; cat?: number; size?
 const failed = ref(false);
 watch(() => props.id, () => { failed.value = false; });
 
-const src = computed(() => (props.id ? `/assets/itemicons/${props.id.toLowerCase()}.png` : ""));
+const src = computed(() => (props.id ? assetUrl(`itemicons/${props.id.toLowerCase()}.png`) : ""));
 const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px` }));
 </script>
 

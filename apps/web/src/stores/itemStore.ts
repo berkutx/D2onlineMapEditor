@@ -6,6 +6,7 @@
  * catalog) so the catalog stays pure game-sourced data.
  */
 import { defineStore } from "pinia";
+import { assetUrl } from "../services/api";
 import { ref, computed } from "vue";
 
 export interface ItemEntry {
@@ -88,7 +89,7 @@ export const useItemStore = defineStore("item", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch("/assets/itemCatalog.json", { cache: "no-store" });
+      const res = await fetch(assetUrl("itemCatalog.json"), { cache: "no-store" });
       if (!res.ok) throw new Error(`itemCatalog.json ${res.status}`);
       const arr = (await res.json()) as ItemEntry[];
       const map: Record<string, ItemEntry> = {};

@@ -8,6 +8,7 @@
  * synchronous frameOf(key) for components to read reactively after ensureKeys().
  */
 import { defineStore } from "pinia";
+import { assetUrl } from "../services/api";
 import { ref } from "vue";
 
 export interface SpriteRect {
@@ -28,7 +29,7 @@ export const useSpriteStore = defineStore("sprite", () => {
 
   function manifest(): Promise<ManifestLite> {
     if (!manifestP) {
-      manifestP = fetch("/assets/manifest.json", { cache: "force-cache" }).then((r) => {
+      manifestP = fetch(assetUrl("manifest.json"), { cache: "force-cache" }).then((r) => {
         if (!r.ok) throw new Error(`manifest.json ${r.status}`);
         return r.json() as Promise<ManifestLite>;
       });
@@ -39,7 +40,7 @@ export const useSpriteStore = defineStore("sprite", () => {
   function loadPageMeta(metaFile: string, pageImage: string): Promise<void> {
     let p = pageMetaP.get(metaFile);
     if (!p) {
-      p = fetch(`/assets/${metaFile}`, { cache: "force-cache" })
+      p = fetch(assetUrl(metaFile), { cache: "force-cache" })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${metaFile} ${r.status}`))))
         .then((meta: { frames?: Record<string, { frame: { x: number; y: number; w: number; h: number }; sourceSize: { w: number; h: number } }> }) => {
           const add: Record<string, SpriteRect> = {};

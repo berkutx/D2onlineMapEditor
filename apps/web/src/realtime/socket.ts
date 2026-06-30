@@ -13,9 +13,14 @@ export type TypedClientSocket = Socket<ServerToClientEvents, ClientToServerEvent
 
 let socket: TypedClientSocket | null = null;
 
+// Namespace the socket.io endpoint under the deploy base ('/' in dev, '/map/' in prod) so it
+// resolves to OUR container behind the tunnel (the existing site owns the root /socket.io).
+const SOCKET_PATH = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/socket.io`;
+
 export function getSocket(): TypedClientSocket {
   if (!socket) {
     socket = io({
+      path: SOCKET_PATH,
       autoConnect: true,
       transports: ["websocket", "polling"],
       // a dropped connection should re-establish and the collab store will re-join + resync
