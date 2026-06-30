@@ -27,6 +27,7 @@ import { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
+import { PresenceLayer, type PeerMarker } from "./PresenceLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
 import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
 import type { LandmarkFootprints } from "./objectSprite.js";
@@ -118,6 +119,7 @@ export class Scene {
   private locations?: LocationLayer;
   /** label/highlight inputs (captions, selected id) kept so locations can rebuild in place. */
   private locOpts: LocationOpts = {};
+  private presence?: PresenceLayer;
   private overlay?: OverlayLayer;
   private anim?: AnimationManager;
   private camera?: Camera;
@@ -269,6 +271,10 @@ export class Scene {
     this.locations.build(map.objects, this.locOpts);
     this.world.addChild(this.locations.view);
 
+    // collaborator cursors, above locations
+    this.presence = new PresenceLayer();
+    this.world.addChild(this.presence.view);
+
     // editor-assist overlays (tints / hover outline / cursor) on top of everything
     this.overlay = new OverlayLayer();
     this.overlay.build(
@@ -326,6 +332,13 @@ export class Scene {
     if (opts) this.locOpts = { ...this.locOpts, ...opts };
     if (!this.locations) return;
     this.locations.build(map.objects, this.locOpts);
+    this.renderNow();
+  }
+
+  /** Replace the live collaborator-cursor markers (collab presence). */
+  setPeers(peers: ReadonlyArray<PeerMarker>): void {
+    if (!this.presence) return;
+    this.presence.setPeers(peers);
     this.renderNow();
   }
 
@@ -718,6 +731,7 @@ export class Scene {
     }
     if (this.objects && this.anim) this.objects.destroy(this.anim);
     this.overlay?.destroy();
+    this.presence?.destroy();
     this.locations?.destroy();
     this.grid?.destroy();
     this.terrain?.destroy();

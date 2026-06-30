@@ -9,11 +9,11 @@ import { createIo } from "./realtime/io.js";
 import { config } from "./config.js";
 
 async function main(): Promise<void> {
-  const { app } = await buildApp();
+  const { app, store } = await buildApp();
 
   // Ensure the HTTP server exists before socket.io attaches to it.
   await app.ready();
-  const { io } = createIo(app.server);
+  const { io } = createIo(app.server, store);
 
   await app.listen({ port: config.PORT, host: config.HOST });
 

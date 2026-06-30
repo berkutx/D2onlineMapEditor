@@ -33,6 +33,7 @@ import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useDecorStore, type DecorEntry } from "../stores/decorStore";
+import { useCollabStore } from "../stores/collabStore";
 import { getAssetStore, getScene, setScene, destroyScene } from "./sceneHolder";
 
 const mapStore = useMapStore();
@@ -41,6 +42,7 @@ const viewStore = useViewStore();
 const toolStore = useToolStore();
 const editStore = useEditStore();
 const decorStore = useDecorStore();
+const collabStore = useCollabStore();
 
 const { currentMap } = storeToRefs(mapStore);
 const { manifest } = storeToRefs(assetStore);
@@ -117,6 +119,9 @@ async function rebuild(): Promise<void> {
     // the rev watcher re-tiles onto the freshly-built terrain).
     editStore.ensureProject(id);
     editStore.setBaseDoc(doc);
+    // join this map's collaboration room (room = map id = share link). Done AFTER setBaseDoc
+    // so a snapshot catch-up replaces a consistent base; join() leaves any previous room.
+    void collabStore.join(id);
     scene.setPanEnabled(toolStore.tool === "select");
     // apply the current view state to the freshly-built scene
     scene.setLayerVisibility("terrain", terrainVisible.value);
@@ -702,6 +707,7 @@ function onPointerMove(e: PointerEvent): void {
   if (cell) {
     viewStore.setCursorCell({ x: cell.x, y: cell.y });
     getScene()?.setCursorCell({ x: cell.x, y: cell.y });
+    collabStore.sendCursor(cell); // broadcast my cursor to room peers (throttled)
     if (painting) paintAt(cell.x, cell.y);
   } else {
     viewStore.setCursorCell(null);
@@ -815,6 +821,17 @@ watch(
       });
     }
   },
+);
+
+// Collab presence: broadcast my selection to room peers; render their live cursors.
+watch(
+  () => toolStore.selectedId,
+  (id) => collabStore.sendSelection(id ? [id] : []),
+);
+watch(
+  () => collabStore.peerList,
+  (peers) => getScene()?.setPeers(peers.map((p) => ({ socketId: p.socketId, name: p.name, color: p.color, cursor: p.cursor }))),
+  { deep: true },
 );
 
 // A paint tool owns the drag; "select" restores camera pan. The decor tool also owns

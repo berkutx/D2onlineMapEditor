@@ -1,14 +1,13 @@
 /**
  * Per-socket room + presence + edit handlers.
  *
- * Stage 1 behavior:
- *  - room:join / room:leave manage membership and broadcast peer lists.
+ *  - room:join / room:leave manage membership and broadcast peer lists; the join ack
+ *    carries the current log head (snapshotSeq) so a late joiner can sync.
  *  - presence:cursor / viewport / select are throttled (~20Hz) per socket and
  *    broadcast to the rest of the room.
- *  - edit:op immediately acks { ok:false, reason:"read-only" } and emits nothing.
- *
- * The wiring (rooms, broadcasts, snapshotSeq) is final; Stage 4 only swaps the
- * edit:op body for a real apply path.
+ *  - edit:op validates + appends to the server-authoritative EditLog (assigning a seq),
+ *    acks { ok, seq } to the author, and broadcasts edit:applied to the rest of the room.
+ *  - snapshot:request returns the base map + the whole log applied (catch-up / late join).
  */
 
 import type { Server, Socket } from "socket.io";
@@ -19,7 +18,11 @@ import type {
   SocketData,
   UserPresence,
 } from "@d2/socket-contract";
+import { EditOp } from "@d2/socket-contract";
+import { applyOps } from "@d2/map-edit";
+import type { MapStore } from "../maps/mapStore.js";
 import { RoomManager, roomId } from "./RoomManager.js";
+import type { EditLog } from "./EditLog.js";
 
 type IO = Server<
   ClientToServerEvents,
@@ -47,6 +50,8 @@ export function registerRoomHandlers(
   io: IO,
   socket: IOSocket,
   rooms: RoomManager,
+  log: EditLog,
+  store: MapStore,
 ): void {
   const last: Throttle = { cursor: 0, viewport: 0, select: 0 };
 
@@ -77,7 +82,8 @@ export function registerRoomHandlers(
       // tell existing peers about the newcomer
       socket.to(roomId(p.mapId)).emit("presence:update", presence);
 
-      ack({ ok: true, you: presence, peers, snapshotSeq: 0 });
+      // late joiner gets the current head; if >0 they should snapshot:request to catch up
+      ack({ ok: true, you: presence, peers, snapshotSeq: log.head(p.mapId) });
     } catch (err) {
       ack({ ok: false, error: (err as Error).message });
     }
@@ -109,9 +115,46 @@ export function registerRoomHandlers(
     if (updated) broadcastPresence(socket, p.mapId, updated);
   });
 
-  // Stage 1: edits are rejected read-only. No state mutates, nothing is emitted.
-  socket.on("edit:op", (_p, ack) => {
-    ack({ ok: false, reason: "read-only" });
+  // Apply a peer's op: validate, append to the authoritative log (assigns seq), ack the
+  // author with the seq, and broadcast edit:applied to the rest of the room. LWW is implicit
+  // in the single ordered log — every client applies the broadcast stream in seq order.
+  socket.on("edit:op", (p, ack) => {
+    if (!p || typeof p.mapId !== "string" || typeof p.clientOpId !== "string") {
+      ack({ ok: false, reason: "invalid edit:op payload" });
+      return;
+    }
+    if (socket.data.mapId !== p.mapId) {
+      ack({ ok: false, reason: "not joined to this map's room" });
+      return;
+    }
+    const parsed = EditOp.safeParse(p.op);
+    if (!parsed.success) {
+      ack({ ok: false, reason: "invalid op: " + parsed.error.issues[0]?.message });
+      return;
+    }
+    const entry = log.append(p.mapId, parsed.data, socket.id, p.clientOpId, Date.now());
+    ack({ ok: true, seq: entry.seq });
+    socket
+      .to(roomId(p.mapId))
+      .emit("edit:applied", { seq: entry.seq, by: socket.id, op: parsed.data });
+  });
+
+  // Catch-up: return the base map with the entire log applied, plus the head seq, so a late
+  // joiner (or a client that fell behind) can resync to the authoritative shared state.
+  socket.on("snapshot:request", (p, ack) => {
+    void (async () => {
+      try {
+        const loaded = await store.getMap(p.mapId);
+        if (!loaded) {
+          ack({ seq: log.head(p.mapId), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
+          return;
+        }
+        const ops = log.all(p.mapId).map((e) => e.op);
+        ack({ seq: log.head(p.mapId), doc: applyOps(loaded.doc, ops) });
+      } catch {
+        ack({ seq: log.head(p.mapId), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
+      }
+    })();
   });
 
   socket.on("disconnect", () => {

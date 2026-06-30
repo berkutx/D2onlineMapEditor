@@ -24,6 +24,7 @@ import StatusBar from "./StatusBar.vue";
 import CopilotBar from "./CopilotBar.vue";
 import DecorPalette from "./DecorPalette.vue";
 import ObjectActionBar from "./ObjectActionBar.vue";
+import HistoryPanel from "./HistoryPanel.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
 
 const view = useViewStore();
@@ -143,6 +144,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <ToolOptionsBar v-if="currentScenarioId" />
         <ObjectActionBar v-if="toolStore.tool === 'move'" />
         <CopilotBar v-show="view.copilotVisible" />
+        <HistoryPanel />
       </el-main>
       <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="300px">
         <DecorPalette />

@@ -29,7 +29,10 @@ async function boot(): Promise<void> {
   bootMessage.value = "Loading assets and map…";
   try {
     const list = await mapStore.loadScenarios();
-    const target = mapStore.pickDefaultScenario(list);
+    // a share link (?map=<id>) opens that exact map — and so joins its collaboration room
+    const shared = new URLSearchParams(window.location.search).get("map");
+    const target =
+      (shared && list.find((m) => m.id === shared)) || mapStore.pickDefaultScenario(list);
     if (!target) {
       bootMessage.value = "No scenarios available on the server.";
       ElMessage.warning("No scenarios found. Use File ▸ Open map once any exist.");

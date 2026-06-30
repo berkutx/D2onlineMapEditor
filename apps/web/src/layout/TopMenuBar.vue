@@ -8,19 +8,39 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { ElMessage, ElNotification } from "element-plus";
-import { Check, Moon, Sunny } from "@element-plus/icons-vue";
+import { Check, Moon, Sunny, Share } from "@element-plus/icons-vue";
 import type { ScenarioEntry, ValidationReport } from "@d2/socket-contract";
 import { createNewMap } from "../services/api";
 import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
+import { useCollabStore } from "../stores/collabStore";
 import { getScene } from "../canvas/sceneHolder";
 
 const mapStore = useMapStore();
 const viewStore = useViewStore();
 const editStore = useEditStore();
+const collabStore = useCollabStore();
 
 const { scenarios, currentScenarioId, status } = storeToRefs(mapStore);
+const { peerList } = storeToRefs(collabStore);
+
+/** Copy a share link (?map=<id>) so a collaborator opens the same map = same room. */
+async function shareLink(): Promise<void> {
+  const id = currentScenarioId.value;
+  if (!id) return;
+  const url = `${window.location.origin}${window.location.pathname}?map=${id}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    ElMessage.success("Ссылка для совместного редактирования скопирована");
+  } catch {
+    ElMessage.info(url);
+  }
+}
+
+/** Two-letter initials for a peer avatar. */
+const initials = (name: string): string =>
+  name.replace(/[^\p{L}\p{N}]/gu, " ").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 const { dirty, undoable, redoable } = storeToRefs(editStore);
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
@@ -248,6 +268,23 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
     <span v-if="mapStore.mapName" class="map-title">{{ mapStore.mapName }}</span>
     <el-tag v-if="status === 'loading'" size="small" type="warning" effect="plain" round>Загрузка…</el-tag>
     <el-tag v-if="dirty" size="small" type="warning" effect="plain" round>есть правки</el-tag>
+
+    <!-- collaborators present in this map's room (each in their assigned colour) -->
+    <span v-if="peerList.length" class="peers">
+      <el-tooltip
+        v-for="p in peerList"
+        :key="p.socketId"
+        :content="p.name"
+        placement="bottom"
+        :show-after="200"
+      >
+        <span class="peer-avatar" :style="{ background: p.color }">{{ initials(p.name) }}</span>
+      </el-tooltip>
+    </span>
+    <el-tooltip content="Скопировать ссылку для совместного редактирования" placement="bottom" :show-after="300">
+      <el-button class="appearance" text :icon="Share" :disabled="!currentScenarioId" @click="shareLink()" />
+    </el-tooltip>
+
     <el-tooltip :content="dark ? 'Светлая тема' : 'Тёмная тема'" placement="bottom" :show-after="300">
       <el-button class="appearance" text :icon="dark ? Sunny : Moon" @click="viewStore.toggleDark()" />
     </el-tooltip>
@@ -322,6 +359,25 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
   gap: var(--d2-sp-2);
   background: var(--el-bg-color);
   border-bottom: var(--d2-hairline);
+}
+.peers {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 2px;
+}
+.peer-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 1.5px var(--el-bg-color);
 }
 .app-title {
   display: flex;

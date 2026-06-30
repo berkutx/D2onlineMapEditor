@@ -102,3 +102,20 @@ export function applyOps(doc: MapDocument, ops: readonly EditOp[]): MapDocument 
   for (const op of ops) d = applyOp(d, op).doc;
   return d;
 }
+
+/**
+ * Build the FORWARD ops that undo `ops` when applied to `doc` — i.e. each op's inverse,
+ * in reverse order. Used by collaboration: an undo / history-revert is sent to peers as a
+ * normal forward edit (append-inverse model), never as a history rewind. `doc` must be the
+ * state the ops were last applied to (their inverses are computed against the walk).
+ */
+export function invertOps(doc: MapDocument, ops: readonly EditOp[]): EditOp[] {
+  let d = doc;
+  const inverses: EditOp[] = [];
+  for (const op of ops) {
+    const applied = applyOp(d, op);
+    inverses.push(applied.inverse);
+    d = applied.doc;
+  }
+  return inverses.reverse();
+}

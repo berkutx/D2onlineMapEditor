@@ -10,6 +10,8 @@ import {
   getGround,
   getForest,
   applyOp,
+  applyOps,
+  invertOps,
   applyEditsToBytes,
   roundTripSemantic,
   roadBrush,
@@ -79,6 +81,24 @@ describe("@d2/map-edit applyOp + inverse", () => {
     expect(d2.objects.find((o) => o.id === victim.id)).toBeUndefined();
     const { doc: d3 } = applyOp(d2, inverse);
     expect(d3.objects.find((o) => o.id === victim.id)).toEqual(victim);
+  });
+
+  it("invertOps undoes a whole batch (collab undo / history-revert primitive)", () => {
+    const i1 = 5 * doc.size + 5;
+    const i2 = 6 * doc.size + 6;
+    const before1 = doc.terrain.cells[i1]!;
+    const before2 = doc.terrain.cells[i2]!;
+    const ops: EditOp[] = [
+      { kind: "setCell", x: 5, y: 5, value: setTerrain(before1.value, (before1.terrain + 1) % 5) },
+      { kind: "setCell", x: 6, y: 6, value: setTerrain(before2.value, (before2.terrain + 2) % 5) },
+    ];
+    const inv = invertOps(doc, ops); // captured against the pre-op doc
+    const applied = applyOps(doc, ops);
+    expect(applied.terrain.cells[i1]!.value).toBe(ops[0]!.kind === "setCell" ? ops[0]!.value : -1);
+    // applying the inverse batch restores the exact original cells
+    const restored = applyOps(applied, inv);
+    expect(restored.terrain.cells[i1]).toEqual(before1);
+    expect(restored.terrain.cells[i2]).toEqual(before2);
   });
 });
 
