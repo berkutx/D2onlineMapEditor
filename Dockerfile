@@ -13,13 +13,13 @@ ARG VITE_COPILOT_LLM=off
 
 # whole workspace (the .dockerignore keeps node_modules / dist / public/assets / var out)
 COPY . .
+# NOTE: no `pnpm -r run gen` here — it only emits JSON schemas for the Python pipeline (not
+# needed at runtime) AND it must run AFTER build:tsc (socket-contract's gen imports
+# @d2/map-schema/dist). No `|| true`: any build failure must fail the image, not ship empty dist.
 RUN pnpm install --frozen-lockfile \
- && pnpm -r run gen \
  && pnpm run build:tsc \
  && pnpm --filter @d2/server run build \
- && VITE_BASE="$VITE_BASE" VITE_COPILOT_LLM="$VITE_COPILOT_LLM" pnpm --filter @d2/web run build \
- && pnpm prune --prod \
- && pnpm store prune || true
+ && VITE_BASE="$VITE_BASE" VITE_COPILOT_LLM="$VITE_COPILOT_LLM" pnpm --filter @d2/web run build
 
 # ---- runtime ----
 FROM node:22-alpine

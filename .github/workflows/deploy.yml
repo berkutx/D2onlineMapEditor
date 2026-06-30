@@ -34,9 +34,11 @@ jobs:
           SSHOPTS="-i key -p 22 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           REMOTE="$SERVER_USERNAME@$SERVER_HOST"
           ssh $SSHOPTS "$REMOTE" 'mkdir -p ~/d2editor'
-          # ship code only; node_modules/dist/assets/volumes are excluded (built in-image / persisted)
+          # ship code only; node_modules/dist/assets/volumes are excluded (built in-image /
+          # persisted). CRITICAL: exclude ./key — the SSH private key written above must NEVER
+          # be tarred to the server.
           tar czf - \
-            --exclude='.git' --exclude='.github' --exclude='node_modules' \
+            --exclude='./key' --exclude='.git' --exclude='.github' --exclude='node_modules' \
             --exclude='**/node_modules' --exclude='dist' --exclude='**/dist' \
             --exclude='public/assets' --exclude='var' --exclude='scratchpad' \
             . | ssh $SSHOPTS "$REMOTE" 'tar xzf - -C ~/d2editor'
