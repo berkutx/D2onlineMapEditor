@@ -35,8 +35,10 @@ COPY . .
 # build artifact is missing, instead of shipping a container that crash-loops on a missing dist.
 RUN pnpm install --frozen-lockfile \
  && pnpm run build:tsc \
+ && pnpm --filter @d2/mapgen run build \
  && pnpm --filter @d2/server run build \
  && VITE_BASE="$VITE_BASE" VITE_COPILOT_LLM="$VITE_COPILOT_LLM" pnpm --filter @d2/web run build \
+ && test -f packages/mapgen/dist/index.js \
  && test -f apps/server/dist/index.js \
  && test -f apps/web/dist/index.html
 
