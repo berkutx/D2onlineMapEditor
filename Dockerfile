@@ -14,8 +14,10 @@ RUN corepack enable
 ARG VITE_BASE=/map/
 ARG VITE_COPILOT_LLM=off
 
-ENV NODE_ENV=production \
-    HOST=0.0.0.0 \
+# NOTE: do NOT set NODE_ENV=production before `pnpm install` — pnpm then SKIPS devDependencies
+# (typescript, vite, vue-tsc), so the build can't run (`tsc: not found`). It is set after the
+# build (and also via compose) for the runtime.
+ENV HOST=0.0.0.0 \
     PORT=3000 \
     BASE_PATH=/map \
     COPILOT_LLM=off \
@@ -38,6 +40,7 @@ RUN pnpm install --frozen-lockfile \
  && test -f apps/server/dist/index.js \
  && test -f apps/web/dist/index.html
 
+ENV NODE_ENV=production
 EXPOSE 3000
 # run node directly; node resolves @d2/* via the workspace node_modules symlinks. WORKDIR /app
 # so config.REPO_ROOT (resolve(__dirname,'..','..','..')) is /app.
