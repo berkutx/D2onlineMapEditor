@@ -155,7 +155,8 @@ function garr6(o: { garrison?: (GarrUnit | null)[] } | null | undefined): (GarrU
 const visitorStack = computed(() => {
   const o = obj.value;
   const ref = o && (o.type === "capital" || o.type === "village") ? o.stackRef : undefined;
-  return ref ? editStore.liveDoc?.objects.find((x) => x.id === ref) ?? null : null;
+  const s = ref ? editStore.liveDoc?.objects.find((x) => x.id === ref) : undefined;
+  return s && s.type === "stack" ? s : null;
 });
 const defenseGarrison = computed(() => garr6(obj.value as { garrison?: (GarrUnit | null)[] } | null));
 const visitorGarrison = computed(() => garr6(visitorStack.value as { garrison?: (GarrUnit | null)[] } | null));
@@ -228,40 +229,72 @@ const ORDER_OPTIONS = [
   { value: 4, label: "Атаковать" }, { value: 7, label: "Бродить" }, { value: 8, label: "Идти" },
   { value: 9, label: "Защищать" }, { value: 10, label: "Берсерк" },
 ];
+// Standard D2 slot→item-category eligibility (user-approved; the exact rule isn't in the RE'd
+// sources, so this is centralized for easy tweaking). LmagItm catKeys per slot.
+const ARTIFACT_CATS = ["L_ARMOR", "L_WEAPON", "L_JEWEL"];
+const BATTLE_CATS = ["L_POTION_BOOST", "L_POTION_HEAL", "L_POTION_REVIVE", "L_SCROLL", "L_WAND", "L_ORB", "L_TALISMAN"];
 const EQUIP_SLOTS = [
-  { key: "tome", label: "Книга" }, { key: "battle1", label: "Боевой 1" }, { key: "battle2", label: "Боевой 2" },
-  { key: "artifact1", label: "Артефакт 1" }, { key: "artifact2", label: "Артефакт 2" }, { key: "boots", label: "Сапоги" },
+  { key: "tome", label: "Книга", cats: ["L_SPECIAL"] },
+  { key: "battle1", label: "Боевой 1", cats: BATTLE_CATS },
+  { key: "battle2", label: "Боевой 2", cats: BATTLE_CATS },
+  { key: "artifact1", label: "Артефакт 1", cats: ARTIFACT_CATS },
+  { key: "artifact2", label: "Артефакт 2", cats: ARTIFACT_CATS },
+  { key: "boots", label: "Сапоги", cats: ["L_TRAVEL_ITEM"] },
 ];
+const EMPTY_REFS = new Set(["000000", "G000000000"]);
+/** Stack banner-item slot (the BANNER field; separate from the faction banner = subRace). */
+function bannerVal(): string {
+  const b = obj.value?.type === "stack" ? obj.value.banner : undefined;
+  return b && !EMPTY_REFS.has(b) ? b : NEUTRAL;
+}
+function setStackBanner(id: string | null): void {
+  if (obj.value?.type !== "stack") return;
+  editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { banner: id && id !== NEUTRAL ? id : "000000" } }]);
+}
+type StackLike = { id: string; garrison?: (GarrUnit | null)[]; leaderCell?: number } | null | undefined;
 const stackGarrison = computed(() => garr6(obj.value?.type === "stack" ? (obj.value as { garrison?: (GarrUnit | null)[] }) : null));
 const stackCount = computed(() => stackGarrison.value.filter(Boolean).length);
 const stackLeaderCell = computed(() => (obj.value?.type === "stack" ? obj.value.leaderCell ?? -1 : -1));
 
-function commitStack(g: (GarrUnit | null)[], leaderCell: number): void {
-  if (obj.value?.type !== "stack") return;
+// Formation editors, parameterized by the target stack — reused by the Отряд section AND the city
+// VISITOR (which is itself a linked stack). Editing the formation rewrites UNIT_/POS_ (new MidUnit
+// instances) + LEADER_ID; we always send garrison + leaderCell + the recomputed leaderImage.
+function commitStackFormation(st: StackLike, g: (GarrUnit | null)[], leaderCell: number): void {
+  if (!st) return;
   let lc = leaderCell;
   if (lc < 0 || !g[lc]) lc = g.findIndex(Boolean); // keep the leader on a filled cell
   const leaderImage = lc >= 0 ? g[lc]?.unit : undefined;
-  editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { garrison: g, leaderCell: lc, leaderImage } }]);
+  editStore.commit([{ kind: "patchObject", id: st.id, fields: { garrison: g, leaderCell: lc, leaderImage } }]);
 }
-function setStackUnit(cell: number, unitId: string): void {
-  const g = stackGarrison.value.map((c) => (c ? { ...c } : null));
+function stackSetUnit(st: StackLike, cell: number, unitId: string): void {
+  if (!st) return;
+  const g = garr6(st).map((c) => (c ? { ...c } : null));
   g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
-  commitStack(g, stackLeaderCell.value);
+  commitStackFormation(st, g, st.leaderCell ?? -1);
 }
-function clearStackCell(cell: number): void {
-  const g = stackGarrison.value.map((c) => (c ? { ...c } : null));
+function stackClearCell(st: StackLike, cell: number): void {
+  if (!st) return;
+  const g = garr6(st).map((c) => (c ? { ...c } : null));
   g[cell] = null;
-  commitStack(g, stackLeaderCell.value);
+  commitStackFormation(st, g, st.leaderCell ?? -1);
 }
-function setStackStat(cell: number, key: "level" | "hp", v: number): void {
-  const g = stackGarrison.value.map((c) => (c ? { ...c } : null));
+function stackSetStat(st: StackLike, cell: number, key: "level" | "hp", v: number): void {
+  if (!st) return;
+  const g = garr6(st).map((c) => (c ? { ...c } : null));
   const c = g[cell];
   if (!c) return;
   g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
-  commitStack(g, stackLeaderCell.value);
+  commitStackFormation(st, g, st.leaderCell ?? -1);
 }
-function setStackLeader(cell: number): void {
-  commitStack(stackGarrison.value.map((c) => (c ? { ...c } : null)), cell);
+function stackSetLeader(st: StackLike, cell: number): void {
+  if (!st) return;
+  commitStackFormation(st, garr6(st).map((c) => (c ? { ...c } : null)), cell);
+}
+/** Jump the inspector to the city's visiting hero stack for full editing (order/equip/inventory). */
+function openVisitor(): void {
+  const o = obj.value;
+  const ref = o && (o.type === "capital" || o.type === "village") ? o.stackRef : undefined;
+  if (ref) toolStore.setSelectedId(ref);
 }
 function equipVal(slot: string): string {
   const eq = obj.value?.type === "stack" ? (obj.value.equip as Record<string, string | undefined> | undefined) : undefined;
@@ -276,6 +309,16 @@ function setStackEquip(slot: string, id: string | null): void {
     if (v) equip[s.key] = v;
   }
   editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { equip } }]);
+}
+/** Stack carried inventory — global GItem template ids (MidItem instances re-created on export). */
+const stackInventory = computed(() => (obj.value?.type === "stack" ? obj.value.inventory ?? [] : []));
+function stackAddItem(template: string): void {
+  if (obj.value?.type !== "stack") return;
+  editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { inventory: [...stackInventory.value, template] } }]);
+}
+function stackRemoveItem(i: number): void {
+  if (obj.value?.type !== "stack") return;
+  editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { inventory: stackInventory.value.filter((_, k) => k !== i) } }]);
 }
 
 /** Parse a ruin CASH reward "G0600:R0000:Y0000:E0000:W0000:B0000" into labelled amounts.
@@ -590,29 +633,36 @@ function close(): void {
           :garrison="stackGarrison"
           :count="stackCount"
           :leader-cell="stackLeaderCell"
-          @set-unit="setStackUnit"
-          @clear="clearStackCell"
-          @set-stat="setStackStat"
-          @set-leader="setStackLeader"
+          @set-unit="(c, u) => stackSetUnit(obj, c, u)"
+          @clear="(c) => stackClearCell(obj, c)"
+          @set-stat="(c, k, v) => stackSetStat(obj, c, k, v)"
+          @set-leader="(c) => stackSetLeader(obj, c)"
         />
 
         <div class="section-head">Экипировка лидера</div>
         <div class="equip-grid">
+          <div class="equip-row">
+            <label>Знамя</label>
+            <ItemPicker :model-value="bannerVal()" nullable title="Знамя" :allow-cats="['L_BANNER']" @update:model-value="(v: string | null) => setStackBanner(v)" />
+          </div>
           <div v-for="s in EQUIP_SLOTS" :key="s.key" class="equip-row">
             <label>{{ s.label }}</label>
-            <ItemPicker :model-value="equipVal(s.key)" nullable :title="s.label" @update:model-value="(v: string | null) => setStackEquip(s.key, v)" />
+            <ItemPicker :model-value="equipVal(s.key)" nullable :title="s.label" :allow-cats="s.cats" @update:model-value="(v: string | null) => setStackEquip(s.key, v)" />
           </div>
         </div>
 
         <div class="ro-block">
-          <div class="ro-label">Инвентарь <span class="muted">({{ (obj.inventory ?? []).length }})</span></div>
-          <div v-if="(obj.inventory ?? []).length" class="items-list">
-            <div v-for="(it, i) in obj.inventory" :key="`${it}#${i}`" class="item-line">
-              <ItemIcon :id="it" :cat="itemStore.get(it)?.cat ?? -1" :size="22" />
+          <div class="ro-label">Инвентарь <span class="muted">({{ stackInventory.length }})</span></div>
+          <div v-if="stackInventory.length" class="items-list">
+            <div v-for="(it, i) in stackInventory" :key="`${it}#${i}`" class="item-line">
+              <ItemIcon :id="it" :cat="itemStore.get(it)?.cat ?? -1" :size="24" />
               <span class="item-name" :title="itemStore.nameOf(it) || it">{{ itemStore.nameOf(it) || it }}</span>
+              <span v-if="itemStore.get(it)?.gold" class="item-gold">{{ itemStore.get(it)?.gold }}</span>
+              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="stackRemoveItem(i)" />
             </div>
           </div>
           <div v-else class="muted sm">пусто</div>
+          <ItemPicker class="item-add" trigger-label="+ Добавить предмет" title="Добавить предмет в инвентарь" @pick="stackAddItem" />
         </div>
       </template>
 
@@ -640,10 +690,19 @@ function close(): void {
         <div class="section-head">
           Гость (герой)
           <span class="muted">{{ visitorStack ? `(${visitorCount}/6)` : "— нет —" }}</span>
+          <el-button v-if="visitorStack" class="visitor-open" size="small" text @click="openVisitor">Свойства гостя →</el-button>
         </div>
-        <GarrisonEditor v-if="visitorStack" :garrison="visitorGarrison" :count="visitorCount" readonly />
+        <GarrisonEditor
+          v-if="visitorStack"
+          :garrison="visitorGarrison"
+          :count="visitorCount"
+          :leader-cell="(visitorStack.leaderCell ?? -1)"
+          @set-unit="(c, u) => stackSetUnit(visitorStack, c, u)"
+          @clear="(c) => stackClearCell(visitorStack, c)"
+          @set-stat="(c, k, v) => stackSetStat(visitorStack, c, k, v)"
+          @set-leader="(c) => stackSetLeader(visitorStack, c)"
+        />
         <p v-else class="muted sm">В городе нет гостящего героя. Добавление гостя — в редакторе отряда.</p>
-        <p v-if="visitorStack" class="muted xs">Редактирование гостя — в свойствах отряда (скоро).</p>
       </template>
 
     </div>

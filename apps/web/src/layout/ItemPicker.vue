@@ -27,8 +27,9 @@ const props = withDefaults(
     nullable?: boolean;
     title?: string;
     triggerLabel?: string;
+    allowCats?: string[]; // restrict to these LmagItm catKeys (equip slots); undefined = all
   }>(),
-  { modelValue: null, nullable: false, title: "Выбор предмета", triggerLabel: "" },
+  { modelValue: null, nullable: false, title: "Выбор предмета", triggerLabel: "", allowCats: undefined },
 );
 const emit = defineEmits<{
   "update:modelValue": [string | null];
@@ -83,20 +84,26 @@ interface DisplayGroup { key: string; label: string; items: ItemEntry[] }
 
 /** Groups for the active mode, before the search filter. */
 const baseGroups = computed<DisplayGroup[]>(() => {
-  if (mode.value === "bonus") return itemStore.bonusGroups;
-  if (mode.value === "alpha") {
-    return [{ key: "all", label: "Все предметы", items: [...itemStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
-  }
-  if (mode.value === "cost") {
-    return COST_BUCKETS.map((b) => ({
-      key: b.key,
-      label: b.label,
-      items: itemStore.all
-        .filter((e) => e.gold >= b.lo && e.gold <= b.hi)
-        .sort((a, c) => c.gold - a.gold || a.name.localeCompare(c.name, "ru")),
-    })).filter((g) => g.items.length);
-  }
-  return itemStore.groups.map((g) => ({ key: g.catKey || String(g.cat), label: g.label, items: g.items }));
+  const raw: DisplayGroup[] = (() => {
+    if (mode.value === "bonus") return itemStore.bonusGroups;
+    if (mode.value === "alpha") {
+      return [{ key: "all", label: "Все предметы", items: [...itemStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
+    }
+    if (mode.value === "cost") {
+      return COST_BUCKETS.map((b) => ({
+        key: b.key,
+        label: b.label,
+        items: itemStore.all
+          .filter((e) => e.gold >= b.lo && e.gold <= b.hi)
+          .sort((a, c) => c.gold - a.gold || a.name.localeCompare(c.name, "ru")),
+      })).filter((g) => g.items.length);
+    }
+    return itemStore.groups.map((g) => ({ key: g.catKey || String(g.cat), label: g.label, items: g.items }));
+  })();
+  // Equip-slot restriction: keep only items whose category is allowed for this slot.
+  if (!props.allowCats?.length) return raw;
+  const ok = new Set(props.allowCats);
+  return raw.map((g) => ({ ...g, items: g.items.filter((it) => ok.has(it.catKey)) })).filter((g) => g.items.length);
 });
 
 /** Sub-group options for the active mode (drives the subcategory combobox). */

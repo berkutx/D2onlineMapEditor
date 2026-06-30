@@ -653,6 +653,30 @@ describe("@d2/map-edit stack (Отряд) editor", () => {
     expect(validateMap(re).ok).toBe(true);
     expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
   });
+
+  it("banner slot round-trip (BANNER ref)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const st = doc.objects.find((o) => o.type === "stack") as { id: string };
+    const ops: EditOp[] = [{ kind: "patchObject", id: st.id, fields: { banner: "G000IG0001" } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect((re.objects.find((o) => o.id === st.id) as { banner?: string }).banner).toBe("G000IG0001");
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("inventory round-trip (mid-block ITEM_ID list — add an item)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const st = doc.objects.find((o) => o.type === "stack") as { id: string; inventory?: string[] };
+    const inventory = [...(st.inventory ?? []), "G000IG0001"];
+    const ops: EditOp[] = [{ kind: "patchObject", id: st.id, fields: { inventory } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect((re.objects.find((o) => o.id === st.id) as { inventory?: string[] }).inventory).toEqual(inventory);
+    expect(re.objects.length).toBe(doc.objects.length); // MidItem instances aren't placed objects
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
 });
 
 describe("@d2/map-edit project (journal + undo/redo)", () => {

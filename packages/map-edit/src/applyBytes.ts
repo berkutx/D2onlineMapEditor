@@ -65,6 +65,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   const listEdits: ItemListEdit[] = [];
   /** Chest items edits, keyed by objId so the LAST list per chest wins (no stray blocks). */
   const chestItemOps = new Map<string, string[]>();
+  /** Stack inventory edits (MidStack ITEM_ID list — mid-block, distinct splice). */
+  const stackItemOps = new Map<string, string[]>();
   /** Site stock list edits (merchant/mage/mercs) — literal QTY_ tag, global ids. */
   const qtyListEdits: QtyListEdit[] = [];
   /** Garrison/formation edits, keyed by object id (last wins): the 6 formation cells, plus an
@@ -151,6 +153,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           const STR_TAG: Record<string, string> = {
             name: isRuin ? "TITLE" : isSite ? "TXT_TITLE" : "NAME_TXT", desc: isRuin ? "DESC" : "DESC_TXT",
             owner: "OWNER", subRace: "SUBRACE", item: "ITEM", looter: "LOOTER", reward: "CASH",
+            banner: "BANNER", // stack banner-item slot (growable ref; "000000" = empty)
           };
           const handled = new Set<string>();
           for (const [key, tag] of Object.entries(INT_TAG)) {
@@ -199,6 +202,14 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
               throw new Error(`applyEditsToBytes: 'items' on unexpected object ${o.typeName}`);
             }
             handled.add("items");
+          }
+          // stack (Отряд) carried inventory — a MidStack ITEM_ID list (global templates, MidItem
+          // instances re-created on export like a chest, but spliced mid-block; see below).
+          if (Array.isArray(f.inventory)) {
+            if (!o) throw new Error(`applyEditsToBytes: patchObject ${op.id} unknown object`);
+            if (o.typeName !== "MidStack") throw new Error(`applyEditsToBytes: 'inventory' on unexpected object ${o.typeName}`);
+            stackItemOps.set(op.id, (f.inventory as unknown[]).map(String));
+            handled.add("inventory");
           }
           // mage spell stock (QTY_SPELL — global Gspells ids).
           if (Array.isArray(f.spells)) {
@@ -264,6 +275,20 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     listEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds });
   }
 
+  // Stack inventory: same MidItem-instance re-creation as a chest, but the list is mid-block so it
+  // gets the dedicated stackItemListSplice (precise count-tag locator + span-walk) on export.
+  const stackListEdits: ItemListEdit[] = [];
+  for (const [objId, templates] of stackItemOps) {
+    const o = raw.objectById.get(objId);
+    if (!o) throw new Error(`applyEditsToBytes: stack inventory edit for unknown object ${objId}`);
+    const instanceIds = templates.map((template) => {
+      const second = nextIM++;
+      appends.push(itemFrame(raw.version, second, template));
+      return `${raw.version}IM${hex4(second)}`;
+    });
+    stackListEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds });
+  }
+
   // Resolve each edited fort's FINAL garrison (last write won): create a fresh MidUnit instance
   // per filled formation cell and write the fort's embedded UNIT_0..5/POS_0..5 (fixed-width
   // refField/int splices). Old MidUnit instances are left orphaned (harmless). The .sg stores
@@ -318,8 +343,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   // unchanged by the splice itself; new MidItem blocks are appended below). Done before the
   // append/replace passes; those re-scan markers + the header count (all preserved). Both
   // splice kinds share one highest-offset-first pass so cross-object offsets stay valid.
-  if (stringEdits.length || listEdits.length || qtyListEdits.length) {
-    bytes = spliceVariableFields(bytes, stringEdits, listEdits, qtyListEdits);
+  if (stringEdits.length || listEdits.length || qtyListEdits.length || stackListEdits.length) {
+    bytes = spliceVariableFields(bytes, stringEdits, listEdits, qtyListEdits, stackListEdits);
   }
   const frames = appends.filter((f): f is Uint8Array => f !== null);
   if (frames.length) bytes = appendBlocks(bytes, frames);

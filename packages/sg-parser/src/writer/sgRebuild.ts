@@ -277,6 +277,43 @@ function itemListSplice(buf: ByteBuffer, e: ItemListEdit): Splice {
   return { start, end: e.fieldsEnd, region: w.toBytes() };
 }
 
+/**
+ * Stack (MidStack) inventory ITEM_ID list. Unlike a chest, the list sits MID-block (after
+ * POS_0..5, before STACK_ID/SRCTMPL_ID) and the objId ALSO appears as the GROUP_ID/STACK_ID
+ * ref VALUES — so neither lastIndexOf nor "replace to fieldsEnd" works. The bare count tag is
+ * the objId occurrence NOT preceded by a refField length prefix (0B 00 00 00) — every ref VALUE
+ * is, the count tag (preceded by POS_5's int32 ∈ {-1..5}) is not. We then walk the OLD N entries
+ * to bound the span and replace EXACTLY that region.
+ */
+function stackCountTagOffset(buf: ByteBuffer, objId: string, from: number, end: number): number {
+  let at = buf.indexOf(objId, from);
+  while (at >= 0 && at < end) {
+    const p = at - 4;
+    const isRefValue =
+      p >= 0 && buf.bytes[p] === 0x0b && buf.bytes[p + 1] === 0 && buf.bytes[p + 2] === 0 && buf.bytes[p + 3] === 0;
+    if (!isRefValue) return at;
+    at = buf.indexOf(objId, at + 1);
+  }
+  return -1;
+}
+function stackItemListSplice(buf: ByteBuffer, e: ItemListEdit): Splice {
+  const start = stackCountTagOffset(buf, e.objId, e.fieldsFrom, e.fieldsEnd);
+  if (start < 0) {
+    throw new Error(`spliceVariableFields: stack item-list count tag ${e.objId} not found in [${e.fieldsFrom},${e.fieldsEnd}]`);
+  }
+  let p = start + e.objId.length;
+  const oldCount = buf.readInt32LE(p);
+  p += 4;
+  for (let i = 0; i < oldCount; i++) {
+    p += "ITEM_ID".length;
+    p += 4 + buf.readInt32LE(p); // int32 len + payload (10-char id + NUL)
+  }
+  const w = new ByteWriter();
+  w.cp(e.objId).i32(e.instanceIds.length);
+  for (const id of e.instanceIds) w.refField("ITEM_ID", id);
+  return { start, end: p, region: w.toBytes() }; // replace ONLY the old list span (mid-block safe)
+}
+
 /** Apply pre-computed splices to `bytes`, HIGHEST-offset-first so lower ranges stay valid. */
 function applySplices(bytes: Uint8Array, splices: Splice[]): Uint8Array {
   if (splices.length === 0) return bytes;
@@ -306,13 +343,18 @@ export function spliceVariableFields(
   stringEdits: readonly StringFieldEdit[],
   itemListEdits: readonly ItemListEdit[] = [],
   qtyListEdits: readonly QtyListEdit[] = [],
+  stackItemListEdits: readonly ItemListEdit[] = [],
 ): Uint8Array {
-  if (stringEdits.length === 0 && itemListEdits.length === 0 && qtyListEdits.length === 0) return bytes;
+  if (
+    stringEdits.length === 0 && itemListEdits.length === 0 &&
+    qtyListEdits.length === 0 && stackItemListEdits.length === 0
+  ) return bytes;
   const buf = new ByteBuffer(bytes);
   const splices = [
     ...stringEdits.map((e) => stringFieldSplice(buf, e)),
     ...itemListEdits.map((e) => itemListSplice(buf, e)),
     ...qtyListEdits.map((e) => qtyListSplice(buf, e)),
+    ...stackItemListEdits.map((e) => stackItemListSplice(buf, e)),
   ];
   return applySplices(bytes, splices);
 }

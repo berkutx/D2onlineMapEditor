@@ -15,6 +15,8 @@ import { sortBy, nextSort, type SortKey } from "./pickerSort";
 const SORT_KEYS: SortKey<SpellEntry>[] = [
   { key: "name", label: "А-Я", get: (e) => e.name },
   { key: "level", label: "ур.", get: (e) => e.level, desc: true },
+  { key: "damage", label: "урон", get: (e) => e.damage ?? 0, desc: true },
+  { key: "heal", label: "лечение", get: (e) => e.heal ?? 0, desc: true },
 ];
 
 const props = withDefaults(
