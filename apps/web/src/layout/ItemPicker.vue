@@ -12,6 +12,14 @@ import { ref, computed, watch } from "vue";
 import { Search, CircleClose } from "@element-plus/icons-vue";
 import { useItemStore, type ItemEntry } from "../stores/itemStore";
 import ItemIcon from "./ItemIcon.vue";
+import PickerSortHeader from "./PickerSortHeader.vue";
+import { sortBy, nextSort, type SortKey } from "./pickerSort";
+
+/** Sort keys for the per-group sort control (shown in every subcategory header). */
+const SORT_KEYS: SortKey<ItemEntry>[] = [
+  { key: "name", label: "А-Я", get: (e) => e.name },
+  { key: "gold", label: "цена", get: (e) => e.gold, desc: true },
+];
 
 const props = withDefaults(
   defineProps<{
@@ -42,12 +50,23 @@ const MODE_OPTIONS = [
   { label: "А-Я", value: "alpha" },
 ];
 
+const sortKey = ref<string>("name");
+const sortDir = ref<1 | -1>(1);
+function setSort(key: string): void {
+  const n = nextSort(SORT_KEYS, { key: sortKey.value, dir: sortDir.value }, key);
+  sortKey.value = n.key;
+  sortDir.value = n.dir;
+}
+const activeSort = computed(() => SORT_KEYS.find((k) => k.key === sortKey.value));
+
 watch(open, (v) => {
   if (v) {
     void itemStore.load();
     query.value = "";
     mode.value = "cat";
     subFilter.value = "all";
+    sortKey.value = "name";
+    sortDir.value = 1;
   }
 });
 watch(mode, () => { subFilter.value = "all"; }); // sub-groups change with the mode
@@ -88,13 +107,15 @@ const groups = computed<DisplayGroup[]>(() => {
   const q = query.value.trim().toLowerCase();
   let base = baseGroups.value;
   if (subFilter.value !== "all") base = base.filter((g) => g.key === subFilter.value);
-  if (!q) return base.filter((g) => g.items.length);
+  const sk = activeSort.value;
+  const dir = sortDir.value;
+  if (!q) return base.filter((g) => g.items.length).map((g) => ({ ...g, items: sortBy(g.items, sk, dir) }));
   const out: DisplayGroup[] = [];
   for (const g of base) {
     const items = g.items.filter(
       (it) => it.name.toLowerCase().includes(q) || (it.effect ?? "").toLowerCase().includes(q) || it.id.toLowerCase().includes(q),
     );
-    if (items.length) out.push({ ...g, items });
+    if (items.length) out.push({ ...g, items: sortBy(items, sk, dir) });
   }
   return out;
 });
@@ -169,7 +190,14 @@ function clear(): void {
       <div v-else class="ip-list">
         <div v-if="!resultCount" class="ip-status">Ничего не найдено</div>
         <template v-for="g in groups" :key="g.key">
-          <div class="ip-group">{{ g.label }} <span class="ip-count">{{ g.items.length }}</span></div>
+          <PickerSortHeader
+            :label="g.label"
+            :count="g.items.length"
+            :sort-keys="SORT_KEYS"
+            :sort-key="sortKey"
+            :sort-dir="sortDir"
+            @sort="setSort"
+          />
           <button
             v-for="it in g.items"
             :key="it.id"

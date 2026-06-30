@@ -8,6 +8,14 @@ import { ref, computed, watch } from "vue";
 import { Search } from "@element-plus/icons-vue";
 import { useSpellStore, type SpellEntry, type SpellGroup } from "../stores/spellStore";
 import SpellIcon from "./SpellIcon.vue";
+import PickerSortHeader from "./PickerSortHeader.vue";
+import { sortBy, nextSort, type SortKey } from "./pickerSort";
+
+/** Sort keys for the per-group sort control (shown in every subcategory header). */
+const SORT_KEYS: SortKey<SpellEntry>[] = [
+  { key: "name", label: "А-Я", get: (e) => e.name },
+  { key: "level", label: "ур.", get: (e) => e.level, desc: true },
+];
 
 const props = withDefaults(
   defineProps<{ title?: string; triggerLabel?: string }>(),
@@ -28,12 +36,23 @@ const MODE_OPTIONS = [
   { label: "А-Я", value: "alpha" },
 ];
 
+const sortKey = ref<string>("level");
+const sortDir = ref<1 | -1>(1);
+function setSort(key: string): void {
+  const n = nextSort(SORT_KEYS, { key: sortKey.value, dir: sortDir.value }, key);
+  sortKey.value = n.key;
+  sortDir.value = n.dir;
+}
+const activeSort = computed(() => SORT_KEYS.find((k) => k.key === sortKey.value));
+
 watch(open, (v) => {
   if (v) {
     void spellStore.load();
     query.value = "";
     mode.value = "cat";
     subFilter.value = "all";
+    sortKey.value = "level";
+    sortDir.value = 1;
   }
 });
 watch(mode, () => { subFilter.value = "all"; });
@@ -55,13 +74,15 @@ const groups = computed<DisplayGroup[]>(() => {
   const q = query.value.trim().toLowerCase();
   let base = baseGroups.value;
   if (subFilter.value !== "all") base = base.filter((g) => g.key === subFilter.value);
-  if (!q) return base.filter((g) => g.spells.length);
+  const sk = activeSort.value;
+  const dir = sortDir.value;
+  if (!q) return base.filter((g) => g.spells.length).map((g) => ({ ...g, spells: sortBy(g.spells, sk, dir) }));
   const out: DisplayGroup[] = [];
   for (const g of base) {
     const spells = g.spells.filter(
       (s) => s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.desc ?? "").toLowerCase().includes(q),
     );
-    if (spells.length) out.push({ ...g, spells });
+    if (spells.length) out.push({ ...g, spells: sortBy(spells, sk, dir) });
   }
   return out;
 });
@@ -92,7 +113,14 @@ function choose(id: string): void {
       <div v-else class="sp-list">
         <div v-if="!resultCount" class="sp-status">Ничего не найдено</div>
         <template v-for="g in groups" :key="g.key">
-          <div class="sp-group">{{ g.label }} <span class="sp-count">{{ g.spells.length }}</span></div>
+          <PickerSortHeader
+            :label="g.label"
+            :count="g.spells.length"
+            :sort-keys="SORT_KEYS"
+            :sort-key="sortKey"
+            :sort-dir="sortDir"
+            @sort="setSort"
+          />
           <button
             v-for="s in g.spells"
             :key="s.id"
