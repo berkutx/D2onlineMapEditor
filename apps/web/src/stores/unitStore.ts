@@ -30,7 +30,7 @@ export interface UnitGroup {
   units: UnitEntry[];
 }
 
-/** RU labels for the authoritative LunitC unit-category enum. */
+/** RU labels for the authoritative LunitC unit-category enum (group headings, plural). */
 export const UNIT_CAT_LABELS: Record<string, string> = {
   L_SOLDIER: "Воины",
   L_LEADER: "Герои",
@@ -39,6 +39,19 @@ export const UNIT_CAT_LABELS: Record<string, string> = {
   L_NOBLE: "Дворяне",
   L_ILLUSION: "Иллюзии",
 };
+
+/** Singular role labels for a single unit row. The SAME creature often has several Gunit
+ *  records differing only by role (e.g. Мизраэль exists as L_GUARDIAN and L_SOLDIER) — showing
+ *  the role is what tells those otherwise-identical-looking rows apart. */
+export const UNIT_ROLE_LABELS: Record<string, string> = {
+  L_SOLDIER: "Воин",
+  L_LEADER: "Герой",
+  L_GUARDIAN: "Страж",
+  L_SUMMON: "Призыв",
+  L_NOBLE: "Дворянин",
+  L_ILLUSION: "Иллюзия",
+};
+export const roleLabel = (catKey: string): string => UNIT_ROLE_LABELS[catKey] ?? "";
 
 /** RU labels for the LleadC leader-subtype enum (heroes only). */
 export const UNIT_LEADER_LABELS: Record<string, string> = {

@@ -10,7 +10,7 @@
  */
 import { ref, computed, watch } from "vue";
 import { Search, CircleClose } from "@element-plus/icons-vue";
-import { useUnitStore, type UnitEntry, type UnitGroup } from "../stores/unitStore";
+import { useUnitStore, roleLabel, type UnitEntry, type UnitGroup } from "../stores/unitStore";
 import UnitIcon from "./UnitIcon.vue";
 import PickerSortHeader from "./PickerSortHeader.vue";
 import { sortBy, nextSort, type SortKey } from "./pickerSort";
@@ -20,6 +20,8 @@ const SORT_KEYS: SortKey<UnitEntry>[] = [
   { key: "name", label: "А-Я", get: (u) => u.name },
   { key: "level", label: "ур.", get: (u) => u.level, desc: true },
   { key: "hp", label: "HP", get: (u) => u.hp, desc: true },
+  { key: "armor", label: "бр.", get: (u) => u.armor, desc: true },
+  { key: "leadership", label: "лид.", get: (u) => u.leadership, desc: true },
 ];
 
 const props = withDefaults(
@@ -180,7 +182,10 @@ function clear(): void {
             <UnitIcon :id="u.id" :level="u.level" :subrace-id="u.subraceId" :size="30" />
             <span class="up-text">
               <span class="up-name">{{ u.name || u.id }}</span>
-              <span class="up-meta">{{ u.race }} · ур.{{ u.level }} · {{ u.hp }} HP</span>
+              <span class="up-meta">
+                {{ u.race }}<template v-if="roleLabel(u.catKey)"> · {{ roleLabel(u.catKey) }}</template>
+                · ур.{{ u.level }} · {{ u.hp }} HP · бр.{{ u.armor }}<template v-if="u.leadership"> · лид.{{ u.leadership }}</template>
+              </span>
             </span>
           </button>
         </template>
