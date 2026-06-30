@@ -3,7 +3,10 @@
 # d2mapeditor.online/map (dashboard path-ingress -> http://d2editor:3000); the app strips the
 # /map base itself (BASE_PATH). The 253 MB atlas set is NOT baked — it is mounted from a
 # volume at /app/public/assets (see docker-compose.yml). Scenarios are baked (deploy/scenarios).
-FROM node:22-alpine AS build
+#
+# Single stage (build + run in one image) for reliability — a beta-acceptable size trade for not
+# depending on a multi-stage COPY of the pnpm-symlinked workspace. Optimize to multi-stage later.
+FROM node:22-alpine
 WORKDIR /app
 RUN corepack enable
 
@@ -11,19 +14,6 @@ RUN corepack enable
 ARG VITE_BASE=/map/
 ARG VITE_COPILOT_LLM=off
 
-# whole workspace (the .dockerignore keeps node_modules / dist / public/assets / var out)
-COPY . .
-# NOTE: no `pnpm -r run gen` here — it only emits JSON schemas for the Python pipeline (not
-# needed at runtime) AND it must run AFTER build:tsc (socket-contract's gen imports
-# @d2/map-schema/dist). No `|| true`: any build failure must fail the image, not ship empty dist.
-RUN pnpm install --frozen-lockfile \
- && pnpm run build:tsc \
- && pnpm --filter @d2/server run build \
- && VITE_BASE="$VITE_BASE" VITE_COPILOT_LLM="$VITE_COPILOT_LLM" pnpm --filter @d2/web run build
-
-# ---- runtime ----
-FROM node:22-alpine
-WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
@@ -35,10 +25,20 @@ ENV NODE_ENV=production \
     UPLOAD_DIR=/app/var/uploads \
     LLM_DIR=/app/var/llm
 
-# bring over the built workspace (server+packages dist, web/dist, pruned node_modules, scenarios)
-COPY --from=build /app /app
+# whole workspace (the .dockerignore keeps node_modules / dist / public/assets / var out)
+COPY . .
+# Build packages (tsc -b), then the server (tsc -p -> apps/server/dist), then the web (vite ->
+# apps/web/dist). No `pnpm -r run gen` (JSON schemas for the Python pipeline; not needed at
+# runtime, and it must run after build:tsc). The `test -f` lines fail the image LOUDLY if either
+# build artifact is missing, instead of shipping a container that crash-loops on a missing dist.
+RUN pnpm install --frozen-lockfile \
+ && pnpm run build:tsc \
+ && pnpm --filter @d2/server run build \
+ && VITE_BASE="$VITE_BASE" VITE_COPILOT_LLM="$VITE_COPILOT_LLM" pnpm --filter @d2/web run build \
+ && test -f apps/server/dist/index.js \
+ && test -f apps/web/dist/index.html
 
 EXPOSE 3000
-# run node directly (no corepack/pnpm at runtime); node resolves @d2/* via the workspace
-# node_modules symlinks. WORKDIR /app so config.REPO_ROOT resolves to /app.
+# run node directly; node resolves @d2/* via the workspace node_modules symlinks. WORKDIR /app
+# so config.REPO_ROOT (resolve(__dirname,'..','..','..')) is /app.
 CMD ["node", "apps/server/dist/index.js"]
