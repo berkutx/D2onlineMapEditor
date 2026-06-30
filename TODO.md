@@ -46,6 +46,19 @@ Things intentionally postponed (decided 2026-06-26). Order is rough priority.
 - **`apps/web` has no vitest tests** -> `pnpm -r run test` exits non-zero on web ("no test files").
   Pre-existing; consider `vitest run --passWithNoTests` for the web test script.
 
+## Collaboration & editor follow-ups (deferred 2026-06-30)
+- **Events editor** — the one remaining big object type not yet editable (triggers/effects). Research the
+  `.sg` event block layout on bitbucket before touching the writer.
+- **Collab: history-revert action** — the shared History panel is read-only. To add "откатить отсюда"
+  (single + chain), each history entry must carry its INVERSE captured at apply time (today only my own
+  ops capture inverses, in `editStore.myUndo`; peer ops via `applyIncoming` don't). Store the inverse per
+  entry in `collabStore`, then revert = `editStore.commit(inverse)` (broadcasts as a forward op).
+- **Collab: share a pre-join local draft** — on `join`, the client's existing local journal stays on top
+  locally but is NOT pushed to the server, so a peer won't see drafts made before joining. Decide: push
+  `activeOps` on join (risk: double-apply on reconnect) vs. discard vs. prompt.
+- **Locations: on-canvas drag-resize handles** — radius field already resizes "relative to center"; canvas
+  handles are polish.
+
 ## Animation (by need, with a size optimization to consider first)
 - Sprite animation is off by default (`viewStore.animate`). Turning it on must drive
   stack walk/idle, animated forts/crystals/landmarks, the cursor highlight, etc. at the
