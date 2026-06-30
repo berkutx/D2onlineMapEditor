@@ -146,6 +146,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
             morale: "MORALE", regen: "REGEN_B", growth: "GROWTH_T", resource: "RESOURCE",
             // stack (Отряд) scalar fields:
             order: "ORDER", facing: "FACING", move: "MOVE", creatLvl: "CREAT_LVL",
+            radius: "RADIUS", // MidLocation size step (0=1×1, 1=3×3, 2=5×5)
           };
           // 2) string fields — ALL via the growable splice (handles same-length compound
           //    ids / CASH AND variable-length user text uniformly; never length-throws).

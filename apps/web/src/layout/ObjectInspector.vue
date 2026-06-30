@@ -60,8 +60,11 @@ const TYPE_LABEL: Record<string, string> = {
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
 const SITE_TYPES = ["merchant", "mage", "trainer", "mercenary"];
 const editable = computed(
-  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", ...SITE_TYPES].includes(obj.value.type),
+  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", "location", ...SITE_TYPES].includes(obj.value.type),
 );
+
+/** MidLocation radius is a size step r → a (2r+1)×(2r+1) cell square. */
+const locationSpan = (r: number): string => `${2 * r + 1}×${2 * r + 1} клеток`;
 
 /** Site sprite key: "G000SI0000" + 4-char type code + image(2). */
 const SITE_CODE: Record<string, string> = { merchant: "MERH", mage: "MAGE", trainer: "TRAI", mercenary: "MERC" };
@@ -673,6 +676,22 @@ function close(): void {
           <el-select :model-value="obj.resource ?? 0" size="small" class="owner-sel" @change="(v: number) => patch({ resource: v })">
             <el-option v-for="(lbl, i) in CRYSTAL_LABELS" :key="i" :label="lbl" :value="i" />
           </el-select>
+        </div>
+      </template>
+
+      <!-- 📍 LOCATION (именованная область) -->
+      <template v-else-if="obj.type === 'location'">
+        <div class="col">
+          <label>Название</label>
+          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+        </div>
+        <div class="row">
+          <label>Радиус</label>
+          <el-input-number :model-value="obj.radius ?? 0" :min="0" :max="20" size="small" controls-position="right" @change="(v: number) => patch({ radius: v ?? 0 })" />
+        </div>
+        <div class="ro-row">
+          <label>Размер области</label>
+          <span class="ro-val">{{ locationSpan(obj.radius ?? 0) }}</span>
         </div>
       </template>
 

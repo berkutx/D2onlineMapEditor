@@ -679,6 +679,22 @@ describe("@d2/map-edit stack (Отряд) editor", () => {
   });
 });
 
+describe("@d2/map-edit location editor", () => {
+  it("name + radius round-trip", () => {
+    const { doc, raw } = parseScenarioRaw(bytes); // Riders
+    const loc = doc.objects.find((o) => o.type === "location") as { id: string };
+    expect(loc).toBeTruthy();
+    const ops: EditOp[] = [{ kind: "patchObject", id: loc.id, fields: { name: "Тестовая область", radius: 3 } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reLoc = re.objects.find((o) => o.id === loc.id) as { name: string; radius: number };
+    expect(reLoc.name).toBe("Тестовая область");
+    expect(reLoc.radius).toBe(3);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+});
+
 describe("@d2/map-edit project (journal + undo/redo)", () => {
   it("pushOp / undo / redo move the cursor and gate activeOps", () => {
     const op1: EditOp = { kind: "setCell", x: 1, y: 1, value: 1 };
