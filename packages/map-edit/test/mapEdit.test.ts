@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { parseScenarioRaw, parseScenario, validateMap } from "@d2/sg-parser";
+import { parseScenarioRaw, parseScenario, validateMap, ByteBuffer, iterateObjects } from "@d2/sg-parser";
 import {
   setTerrain,
   setGround,
@@ -441,6 +441,84 @@ describe("@d2/map-edit garrison + site stocks", () => {
     expect(re.objects.length).toBe(doc.objects.length); // MidUnit instances aren't placed objects
     expect(validateMap(re).ok).toBe(true);
     expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("fort garrison: POS_i is CELL-indexed (cell i = UNIT_[POS_i]), matching D2RSG", () => {
+    // Place units in SCATTERED cells (0 and 3 only) so the slot-vs-cell indexing direction
+    // matters — a slot-indexed writer (the old bug) would mis-encode this and the game would
+    // read it wrong. Decode the written bytes with the GAME formula independently of our reader.
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const cap = doc.objects.find(
+      (o) => o.type === "capital" && (o as { garrison?: unknown[] }).garrison,
+    ) as { id: string };
+    const g: ({ unit: string; level: number; hp: number } | null)[] = [null, null, null, null, null, null];
+    g[0] = { unit: "G000UU0011", level: 1, hp: 50 }; // front-left
+    g[3] = { unit: "G000UU0006", level: 1, hp: 45 }; // back-left
+    const out = applyEditsToBytes(raw, [{ kind: "patchObject", id: cap.id, fields: { garrison: g } }]);
+
+    // Read the fort's raw UNIT_0..5 + POS_0..5 from the written bytes.
+    const bb = new ByteBuffer(out);
+    let fFrom = -1, fEnd = -1;
+    for (const o of iterateObjects(bb)) if (o.id === cap.id) { fFrom = o.fieldsFrom; fEnd = o.fieldsEnd; }
+    expect(fFrom).toBeGreaterThan(0);
+    const readUnit = (i: number): string => {
+      const at = bb.indexOf(`UNIT_${i}`, fFrom);
+      const p = at + `UNIT_${i}`.length;
+      const len = bb.readInt32LE(p);
+      return bb.asciiSlice(p + 4, p + 4 + Math.max(0, len - 1));
+    };
+    const readPos = (i: number): number => {
+      const at = bb.indexOf(`POS_${i}`, fFrom);
+      return bb.readInt32LE(at + `POS_${i}`.length);
+    };
+    expect(bb.indexOf("UNIT_0", fFrom)).toBeLessThan(fEnd);
+    const UNIT = [0, 1, 2, 3, 4, 5].map(readUnit);
+    const POS = [0, 1, 2, 3, 4, 5].map(readPos);
+
+    // Two filled cells pack into the low UNIT_ slots (insertion order = ascending cell).
+    expect(UNIT[0]).toMatch(/UN[0-9a-f]{4}$/); // cell 0's unit instance
+    expect(UNIT[1]).toMatch(/UN[0-9a-f]{4}$/); // cell 3's unit instance
+    expect(UNIT[2]).toBe("G000000000");
+    // POS is CELL-indexed: cell0 -> slot 0, cell3 -> slot 1, the rest empty.
+    expect(POS).toEqual([0, -1, -1, 1, -1, -1]);
+    // GAME formula: cell i = UNIT_[POS_i].
+    expect(UNIT[POS[0]!]).toBe(UNIT[0]); // cell 0 occupant
+    expect(UNIT[POS[3]!]).toBe(UNIT[1]); // cell 3 occupant
+
+    // And our reader agrees: garrison[0] + garrison[3] resolve to the chosen units, rest empty.
+    const re = parseScenario(out);
+    const reCap = re.objects.find((o) => o.id === cap.id) as { garrison: ({ unit: string } | null)[] };
+    expect(reCap.garrison[0]?.unit).toBe("G000UU0011");
+    expect(reCap.garrison[3]?.unit).toBe("G000UU0006");
+    expect(reCap.garrison[1]).toBeNull();
+    expect(reCap.garrison[2]).toBeNull();
+    expect(reCap.garrison[4]).toBeNull();
+    expect(reCap.garrison[5]).toBeNull();
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("fort garrison: re-committing a real fort's garrison unchanged preserves every cell", () => {
+    // Real forts have non-trivial POS permutations; an unchanged rewrite must reproduce the
+    // exact cell->unit mapping (reader+writer agree on the cell-indexed convention).
+    for (const src of [bytes, dragon]) {
+      const { doc, raw } = parseScenarioRaw(src);
+      const forts = doc.objects.filter(
+        (o) => (o.type === "capital" || o.type === "village") &&
+          (o as { garrison?: ({ unit: string } | null)[] }).garrison?.some(Boolean),
+      ) as { id: string; garrison: ({ unit: string; level: number; hp: number } | null)[] }[];
+      if (!forts.length) continue;
+      const ops: EditOp[] = forts.map((ft) => ({
+        kind: "patchObject", id: ft.id,
+        fields: { garrison: ft.garrison.map((c) => (c ? { unit: c.unit, level: c.level, hp: c.hp } : null)) },
+      }));
+      const re = parseScenario(applyEditsToBytes(raw, ops));
+      for (const ft of forts) {
+        const reFt = re.objects.find((o) => o.id === ft.id) as { garrison: ({ unit: string } | null)[] };
+        for (let cell = 0; cell < 6; cell++) {
+          expect(reFt.garrison[cell]?.unit ?? null).toBe(ft.garrison[cell]?.unit ?? null);
+        }
+      }
+    }
   });
 
   it("merchant stock: add an item -> QTY_ITEM list, round-trips", () => {

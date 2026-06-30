@@ -29,21 +29,19 @@ function refOrUndef(s: string | null): string | undefined {
   return s;
 }
 
-/** Read a fort/stack garrison formation: UNIT_0..5 (MidUnit instance) + POS_0..5 (cell 0..5).
- *  Returns a 6-element array indexed by FORMATION CELL -> instance id (null = empty cell). */
+/** Read a fort/stack garrison formation. The .sg stores TWO PARALLEL arrays: UNIT_0..5 =
+ *  the units in INSERTION order (slot index, NOT cell), and POS_0..5 where POS_i = the index
+ *  into UNIT_ of the unit occupying FORMATION CELL i (-1 = empty cell). So **cell i = UNIT_[POS_i]**.
+ *  (Verified verbatim vs D2RSG group.cpp serialize() + D2ModdingToolset unitslotview: even cell =
+ *  front line, odd = back; column = cell/2.) Returns a 6-element array indexed by FORMATION CELL ->
+ *  instance id (null = empty cell). */
 function readGarrison(buf: ByteBuffer, f: number, e: number): (string | null)[] {
+  const units: (string | null)[] = [];
+  for (let i = 0; i < 6; i++) units.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
   const cells: (string | null)[] = [null, null, null, null, null, null];
-  const pending: string[] = []; // filled slots whose POS is -1/duplicate (legacy linked stacks)
   for (let i = 0; i < 6; i++) {
-    const inst = refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e));
-    if (!inst) continue;
     const pos = readDefaultInt(buf, `POS_${i}`, f, e);
-    if (pos !== null && pos >= 0 && pos < 6 && cells[pos] == null) cells[pos] = inst;
-    else pending.push(inst);
-  }
-  for (const inst of pending) {
-    const free = cells.indexOf(null);
-    if (free >= 0) cells[free] = inst;
+    if (pos !== null && pos >= 0 && pos < 6) cells[i] = units[pos] ?? null;
   }
   return cells;
 }

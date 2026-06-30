@@ -239,10 +239,13 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
 
   // Resolve each edited fort's FINAL garrison (last write won): create a fresh MidUnit instance
   // per filled formation cell and write the fort's embedded UNIT_0..5/POS_0..5 (fixed-width
-  // refField/int splices). Old MidUnit instances are left orphaned (harmless). Filled cells
-  // pack into the low slots; POS_i carries the formation cell; empty slots = G000000000/-1.
+  // refField/int splices). Old MidUnit instances are left orphaned (harmless). The .sg stores
+  // two PARALLEL arrays: UNIT_j = units in insertion order (filled cells packed into the low
+  // slots), and POS_i = indexed by FORMATION CELL i, holding the UNIT_ slot of cell i's unit
+  // (-1 = empty cell). So cell i = UNIT_[POS_i] — verified vs D2RSG group.cpp serialize().
   for (const [fortId, cells] of garrisonOps) {
     if (!raw.objectById.get(fortId)) throw new Error(`applyEditsToBytes: garrison edit for unknown object ${fortId}`);
+    const slotOfCell: number[] = [-1, -1, -1, -1, -1, -1];
     let slot = 0;
     for (let cell = 0; cell < 6; cell++) {
       const gu = cells[cell];
@@ -250,13 +253,11 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       const second = nextUN++;
       appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0));
       w.setObjectString(fortId, `UNIT_${slot}`, `${raw.version}UN${hex4(second)}`);
-      w.setObjectInt(fortId, `POS_${slot}`, cell);
+      slotOfCell[cell] = slot;
       slot++;
     }
-    for (; slot < 6; slot++) {
-      w.setObjectString(fortId, `UNIT_${slot}`, "G000000000");
-      w.setObjectInt(fortId, `POS_${slot}`, -1);
-    }
+    for (let s = slot; s < 6; s++) w.setObjectString(fortId, `UNIT_${s}`, "G000000000");
+    for (let cell = 0; cell < 6; cell++) w.setObjectInt(fortId, `POS_${cell}`, slotOfCell[cell] ?? -1);
   }
 
   // Emit added objects at their FINAL position (place + later moves coalesced).
