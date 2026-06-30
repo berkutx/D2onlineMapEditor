@@ -51,12 +51,16 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd ~/d2editor
-            # project name "d2editor" is separate from "d2mapeditor"; --remove-orphans is
-            # scoped to THIS project, so the existing app + tunnel are untouched.
-            docker compose up -d --build --remove-orphans
+            # nuke any stale/orphan container named d2editor (an earlier broken run may have left
+            # a crash-looping one that compose won't replace). Safe: only OUR container by name.
+            docker rm -f d2editor 2>/dev/null || true
+            # project name "d2editor" is separate from "d2mapeditor"; --remove-orphans is scoped
+            # to THIS project, so the existing app + tunnel are untouched. --force-recreate ensures
+            # the new image actually replaces the running container.
+            docker compose up -d --build --force-recreate --remove-orphans
             docker image prune -f
             # surface the container's own logs + fail the deploy if it isn't actually serving
-            sleep 6
+            sleep 8
             echo "=== d2editor logs (tail) ==="
             docker logs --tail 120 d2editor 2>&1 || true
             echo "=== health check (inside the container) ==="
