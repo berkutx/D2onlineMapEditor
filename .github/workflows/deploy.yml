@@ -51,14 +51,16 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd ~/d2editor
-            # nuke any stale/orphan container named d2editor (an earlier broken run may have left
-            # a crash-looping one that compose won't replace). Safe: only OUR container by name.
-            docker rm -f d2editor 2>/dev/null || true
-            # project name "d2editor" is separate from "d2mapeditor"; --remove-orphans is scoped
-            # to THIS project, so the existing app + tunnel are untouched. --force-recreate ensures
-            # the new image actually replaces the running container.
+            # The VPS disk is small + shared with other stacks. Free build cache + dangling images
+            # BEFORE building (NEVER volumes — they hold both sites' data) so the build has room.
+            docker builder prune -af || true
+            docker image prune -f || true
+            # Build the new image while the OLD container keeps serving; --force-recreate swaps it in
+            # only AFTER a successful build (so a failed build never takes /map down). Project name
+            # "d2editor" is separate from "d2mapeditor"; --remove-orphans is scoped to THIS project.
             docker compose up -d --build --force-recreate --remove-orphans
-            docker image prune -f
+            docker image prune -f || true   # drop the now-dangling previous image
+            df -h / | tail -1
             # surface the container's own logs + fail the deploy if it isn't actually serving
             sleep 8
             echo "=== d2editor logs (tail) ==="
