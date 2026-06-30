@@ -6,6 +6,7 @@
  */
 import { computed } from "vue";
 import { useSpriteStore } from "../stores/spriteStore";
+import { assetUrl } from "../services/api";
 
 const props = withDefaults(defineProps<{ spriteKey: string | null; size?: number }>(), {
   spriteKey: null,
@@ -24,7 +25,7 @@ const cropStyle = computed(() => {
   return {
     width: `${r.w}px`,
     height: `${r.h}px`,
-    backgroundImage: `url(/assets/${r.page})`,
+    backgroundImage: `url(${assetUrl(r.page)})`,
     backgroundPosition: `-${r.x}px -${r.y}px`,
     transform: `scale(${scale.value})`,
   };

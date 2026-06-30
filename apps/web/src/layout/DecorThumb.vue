@@ -6,6 +6,7 @@
  */
 import { computed } from "vue";
 import type { DecorThumb } from "../stores/decorStore";
+import { assetUrl } from "../services/api";
 
 const props = withDefaults(defineProps<{ thumb: DecorThumb; size?: number }>(), {
   size: 64,
@@ -16,7 +17,7 @@ const scale = computed(() => Math.min(props.size / props.thumb.w, props.size / p
 const cropStyle = computed(() => ({
   width: `${props.thumb.w}px`,
   height: `${props.thumb.h}px`,
-  backgroundImage: `url(/assets/${props.thumb.page})`,
+  backgroundImage: `url(${assetUrl(props.thumb.page)})`,
   backgroundPosition: `-${props.thumb.x}px -${props.thumb.y}px`,
   transform: `scale(${scale.value})`,
 }));
