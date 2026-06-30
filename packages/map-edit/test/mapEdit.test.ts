@@ -19,6 +19,7 @@ import {
   eraseRoadCells,
   placeMountainOps,
   placeLandmarkOps,
+  placeVisitorOps,
   emptyProject,
   pushOp,
   undo,
@@ -661,6 +662,29 @@ describe("@d2/map-edit stack (Отряд) editor", () => {
     const out = applyEditsToBytes(raw, ops);
     const re = parseScenario(out);
     expect((re.objects.find((o) => o.id === st.id) as { banner?: string }).banner).toBe("G000IG0001");
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("add a visiting hero to a city — new MidStack + STACK link, round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes); // Riders
+    const city = doc.objects.find(
+      (o) => (o.type === "village" || o.type === "capital") && !(o as { stackRef?: string }).stackRef,
+    ) as { id: string; pos: { x: number; y: number }; owner?: string };
+    expect(city).toBeTruthy();
+    const ops = placeVisitorOps(doc, city);
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reCity = re.objects.find((o) => o.id === city.id) as { stackRef?: string };
+    expect(reCity.stackRef).toBeTruthy();
+    const vis = re.objects.find((o) => o.id === reCity.stackRef) as {
+      type: string; inside?: string; garrisoned?: boolean; garrison?: ({ unit: string } | null)[];
+    };
+    expect(vis.type).toBe("stack");
+    expect(vis.inside).toBe(city.id);
+    expect(vis.garrisoned).toBe(true);
+    expect((vis.garrison ?? []).filter(Boolean).length).toBe(0); // empty formation
+    expect(re.objects.length).toBe(doc.objects.length + 1); // exactly one new placed object
     expect(validateMap(re).ok).toBe(true);
     expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
   });

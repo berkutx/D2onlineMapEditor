@@ -9,6 +9,7 @@
 import { computed, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { Close, Delete } from "@element-plus/icons-vue";
+import { placeVisitorOps } from "@d2/map-edit";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
@@ -298,6 +299,12 @@ function openVisitor(): void {
   const o = obj.value;
   const ref = o && (o.type === "capital" || o.type === "village") ? o.stackRef : undefined;
   if (ref) toolStore.setSelectedId(ref);
+}
+/** Add an (empty) visiting hero stack to this city — a new MidStack linked via STACK/INSIDE. */
+function addVisitor(): void {
+  const o = obj.value;
+  if (!o || (o.type !== "capital" && o.type !== "village") || !editStore.liveDoc) return;
+  editStore.commit(placeVisitorOps(editStore.liveDoc, { id: o.id, pos: o.pos, owner: o.owner }));
 }
 function equipVal(slot: string): string {
   const eq = obj.value?.type === "stack" ? (obj.value.equip as Record<string, string | undefined> | undefined) : undefined;
@@ -721,7 +728,10 @@ function close(): void {
           @set-stat="(c, k, v) => stackSetStat(visitorStack, c, k, v)"
           @set-leader="(c) => stackSetLeader(visitorStack, c)"
         />
-        <p v-else class="muted sm">В городе нет гостящего героя. Добавление гостя — в редакторе отряда.</p>
+        <template v-else>
+          <p class="muted sm">В городе нет гостящего героя.</p>
+          <el-button class="item-add" size="small" @click="addVisitor">+ Добавить гостя</el-button>
+        </template>
       </template>
 
     </div>

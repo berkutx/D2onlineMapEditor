@@ -105,6 +105,54 @@ export function unitFrame(
   });
 }
 
+/** A MidStack block frame (code 0x10, short KC) — a fresh EMPTY hero stack, used to add a
+ *  city/capital VISITOR. Body matches D2Stack::data() field order exactly; empty refs are the
+ *  "G000000000" sentinel (verified on real bytes — the struct's "000000" QString defaults
+ *  normalize to it on disk). Formation/leader/items/equip start empty; the editor fills them
+ *  afterwards via the normal garrison/equip/inventory ops on this stack's id. */
+export function stackFrame(
+  version: string,
+  second: number,
+  o: { owner: string; inside: string; subRace?: string; posX: number; posY: number },
+): Uint8Array {
+  const NIL = "G000000000";
+  return emitBlock(version, "MidStack", 0x10, "KC", second, (w, full) => {
+    w.refField("GROUP_ID", full);
+    for (let i = 0; i < 6; i++) w.refField(`UNIT_${i}`, NIL);
+    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, -1);
+    w.defaultInt(full, 0); // carried-items count (tag = own id) = 0
+    w.refField("STACK_ID", full);
+    w.refField("SRCTMPL_ID", NIL);
+    w.refField("LEADER_ID", NIL);
+    w.bool("LEADR_ALIV", true);
+    w.defaultInt("POS_X", o.posX);
+    w.defaultInt("POS_Y", o.posY);
+    w.defaultInt("MORALE", 0);
+    w.defaultInt("MOVE", 20);
+    w.defaultInt("FACING", 0);
+    w.refField("BANNER", NIL);
+    w.refField("TOME", NIL);
+    w.refField("BATTLE1", NIL);
+    w.refField("BATTLE2", NIL);
+    w.refField("ARTIFACT1", NIL);
+    w.refField("ARTIFACT2", NIL);
+    w.refField("BOOTS", NIL);
+    w.refField("OWNER", o.owner);
+    w.refField("INSIDE", o.inside);
+    w.refField("SUBRACE", o.subRace || NIL);
+    w.bool("INVISIBLE", false);
+    w.bool("AI_IGNORE", false);
+    w.defaultInt("UPGCOUNT", 0);
+    w.defaultInt("ORDER", 1); // Normal
+    w.refField("ORDER_TARG", NIL);
+    w.defaultInt("AIORDER", 2); // Stand
+    w.refField("AIORDERTAR", NIL);
+    w.defaultInt("AIPRIORITY", 3);
+    w.defaultInt("CREAT_LVL", 1);
+    w.defaultInt("NBBATTLE", 0);
+  });
+}
+
 /** One mountain entry written into the MidMountains body. */
 export interface MountainEntry {
   x: number;

@@ -16,6 +16,7 @@ import {
   mountainsFrame,
   itemFrame,
   unitFrame,
+  stackFrame,
   replaceBlock,
   spliceVariableFields,
   type SgRaw,
@@ -34,10 +35,14 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   let nextMM = 0;
   let nextIM = 0;
   let nextUN = 0;
+  let nextKC = 0;
   for (const o of raw.objects) {
     if (o.typeName === "MidRoad") {
       const m = /RA([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextRA = Math.max(nextRA, parseInt(m[1]!, 16) + 1);
+    } else if (o.typeName === "MidStack") {
+      const m = /KC([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) nextKC = Math.max(nextKC, parseInt(m[1]!, 16) + 1);
     } else if (o.typeName === "MidLandmark") {
       const m = /MM([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextMM = Math.max(nextMM, parseInt(m[1]!, 16) + 1);
@@ -155,6 +160,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
             name: isRuin ? "TITLE" : isSite ? "TXT_TITLE" : "NAME_TXT", desc: isRuin ? "DESC" : "DESC_TXT",
             owner: "OWNER", subRace: "SUBRACE", item: "ITEM", looter: "LOOTER", reward: "CASH",
             banner: "BANNER", // stack banner-item slot (growable ref; "000000" = empty)
+            stackRef: "STACK", // city → its visiting hero stack (KC id; "G000000000" = none)
           };
           const handled = new Set<string>();
           for (const [key, tag] of Object.entries(INT_TAG)) {
@@ -334,6 +340,18 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
         x: o.pos.x, y: o.pos.y, w: o.w ?? 1, h: o.h ?? 1,
         image: o.image ?? 0, race: o.race ?? 0,
       });
+    } else if (o.type === "stack") {
+      // A visiting hero stack added to a city (empty formation; INSIDE → the city). The
+      // city.STACK link is a separate patchObject (stackRef → STACK). Subsequent unit/equip/
+      // inventory edits target this id via the normal ops.
+      const m = /KC([0-9a-fA-F]{4})$/.exec(o.id);
+      const second = m ? parseInt(m[1]!, 16) : nextKC++;
+      appends.push(stackFrame(raw.version, second, {
+        owner: o.owner ?? "G000000000",
+        inside: o.inside ?? "G000000000",
+        posX: o.pos.x,
+        posY: o.pos.y,
+      }));
     } else {
       throw new Error(`applyEditsToBytes: addObject type '${o.type}' not supported yet (M4)`);
     }

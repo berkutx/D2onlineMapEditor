@@ -23,6 +23,7 @@ export {
   mountainsFrame,
   itemFrame,
   unitFrame,
+  stackFrame,
   replaceBlock,
   spliceStringFields,
   spliceVariableFields,
