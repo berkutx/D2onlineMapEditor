@@ -140,43 +140,48 @@ function chestMoveItem(idx: number, dir: number): void {
   patch({ items });
 }
 
-/** ── Garrison (city + capital): a 2×3 formation by cell 0..5. Even = front line, odd = back
- *  (the D2 convention). Each cell carries a global Gunit id + level + current HP; the bytes
- *  writer re-creates the MidUnit instance + fort UNIT_/POS_ slots on export. */
+/** ── Garrisons. A city/capital has TWO armies (verified vs toolsqt + Riders bytes):
+ *  • DEFENSE — the city's OWN embedded UNIT_/POS_ formation (editable here, on the city id);
+ *  • VISITOR — a separate hero MidStack stationed inside (city.stackRef → that stack). Shown
+ *    read-only for now; full editing comes with the Отряд (stack) editor. Each cell = a global
+ *    Gunit id + level + HP; the writer re-creates the MidUnit instances + UNIT_/POS_ slots. */
 type GarrUnit = { unit: string; level: number; hp: number };
-const GARRISON_CELLS = [
-  { cell: 0, label: "Фронт · лево" },
-  { cell: 2, label: "Фронт · центр" },
-  { cell: 4, label: "Фронт · право" },
-  { cell: 1, label: "Тыл · лево" },
-  { cell: 3, label: "Тыл · центр" },
-  { cell: 5, label: "Тыл · право" },
-];
-function curGarrison(): (GarrUnit | null)[] {
-  const o = obj.value;
-  const g = o && (o.type === "capital" || o.type === "village") ? o.garrison : undefined;
+function garr6(o: { garrison?: (GarrUnit | null)[] } | null | undefined): (GarrUnit | null)[] {
   const out: (GarrUnit | null)[] = [null, null, null, null, null, null];
-  (g ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { unit: c.unit, level: c.level, hp: c.hp }; });
+  (o?.garrison ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { unit: c.unit, level: c.level, hp: c.hp }; });
   return out;
 }
-const garrison = computed(() => curGarrison());
-const garrisonCount = computed(() => garrison.value.filter(Boolean).length);
-function setGarrisonUnit(cell: number, unitId: string): void {
-  const g = curGarrison();
+/** the visiting hero stack stationed inside this city (city.stackRef → a MidStack), if any */
+const visitorStack = computed(() => {
+  const o = obj.value;
+  const ref = o && (o.type === "capital" || o.type === "village") ? o.stackRef : undefined;
+  return ref ? editStore.liveDoc?.objects.find((x) => x.id === ref) ?? null : null;
+});
+const defenseGarrison = computed(() => garr6(obj.value as { garrison?: (GarrUnit | null)[] } | null));
+const visitorGarrison = computed(() => garr6(visitorStack.value as { garrison?: (GarrUnit | null)[] } | null));
+const defenseCount = computed(() => defenseGarrison.value.filter(Boolean).length);
+const visitorCount = computed(() => visitorGarrison.value.filter(Boolean).length);
+
+/** commit a garrison change to a specific object id (the city, for its defense). */
+function commitGarrison(targetId: string, g: (GarrUnit | null)[]): void {
+  editStore.commit([{ kind: "patchObject", id: targetId, fields: { garrison: g } }]);
+}
+function setGarrisonUnitOn(targetId: string, cur: (GarrUnit | null)[], cell: number, unitId: string): void {
+  const g = cur.map((c) => (c ? { ...c } : null));
   g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
-  patch({ garrison: g });
+  commitGarrison(targetId, g);
 }
-function clearGarrisonCell(cell: number): void {
-  const g = curGarrison();
+function clearGarrisonCellOn(targetId: string, cur: (GarrUnit | null)[], cell: number): void {
+  const g = cur.map((c) => (c ? { ...c } : null));
   g[cell] = null;
-  patch({ garrison: g });
+  commitGarrison(targetId, g);
 }
-function setGarrisonStat(cell: number, key: "level" | "hp", v: number): void {
-  const g = curGarrison();
+function setGarrisonStatOn(targetId: string, cur: (GarrUnit | null)[], cell: number, key: "level" | "hp", v: number): void {
+  const g = cur.map((c) => (c ? { ...c } : null));
   const c = g[cell];
   if (!c) return;
   g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
-  patch({ garrison: g });
+  commitGarrison(targetId, g);
 }
 
 /** ── Merchant stock: a list of {id (global GItem), count}. */
@@ -382,13 +387,6 @@ function close(): void {
           <label>Прирост</label>
           <el-input-number :model-value="obj.growth" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ growth: v ?? 0 })" />
         </div>
-        <GarrisonEditor
-          :garrison="garrison"
-          :count="garrisonCount"
-          @set-unit="setGarrisonUnit"
-          @clear="clearGarrisonCell"
-          @set-stat="setGarrisonStat"
-        />
       </template>
 
       <!-- 🏰 CAPITAL (столица) -->
@@ -397,6 +395,10 @@ function close(): void {
           <label>Название</label>
           <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
         </div>
+        <div v-if="obj.desc !== undefined" class="col">
+          <label>Описание</label>
+          <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" @change="(v: string) => patch({ desc: v })" />
+        </div>
         <div class="row">
           <label>Владелец</label>
           <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="setOwner">
@@ -404,13 +406,10 @@ function close(): void {
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
-        <GarrisonEditor
-          :garrison="garrison"
-          :count="garrisonCount"
-          @set-unit="setGarrisonUnit"
-          @clear="clearGarrisonCell"
-          @set-stat="setGarrisonStat"
-        />
+        <div class="row">
+          <label>Приоритет ИИ</label>
+          <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
+        </div>
       </template>
 
       <!-- 🏪 SITE (торговец / маг / тренер / наёмники) -->
@@ -504,6 +503,26 @@ function close(): void {
             <el-option v-for="(lbl, i) in CRYSTAL_LABELS" :key="i" :label="lbl" :value="i" />
           </el-select>
         </div>
+      </template>
+
+      <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
+      <template v-if="obj.type === 'village' || obj.type === 'capital'">
+        <div class="section-head">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
+        <GarrisonEditor
+          :garrison="defenseGarrison"
+          :count="defenseCount"
+          @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
+          @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
+          @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"
+        />
+        <div class="section-divider" />
+        <div class="section-head">
+          Гость (герой)
+          <span class="muted">{{ visitorStack ? `(${visitorCount}/6)` : "— нет —" }}</span>
+        </div>
+        <GarrisonEditor v-if="visitorStack" :garrison="visitorGarrison" :count="visitorCount" readonly />
+        <p v-else class="muted sm">В городе нет гостящего героя. Добавление гостя — в редакторе отряда.</p>
+        <p v-if="visitorStack" class="muted xs">Редактирование гостя — в свойствах отряда (скоро).</p>
       </template>
 
     </div>
@@ -612,6 +631,19 @@ function close(): void {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.section-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  margin-top: var(--d2-sp-2, 8px);
+}
+.section-divider {
+  border-top: var(--d2-hairline, 1px solid var(--el-border-color-lighter));
+  margin: var(--d2-sp-2, 8px) 0 0;
+}
+.xs {
+  font-size: 10px;
 }
 .ro-label {
   font-size: 12px;

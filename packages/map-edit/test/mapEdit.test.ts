@@ -521,6 +521,35 @@ describe("@d2/map-edit garrison + site stocks", () => {
     }
   });
 
+  it("city defense and visitor are SEPARATE armies (no stackRef fallback merge)", () => {
+    const doc = parseScenario(bytes); // Riders
+    const cities = doc.objects.filter((o) => o.type === "village" || o.type === "capital") as {
+      id: string; stackRef?: string; garrison?: ({ unit: string } | null)[];
+    }[];
+    // A city with a visiting stack but EMPTY own defense (Riders village FT0002 'Маргилла').
+    const visited = cities.find((c) => c.stackRef && !(c.garrison ?? []).some(Boolean));
+    expect(visited).toBeTruthy();
+    expect((visited!.garrison ?? []).filter(Boolean).length).toBe(0); // defense stays empty (no merge)
+    const visitor = doc.objects.find((o) => o.id === visited!.stackRef) as {
+      type: string; garrison?: ({ unit: string } | null)[];
+    };
+    expect(visitor?.type).toBe("stack");
+    expect((visitor.garrison ?? []).filter(Boolean).length).toBeGreaterThan(0); // the visitor has its own units
+  });
+
+  it("capital desc + AI priority round-trip", () => {
+    const { doc, raw } = parseScenarioRaw(dragon);
+    const cap = doc.objects.find((o) => o.type === "capital") as { id: string };
+    const ops: EditOp[] = [{ kind: "patchObject", id: cap.id, fields: { desc: "Тест столицы", priority: 5 } }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reCap = re.objects.find((o) => o.id === cap.id) as { desc?: string; priority?: number };
+    expect(reCap.desc).toBe("Тест столицы");
+    expect(reCap.priority).toBe(5);
+    expect(validateMap(re).ok).toBe(true);
+    expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
   it("merchant stock: add an item -> QTY_ITEM list, round-trips", () => {
     const { doc, raw } = parseScenarioRaw(dragon);
     const m = doc.objects.find((o) => o.type === "merchant" && (o as { items?: unknown[] }).items?.length) as {

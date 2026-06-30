@@ -6,7 +6,7 @@
  * Vue owns this DOM chrome; the <MapCanvasHost> is the only seam where PixiJS
  * takes over a div and renders the map.
  */
-import { onMounted, onBeforeUnmount } from "vue";
+import { computed, onMounted, onBeforeUnmount } from "vue";
 import { storeToRefs } from "pinia";
 import { eraseRoadCells } from "@d2/map-edit";
 import { useViewStore } from "../stores/viewStore";
@@ -32,6 +32,13 @@ const decorStore = useDecorStore();
 const editStore = useEditStore();
 const mapStore = useMapStore();
 const { currentScenarioId } = storeToRefs(mapStore);
+
+/** Cities/capitals show a double garrison (2 vertical formations) — give them a wider rail. */
+const inspectorWidth = computed(() => {
+  const id = toolStore.selectedId;
+  const o = id ? editStore.liveDoc?.objects.find((x) => x.id === id) : null;
+  return o && (o.type === "capital" || o.type === "village") ? "320px" : "260px";
+});
 
 /** Global view hotkeys (single keys; ignored while typing or with modifiers). */
 function onKey(e: KeyboardEvent): void {
@@ -140,7 +147,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="300px">
         <DecorPalette />
       </el-aside>
-      <el-aside v-if="toolStore.selectedId" class="app-inspector" width="260px">
+      <el-aside v-if="toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
         <ObjectInspector />
       </el-aside>
     </el-container>

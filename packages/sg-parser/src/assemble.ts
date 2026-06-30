@@ -32,7 +32,7 @@ import {
   type RoadRecord,
 } from "./blocks/index.js";
 import { readDefaultInt, readDefaultString } from "./bytebuffer.js";
-import type { MapDocument, MapObject, PlayerInfo, MapHeader } from "@d2/map-schema";
+import type { MapDocument, MapObject, PlayerInfo, MapHeader, GarrisonUnit } from "@d2/map-schema";
 
 const DEFAULT_SG_VERSION = "S143";
 
@@ -203,27 +203,25 @@ export function assembleDocument(
     }
   }
 
-  // Resolve fort garrisons: the fort's embedded UNIT_0..5/POS_0..5 (MidUnit instances) →
-  // global Gunit ids by formation cell; if the fort uses the legacy linked form (embedded
-  // empty + STACK set), source from that MidStack's formation instead.
-  const stackGarrison = new Map<string, (string | null)[]>(); // stack id -> by-cell instance ids
-  for (const o of acc.objects) {
-    if (o.type === "stack" && o.garrison) stackGarrison.set(o.id, o.garrison as (string | null)[]);
-    if (o.type === "stack") delete o.garrison; // internal: only needed to resolve linked forts
-  }
-  for (const o of acc.objects) {
-    if (o.type !== "village" && o.type !== "capital") continue;
-    let cells = o.garrisonRaw ?? null;
-    if ((!cells || cells.every((c) => c == null)) && o.stackRef) {
-      cells = stackGarrison.get(o.stackRef) ?? cells;
-    }
-    o.garrison = (cells ?? [null, null, null, null, null, null]).map((inst) => {
+  // Resolve garrison formations from their by-cell MidUnit-instance ids to {global Gunit id,
+  // level, hp}. Two DISTINCT armies (verified vs toolsqt D2Capital/D2Village/D2Stack + Riders.sg):
+  //   • a city/capital's embedded UNIT_0..5/POS_0..5 = the city's OWN DEFENSE garrison;
+  //   • a stack's UNIT_/POS_ = its own army — and when that stack is INSIDE a city (city.STACK →
+  //     this stack, stack.INSIDE → the city), it IS the city's separate "visitor" garrison.
+  // Do NOT fall back from an empty city defense to the linked visitor — they are different armies
+  // (e.g. Riders village FT0002 has empty defense + a visitor; the old fallback merged them).
+  const resolveCells = (cells: (string | null)[] | null | undefined): (GarrisonUnit | null)[] =>
+    (cells ?? [null, null, null, null, null, null]).map((inst) => {
       if (!inst) return null;
       const u = acc.unitInstances[inst];
       if (u) return { unit: u.implId ?? inst, level: u.level ?? 1, hp: u.hp ?? 0 };
       return { unit: inst, level: 1, hp: 0 };
     });
-    delete o.garrisonRaw;
+  for (const o of acc.objects) {
+    if (o.type === "stack" || o.type === "village" || o.type === "capital") {
+      o.garrison = resolveCells(o.garrisonRaw);
+      delete o.garrisonRaw;
+    }
   }
 
   // Resolve each fort/capital/village's sprite race from its OWNER player. The

@@ -33,8 +33,11 @@ export const StackObject = z.object({
   garrisoned: z.boolean().optional(), // INSIDE a fort -> editor draws nothing
   order: z.number().int().optional(), // ORDER (1=Normal..3=Guard..); Guard => guard-range overlay
   units: z.array(z.string()).default([]),
-  // formation by cell (POS 0..5) -> MidUnit INSTANCE id; used to resolve a linked fort garrison
-  garrison: z.array(z.string().nullable()).optional(),
+  inside: z.string().optional(), // INSIDE: a city/fort uid this stack is stationed in (a "visitor")
+  // formation by cell (POS 0..5) -> {unit (global Gunit id), level, hp}; the stack's own army.
+  // For a garrisoned/visiting stack this IS the city's "visitor" garrison (edited via the stack id).
+  garrison: z.array(GarrisonUnit.nullable()).optional(),
+  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
 });
 
 export const FortObject = z.object({
@@ -52,11 +55,13 @@ export const CapitalObject = z.object({
   subRace: z.string().optional(), // SUBRACE uid -> MidSubRace (banner)
   bannerIndex: z.number().int().optional(), // resolved subrace banner number
   name: z.string().default(""),
-  // garrison: formation cell (POS 0..5) -> {unit (global Gunit id), level, hp}, resolved from
-  // the embedded UNIT_0..5/POS_0..5 MidUnit instances (or the linked STACK). null = empty cell.
+  desc: z.string().optional(), // DESC_TXT
+  priority: z.number().int().optional(), // AIPRIORITY 0..6
+  // garrison = the city's OWN DEFENSE: formation cell (POS 0..5) -> {unit (global Gunit id),
+  // level, hp}, resolved from the embedded UNIT_0..5/POS_0..5 MidUnit instances. null = empty.
   garrison: z.array(GarrisonUnit.nullable()).optional(),
   garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
-  stackRef: z.string().optional(), // STACK uid (linked-stack garrison form), if any
+  stackRef: z.string().optional(), // STACK uid -> the visiting hero MidStack (the SECOND garrison)
 });
 export const VillageObject = z.object({
   ...base,

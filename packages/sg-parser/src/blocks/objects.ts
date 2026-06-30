@@ -147,11 +147,11 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(leaderUnitId ? { leaderUnitId } : {}),
     ...(banner ? { banner } : {}),
     ...(subRace ? { subRace } : {}),
-    ...(inside ? { garrisoned: true } : {}),
+    ...(inside ? { garrisoned: true, inside } : {}),
     ...(facing !== null ? { facing } : {}),
     ...(order !== null ? { order } : {}),
     units,
-    garrison: readGarrison(buf, f, e), // by-cell instance ids (used to resolve linked fort garrisons)
+    garrisonRaw: readGarrison(buf, f, e), // by-cell instance ids; resolved to garrison in post-pass
   };
 }
 
@@ -177,7 +177,7 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(owner ? { owner } : {}),
     ...(subRace ? { subRace } : {}),
     name,
-    ...(desc ? { desc } : {}),
+    ...(desc !== null ? { desc } : {}), // present-but-empty -> editable; absent -> omit
     tier,
     ...(priority !== null ? { priority } : {}),
     ...(morale !== null ? { morale } : {}),
@@ -197,6 +197,8 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
   const owner = refOrUndef(readDefaultString(buf, "OWNER", f, e));
   const subRace = refOrUndef(readDefaultString(buf, "SUBRACE", f, e));
   const name = readDefaultString(buf, "NAME_TXT", f, e) ?? "";
+  const desc = readDefaultString(buf, "DESC_TXT", f, e);
+  const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   const stackRef = refOrUndef(readDefaultString(buf, "STACK", f, e));
   return {
     type: "capital",
@@ -205,7 +207,9 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(owner ? { owner } : {}),
     ...(subRace ? { subRace } : {}),
     name,
-    garrisonRaw: readGarrison(buf, f, e),
+    ...(desc !== null ? { desc } : {}), // present-but-empty -> editable; absent -> omit
+    ...(priority !== null ? { priority } : {}),
+    garrisonRaw: readGarrison(buf, f, e), // city's OWN defense; resolved in assemble post-pass
     ...(stackRef ? { stackRef } : {}),
   };
 }

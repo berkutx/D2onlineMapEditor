@@ -5,6 +5,7 @@ export type { GroundId } from "./enums.js";
 export { MapCell, TerrainGrid } from "./cells.js";
 export {
   MapObject,
+  GarrisonUnit,
   StackObject,
   FortObject,
   CapitalObject,

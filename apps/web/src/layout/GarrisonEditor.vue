@@ -1,21 +1,25 @@
 <script setup lang="ts">
 /**
- * GarrisonEditor — the city/capital garrison as a real 2×3 battle formation, like the game.
- * Verified vs D2RSG/D2ModdingToolset: columns are POS pairs (0,1),(2,3),(4,5) [column = cell/2];
- * EVEN cells (0,2,4) = FRONT line (toward the enemy), ODD (1,3,5) = BACK line. We draw FRONT on
- * the TOP row, BACK on the bottom, columns left→right (col0,col1,col2). Presentational only: it
- * renders a UnitPicker per cell + level/HP inputs and emits intent; the parent (ObjectInspector)
- * owns the undoable patchObject so all byte-writer-aware logic stays in one place.
+ * GarrisonEditor — a garrison as the in-game VERTICAL formation: 2 columns × 3 rows, with the
+ * RIGHT column = FRONT line (even cells 0/2/4) and the LEFT column = BACK line (odd cells 1/3/5);
+ * rows top→bottom = formation column index (cell/2). Verified vs D2RSG/D2ModdingToolset
+ * (even cell = front, cell/2 = column). DOM order for the 2-col row-major grid = [1,0,3,2,5,4].
+ * Presentational only: emits intent; the parent (ObjectInspector) owns the undoable patchObject.
  */
 import UnitPicker from "./UnitPicker.vue";
+import UnitIcon from "./UnitIcon.vue";
 import { useUnitStore } from "../stores/unitStore";
 
 type GarrUnit = { unit: string; level: number; hp: number };
 
-defineProps<{
-  garrison: (GarrUnit | null)[]; // length 6, by formation cell
-  count: number;
-}>();
+withDefaults(
+  defineProps<{
+    garrison: (GarrUnit | null)[]; // length 6, by formation cell
+    count: number;
+    readonly?: boolean; // visitor garrison is shown read-only until the full Отряд editor lands
+  }>(),
+  { readonly: false },
+);
 const emit = defineEmits<{
   setUnit: [cell: number, unitId: string];
   clear: [cell: number];
@@ -24,15 +28,9 @@ const emit = defineEmits<{
 
 const unitStore = useUnitStore();
 
-// Row-major order for a 3-column grid: front row (even cells) first, then back row (odd cells).
-const CELLS = [
-  { cell: 0, col: "Лево" },
-  { cell: 2, col: "Центр" },
-  { cell: 4, col: "Право" },
-  { cell: 1, col: "Лево" },
-  { cell: 3, col: "Центр" },
-  { cell: 5, col: "Право" },
-];
+// Row-major order for a 2-col grid: each row = one formation column (cell/2); left=back (odd),
+// right=front (even). Row0=[1,0], row1=[3,2], row2=[5,4].
+const CELLS = [1, 0, 3, 2, 5, 4];
 
 function onPick(cell: number, v: string | null): void {
   if (v) emit("setUnit", cell, v);
@@ -42,59 +40,82 @@ function onPick(cell: number, v: string | null): void {
 
 <template>
   <div class="ro-block">
-    <div class="ro-label">Гарнизон <span class="muted">({{ count }}/6)</span></div>
+    <div class="garr-cols"><span>Тыл</span><span>Фронт</span></div>
     <div class="garr-grid">
-      <div v-for="c in CELLS" :key="c.cell" class="garr-cell" :class="{ filled: !!garrison[c.cell] }">
-        <UnitPicker
-          :model-value="garrison[c.cell]?.unit ?? null"
-          nullable
-          :title="`Юнит — ${c.cell % 2 === 0 ? 'фронт' : 'тыл'} · ${c.col.toLowerCase()}`"
-          @update:model-value="(v) => onPick(c.cell, v)"
-        />
-        <div v-if="garrison[c.cell]" class="garr-stats">
+      <div v-for="cell in CELLS" :key="cell" class="garr-cell" :class="{ filled: !!garrison[cell], ro: readonly }">
+        <template v-if="readonly">
+          <div class="garr-ro">
+            <UnitIcon
+              :id="garrison[cell]?.unit ?? null"
+              :level="unitStore.get(garrison[cell]?.unit)?.level"
+              :subrace-id="unitStore.get(garrison[cell]?.unit)?.subraceId ?? -1"
+              :size="22"
+            />
+            <span class="garr-ro-name">{{ garrison[cell] ? unitStore.nameOf(garrison[cell]!.unit) : "—" }}</span>
+          </div>
+          <div v-if="garrison[cell]" class="garr-ro-stats">ур.{{ garrison[cell]!.level }} · {{ garrison[cell]!.hp }} HP</div>
+        </template>
+        <template v-else>
+          <UnitPicker
+            :model-value="garrison[cell]?.unit ?? null"
+            nullable
+            :title="`Юнит — ${cell % 2 === 0 ? 'передняя' : 'задняя'} линия`"
+            @update:model-value="(v) => onPick(cell, v)"
+          />
+          <div v-if="garrison[cell]" class="garr-stats">
           <span class="garr-stat">
             <label>ур.</label>
             <el-input-number
-              :model-value="garrison[c.cell]!.level"
+              :model-value="garrison[cell]!.level"
               :min="1"
               :max="50"
               size="small"
               :controls="false"
-              @change="(v: number) => emit('setStat', c.cell, 'level', v ?? 1)"
+              @change="(v: number) => emit('setStat', cell, 'level', v ?? 1)"
             />
           </span>
           <span class="garr-stat">
             <label>HP</label>
             <el-input-number
-              :model-value="garrison[c.cell]!.hp"
+              :model-value="garrison[cell]!.hp"
               :min="0"
-              :max="unitStore.get(garrison[c.cell]!.unit)?.hp || 9999"
+              :max="unitStore.get(garrison[cell]!.unit)?.hp || 9999"
               size="small"
               :controls="false"
-              @change="(v: number) => emit('setStat', c.cell, 'hp', v ?? 0)"
+              @change="(v: number) => emit('setStat', cell, 'hp', v ?? 0)"
             />
           </span>
-        </div>
+          </div>
+        </template>
       </div>
     </div>
-    <div class="garr-legend"><span>↑ передняя линия</span><span>↓ задняя линия</span></div>
   </div>
 </template>
 
 <style scoped>
 .ro-block { display: flex; flex-direction: column; gap: 4px; }
-.ro-label { font-size: 12px; color: var(--el-text-color-secondary); }
-.muted { color: var(--el-text-color-secondary); }
+.garr-cols {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--d2-sp-1, 4px);
+}
+.garr-cols span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--el-text-color-placeholder);
+  text-align: center;
+}
 .garr-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--d2-sp-1, 4px);
 }
 .garr-cell {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 4px;
+  padding: 5px;
   min-width: 0;
   border: 1px dashed var(--el-border-color);
   border-radius: var(--d2-radius-sm, 6px);
@@ -103,22 +124,47 @@ function onPick(cell: number, v: string | null): void {
   border-style: solid;
   background: var(--el-fill-color-lighter);
 }
-/* the unit picker trigger fills the cell and truncates the name */
+.garr-cell.ro {
+  gap: 2px;
+  padding: 4px 5px;
+}
+.garr-ro {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.garr-ro-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+.garr-ro-stats {
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+  padding-left: 27px;
+}
 .garr-cell :deep(.up-wrap) { width: 100%; }
 .garr-cell :deep(.up-trigger) { width: 100%; justify-content: flex-start; padding: 4px 6px; }
 .garr-cell :deep(.up-trigger-text) { max-width: 100%; }
 .garr-stats {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
 }
 .garr-stat {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  flex: 1 1 0;
+  min-width: 0;
 }
 .garr-stat label {
-  flex: 0 0 22px;
+  flex: 0 0 auto;
   font-size: 10px;
   color: var(--el-text-color-secondary);
 }
@@ -130,12 +176,5 @@ function onPick(cell: number, v: string | null): void {
 .garr-stat :deep(.el-input-number .el-input__inner) {
   text-align: left;
   padding: 0 4px;
-}
-.garr-legend {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--el-text-color-placeholder);
-  padding: 0 2px;
 }
 </style>
