@@ -28,6 +28,9 @@ export const EditorProject = z.object({
   journal: z.array(z.array(EditOp)).default([]),
   /** How many commits are currently applied (undo decrements, redo increments). */
   cursor: z.number().int().nonnegative().default(0),
+  /** Editor-only, optional per-location display captions (object id → text). NOT written to the
+   *  .sg (the game has no such field); shown as a label on the world map. */
+  captions: z.record(z.string(), z.string()).default({}),
   meta: z
     .object({
       name: z.string().optional(),
@@ -49,6 +52,7 @@ export function emptyProject(
     relations: [],
     journal: [],
     cursor: 0,
+    captions: {},
     meta,
   };
 }

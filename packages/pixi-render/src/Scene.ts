@@ -26,7 +26,7 @@ import { AssetStore } from "./AssetStore.js";
 import { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer, type ObjectTables } from "./ObjectLayer.js";
-import { LocationLayer } from "./LocationLayer.js";
+import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
 import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
 import type { LandmarkFootprints } from "./objectSprite.js";
@@ -116,6 +116,8 @@ export class Scene {
   private grid?: GridLayer;
   private objects?: ObjectLayer;
   private locations?: LocationLayer;
+  /** label/highlight inputs (captions, selected id) kept so locations can rebuild in place. */
+  private locOpts: LocationOpts = {};
   private overlay?: OverlayLayer;
   private anim?: AnimationManager;
   private camera?: Camera;
@@ -264,7 +266,7 @@ export class Scene {
 
     // event-location highlights, drawn on top of everything (editor getZ ~1300)
     this.locations = new LocationLayer();
-    this.locations.build(map.objects);
+    this.locations.build(map.objects, this.locOpts);
     this.world.addChild(this.locations.view);
 
     // editor-assist overlays (tints / hover outline / cursor) on top of everything
@@ -312,6 +314,19 @@ export class Scene {
     this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
     this.updateRenderMode();
     this.renderNow(); // paint immediately — rAF is throttled when the pointer is off-canvas
+  }
+
+  /**
+   * Rebuild the location highlights + labels in place from an edited document plus the
+   * editor's label inputs (captions, the selected object id). Cheap (a few Graphics/Text);
+   * call on object edits and whenever the caption/selection changes. `opts` is merged into
+   * the kept state so a later buildScene re-applies the same labels.
+   */
+  updateLocations(map: MapDocument, opts?: LocationOpts): void {
+    if (opts) this.locOpts = { ...this.locOpts, ...opts };
+    if (!this.locations) return;
+    this.locations.build(map.objects, this.locOpts);
+    this.renderNow();
   }
 
   /**

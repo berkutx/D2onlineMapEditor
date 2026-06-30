@@ -723,6 +723,15 @@ function close(): void {
           <label>Размер области</label>
           <span class="ro-val">{{ locationSpan(obj.radius ?? 0) }}</span>
         </div>
+        <div class="col">
+          <label>Подпись на карте <span class="muted xs">(своя, не в .sg)</span></label>
+          <el-input
+            :model-value="editStore.captions[obj.id] ?? ''"
+            size="small"
+            placeholder="опционально"
+            @change="(v: string) => editStore.setCaption(obj.id, v)"
+          />
+        </div>
       </template>
 
       <!-- 🪄 ROD (жезл власти) -->

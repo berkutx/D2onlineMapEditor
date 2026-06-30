@@ -123,6 +123,11 @@ async function rebuild(): Promise<void> {
     scene.setLayerVisibility("objects", objectsVisible.value);
     scene.setLayerVisibility("grid", gridVisible.value);
     scene.setLayerVisibility("locations", locationsVisible.value);
+    // seed location labels (own captions + current selection) onto the fresh scene
+    scene.updateLocations(editStore.liveDoc ?? doc, {
+      captions: editStore.captions,
+      selectedId: toolStore.selectedId,
+    });
     for (const cat of OVERLAY_TINTS) scene.setOverlayTint(cat, overlayTints.value[cat]);
     scene.setAnimationEnabled(animate.value);
     // seed the status bar with the initial camera zoom + visible-cell box
@@ -362,24 +367,51 @@ function objectGhostKey(obj: MapObject, cell: { x: number; y: number } | null): 
   }
 }
 
-/** Topmost rendered object whose footprint covers (cx,cy), for the move tool's pick. */
-function objectAtCell(cx: number, cy: number): MapObject | null {
+/** The centered cell span of a location's drawn area — (2r+1)² around its center pos, matching
+ *  LocationLayer's highlight (NOT objectFootprint, which is the editor's r×r placement box). */
+function locationCells(o: MapObject): { x: number; y: number }[] {
+  const r = o.type === "location" ? (o.radius ?? 0) : 0;
+  return footprintCells(o.pos.x - r, o.pos.y - r, 2 * r + 1, 2 * r + 1);
+}
+
+/**
+ * Every selectable object whose footprint covers (cx,cy), in pick-priority order: concrete
+ * objects first (topmost painter-z first), then location overlays (smaller/more specific area
+ * first). Index 0 is what a plain click selects; Shift steps one level down the list — so a
+ * location overlapping a building, or two overlapping locations, can both be reached.
+ */
+function objectsAtCell(cx: number, cy: number): MapObject[] {
   const doc = editStore.liveDoc;
-  if (!doc) return null;
-  let best: MapObject | null = null;
-  let bestZ = -Infinity;
+  if (!doc) return [];
+  const concrete: { o: MapObject; z: number }[] = [];
+  const locs: { o: MapObject; z: number }[] = [];
   for (const o of doc.objects) {
+    if (o.type === "location") {
+      const r = o.radius ?? 0; // centered (2r+1)² area, like the drawn highlight
+      if (cx >= o.pos.x - r && cx <= o.pos.x + r && cy >= o.pos.y - r && cy <= o.pos.y + r) {
+        locs.push({ o, z: -r }); // a smaller location ranks above the bigger one it sits in
+      }
+      continue;
+    }
     if (!VISIBLE_OBJECT_TYPES.has(o.type)) continue;
     const { w, h } = objectFootprint(o, landmarkFootprints);
     if (cx >= o.pos.x && cx < o.pos.x + w && cy >= o.pos.y && cy < o.pos.y + h) {
-      const z = objectZBase(o) + o.pos.x + o.pos.y + h;
-      if (z >= bestZ) {
-        bestZ = z;
-        best = o;
-      }
+      concrete.push({ o, z: objectZBase(o) + o.pos.x + o.pos.y + h });
     }
   }
-  return best;
+  concrete.sort((a, b) => b.z - a.z);
+  locs.sort((a, b) => b.z - a.z);
+  return [...concrete.map((c) => c.o), ...locs.map((l) => l.o)];
+}
+
+/** Pick from the covering candidates: plain click → topmost; Shift → one level below the
+ *  current selection (cycling), so overlapping objects/locations can be reached. */
+function pickAtCell(cx: number, cy: number, shift: boolean): MapObject | null {
+  const list = objectsAtCell(cx, cy);
+  if (!list.length) return null;
+  if (!shift) return list[0]!;
+  const i = list.findIndex((o) => o.id === toolStore.selectedId);
+  return list[(i + 1) % list.length]!;
 }
 
 /** The in-bounds cells of a w×h footprint anchored at (cx,cy). */
@@ -469,6 +501,12 @@ function refreshGhost(cell: { x: number; y: number } | null): void {
   if (toolStore.tool === "move" && toolStore.moveId) {
     const obj = doc?.objects.find((o) => o.id === toolStore.moveId);
     if (!obj || !cell || !doc) return clearPreview();
+    if (obj.type === "location") {
+      const r = obj.radius ?? 0; // centered area follows the cursor; always a valid drop
+      s.setGhost(null, cell);
+      s.setFootprint(footprintCells(cell.x - r, cell.y - r, 2 * r + 1, 2 * r + 1), true);
+      return;
+    }
     const { w, h } = objectFootprint(obj, landmarkFootprints);
     const valid = canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined);
     s.setGhost(objectGhostKey(obj, cell), cell, { w, h }, valid); // null key => footprint only
@@ -559,12 +597,13 @@ function onPointerDown(e: PointerEvent): void {
     }
     return;
   }
-  // move tool: 1st click picks the topmost object; 2nd click drops it at the new cell.
+  // move tool: 1st click picks the object (Shift = one level below, like select); 2nd click
+  // drops it at the new cell. A location's center moves freely (it overlaps objects by design).
   if (toolStore.tool === "move") {
     const cell = cellFromEvent(e);
     if (!cell) return;
     if (!toolStore.moveId) {
-      const hit = objectAtCell(cell.x, cell.y);
+      const hit = pickAtCell(cell.x, cell.y, e.shiftKey);
       if (hit) {
         toolStore.setMoveId(hit.id);
         refreshGhost(cell);
@@ -572,9 +611,11 @@ function onPointerDown(e: PointerEvent): void {
     } else {
       const obj = editStore.liveDoc?.objects.find((o) => o.id === toolStore.moveId);
       if (obj) {
-        const { w, h } = objectFootprint(obj, landmarkFootprints);
-        // invalid drop (off-map / onto another object) -> keep carrying, like the editor
-        if (!canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined)) return;
+        if (obj.type !== "location") {
+          const { w, h } = objectFootprint(obj, landmarkFootprints);
+          // invalid drop (off-map / onto another object) -> keep carrying, like the editor
+          if (!canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined)) return;
+        }
         if (obj.pos.x !== cell.x || obj.pos.y !== cell.y) {
           editStore.commit([{ kind: "moveObject", id: toolStore.moveId, x: cell.x, y: cell.y }]);
         }
@@ -633,12 +674,13 @@ function onPointerUp(e: PointerEvent): void {
     return;
   }
   // select/inspect tool: a click (negligible movement) picks the topmost object → inspector.
+  // Hold Shift to step one level below the current pick (overlapping locations/objects).
   if (toolStore.tool === "select" && selDown) {
     const moved = Math.abs(e.clientX - selDown.x) + Math.abs(e.clientY - selDown.y);
     selDown = null;
     if (moved < 6) {
       const cell = cellFromEvent(e);
-      const hit = cell ? objectAtCell(cell.x, cell.y) : null;
+      const hit = cell ? pickAtCell(cell.x, cell.y, e.shiftKey) : null;
       toolStore.setSelectedId(hit ? hit.id : null);
     }
     return;
@@ -751,9 +793,27 @@ watch(
     if (!s) return;
     const id = toolStore.selectedId;
     const obj = id ? editStore.liveDoc?.objects.find((o) => o.id === id) : null;
-    if (!obj) { s.setSelection([]); return; }
+    // A selected location is highlighted by LocationLayer (yellow accent on its centered
+    // area), so skip the generic footprint outline (which would be the wrong r×r box at pos).
+    if (!obj || obj.type === "location") { s.setSelection([]); return; }
     const { w, h } = objectFootprint(obj, landmarkFootprints);
     s.setSelection(footprintCells(obj.pos.x, obj.pos.y, w, h));
+  },
+);
+
+// Rebuild the LOCATION highlights + labels when an object edit moves/adds/removes a
+// location, when the selection changes (selected location gets its name label + accent),
+// or when an editor-only caption is edited. Cheap (a few Graphics/Text).
+watch(
+  [() => editStore.objectsRev, () => toolStore.selectedId, () => editStore.captions],
+  () => {
+    const s = getScene();
+    if (s && editStore.liveDoc) {
+      s.updateLocations(editStore.liveDoc, {
+        captions: editStore.captions,
+        selectedId: toolStore.selectedId,
+      });
+    }
   },
 );
 

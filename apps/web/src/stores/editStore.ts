@@ -150,6 +150,18 @@ export const useEditStore = defineStore("edit", () => {
     persist();
   }
 
+  /** Editor-only per-object display captions (object id → text); persisted, NOT in the .sg. */
+  const captions = computed<Record<string, string>>(() => project.value?.captions ?? {});
+  function setCaption(id: string, text: string): void {
+    if (!project.value) return;
+    const next = { ...(project.value.captions ?? {}) };
+    const t = text.trim();
+    if (t) next[id] = t;
+    else delete next[id];
+    project.value = { ...project.value, captions: next };
+    persist(); // editor-only metadata: persist without touching the op journal
+  }
+
   async function validate(): Promise<ValidationReport | null> {
     if (!project.value) return null;
     busy.value = true;
@@ -242,6 +254,8 @@ export const useEditStore = defineStore("edit", () => {
     undoEdit,
     redoEdit,
     reset,
+    captions,
+    setCaption,
     validate,
     generate,
     copilot,
