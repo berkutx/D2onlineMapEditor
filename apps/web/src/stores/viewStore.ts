@@ -41,6 +41,8 @@ export const useViewStore = defineStore("view", () => {
   const animate = ref(bool(p.animate, false));
   /** Left "Objects" panel — hidden by default; toggle from the View menu. */
   const objectPanelVisible = ref(bool(p.objectPanelVisible, false));
+  /** Events panel (scenario triggers/effects). Hidden by default; toggle from the View menu. */
+  const eventPanelVisible = ref(bool(p.eventPanelVisible, false));
   /** Debug HUD overlay (FPS / render ms / iso engine). On by default for now. */
   const debugOverlay = ref(bool(p.debugOverlay, true));
   /** Copilot floating command input. Always shown on load (NOT persisted, so it can't get
@@ -101,6 +103,10 @@ export const useViewStore = defineStore("view", () => {
     objectPanelVisible.value = !objectPanelVisible.value;
   }
 
+  function toggleEventPanel(): void {
+    eventPanelVisible.value = !eventPanelVisible.value;
+  }
+
   function toggleDebugOverlay(): void {
     debugOverlay.value = !debugOverlay.value;
   }
@@ -139,7 +145,7 @@ export const useViewStore = defineStore("view", () => {
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
     [terrainVisible, objectsVisible, gridVisible, locationsVisible, animate,
-      objectPanelVisible, debugOverlay, dark, overlayTints],
+      objectPanelVisible, eventPanelVisible, debugOverlay, dark, overlayTints],
     () => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -149,6 +155,7 @@ export const useViewStore = defineStore("view", () => {
           locationsVisible: locationsVisible.value,
           animate: animate.value,
           objectPanelVisible: objectPanelVisible.value,
+          eventPanelVisible: eventPanelVisible.value,
           debugOverlay: debugOverlay.value,
           dark: dark.value,
           overlayTints: overlayTints.value,
@@ -167,6 +174,7 @@ export const useViewStore = defineStore("view", () => {
     locationsVisible,
     animate,
     objectPanelVisible,
+    eventPanelVisible,
     debugOverlay,
     copilotVisible,
     copilotFocusTick,
@@ -182,6 +190,7 @@ export const useViewStore = defineStore("view", () => {
     toggleAnimate,
     toggleLocations,
     toggleObjectPanel,
+    toggleEventPanel,
     toggleDebugOverlay,
     toggleCopilot,
     focusCopilot,

@@ -23,6 +23,7 @@ import ObjectInspector from "./ObjectInspector.vue";
 import StatusBar from "./StatusBar.vue";
 import CopilotBar from "./CopilotBar.vue";
 import DecorPalette from "./DecorPalette.vue";
+import EventsPanel from "./EventsPanel.vue";
 import ObjectActionBar from "./ObjectActionBar.vue";
 import HistoryPanel from "./HistoryPanel.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
@@ -117,6 +118,7 @@ function onKey(e: KeyboardEvent): void {
     case "l": view.toggleLocations(); break;
     case "a": view.toggleAnimate(); break;
     case "p": view.toggleObjectPanel(); break;
+    case "e": view.toggleEventPanel(); break;
     case "d": view.toggleDebugOverlay(); break;
     case "f": getScene()?.fitView(); break;
     case "/": view.focusCopilot(); break;
@@ -152,6 +154,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <el-aside v-if="toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
         <ObjectInspector />
       </el-aside>
+      <el-aside v-if="view.eventPanelVisible" class="app-events" width="340px">
+        <EventsPanel />
+      </el-aside>
     </el-container>
     <el-footer class="app-footer" height="28px">
       <StatusBar />
@@ -176,6 +181,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   overflow: hidden;
 }
 .app-decor {
+  padding: 0;
+  overflow: hidden;
+}
+.app-events {
   padding: 0;
   overflow: hidden;
 }

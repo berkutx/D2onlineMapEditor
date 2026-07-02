@@ -46,7 +46,7 @@ const initials = (name: string): string =>
 const { dirty, undoable, redoable } = storeToRefs(editStore);
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
-  animate, objectPanelVisible, debugOverlay, copilotVisible, dark, overlayTints,
+  animate, objectPanelVisible, eventPanelVisible, debugOverlay, copilotVisible, dark, overlayTints,
 } = storeToRefs(viewStore);
 
 const dialogVisible = ref(false);
@@ -201,6 +201,7 @@ function onSelect(index: string): void {
     case "view:locations": return viewStore.toggleLocations();
     case "view:animate": return viewStore.toggleAnimate();
     case "view:objectPanel": return viewStore.toggleObjectPanel();
+    case "view:eventPanel": return viewStore.toggleEventPanel();
     case "view:debug": return viewStore.toggleDebugOverlay();
     case "view:fit": getScene()?.fitView(); return;
     case "view:copilot": return viewStore.toggleCopilot();
@@ -242,6 +243,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <el-menu-item index="view:locations"><el-icon class="mck" :style="{ visibility: locationsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Локации<span class="mkbd">L</span></el-menu-item>
         <el-menu-item index="view:animate"><el-icon class="mck" :style="{ visibility: animate ? 'visible' : 'hidden' }"><Check /></el-icon>Анимация<span class="mkbd">A</span></el-menu-item>
         <el-menu-item index="view:objectPanel"><el-icon class="mck" :style="{ visibility: objectPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Панель объектов<span class="mkbd">P</span></el-menu-item>
+        <el-menu-item index="view:eventPanel"><el-icon class="mck" :style="{ visibility: eventPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>События<span class="mkbd">E</span></el-menu-item>
         <el-menu-item index="view:debug"><el-icon class="mck" :style="{ visibility: debugOverlay ? 'visible' : 'hidden' }"><Check /></el-icon>Отладка<span class="mkbd">D</span></el-menu-item>
         <el-sub-menu index="view:tints">
           <template #title>Подсветки</template>

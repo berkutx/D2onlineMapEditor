@@ -35,6 +35,7 @@ import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useDecorStore, type DecorEntry } from "../stores/decorStore";
 import { useCollabStore } from "../stores/collabStore";
+import { useEventStore } from "../stores/eventStore";
 import { getAssetStore, getScene, setScene, destroyScene } from "./sceneHolder";
 
 const mapStore = useMapStore();
@@ -44,6 +45,7 @@ const toolStore = useToolStore();
 const editStore = useEditStore();
 const decorStore = useDecorStore();
 const collabStore = useCollabStore();
+const eventStore = useEventStore();
 
 const { currentMap } = storeToRefs(mapStore);
 const { manifest } = storeToRefs(assetStore);
@@ -832,6 +834,16 @@ watch(
         selectedId: toolStore.selectedId,
       });
     }
+  },
+);
+
+// Event overlay: draw the selected event's trigger zones + movement arrows. Re-run when the
+// selection changes or any object/event edit lands (objectsRev bumps on both).
+watch(
+  [() => eventStore.selectedId, () => editStore.objectsRev],
+  () => {
+    const s = getScene();
+    if (s && editStore.liveDoc) s.updateEventOverlay(editStore.liveDoc, eventStore.selected);
   },
 );
 

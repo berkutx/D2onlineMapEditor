@@ -424,16 +424,21 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       raw.objects.filter((o) => o.typeName === "MidEvent").map((o) => o.id),
     );
     const newFrames: Uint8Array[] = [];
+    // a valid on-disk event id for THIS map: <version>EV<hex4> that isn't already taken.
+    const evIdRe = new RegExp(`^${raw.version}EV[0-9a-fA-F]{4}$`);
     for (const [id, ev] of eventOps) {
       if (ev === null) {
         if (existing.has(id)) deletedIds.push(id);
         continue; // deleting a never-appended event is a no-op
       }
-      // an event id the client minted (e.g. "NEW*") gets a real EV id at export time
-      const finalId = existing.has(id) ? id : `${raw.version}EV${hex4(nextEV++)}`;
-      const frame = eventFrame(raw.version, { ...ev, id: finalId });
-      if (existing.has(id)) bytes = replaceBlock(bytes, id, frame);
-      else newFrames.push(frame);
+      if (existing.has(id)) {
+        bytes = replaceBlock(bytes, id, eventFrame(raw.version, ev));
+        continue;
+      }
+      // a NEW event: keep the client's id if it is a valid, non-colliding on-disk id (so the
+      // model and the export agree); otherwise (a temp "NEW*" id) mint a fresh EV id.
+      const finalId = evIdRe.test(id) ? id : `${raw.version}EV${hex4(nextEV++)}`;
+      newFrames.push(eventFrame(raw.version, { ...ev, id: finalId }));
     }
     if (newFrames.length) bytes = appendBlocks(bytes, newFrames);
   }

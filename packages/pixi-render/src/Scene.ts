@@ -27,6 +27,7 @@ import { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
+import { EventOverlayLayer } from "./EventOverlayLayer.js";
 import { PresenceLayer, type PeerMarker } from "./PresenceLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
 import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
@@ -119,6 +120,9 @@ export class Scene {
   private locations?: LocationLayer;
   /** label/highlight inputs (captions, selected id) kept so locations can rebuild in place. */
   private locOpts: LocationOpts = {};
+  private eventOverlay?: EventOverlayLayer;
+  /** The selected event to visualize; kept so a rebuild after an edit re-draws it. */
+  private selectedEvent: import("@d2/map-schema").MapEvent | null = null;
   private presence?: PresenceLayer;
   private overlay?: OverlayLayer;
   private anim?: AnimationManager;
@@ -271,6 +275,11 @@ export class Scene {
     this.locations.build(map.objects, this.locOpts);
     this.world.addChild(this.locations.view);
 
+    // event overlay (trigger zones / movement arrows), above locations
+    this.eventOverlay = new EventOverlayLayer();
+    this.eventOverlay.build(map, this.selectedEvent);
+    this.world.addChild(this.eventOverlay.view);
+
     // collaborator cursors, above locations
     this.presence = new PresenceLayer();
     this.world.addChild(this.presence.view);
@@ -334,6 +343,14 @@ export class Scene {
     if (opts) this.locOpts = { ...this.locOpts, ...opts };
     if (!this.locations) return;
     this.locations.build(map.objects, this.locOpts);
+    this.renderNow();
+  }
+
+  /** Visualize a selected scenario event (trigger zones + movement arrows), or clear (null). */
+  updateEventOverlay(map: MapDocument, ev: import("@d2/map-schema").MapEvent | null): void {
+    this.selectedEvent = ev;
+    if (!this.eventOverlay) return;
+    this.eventOverlay.build(map, ev);
     this.renderNow();
   }
 
@@ -739,6 +756,7 @@ export class Scene {
     if (this.objects && this.anim) this.objects.destroy(this.anim);
     this.overlay?.destroy();
     this.presence?.destroy();
+    this.eventOverlay?.destroy();
     this.locations?.destroy();
     this.grid?.destroy();
     this.terrain?.destroy();
@@ -746,6 +764,7 @@ export class Scene {
     this.camera?.destroy();
     this.objects = undefined;
     this.overlay = undefined;
+    this.eventOverlay = undefined;
     this.locations = undefined;
     this.grid = undefined;
     this.terrain = undefined;
