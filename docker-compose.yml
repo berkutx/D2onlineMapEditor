@@ -36,8 +36,22 @@ networks:
     external: true
     name: d2map_net
 
+# Volumes are named (stable for CI + the asset-upload command) but BIND-BACKED onto the
+# dedicated data disk mounted at /mnt/data (ext4 label d2data, in fstab) — the 9 GB system
+# disk is shared with other stacks and was running out. The device dirs must exist before
+# `up` (they do; see deploy/README.md). Data copied from the old volumes on 2026-07-02.
 volumes:
   d2editor_assets:
     name: d2editor_assets
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/data/d2editor/assets
   d2editor_uploads:
     name: d2editor_uploads
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/data/d2editor/uploads

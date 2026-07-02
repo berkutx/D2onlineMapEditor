@@ -29,6 +29,13 @@ Networks → Tunnels → (your tunnel) → **Public Hostname** → add a rule **
 Rule **order matters**: this `/map` rule must come before the existing `/` → `d2map_app:3456`
 rule, else `/` swallows it. Changes take effect in seconds and are trivially reversible.
 
+### 2.5 Data disk (done 2026-07-02)
+Volumes are bind-backed onto a dedicated disk: `/dev/sda` (ext4, label `d2data`, in fstab
+with `nofail`) mounted at **`/mnt/data`**; our data lives in `/mnt/data/d2editor/{assets,uploads}`
+(the voicer's in `/mnt/data/d2mapeditor/*`). The compose volume NAMES are unchanged, so the
+asset-upload command and CI work as before. If the server is ever rebuilt: create + mount the
+disk and `mkdir -p` those dirs BEFORE `docker compose up` (bind volumes fail on missing dirs).
+
 ### 3. Populate the atlas volume (253 MB, not in git)
 The atlases are built offline from the GOG install and are gitignored, so they ship out of
 band — **once** — from a machine that has `public/assets/` (the dev box). From the repo root:
