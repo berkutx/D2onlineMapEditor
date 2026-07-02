@@ -179,9 +179,14 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   });
 
   const numChunks = (size / 4) * (size / 8);
+  // 15 createMap singletons + the neutral player's own MidgardMapFog (FG0000) — every player
+  // needs a fog block, incl. neutral, or its FOG_ID dangles and the game won't load the map.
+  // + the MidSubRace table (gold-checked as REQUIRED by the game editor): 1 neutral SR + 8
+  // fixed neutral-special SRs (subrace 6..13) + 1 per race player.
   // per race: fog + buildings + spells + player + capital + guardian unit + hero unit +
   // hero stack + 3 capital items = 10 blocks
-  const objCount = 15 + numChunks + races.length * 10;
+  const SUBRACE_FIXED = 9; // neutral SR0000 + 8 neutral-special tail (subrace 6..13)
+  const objCount = 16 + SUBRACE_FIXED + numChunks + races.length * (10 + 1);
 
   const w = new ByteWriter();
 
@@ -333,6 +338,21 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   frame("PlayerBuildings", 0x17, "PB", 0, (f) => w.defaultInt(f, 0));
   frame("PlayerKnownSpells", 0x19, "KS", 0, (f) => w.defaultInt(f, 0));
 
+  // MidgardMapFog per player: entryCount(tag=own id) + per row POS_Y + FOG(size/8, all dark).
+  // EVERY player references its OWN fog by player index (Riders: player n -> FGn) — the neutral
+  // needs one too, else its FOG_ID = FG0000 dangles and the GAME editor refuses to load the map
+  // (createMap alone omits it — this is why a from-scratch base failed the gold check).
+  const emitFog = (second: number): void => {
+    frame("MidgardMapFog", 0x15, "FG", second, (f) => {
+      w.defaultInt(f, size);
+      for (let y = 0; y < size; y++) {
+        w.defaultInt("POS_Y", y);
+        w.cp("FOG").i32(size / 8).repitable(0, size / 8);
+      }
+    });
+  };
+  emitFog(0); // neutral player's fog (FG0000)
+
   // ---- MidgardMapBlock chunks (commitGrid order) ----------------------------
   for (let i = 0; i < size; i += 4) {
     // row origin
@@ -351,18 +371,48 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
     }
   }
 
+  // ---- MidSubRace table (gold-checked REQUIRED: without it the game editor refuses the
+  // map). Verbatim structure extracted from 28 real campaign maps (no guessing):
+  //   • one neutral SR (SUBRACE 5, PLAYER=neutral, BANNER 4) — always SR0000;
+  //   • one per race player (SUBRACE = raceType+1, verified Empire0→1/Undead1→2/Clans2→3/
+  //     Neutral4→5; BANNER = SUBRACE-1) — SR<playerNo>, the id the capital's SUBRACE refs;
+  //   • the fixed neutral-special tail SUBRACE 6..13 (BANNER 5..12), identical across every
+  //     real map — the game's neutral factions (greenskins/marsh/…).
+  // Trailing SUBRACE=0 blocks (per-map, tied to placed neutral units) are omitted: a blank
+  // map has none. Code 0x12, short "SR".
+  const NIL = EMPTY_REF;
+  const subRaceBlock = (second: number, subrace: number, playerId: string, banner: number): void => {
+    frame("MidSubRace", 0x12, "SR", second, (f) => {
+      w.refField("SUBRACE_ID", f);
+      w.defaultInt("SUBRACE", subrace);
+      w.refField("PLAYER_ID", playerId);
+      w.defaultInt("NUMBER", 0);
+      w.stringField("NAME_TXT", "");
+      w.defaultInt("BANNER", banner);
+    });
+  };
+  const neutralId = fullId("PL", 0);
+  subRaceBlock(0, 5, neutralId, 4); // SR0000: neutral player's subrace
+  races.forEach((key, idx) => {
+    const sub = RACES[key].raceType + 1; // verified: subrace = raceType + 1
+    subRaceBlock(idx + 1, sub, fullId("PL", idx + 1), sub - 1); // SR<playerNo>, banner=sub-1
+  });
+  // fixed neutral-special tail SR (subrace 6..13, banner 5..12), ids after the race SRs
+  for (let s = 6; s <= 13; s++) subRaceBlock(races.length + 1 + (s - 6), s, neutralId, s - 1);
+
   // ---- races (D2MapEditor::addRace, verbatim port) --------------------------
   // Block order per addRace's replace/addDataBlock sequence: fog, buildings, spells,
   // player, 3 capital items, guardian unit, hero unit, capital, hero stack.
-  // Ids follow m_idsHelper.nextId per type: neutral owns PL0000/PB0000/KS0000; race
-  // #idx gets PL/PB/KS(idx+1), FG/FT/KC(idx), UN(idx*2, idx*2+1), IM(idx*3..+2).
-  const NIL = EMPTY_REF;
+  // Ids follow m_idsHelper.nextId per type: neutral owns PL0000/PB0000/KS0000/FG0000; race
+  // #idx gets PL/PB/KS/FG(idx+1), FT/KC(idx), UN(idx*2, idx*2+1), IM(idx*3..+2). FOG is keyed
+  // by PLAYER index (matching Riders: player n -> FGn), NOT the race index — the neutral's
+  // FG0000 already exists above. The capital's SUBRACE ref = SR<playerNo> (emitted above).
   races.forEach((key, idx) => {
     const race = RACES[key];
     const spot = capitalSpot(idx, size);
     const playerNo = idx + 1;
     const playerId = fullId("PL", playerNo);
-    const fogId = fullId("FG", idx);
+    const fogId = fullId("FG", playerNo);
     const pbId = fullId("PB", playerNo);
     const ksId = fullId("KS", playerNo);
     const capitalId = fullId("FT", idx);
@@ -375,15 +425,8 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
     const subRaceId = fullId("SR", playerNo);
     const itemIds = [0, 1, 2].map((n) => fullId("IM", idx * 3 + n));
 
-    // fog: entryCount(tag=own id) + per row POS_Y + FOG(len=size/8, all dark) —
-    // addRace fills the bitmap with '\0' (its reveal loop is dead code).
-    frame("MidgardMapFog", 0x15, "FG", idx, (f) => {
-      w.defaultInt(f, size);
-      for (let y = 0; y < size; y++) {
-        w.defaultInt("POS_Y", y);
-        w.cp("FOG").i32(size / 8).repitable(0, size / 8);
-      }
-    });
+    // fog for this race's player (FG = playerNo; the neutral fog FG0000 was emitted above)
+    emitFog(playerNo);
 
     frame("PlayerBuildings", 0x17, "PB", playerNo, (f) => w.defaultInt(f, 0));
     frame("PlayerKnownSpells", 0x19, "KS", playerNo, (f) => w.defaultInt(f, 0));

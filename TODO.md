@@ -28,6 +28,33 @@ Things intentionally postponed (decided 2026-06-26). Order is rough priority.
 - **M4:** buildings/ruins (needs the growable
   writer: object insert/delete + framing/count fixups + cp1251 string emit). **M5:** relations +
   cascade move (drag-with-bindings, Alt to detach). **M6:** region-regen agent scaffold.
+- **GAME-EDITOR GOLD CHECK (2026-07-02): from-scratch maps still DON'T load in ScenEdit.**
+  Ran the actual game editor (ScenEdit.exe, loads from `Game/Exports/`) on createBlankMap output.
+  Error: «Ошибка запуска редактора сценариев» for 0-race AND race maps. Our 3-tier validator +
+  byte round-trip are self-consistent but the game is stricter. Findings (all byte-verified,
+  no guessing):
+  - **FIXED — dangling neutral fog:** the neutral MidPlayer references FOG_ID=FG0000 but
+    createMap emitted NO fog block → dangling ref. Now every player (incl. neutral) gets its own
+    MidgardMapFog, keyed by player index (Riders: player n → FGn). Race fogs renumbered to
+    playerNo (were colliding with race-index).
+  - **FIXED — missing MidSubRace table:** capitals reference SUBRACE=SR#### with no MidSubRace
+    block emitted. Extracted the deterministic table from 28 real campaign maps: 1 neutral SR
+    (SUBRACE 5, BANNER 4) + 1 per race player (SUBRACE = raceType+1 verified Empire0→1/Undead1→2/
+    Clans2→3/Neutral4→5; BANNER = SUBRACE−1) + the fixed neutral-special tail SUBRACE 6..13
+    (BANNER 5..12, identical across every map). Capital.SUBRACE = SR<playerNo> matches.
+  - **RULED OUT — block order:** D2MapModel::save writes m_blocks in INSERTION order (QList,
+    foreach, no sort — confirmed from source); the loader is two-pass, so forward refs / order
+    don't matter.
+  - **RULED OUT — header layout:** MapHeaderBlock::data() order confirmed from source; our header
+    is byte-identical to Riders except the offset field (2720 vs 2800, both = (playerCount+67)*40).
+    `_playersData` is positioned per source (after the padding-size i32, before S143OB0000).
+  - **STILL FAILS after both fixes** — remaining defect is opaque without the game's internal load
+    error. Candidates to investigate next: exact `_playersData` byte content/position vs a real
+    map at the same absolute offset; whether ScenEdit requires MidSubRace trailing SUBRACE=0
+    blocks; whether a from-scratch map needs to have been through the game's own save once. Repro
+    scripts: scratchpad {findpd,hdrfull,typeorder,subracecmp,race2subrace}.mjs. The fog+subrace
+    fixes are kept (genuine correctness, all tests green) even though they don't alone unblock load.
+
 - **New Map (blank from scratch): DONE (2026-06-28).** `createBlankMap({size, fill:'default'|'water'|'snow',
   name, mountains})` in `packages/sg-parser/src/writer/createBlankMap.ts` ports toolsqt `createMap`+`commitGrid`
   +`MapHeaderBlock::data`+ every block `data()` (verbatim, cross-checked vs Riders.sg). Header `offset` =
