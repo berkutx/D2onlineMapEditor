@@ -35,11 +35,14 @@ const editStore = useEditStore();
 const mapStore = useMapStore();
 const { currentScenarioId } = storeToRefs(mapStore);
 
-/** Cities/capitals show a double garrison (2 vertical formations) — give them a wider rail. */
+/** Cities/capitals show a double garrison (2 vertical formations) — give them a wider rail.
+ *  Widths are clamp()'d so rails SHRINK on narrow windows instead of pushing off-screen. */
 const inspectorWidth = computed(() => {
   const id = toolStore.selectedId;
   const o = id ? editStore.liveDoc?.objects.find((x) => x.id === id) : null;
-  return o && (o.type === "capital" || o.type === "village" || o.type === "stack") ? "320px" : "260px";
+  return o && (o.type === "capital" || o.type === "village" || o.type === "stack")
+    ? "clamp(250px, 28vw, 320px)"
+    : "clamp(220px, 24vw, 260px)";
 });
 
 /** Global view hotkeys (single keys; ignored while typing or with modifiers). */
@@ -144,7 +147,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
     </el-header>
     <el-container class="app-body">
       <ToolDock />
-      <el-aside v-if="view.objectPanelVisible" class="app-aside" width="220px">
+      <el-aside v-if="view.objectPanelVisible" class="app-aside" width="clamp(180px, 18vw, 220px)">
         <LeftObjectPanel />
       </el-aside>
       <el-main class="app-main">
@@ -154,13 +157,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <CopilotBar v-show="view.copilotVisible" />
         <HistoryPanel />
       </el-main>
-      <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="300px">
+      <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="clamp(240px, 26vw, 300px)">
         <DecorPalette />
       </el-aside>
       <el-aside v-if="toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
         <ObjectInspector />
       </el-aside>
-      <el-aside v-if="view.eventPanelVisible" class="app-events" width="340px">
+      <el-aside v-if="view.eventPanelVisible" class="app-events" width="clamp(280px, 30vw, 340px)">
         <EventsPanel />
       </el-aside>
     </el-container>
@@ -181,6 +184,16 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 .app-body {
   flex: 1;
   min-height: 0;
+  /* rails clamp() down on narrow windows; anything still over-budget must clip, not push
+     the whole app past the viewport edge */
+  overflow: hidden;
+}
+.app-aside,
+.app-decor,
+.app-inspector,
+.app-events {
+  min-width: 0;
+  overflow: hidden;
 }
 .app-aside {
   padding: 0;

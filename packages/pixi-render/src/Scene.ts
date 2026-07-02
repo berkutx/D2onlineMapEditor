@@ -720,15 +720,20 @@ export class Scene {
       this.renderNow();
     });
 
-    // keep the camera's screen size in sync with the parent element
+    // Keep the RENDERER + camera in sync with the parent element. Pixi's `resizeTo: element`
+    // only re-measures on WINDOW resize — when a side panel opens/closes (container resizes
+    // without a window resize) the canvas kept its stale size, leaving a black gap next to a
+    // docked panel (or pushing it off-screen). Explicitly app.resize() (re-reads resizeTo),
+    // then sync the camera and paint NOW (rAF may be throttled).
     if (typeof ResizeObserver !== "undefined" && this.parent) {
       this.resizeObserver = new ResizeObserver(() => {
         if (this.camera && this.app) {
+          this.app.resize();
           this.camera.setScreenSize(
             this.app.screen.width,
             this.app.screen.height,
           );
-          this.requestRender();
+          this.renderNow();
         }
       });
       this.resizeObserver.observe(this.parent);
