@@ -29,6 +29,7 @@ import { ObjectLayer, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
 import { EventOverlayLayer } from "./EventOverlayLayer.js";
 import { AnchorLayer } from "./AnchorLayer.js";
+import { ScenarioRolesLayer, type RoleCounts } from "./ScenarioRolesLayer.js";
 import { PresenceLayer, type PeerMarker } from "./PresenceLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
 import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
@@ -127,6 +128,9 @@ export class Scene {
   private anchorLayer?: AnchorLayer;
   /** anchors (child->parent) + visibility, kept so a full rebuild restores the overlay. */
   private anchorState: { anchors: Record<string, string>; visible: boolean } = { anchors: {}, visible: false };
+  private scenarioRoles?: ScenarioRolesLayer;
+  /** location roles + visibility, kept so a full rebuild restores the overlay. */
+  private scenarioRolesState: { roles: Record<string, RoleCounts>; visible: boolean } = { roles: {}, visible: true };
   private presence?: PresenceLayer;
   private overlay?: OverlayLayer;
   private anim?: AnimationManager;
@@ -290,6 +294,12 @@ export class Scene {
     this.anchorLayer.setVisible(this.anchorState.visible);
     this.world.addChild(this.anchorLayer.view);
 
+    // scenario-roles overlay («Роли локаций»): ring + role badges per event-wired location
+    this.scenarioRoles = new ScenarioRolesLayer();
+    this.scenarioRoles.build(map, this.scenarioRolesState.roles);
+    this.scenarioRoles.setVisible(this.scenarioRolesState.visible);
+    this.world.addChild(this.scenarioRoles.view);
+
     // collaborator cursors, above locations
     this.presence = new PresenceLayer();
     this.world.addChild(this.presence.view);
@@ -370,6 +380,16 @@ export class Scene {
     if (!this.anchorLayer) return;
     this.anchorLayer.build(map, anchors);
     this.anchorLayer.setVisible(visible);
+    this.renderNow();
+  }
+
+  /** Redraw the «Роли локаций» overlay (per-location role counts from the host's
+   *  scenarioRoles model: trigger/spawn/destination/env). */
+  updateScenarioRoles(map: MapDocument, roles: Record<string, RoleCounts>, visible: boolean): void {
+    this.scenarioRolesState = { roles, visible };
+    if (!this.scenarioRoles) return;
+    this.scenarioRoles.build(map, roles);
+    this.scenarioRoles.setVisible(visible);
     this.renderNow();
   }
 
@@ -782,6 +802,7 @@ export class Scene {
     this.presence?.destroy();
     this.eventOverlay?.destroy();
     this.anchorLayer?.destroy();
+    this.scenarioRoles?.destroy();
     this.locations?.destroy();
     this.grid?.destroy();
     this.terrain?.destroy();
@@ -791,6 +812,7 @@ export class Scene {
     this.overlay = undefined;
     this.eventOverlay = undefined;
     this.anchorLayer = undefined;
+    this.scenarioRoles = undefined;
     this.locations = undefined;
     this.grid = undefined;
     this.terrain = undefined;

@@ -19,6 +19,7 @@ import {
   parseScenarioRaw,
   roundTripIdentity,
   validateMap,
+  verifyBlockIntegrity,
   createBlankMap,
   TERRAIN_FILLS,
   RACE_KEYS,
@@ -78,9 +79,20 @@ function buildAndValidate(
   const semantic = bytes
     ? roundTripSemantic(doc, bytes, ops)
     : { ok: false, reason: buildError ?? "build failed" };
-  const structural = bytes
-    ? validateMap(parseScenario(bytes))
-    : { ok: false, errors: [buildError ?? "build failed"], warnings: [] };
+  // Tier 3 = document sanity + BYTE-level block integrity (OB0000 count + dangling internal
+  // refs — the defect classes only the GAME editor used to catch; see the ScenEdit gold check).
+  let structural: { ok: boolean; errors: string[]; warnings: string[] };
+  if (bytes) {
+    const doc3 = validateMap(parseScenario(bytes));
+    const integ = verifyBlockIntegrity(bytes);
+    structural = {
+      ok: doc3.ok && integ.ok,
+      errors: [...doc3.errors, ...integ.errors],
+      warnings: [...doc3.warnings, ...integ.warnings],
+    };
+  } else {
+    structural = { ok: false, errors: [buildError ?? "build failed"], warnings: [] };
+  }
 
   const report: ValidationReport = {
     ok: Boolean(bytes) && identity && semantic.ok && structural.ok,
@@ -290,10 +302,15 @@ export async function registerMapRoutes(
       if (!Number.isInteger(size) || size <= 0 || size % 8 !== 0) {
         return reply.code(400).send({ error: "size must be a positive multiple of 8" });
       }
-      // playable races (the addRace port): validated against the RACES table, deduped
+      // playable races (the addRace port): validated against the RACES table, deduped.
+      // At least ONE is required — a 0-race scenario is not a valid game map (gold check:
+      // the game editor only accepts maps with playable races).
       const races = Array.isArray(body.races)
         ? [...new Set(body.races)].filter((r): r is RaceKey => RACE_KEYS.includes(r as RaceKey))
         : [];
+      if (races.length === 0) {
+        return reply.code(400).send({ error: "выберите хотя бы одну фракцию (карта без игроков не загрузится в игре)" });
+      }
       let bytes: Uint8Array;
       try {
         bytes = createBlankMap({ size, fill, name, author: "web-editor", races });

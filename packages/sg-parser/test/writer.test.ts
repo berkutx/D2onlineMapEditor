@@ -8,6 +8,7 @@ import {
   roundTripIdentity,
   verifyCellOffsets,
   validateMap,
+  verifyBlockIntegrity,
 } from "../src/index";
 
 const CAMPAIGN = String.raw`C:\GOG Games\last_version\Game\Campaign`;
@@ -156,6 +157,9 @@ describe("@d2/sg-parser writer — round-trip across campaign maps", () => {
       const { doc, raw } = parseScenarioRaw(b);
       expect(verifyCellOffsets(raw, doc)).toBe(0);
       expect(validateMap(doc).errors).toEqual([]);
+      // tier-3b byte integrity (OB0000 count + internal refs) must be CLEAN on every
+      // real map — the false-positive guard for the new checker
+      expect(verifyBlockIntegrity(b).errors).toEqual([]);
     });
   }
 });

@@ -65,6 +65,7 @@ export {
   roundTripIdentity,
   verifyCellOffsets,
   validateMap,
+  verifyBlockIntegrity,
   bytesEqual,
   firstDiff,
   type ValidateResult,

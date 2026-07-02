@@ -45,6 +45,9 @@ export const useViewStore = defineStore("view", () => {
   const eventPanelVisible = ref(bool(p.eventPanelVisible, false));
   /** «Связи»: the editor-only anchors overlay (⚓ + child→parent arrows). */
   const anchorsVisible = ref(bool(p.anchorsVisible, false));
+  /** «Роли локаций»: rings + role badges (⚡✨➜☁) on event-wired locations. ON by
+   *  default — the overlay is how users DISCOVER that locations carry scenario roles. */
+  const rolesVisible = ref(bool(p.rolesVisible, true));
   /** Floating minimap dock (bottom-right of the canvas). On by default. */
   const minimapVisible = ref(bool(p.minimapVisible, true));
   /** Debug HUD overlay (FPS / render ms / iso engine). OFF by default (product decision);
@@ -116,6 +119,10 @@ export const useViewStore = defineStore("view", () => {
     anchorsVisible.value = !anchorsVisible.value;
   }
 
+  function toggleRoles(): void {
+    rolesVisible.value = !rolesVisible.value;
+  }
+
   function toggleMinimap(): void {
     minimapVisible.value = !minimapVisible.value;
   }
@@ -158,7 +165,7 @@ export const useViewStore = defineStore("view", () => {
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
     [terrainVisible, objectsVisible, gridVisible, locationsVisible, animate,
-      objectPanelVisible, eventPanelVisible, anchorsVisible, minimapVisible, debugOverlay, dark, overlayTints],
+      objectPanelVisible, eventPanelVisible, anchorsVisible, rolesVisible, minimapVisible, debugOverlay, dark, overlayTints],
     () => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -170,6 +177,7 @@ export const useViewStore = defineStore("view", () => {
           objectPanelVisible: objectPanelVisible.value,
           eventPanelVisible: eventPanelVisible.value,
           anchorsVisible: anchorsVisible.value,
+          rolesVisible: rolesVisible.value,
           minimapVisible: minimapVisible.value,
           debugOverlay: debugOverlay.value,
           debugOffMigrated: true,
@@ -192,6 +200,7 @@ export const useViewStore = defineStore("view", () => {
     objectPanelVisible,
     eventPanelVisible,
     anchorsVisible,
+    rolesVisible,
     minimapVisible,
     debugOverlay,
     copilotVisible,
@@ -210,6 +219,7 @@ export const useViewStore = defineStore("view", () => {
     toggleObjectPanel,
     toggleEventPanel,
     toggleAnchors,
+    toggleRoles,
     toggleMinimap,
     toggleDebugOverlay,
     toggleCopilot,

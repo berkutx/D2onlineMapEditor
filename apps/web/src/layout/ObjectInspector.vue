@@ -6,7 +6,7 @@
  * description, reward, items, owner) are shown read-only until the M4 growable writer
  * lands. Scope: chests / ruins / cities — capitals + units are view-only here.
  */
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { Close, Delete } from "@element-plus/icons-vue";
 import { placeVisitorOps } from "@d2/map-edit";
@@ -16,6 +16,9 @@ import { useItemStore } from "../stores/itemStore";
 import { useUnitStore } from "../stores/unitStore";
 import { useSpellStore } from "../stores/spellStore";
 import { useDecorStore } from "../stores/decorStore";
+import { useEventStore } from "../stores/eventStore";
+import { useViewStore } from "../stores/viewStore";
+import { computeObjectRoles, ROLE_META, type ObjectRole } from "../services/scenarioRoles";
 import DecorThumb from "./DecorThumb.vue";
 import ItemPicker from "./ItemPicker.vue";
 import ItemIcon from "./ItemIcon.vue";
@@ -37,6 +40,8 @@ const itemStore = useItemStore();
 const unitStore = useUnitStore();
 const spellStore = useSpellStore();
 const decorStore = useDecorStore();
+const eventStore = useEventStore();
+const viewStore = useViewStore();
 void itemStore.load();
 const spriteStore = useSpriteStore();
 const { selectedId } = storeToRefs(toolStore);
@@ -49,6 +54,7 @@ watch(selectedId, () => {
   if (!unitStore.loaded && !unitStore.loading) void unitStore.load();
   if (!spellStore.loaded && !spellStore.loading) void spellStore.load();
   if (!decorStore.loaded && !decorStore.loading) void decorStore.load();
+  rolesExpanded.value = false; // collapse the «Сценарий» list when the selection changes
 });
 
 /** the live selected object (or null) */
@@ -80,7 +86,15 @@ const decorVariantId = computed(() =>
     : null,
 );
 const decorEntry = computed(() => decorStore.get(decorVariantId.value));
-const decorVariantCount = computed(() => decorStore.groupOf(decorVariantId.value)?.variants.length ?? 0);
+const decorGroup = computed(() => decorStore.groupOf(decorVariantId.value));
+const decorVariantCount = computed(() => decorGroup.value?.variants.length ?? 0);
+/** Human decoration name: RU game name → group label; the raw G000MG#### id lives in tooltips only. */
+const decorName = computed(() => decorEntry.value?.name_ru || decorGroup.value?.label || "—");
+/** 1-based position of the current look inside its variant group («вариант 3 из 8»); 0 = unknown. */
+const decorVariantPos = computed(() => {
+  const g = decorGroup.value;
+  return g ? g.variants.findIndex((v) => v.id === decorVariantId.value) + 1 : 0;
+});
 function cycleDecor(dir: number): void {
   const next = decorStore.neighbor(decorVariantId.value, dir);
   if (next && obj.value) { const p = decorStore.variantPatch(obj.value, next); if (p) patch(p); }
@@ -88,6 +102,23 @@ function cycleDecor(dir: number): void {
 function rerollDecor(): void {
   const r = decorStore.randomVariant(decorVariantId.value);
   if (r && obj.value) { const p = decorStore.variantPatch(obj.value, r); if (p) patch(p); }
+}
+
+/** ── «Сценарий»: the selected object's scenario roles (trigger/spawn/destination/env), from
+ *  the shared scenarioRoles model — recomputed on every liveDoc change. One clickable row per
+ *  wiring; click = jump to that event in the scenario window (opening it if closed). */
+const ROLE_LIMIT = 6;
+const rolesExpanded = ref(false);
+const objectRoles = computed<ObjectRole[]>(() => {
+  const doc = editStore.liveDoc;
+  if (!doc || !obj.value) return [];
+  return computeObjectRoles(doc).get(obj.value.id) ?? [];
+});
+const visibleRoles = computed<ObjectRole[]>(() =>
+  rolesExpanded.value ? objectRoles.value : objectRoles.value.slice(0, ROLE_LIMIT));
+function openRole(r: ObjectRole): void {
+  eventStore.navigate({ tab: "events", eventId: r.ev.id });
+  if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
 }
 
 /** Site sprite key: "G000SI0000" + 4-char type code + image(2). */
@@ -752,12 +783,15 @@ function close(): void {
         <div class="decor-head">
           <DecorThumb v-if="decorEntry" :thumb="decorEntry.thumb" :size="48" />
           <div class="decor-info">
-            <div class="decor-name">{{ decorEntry?.name_ru || decorVariantId || "—" }}</div>
+            <div class="decor-name" :title="decorVariantId ?? undefined">{{ decorName }}</div>
             <div v-if="decorEntry" class="muted xs">{{ decorEntry.cx }}×{{ decorEntry.cy }} клеток</div>
           </div>
         </div>
         <div class="row">
-          <label>Вид <span class="muted">{{ decorVariantCount }}</span></label>
+          <label :title="decorVariantId ?? undefined">Вид
+            <span v-if="decorVariantPos" class="muted">вариант {{ decorVariantPos }} из {{ decorVariantCount }}</span>
+            <span v-else-if="decorVariantCount" class="muted">{{ decorVariantCount }}</span>
+          </label>
           <span class="decor-cycle">
             <el-button size="small" :disabled="decorVariantCount < 2" title="Предыдущий" @click="cycleDecor(-1)">‹</el-button>
             <el-button size="small" text title="Случайный вид" @click="rerollDecor()">⟳</el-button>
@@ -802,6 +836,36 @@ function close(): void {
 
     <div v-else class="ins-body">
       <p class="muted sm">Свойства для «{{ typeLabel }}» пока не редактируются. Сейчас поддержаны сундуки, руины и города.</p>
+    </div>
+
+    <!-- 🎬 «Сценарий» — где этот объект участвует в событиях (для ЛЮБОГО типа с ролями) -->
+    <div v-if="objectRoles.length" class="ins-body">
+      <div class="d2-sec">Сценарий <span class="muted">({{ objectRoles.length }})</span></div>
+      <div class="roles-list">
+        <div
+          v-for="(r, i) in visibleRoles"
+          :key="`${r.ev.id}#${i}`"
+          class="role-line d2-row"
+          :title="`${ROLE_META[r.cls].label} — ${r.ev.id}`"
+          @click="openRole(r)"
+        >
+          <span class="role-icon">{{ ROLE_META[r.cls].icon }}</span>
+          <span class="stk-text">
+            <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
+            <span class="stk-sub">{{ r.what }}</span>
+          </span>
+        </div>
+        <el-button
+          v-if="objectRoles.length > ROLE_LIMIT"
+          class="role-more"
+          size="small"
+          text
+          @click="rolesExpanded = !rolesExpanded"
+        >{{ rolesExpanded ? "свернуть" : `+${objectRoles.length - ROLE_LIMIT} ещё` }}</el-button>
+      </div>
+    </div>
+    <div v-else-if="obj.type === 'location'" class="ins-body">
+      <p class="muted sm">не используется в сценарии — ПКМ: „＋ Событие“ / „✨ Спавн“</p>
     </div>
   </div>
 </template>
@@ -973,6 +1037,28 @@ function close(): void {
 .decor-cycle {
   display: inline-flex;
   gap: 2px;
+}
+/* «Сценарий»: compact clickable role rows (.d2-row owns hover wash + radius) */
+.roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.role-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.role-icon {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1;
+}
+.role-more {
+  align-self: flex-start;
+  margin: 2px 0 0 4px;
 }
 .reward {
   display: flex;

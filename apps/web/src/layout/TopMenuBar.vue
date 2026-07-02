@@ -72,7 +72,7 @@ const validateHint = computed(() =>
 );
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
-  animate, objectPanelVisible, eventPanelVisible, anchorsVisible, minimapVisible, debugOverlay, copilotVisible, dark, overlayTints,
+  animate, objectPanelVisible, eventPanelVisible, anchorsVisible, rolesVisible, minimapVisible, debugOverlay, copilotVisible, dark, overlayTints,
 } = storeToRefs(viewStore);
 
 const dialogVisible = ref(false);
@@ -239,6 +239,7 @@ function onSelect(index: string): void {
     case "view:objectPanel": return viewStore.toggleObjectPanel();
     case "view:eventPanel": return viewStore.toggleEventPanel();
     case "view:anchors": return viewStore.toggleAnchors();
+    case "view:roles": return viewStore.toggleRoles();
     case "view:minimap": return viewStore.toggleMinimap();
     case "view:debug": return viewStore.toggleDebugOverlay();
     case "view:fit": getScene()?.fitView(); return;
@@ -287,6 +288,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <el-menu-item index="view:objectPanel"><el-icon class="mck" :style="{ visibility: objectPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Панель объектов<span class="mkbd">P</span></el-menu-item>
         <el-menu-item index="view:eventPanel"><el-icon class="mck" :style="{ visibility: eventPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Сценарий (события)<span class="mkbd">E</span></el-menu-item>
         <el-menu-item index="view:anchors"><el-icon class="mck" :style="{ visibility: anchorsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Связи (якоря ⚓)</el-menu-item>
+        <el-menu-item index="view:roles"><el-icon class="mck" :style="{ visibility: rolesVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Роли локаций</el-menu-item>
         <el-menu-item index="view:minimap"><el-icon class="mck" :style="{ visibility: minimapVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Миникарта</el-menu-item>
         <el-menu-item index="view:debug"><el-icon class="mck" :style="{ visibility: debugOverlay ? 'visible' : 'hidden' }"><Check /></el-icon>Отладка<span class="mkbd">D</span></el-menu-item>
         <el-sub-menu index="view:tints">
@@ -419,12 +421,14 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
           <el-checkbox-group v-model="newMap.races" class="nm-races">
             <el-checkbox v-for="r in raceOptions" :key="r.value" :value="r.value">{{ r.label }}</el-checkbox>
           </el-checkbox-group>
+          <!-- гейт ≥1 фракции: сервер отклоняет карту без рас — подсказываем сразу -->
+          <div v-if="!newMap.races.length" class="nm-hint nm-hint-error">выберите хотя бы одну фракцию</div>
           <div class="nm-hint">Каждая фракция получает игрока, столицу со стражем и героя (как «добавить расу» в редакторе игры).</div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="newMapVisible = false">Отмена</el-button>
-        <el-button type="primary" :loading="newMapBusy" @click="doCreateNewMap()">Создать</el-button>
+        <el-button type="primary" :loading="newMapBusy" :disabled="!newMap.races.length" @click="doCreateNewMap()">Создать</el-button>
       </template>
     </el-dialog>
 
@@ -567,6 +571,9 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
   color: var(--el-text-color-secondary);
   line-height: 1.4;
   margin-top: 2px;
+}
+.nm-hint-error {
+  color: var(--el-color-danger);
 }
 .keys {
   display: flex;

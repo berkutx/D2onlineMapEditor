@@ -16,6 +16,7 @@ import type { MapEvent, EventCondition, EventEffect } from "@d2/map-schema";
 import { CONDITION_SPECS, EFFECT_SPECS, CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore, makeCondition, makeEffect } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
+import { eventBadges } from "../services/scenarioRoles";
 import EventFieldInput from "./EventFieldInput.vue";
 import EventGraph from "./EventGraph.vue";
 import VariablesEditor from "./VariablesEditor.vue";
@@ -114,6 +115,8 @@ const effFields = (e: EventEffect) =>
   (EFFECT_BY_KIND[e.kind]?.fields ?? []).filter((f) => !f.hidden);
 const condLabel = (c: EventCondition) => CONDITION_BY_KIND[c.kind]?.label ?? c.kind;
 const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
+/** Role-class icons for a list row (shared scenarioRoles model), capped at 4. */
+const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 </script>
 
 <template>
@@ -205,6 +208,7 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
                 <el-tag v-if="!e.enabled" size="small" type="info" disable-transitions>выкл</el-tag>
                 <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
                 <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
+                <span class="ev-icons">{{ badgeIcons(e) }}</span>
                 <span class="ev-ce">{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
                 <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
                 <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
@@ -359,7 +363,10 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 .ev-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-id { color: var(--el-text-color-secondary); font-family: monospace; font-size: 11px; }
 .ev-badges { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
-.ev-ce { color: var(--el-text-color-secondary); margin-left: auto; }
+/* role icons before the counts; the auto margin moved here (span always renders) so
+   icons + counts sit together on the right edge */
+.ev-icons { margin-left: auto; font-size: 11px; line-height: 1; letter-spacing: 1px; }
+.ev-ce { color: var(--el-text-color-secondary); }
 .ev-editor { flex: 1; min-height: 0; }
 .ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; align-items: center; }
 .ev-props label { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-regular); }

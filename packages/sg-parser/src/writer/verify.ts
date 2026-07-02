@@ -126,3 +126,78 @@ export function validateMap(doc: MapDocument): ValidateResult {
 
   return { ok: errors.length === 0, errors, warnings };
 }
+
+/**
+ * Tier 3b — BYTE-level block integrity. Catches the exact defect classes that our
+ * self-consistent parser/writer CANNOT see but that make the GAME editor refuse a map
+ * (discovered via the ScenEdit gold check):
+ *   1. the OB0000 header count must equal the number of block frames actually present
+ *      (the game trusts it to know how many blocks to read);
+ *   2. every internal reference (the `0B 00 00 00`-prefixed 10-char ids inside block
+ *      bodies: FOG_ID, SUBRACE, STACK, OWNER, INSIDE, ELEMENT, event ID_LOC/ID_STACK…)
+ *      should point to an EXISTING block of this map. Dangling refs are WARNINGS, not
+ *      errors: shipped campaign maps carry some (Dragon's teeth references a deleted
+ *      player S143PL0001 and still loads — the game falls back), but they are exactly
+ *      how «событие ссылается на удалённый объект» class bugs surface, so we report them.
+ * Global game-data ids (G000…) and the empty sentinel are outside the map and skipped.
+ */
+export function verifyBlockIntegrity(bytes: Uint8Array): ValidateResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const buf = bytes;
+  const td = new TextDecoder("latin1");
+
+  const indexOfSeq = (needle: number[], from: number): number => {
+    outer: for (let i = from; i <= buf.length - needle.length; i++) {
+      for (let k = 0; k < needle.length; k++) if (buf[i + k] !== needle[k]) continue outer;
+      return i;
+    }
+    return -1;
+  };
+  const ascii = (s: string): number[] => [...s].map((c) => c.charCodeAt(0));
+
+  // 1) collect every block id (OBJ_ID right before BEGOBJECT) + count frames
+  const WHAT = ascii("WHAT");
+  const BEG = ascii("BEGOBJECT\0");
+  const ids = new Set<string>();
+  let blockCount = 0;
+  let version = "";
+  for (let i = indexOfSeq(WHAT, 0); i >= 0; i = indexOfSeq(WHAT, i + 4)) {
+    const beg = indexOfSeq(BEG, i);
+    if (beg < 0) break;
+    // OBJ_ID + [0B 00 00 00] + id(10) + NUL sits immediately before BEGOBJECT
+    const id = td.decode(buf.subarray(beg - 11, beg - 1));
+    ids.add(id);
+    if (!version) version = id.slice(0, 4);
+    blockCount++;
+  }
+
+  // OB0000 declared count
+  const ob = indexOfSeq(ascii(`${version}OB0000`), 0);
+  if (ob < 0) {
+    errors.push("integrity: OB0000 marker not found");
+  } else {
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const declared = dv.getInt32(ob + 10, true);
+    if (declared !== blockCount) {
+      errors.push(
+        `integrity: OB0000 declares ${declared} blocks but ${blockCount} are present — the game will refuse to load this map`,
+      );
+    }
+  }
+
+  // 2) dangling internal refs: scan block bodies for [0B 00 00 00] + "<version>….\0"
+  const idRe = /^[A-Z]\d{3}[A-Z]{2}[0-9a-fA-F]{4}$/;
+  const seen = new Set<string>(); // dedup (ref target + tag context not tracked — id only)
+  for (let i = 0; i + 15 <= buf.length; i++) {
+    if (buf[i] !== 0x0b || buf[i + 1] !== 0 || buf[i + 2] !== 0 || buf[i + 3] !== 0) continue;
+    if (buf[i + 14] !== 0) continue; // trailing NUL of the 10-char id
+    const id = td.decode(buf.subarray(i + 4, i + 14));
+    if (!id.startsWith(version) || !idRe.test(id)) continue; // globals (G000…) / noise
+    if (ids.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    warnings.push(`integrity: dangling reference ${id} — no such block in this map`);
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
+}

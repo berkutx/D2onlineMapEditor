@@ -16,6 +16,7 @@ import type { EditOp, UserPresence } from "@d2/socket-contract";
 import { getSocket } from "../realtime/socket";
 import { getChannelId } from "../services/clientId";
 import { useEditStore } from "./editStore";
+import { useDecorStore } from "./decorStore";
 
 const NAME_KEY = "d2.collab.name";
 
@@ -56,19 +57,47 @@ const typeRu = (t: string): string => TYPE_RU[t] ?? t;
 const fieldsRu = (fields: Record<string, unknown>): string =>
   Object.keys(fields).map((k) => FIELD_RU[k] ?? k).join(", ");
 
+/** Optional humanizers wired in by the store (avoid hard coupling at module level):
+ *  the target object of an op by id, and a decoration name for a G000MG… id. */
+interface OpContext {
+  objectOf?: (id: string) => { type: string; name?: string } | undefined;
+  decorName?: (id: string) => string | undefined;
+}
+
+/** «столица „Хеленверд“» / «декор „Стена“» — the op target, best effort. */
+function targetRu(id: string, ctx?: OpContext): string {
+  const o = ctx?.objectOf?.(id);
+  if (!o) return "объект";
+  const decor = o.type === "landmark" ? ctx?.decorName?.((o as { baseType?: string }).baseType ?? "") : undefined;
+  const label = o.name || decor;
+  return label ? `${typeRu(o.type)} «${label}»` : typeRu(o.type);
+}
+
+/** Humanize one patched value: decoration ids get their catalog name, the rest print as-is. */
+function valueRu(key: string, v: unknown, ctx?: OpContext): string {
+  if (typeof v === "object") return "…";
+  const s = String(v);
+  if (key === "baseType") {
+    const name = ctx?.decorName?.(s);
+    return name ? `${name} (${s})` : s;
+  }
+  if (key === "image") return `вариант ${s}`;
+  return s;
+}
+
 /** A short, human-readable Russian summary of an op for the history panel. */
-function summarize(op: EditOp): string {
+function summarize(op: EditOp, ctx?: OpContext): string {
   switch (op.kind) {
     case "setCell":
       return op.roadType !== undefined ? `🛣 дорога (${op.x}, ${op.y})` : `⛰ рельеф (${op.x}, ${op.y})`;
     case "addObject":
       return `➕ ${typeRu(op.object.type)}`;
     case "moveObject":
-      return `⇄ перемещён → (${op.x}, ${op.y})`;
+      return `⇄ ${targetRu(op.id, ctx)} → (${op.x}, ${op.y})`;
     case "patchObject":
-      return `✎ ${fieldsRu(op.fields) || "свойства"}`;
+      return `✎ ${fieldsRu(op.fields) || "свойства"} — ${targetRu(op.id, ctx)}`;
     case "deleteObject":
-      return "🗑 удалён объект";
+      return `🗑 ${targetRu(op.id, ctx)}`;
     case "upsertEvent":
       return `⚡ событие «${op.event.name || op.event.id}»`;
     case "deleteEvent":
@@ -83,24 +112,24 @@ function summarize(op: EditOp): string {
 }
 
 /** A slightly longer description revealed when a history row is clicked (not exhaustive). */
-function detailOf(op: EditOp): string {
+function detailOf(op: EditOp, ctx?: OpContext): string {
   switch (op.kind) {
     case "setCell":
       return `клетка (${op.x}, ${op.y}), значение ${op.value}${op.roadType !== undefined ? `, дорога ${op.roadType}` : ""}`;
     case "addObject":
       return `${typeRu(op.object.type)} «${(op.object as { name?: string }).name || op.object.id}» в (${op.object.pos.x}, ${op.object.pos.y})`;
     case "moveObject":
-      return `объект ${op.id} → клетка (${op.x}, ${op.y})`;
+      return `${targetRu(op.id, ctx)} (${op.id}) → клетка (${op.x}, ${op.y})`;
     case "patchObject": {
       const parts = Object.entries(op.fields).map(([k, v]) => {
         const label = FIELD_RU[k] ?? k;
-        const val = typeof v === "object" ? "…" : String(v);
+        const val = valueRu(k, v, ctx);
         return val.length && typeof v !== "object" ? `${label}: ${val}` : label;
       });
-      return `${op.id}\n${parts.join("\n")}`;
+      return `${targetRu(op.id, ctx)} (${op.id})\n${parts.join("\n")}`;
     }
     case "deleteObject":
-      return `объект ${op.id}`;
+      return `${targetRu(op.id, ctx)} (${op.id})`;
     case "upsertEvent":
       return `${op.event.id}\nусловий: ${op.event.conditions.length}, эффектов: ${op.event.effects.length}, шанс ${op.event.chance}%`;
     case "deleteEvent":
@@ -150,10 +179,22 @@ export const useCollabStore = defineStore("collab", () => {
   const nameOf = (socketId: string): string =>
     socketId === me.value?.socketId ? (me.value?.name ?? "я") : peers.get(socketId)?.name ?? "?";
 
+  /** Humanizer context for history rows: resolve the op's target object + decor names.
+   *  Best effort — a deleted object no longer resolves (falls back to «объект»). */
+  function opCtx(): OpContext {
+    const decor = useDecorStore();
+    return {
+      objectOf: (id) =>
+        edit.liveDoc?.objects.find((o) => o.id === id) as { type: string; name?: string } | undefined,
+      decorName: (id) => (id ? decor.get(id.toUpperCase())?.name_ru || decor.get(id.toUpperCase())?.desc_en : undefined),
+    };
+  }
+
   function record(seq: number, by: string, op: EditOp, mine: boolean): void {
+    const ctx = opCtx();
     history.value = [
       ...history.value,
-      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op), detail: detailOf(op), mine },
+      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op, ctx), detail: detailOf(op, ctx), mine },
     ];
   }
 

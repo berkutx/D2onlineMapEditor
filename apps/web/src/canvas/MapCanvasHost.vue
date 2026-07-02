@@ -37,6 +37,7 @@ import { useAssetStore } from "../stores/assetStore";
 import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
+import { locationRoleCounts } from "../services/scenarioRoles";
 import { useDecorStore, type DecorEntry } from "../stores/decorStore";
 import { useUnitStore } from "../stores/unitStore";
 import { useCollabStore } from "../stores/collabStore";
@@ -684,6 +685,13 @@ function ctxAction(action: string): void {
       eventStore.panelTab = "events";
       if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
       break;
+    case "spawnHere": {
+      // one-click spawn trigger for a location (day-1 frequency + createStack pre-wired)
+      eventStore.createSpawnAt(obj.id, (obj as { name?: string }).name);
+      if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
+      ElMessage.success("Событие спавна создано — выберите шаблон отряда в редакторе");
+      break;
+    }
     case "newEvent": {
       const ev = eventStore.createForObject(
         obj.id, obj.type, (obj as { name?: string }).name,
@@ -730,7 +738,7 @@ function finishAnchorPick(parent: MapObject): void {
   }
 }
 
-/** Esc closes the context menu and cancels a pending anchor pick. */
+/** Esc closes the context menu and cancels pending anchor/object picks. */
 function onKeyDown(e: KeyboardEvent): void {
   if (e.key !== "Escape") return;
   if (ctxMenu.value) ctxMenu.value = null;
@@ -738,10 +746,30 @@ function onKeyDown(e: KeyboardEvent): void {
     anchorPickFor.value = null;
     ElMessage.info("Якорение отменено");
   }
+  if (toolStore.objectPickTypes) {
+    toolStore.finishObjectPick(null);
+    ElMessage.info("Выбор на карте отменён");
+  }
 }
 
 function onPointerDown(e: PointerEvent): void {
   ctxMenu.value = null; // any left press dismisses the context menu
+  // «🎯 выбрать на карте»: this click picks an object for a pending event ref-field
+  if (toolStore.objectPickTypes) {
+    const types = toolStore.objectPickTypes;
+    const cell = cellFromEvent(e);
+    const hit = cell
+      ? objectsAtCell(cell.x, cell.y).find((o) => types.includes(o.type)) ?? null
+      : null;
+    if (hit) {
+      toolStore.finishObjectPick(hit.id);
+      ElMessage.success("Выбрано");
+    } else {
+      toolStore.finishObjectPick(null);
+      ElMessage.info("Выбор отменён (тут нет подходящего объекта)");
+    }
+    return;
+  }
   // anchor-pick mode: this click chooses the PARENT for the pending "Заякорить к…"
   if (anchorPickFor.value) {
     const cell = cellFromEvent(e);
@@ -1059,6 +1087,17 @@ watch(
   { deep: true },
 );
 
+// «Роли локаций» overlay: every location shows its scenario role (⚡ trigger / ✨ spawn /
+// ➜ destination / ☁ env). objectsRev bumps on event edits too, so wiring stays live.
+watch(
+  [() => editStore.objectsRev, () => viewStore.rolesVisible],
+  () => {
+    const s = getScene();
+    if (s && editStore.liveDoc)
+      s.updateScenarioRoles(editStore.liveDoc, locationRoleCounts(editStore.liveDoc), viewStore.rolesVisible);
+  },
+);
+
 // Collab presence: broadcast my selection to room peers; render their live cursors.
 watch(
   () => toolStore.selectedId,
@@ -1157,6 +1196,7 @@ watch(
         <div class="ctx-sep" />
         <button class="ctx-item" @click="ctxAction('events')">📋 События объекта</button>
         <button class="ctx-item" @click="ctxAction('newEvent')">＋ Событие с этим объектом</button>
+        <button v-if="ctxMenu.obj.type === 'location'" class="ctx-item" @click="ctxAction('spawnHere')">✨ Спавн отряда здесь</button>
         <div class="ctx-sep" />
         <button class="ctx-item" @click="ctxAction('anchor')">⚓ Заякорить к…</button>
         <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">Снять якорь</button>
@@ -1203,6 +1243,10 @@ watch(
       <div class="hud-sep" />
       <div class="hud-row"><span>{{ debugStats.rendererType }}</span><b>max tex {{ debugStats.maxTexture }}</b></div>
       <div class="hud-row hud-gpu">{{ debugStats.gpu }}</div>
+    </div>
+    <!-- легенда оверлея «Роли локаций» (тумблер в Вид) -->
+    <div v-if="viewStore.rolesVisible && currentMap" class="roles-legend d2-float">
+      ⚡ вход-триггер&ensp;✨ спавн&ensp;➜ цель&ensp;☁ эффект&ensp;<span class="rl-dim">· точка — не используется</span>
     </div>
     <div v-if="building" v-loading="true" class="canvas-overlay" element-loading-text="Building scene…" />
     <el-alert
@@ -1270,6 +1314,21 @@ watch(
   height: 1px;
   margin: 4px 6px;
   background: var(--el-border-color-lighter);
+}
+/* «Роли локаций» legend — bottom-left, clear of the dock/copilot/minimap corners */
+.roles-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 20;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.rl-dim {
+  color: var(--el-text-color-secondary);
 }
 .ctx-danger {
   color: var(--el-color-danger);

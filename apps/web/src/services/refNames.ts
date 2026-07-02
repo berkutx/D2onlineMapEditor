@@ -9,6 +9,7 @@ import type { EventFieldSpec, EventTypeSpec, MapEvent } from "@d2/map-schema";
 import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
+import { useUnitStore } from "../stores/unitStore";
 
 /** Entity category of a resolved ref (drives graph icon + click behavior). */
 export type RefKind = "object" | "player" | "event" | "var" | "spell" | "item" | "template";
@@ -39,17 +40,34 @@ export function useRefNames() {
   const edit = useEditStore();
   const items = useItemStore();
   const spells = useSpellStore();
+  const units = useUnitStore();
   // catalogs are tiny JSONs; kick their lazy load so names resolve on first paint
   void items.load();
   void spells.load();
+  void units.load();
 
   function objOf(id: string) {
     return edit.liveDoc?.objects.find((o) => o.id === id);
   }
+  /** A STACK's human label = its leader's unit name (stacks rarely carry names). */
+  function stackLabel(o: {
+    garrison?: ({ unit: string } | null)[];
+    leaderCell?: number;
+    pos: { x: number; y: number };
+  }): string {
+    const leader =
+      (o.leaderCell !== undefined ? o.garrison?.[o.leaderCell] : undefined) ??
+      o.garrison?.find(Boolean);
+    const lname = leader ? units.get(leader.unit)?.name : undefined;
+    return lname ? `Отряд: ${lname}` : `Отряд (${o.pos.x},${o.pos.y})`;
+  }
   function objName(id: string): string {
     const o = objOf(id);
     if (!o) return id;
-    return (o as { name?: string }).name || o.type;
+    const named = (o as { name?: string }).name;
+    if (named) return named;
+    if (o.type === "stack") return stackLabel(o as Parameters<typeof stackLabel>[0]);
+    return o.type;
   }
   function playerName(id: string): string {
     const p = edit.liveDoc?.players.find((x) => x.id === id);
@@ -119,5 +137,5 @@ export function useRefNames() {
   const icon = (r: ResolvedRef): string =>
     r.kind === "object" ? OBJ_ICONS[r.objType ?? ""] ?? REF_ICONS.object : REF_ICONS[r.kind];
 
-  return { objName, playerName, eventName, varName, templateName, resolveField, refsOf, enablersOf, icon };
+  return { objName, playerName, eventName, varName, templateName, stackLabel, resolveField, refsOf, enablersOf, icon };
 }

@@ -6,8 +6,8 @@
  * name-based catalog dropdowns (no raw G###… ids in the user's face — the id is the
  * option value, the label is the game name + effect line).
  */
-import { computed } from "vue";
-import { ElInputNumber, ElSwitch, ElInput, ElSelect, ElOption, ElButton, ElTooltip, ElMessage } from "element-plus";
+import { computed, watch } from "vue";
+import { ElInputNumber, ElSwitch, ElInput, ElSelect, ElOption, ElOptionGroup, ElButton, ElTooltip, ElMessage } from "element-plus";
 import type { EventFieldSpec } from "@d2/map-schema";
 import { placeLocationOps } from "@d2/map-edit";
 import { cellToWorld } from "@d2/pixi-render";
@@ -17,6 +17,7 @@ import { useToolStore } from "../stores/toolStore";
 import { useViewStore } from "../stores/viewStore";
 import { useItemStore, ITEM_CAT_LABELS } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
+import { useRefNames } from "../services/refNames";
 import CodeInput from "./CodeInput.vue";
 import MiniMap from "./MiniMap.vue";
 
@@ -28,6 +29,7 @@ const toolStore = useToolStore();
 const viewStore = useViewStore();
 const itemStore = useItemStore();
 const spellStore = useSpellStore();
+const names = useRefNames();
 // lazy catalog loads (tiny JSONs, cached across all field inputs)
 void itemStore.load();
 void spellStore.load();
@@ -61,8 +63,35 @@ const refOptions = computed<Opt[]>(() => {
   if (!types) return [];
   return doc.objects
     .filter((o) => types.includes(o.type))
-    .map((o) => ({ value: o.id, label: `${(o as { name?: string }).name || o.type} · ${o.id}` }));
+    .map((o) => ({ value: o.id, label: `${names.objName(o.id)} · ${o.id}` }));
 });
+
+/** Stack fields get TWO groups: placed stacks (labelled by LEADER: «Отряд: Паладин · 12,30»)
+ *  and stack TEMPLATES — real maps put template ids in stack fields («любой отряд, созданный
+ *  из шаблона»; MidStack keeps SRCTMPL_ID for exactly this matching). */
+const stackGroups = computed<{ label: string; options: Opt[] }[]>(() => {
+  const doc = edit.liveDoc;
+  if (!doc) return [];
+  const stacks = doc.objects
+    .filter((o) => o.type === "stack")
+    .map((o) => {
+      const inCity = (o as { garrisoned?: boolean }).garrisoned;
+      const where = inCity ? "в городе" : `${o.pos.x},${o.pos.y}`;
+      return { value: o.id, label: `${names.objName(o.id)} · ${where}` };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  const templates = (doc.templates ?? []).map((tm) => ({
+    value: tm.id,
+    label: `${tm.name || "шаблон"} · ${tm.id}`,
+  }));
+  const out: { label: string; options: Opt[] }[] = [];
+  if (stacks.length) out.push({ label: "Отряды на карте", options: stacks });
+  if (templates.length) out.push({ label: "Шаблоны (любой отряд из шаблона)", options: templates });
+  return out;
+});
+
+/** Object-ref types that get the 📍/🎯 helper buttons (players/events are not on the map). */
+const isObjRef = computed(() => props.field.type in REF_TYPES);
 
 /** Scenario variables (the `var` field type): stored as the variable's numeric id. */
 const varOptions = computed<{ value: number; label: string }[]>(() =>
@@ -121,6 +150,33 @@ function newLocation(): void {
   toolStore.setSelectedId(first.object.id);
   ElMessage.success("Локация создана в центре экрана — двигайте инструментом «Двигать», радиус в инспекторе");
 }
+
+// --- 🎯 «выбрать кликом по карте» (any object-ref field) ----------------------------------
+/** Human hint per ref type for the pick toast. */
+const PICK_HINT: Record<string, string> = {
+  "ref-loc": "локацию", "ref-stack": "отряд", "ref-city": "город",
+  "ref-ruin": "руины", "ref-site": "постройку", "ref-lmark": "ориентир",
+};
+/** Nonce of the pick THIS field requested; only that pick's result is consumed here
+ *  (several EventFieldInput instances watch the same store). */
+let myPickNonce = -1;
+function pickOnMap(): void {
+  const types = REF_TYPES[props.field.type];
+  if (!types) return;
+  // nonce of the pick we are about to own = current counter + 1 (finishObjectPick increments)
+  myPickNonce = (toolStore.objectPickResult?.nonce ?? 0) + 1;
+  toolStore.startObjectPick(types);
+  ElMessage({ message: `Кликните по карте: ${PICK_HINT[props.field.type] ?? "объект"} (Esc — отмена)`, type: "info", duration: 4000 });
+}
+watch(
+  () => toolStore.objectPickResult,
+  (r) => {
+    if (r && r.nonce === myPickNonce) {
+      myPickNonce = -1;
+      set(r.id);
+    }
+  },
+);
 </script>
 
 <template>
@@ -194,6 +250,9 @@ function newLocation(): void {
       <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
       </el-tooltip>
+      <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+        <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
+      </el-tooltip>
       <el-tooltip content="Новая локация в центре экрана" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" @click="newLocation()">＋</el-button>
       </el-tooltip>
@@ -202,19 +261,51 @@ function newLocation(): void {
     <MiniMap v-if="modelValue" :highlight-id="(modelValue as string)" :size="150" class="ev-loc-map" />
   </div>
 
-  <!-- ref-* pickers (objects / players / events) -->
-  <el-select
-    v-else-if="isRef"
-    :model-value="(modelValue as string) || ''"
-    size="small"
-    filterable
-    clearable
-    placeholder="— не задано —"
-    style="width: 100%"
-    @update:model-value="set($event || '')"
-  >
-    <el-option v-for="o in refOptions" :key="o.value" :value="o.value" :label="o.label" />
-  </el-select>
+  <!-- ref-stack: grouped picker — отряды по ЛИДЕРУ + шаблоны отрядов, с 📍/🎯 -->
+  <div v-else-if="field.type === 'ref-stack'" class="ev-loc-row">
+    <el-select
+      :model-value="(modelValue as string) || ''"
+      size="small"
+      filterable
+      clearable
+      placeholder="— отряд или шаблон —"
+      class="ev-loc-sel"
+      @update:model-value="set($event || '')"
+    >
+      <el-option-group v-for="g in stackGroups" :key="g.label" :label="g.label">
+        <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
+      </el-option-group>
+    </el-select>
+    <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+      <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
+    </el-tooltip>
+    <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+      <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
+    </el-tooltip>
+  </div>
+
+  <!-- ref-* pickers (objects / players / events); объектные — с 📍/🎯 -->
+  <div v-else-if="isRef" class="ev-loc-row">
+    <el-select
+      :model-value="(modelValue as string) || ''"
+      size="small"
+      filterable
+      clearable
+      placeholder="— не задано —"
+      class="ev-loc-sel"
+      @update:model-value="set($event || '')"
+    >
+      <el-option v-for="o in refOptions" :key="o.value" :value="o.value" :label="o.label" />
+    </el-select>
+    <template v-if="isObjRef">
+      <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+        <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
+      </el-tooltip>
+      <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+        <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
+      </el-tooltip>
+    </template>
+  </div>
 
   <!-- item / spell: name-based catalog dropdowns (id stays the stored value) -->
   <el-select

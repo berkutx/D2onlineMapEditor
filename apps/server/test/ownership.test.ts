@@ -20,7 +20,7 @@ async function createMap(clientId?: string): Promise<string> {
     method: "POST",
     url: REST.mapNew,
     headers: clientId ? { "x-client-id": clientId } : {},
-    payload: { size: 48, fill: "default", name: `own-${clientId ?? "anon"}` },
+    payload: { size: 48, fill: "default", name: `own-${clientId ?? "anon"}`, races: ["empire"] },
   });
   expect(res.statusCode).toBe(201);
   return (res.json() as { id: string }).id;
@@ -39,6 +39,21 @@ async function listFor(clientId?: string): Promise<ScenarioEntry[]> {
 beforeAll(async () => {
   ({ app } = await buildApp());
   await app.ready();
+});
+
+describe("POST /api/maps/new — race gate", () => {
+  // 0-race maps are unloadable by the game (from-scratch maps are the product's core path),
+  // so the server refuses them outright.
+  it("rejects a raceless map with 400", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: REST.mapNew,
+      headers: { "x-client-id": OWNER },
+      payload: { size: 48, fill: "default", name: "no-races" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toContain("фракци");
+  });
 });
 
 describe("owner-scoped scenario listing", () => {

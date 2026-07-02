@@ -45,6 +45,24 @@ export const useToolStore = defineStore("tool", () => {
    *  Set by a click in the "select" tool; drives ObjectInspector + the selection outline. */
   const selectedId = ref<string | null>(null);
 
+  /** «🎯 выбрать на карте» pick mode for event ref-fields: while non-null, the NEXT map
+   *  click on an object of one of these types resolves the pick (MapCanvasHost hooks it;
+   *  Esc cancels). startObjectPick returns a TOKEN; the result carries it back so ONLY the
+   *  field that requested this pick consumes it (several fields watch the same store). */
+  const objectPickTypes = ref<string[] | null>(null);
+  const objectPickResult = ref<{ id: string; nonce: number } | null>(null);
+  let pickSeq = 0;
+  let pickToken = 0;
+  function startObjectPick(types: string[]): number {
+    objectPickTypes.value = types;
+    pickToken = ++pickSeq;
+    return pickToken;
+  }
+  function finishObjectPick(id: string | null): void {
+    objectPickTypes.value = null;
+    if (id) objectPickResult.value = { id, nonce: pickToken };
+  }
+
   const painting = (): boolean => tool.value !== "select";
 
   function setTool(t: EditTool): void {
@@ -98,6 +116,7 @@ export const useToolStore = defineStore("tool", () => {
 
   return {
     tool, size, terrainId, decorId, moveId, roadSel, region, zoneMode, regionMask, zoneHidden, eyeZone, selectedId,
+    objectPickTypes, objectPickResult, startObjectPick, finishObjectPick,
     painting, setTool, setSize, setTerrainId, setDecor, setMoveId, setRoadSel,
     setRegion, setZoneMode, setRegionMask, setZoneHidden, setEyeZone, setSelectedId, clearZone,
   };

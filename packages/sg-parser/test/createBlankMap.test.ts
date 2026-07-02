@@ -5,6 +5,7 @@ import {
   parseScenarioRaw,
   createBlankMap,
   validateMap,
+  verifyBlockIntegrity,
   roundTripIdentity,
   FILL_VALUE,
   TERRAIN_FILLS,
@@ -137,6 +138,31 @@ describe("@d2/sg-parser createBlankMap — races (addRace port)", () => {
     // body: <id>+i32(mapSize) + <id>+i32(count) — read the count (2nd defaultInt)
     const planCount = buf.readInt32LE(pnBeg + 10 + 10 + 4 + 10);
     expect(planCount).toBe(52);
+  });
+
+  // Tier-3b integrity: the byte-level checks that mirror what the GAME editor enforces.
+  it("verifyBlockIntegrity: clean on generated maps, catches OB0000 drift + dangling refs", () => {
+    const bytes = createBlankMap({ size: 48, fill: "default", races: ["empire", "undead"] });
+    expect(verifyBlockIntegrity(bytes)).toEqual({ ok: true, errors: [], warnings: [] });
+
+    // synthetic OB0000 undercount (the exact bug that made ScenEdit refuse our maps)
+    const broken = bytes.slice();
+    const buf = Buffer.from(broken.buffer, broken.byteOffset, broken.byteLength);
+    const ob = buf.indexOf(Buffer.from("S143OB0000"));
+    buf.writeInt32LE(buf.readInt32LE(ob + 10) - 2, ob + 10);
+    const r1 = verifyBlockIntegrity(broken);
+    expect(r1.ok).toBe(false);
+    expect(r1.errors.some((e) => e.includes("OB0000"))).toBe(true);
+
+    // synthetic dangling ref: point the neutral player's FOG_ID at a non-existent fog.
+    // Dangling refs are WARNINGS (shipped campaign maps carry tolerated ones), but they
+    // must be REPORTED — this is the «событие ссылается на удалённое» detector.
+    const broken2 = bytes.slice();
+    const b2 = Buffer.from(broken2.buffer, broken2.byteOffset, broken2.byteLength);
+    const fogRef = b2.indexOf(Buffer.from("FOG_ID"));
+    b2.write("S143FG0099", fogRef + 10, "latin1");
+    const r2 = verifyBlockIntegrity(broken2);
+    expect(r2.warnings.some((e) => e.includes("S143FG0099"))).toBe(true);
   });
 });
 

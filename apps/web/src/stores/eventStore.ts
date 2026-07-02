@@ -206,6 +206,21 @@ export const useEventStore = defineStore("events", () => {
     return ev;
   }
 
+  /** «✨ Спавн отряда здесь»: one click builds a spawn trigger for a location — a new event
+   *  with a createStack effect pre-wired to `locId` (день-1 периодичность как у типовых
+   *  спавнов; шаблон отряда выбирается в редакторе). Navigates to it. */
+  function createSpawnAt(locId: string, locName?: string): MapEvent {
+    const ev: MapEvent = {
+      ...blankEvent(),
+      name: `Спавн: ${locName || locId}`,
+      conditions: [{ ...makeCondition("frequency"), days: 1 } as EventCondition],
+      effects: [{ ...makeEffect("createStack"), locId } as EventEffect],
+    };
+    upsert(ev);
+    navigate({ tab: "events", eventId: ev.id });
+    return ev;
+  }
+
   /** «➜ следующее в цепочке»: creates a DISABLED follow-up event and auto-adds an
    *  enableEvent effect on `fromId` pointing at it — the chain wires itself.
    *  Both ops land in ONE commit (one undo step). */
@@ -355,7 +370,7 @@ export const useEventStore = defineStore("events", () => {
     selectedId, filter, objectFilter, panelTab, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
     breadcrumbs, canGoBack, navigate, goBack, goToCrumb,
-    createForObject, createChainedEvent, createCounterGate,
+    createForObject, createChainedEvent, createCounterGate, createSpawnAt,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,
     upsertTemplate, removeTemplate, createTemplate, cloneTemplate,
