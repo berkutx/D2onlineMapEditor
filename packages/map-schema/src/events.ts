@@ -41,6 +41,10 @@ export interface EventFieldSpec {
   options?: readonly { value: number; label: string }[];
   min?: number;
   max?: number;
+  /** On-disk field the codec round-trips but the editor form does not show (semantics
+   *  undocumented in the reference). MUST still live in the spec: otherwise a spec-shaped
+   *  event differs from a reparsed one and the semantic verifier fails. */
+  hidden?: boolean;
 }
 
 export interface EventTypeSpec {
@@ -194,7 +198,10 @@ export const EFFECT_SPECS: readonly EventTypeSpec[] = [
     { key: "music", label: "Музыка", type: "text" },
     { key: "leftSide", label: "Слева", type: "bool" },
     { key: "popupShow", label: "Кому", type: "enum", options: [
-      { value: 0, label: "Инициатору (TRI)" }, { value: 1, label: "Всем (ALL)" }, { value: 2, label: "Затронутым (AFF)" } ] } ] },
+      { value: 0, label: "Инициатору (TRI)" }, { value: 1, label: "Всем (ALL)" }, { value: 2, label: "Затронутым (AFF)" } ] },
+    // on-disk optional BOOLVALUE (see docs/reference-gaps-events.md #17) — semantics not
+    // documented in the reference; round-tripped by the codec, hidden from the form.
+    { key: "boolValue", label: "BOOLVALUE (служебный)", type: "bool", hidden: true } ] },
   { code: 18, kind: "changeStackOrder", label: "Приказ отряду", fields: [
     { key: "stackId", label: "Отряд", type: "ref-stack" },
     { key: "orderTarget", label: "Цель приказа", type: "ref-stack" },
@@ -236,11 +243,13 @@ export const EFFECT_BY_CODE: Record<number, EventTypeSpec> = Object.fromEntries(
   EFFECT_SPECS.map((s) => [s.code, s]),
 );
 
-// A field's value type in the model.
+// A field's value type in the model. Every field carries a DEFAULT so that events captured
+// before a spec gained a field (older journals / collab peers) normalize instead of failing —
+// the defaults match what the byte codec writes for an absent tag (false / 0 / "").
 const fieldZod = (f: EventFieldSpec): z.ZodTypeAny =>
-  f.type === "bool" ? z.boolean() : f.type === "text" || f.type.startsWith("ref-") || f.type === "template" || f.type === "item" || f.type === "spell"
-    ? z.string()
-    : z.number(); // int / enum / var
+  f.type === "bool" ? z.boolean().default(false) : f.type === "text" || f.type.startsWith("ref-") || f.type === "template" || f.type === "item" || f.type === "spell"
+    ? z.string().default("")
+    : z.number().default(0); // int / enum / var
 
 function specToZod(specs: readonly EventTypeSpec[], discr: "cond" | "eff"): z.ZodTypeAny {
   const variants = specs.map((s) => {

@@ -42,9 +42,9 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
 
 <template>
   <div class="tpl-editor">
+    <!-- the tab is the title; head keeps the count + action only -->
     <div class="tpl-head">
-      <strong class="d2-sec">Шаблоны отрядов</strong>
-      <span class="tpl-count">{{ store.templates.length }}</span>
+      <span class="tpl-count">{{ store.templates.length }} шаблонов</span>
       <el-button size="small" type="primary" @click="store.createTemplate()">+ Шаблон</el-button>
     </div>
 
@@ -100,15 +100,22 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
 </template>
 
 <style scoped>
-.tpl-editor { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
-.tpl-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
-.tpl-head .d2-sec { margin: 0; }
+/* the WIDE dialog gets two columns (list | form) instead of the old narrow-rail stack */
+.tpl-editor {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  column-gap: 16px;
+  height: 100%;
+  font-size: 12px;
+}
+.tpl-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px; }
 .tpl-count { color: var(--el-text-color-secondary); margin-right: auto; }
-.tpl-list { max-height: 38%; padding: 0 4px 8px; }
+.tpl-list { min-height: 0; padding: 0 4px 8px; }
 .tpl-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; }
 .tpl-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tpl-meta { color: var(--el-text-color-secondary); margin-left: auto; font-size: 11px; }
-.tpl-form { flex: 1; padding: 8px 12px; }
+.tpl-form { min-height: 0; padding: 8px 12px; max-width: 560px; }
 .tpl-props { margin: 8px 0; }
 .tpl-props label, .tpl-leader label { color: var(--el-text-color-secondary); margin-right: 6px; }
 .tpl-leader { display: flex; align-items: center; gap: 6px; margin: 8px 0; }

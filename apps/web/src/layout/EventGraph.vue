@@ -7,8 +7,12 @@
  * enable-chain targets). Clicking an event satellite recenters the graph on it; clicking a
  * var satellite jumps to the Переменные tab; clicking an object satellite selects it on the
  * map (the overlay + inspector follow).
+ *
+ * Navigation is viewBox-based (trackpad-first, no mouse assumed): wheel = zoom toward the
+ * cursor, pointer drag = pan (only after >4px so node clicks still work), floating +/−/⤢
+ * cluster top-right; selecting another event re-fits to the content bbox.
  */
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { ElEmpty } from "element-plus";
 import type { EventCondition, EventEffect } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
@@ -120,7 +124,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
       nodes.push({
         x: COL.satL, y, w: BW.sat, h: NODE_H,
         title: truncate(names.eventName(ev), 24), sub: "включает это событие", icon: "⚑",
-        cls: "g-evt", click: () => store.select(ev), tip: ev,
+        cls: "g-evt", click: () => store.navigate({ tab: "events", eventId: ev }), tip: ev,
       });
       edges.push({ x1: COL.satL + BW.sat, y1: y + NODE_H / 2, x2: center.x, y2: cy - 8, cls: "e-chain" });
     } else if (s.ref) {
@@ -153,13 +157,19 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
   return { nodes, edges, h };
 });
 
-/** Satellite click: events recenter, vars jump to their tab, map objects get selected. */
+/** Satellite click: events recenter, vars jump to their tab, map objects get selected.
+ *  Every in-window jump goes through navigate() so «← Назад» / breadcrumbs can return. */
 function satClick(r: ResolvedRef): (() => void) | undefined {
-  if (r.kind === "event") return () => store.select(String(r.value));
-  if (r.kind === "var") return () => { store.panelTab = "vars"; };
-  if (r.kind === "template") return () => { store.panelTab = "templates"; };
+  if (r.kind === "event") return () => store.navigate({ tab: "events", eventId: String(r.value) });
+  if (r.kind === "var") return () => store.navigate({ tab: "vars" });
+  if (r.kind === "template") return () => store.navigate({ tab: "templates" });
   if (r.kind === "object") return () => toolStore.setSelectedId(String(r.value));
   return undefined;
+}
+
+/** «➜ следующее в цепочке»: auto-creates a disabled follow-up + the enableEvent wire. */
+function chainNext(): void {
+  if (store.selectedId) store.createChainedEvent(store.selectedId);
 }
 
 /** Slightly curved edge path (cubic, horizontal tangents). */
@@ -167,36 +177,171 @@ function edgePath(e: GEdge): string {
   const mx = (e.x1 + e.x2) / 2;
   return `M ${e.x1} ${e.y1} C ${mx} ${e.y1}, ${mx} ${e.y2}, ${e.x2} ${e.y2}`;
 }
+
+// ---- viewBox navigation: wheel zoom, drag pan, fit ---------------------------------------
+const svgRef = ref<SVGSVGElement | null>(null);
+const view = ref({ x: 0, y: 0, w: W, h: 300 });
+const ZOOM_MIN = 0.35; // scale relative to the fitted view
+const ZOOM_MAX = 4;
+const FIT_PAD = 36;
+
+/** Content bbox of the current graph (nodes' extents + padding) — the "fitted" view. */
+const contentBox = computed<{ x: number; y: number; w: number; h: number }>(() => {
+  const g = graph.value;
+  if (!g || !g.nodes.length) return { x: 0, y: 0, w: W, h: 300 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of g.nodes) {
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.w);
+    maxY = Math.max(maxY, n.y + n.h);
+  }
+  let x = minX - FIT_PAD;
+  let y = minY - FIT_PAD;
+  let w = maxX - minX + FIT_PAD * 2;
+  let h = maxY - minY + FIT_PAD * 2;
+  // a near-empty graph shouldn't blow a lone box up to a comical scale
+  const MIN_W = 560;
+  const MIN_H = 240;
+  if (w < MIN_W) { x -= (MIN_W - w) / 2; w = MIN_W; }
+  if (h < MIN_H) { y -= (MIN_H - h) / 2; h = MIN_H; }
+  return { x, y, w, h };
+});
+
+/** Reset to the fitted content view (the ⤢ button, and every event (re)selection). */
+function fitToContent(): void {
+  view.value = { ...contentBox.value };
+}
+watch(() => store.selected?.id, fitToContent, { immediate: true });
+
+/** Screen (client) point → viewBox coords, honoring `xMidYMid meet` letterboxing. */
+function clientToView(cx: number, cy: number): { x: number; y: number } {
+  const svg = svgRef.value;
+  const v = view.value;
+  if (!svg) return { x: v.x + v.w / 2, y: v.y + v.h / 2 };
+  const rect = svg.getBoundingClientRect();
+  const s = Math.min(rect.width / v.w, rect.height / v.h) || 1; // screen px per viewBox unit
+  const ox = (rect.width - v.w * s) / 2;
+  const oy = (rect.height - v.h * s) / 2;
+  return { x: v.x + (cx - rect.left - ox) / s, y: v.y + (cy - rect.top - oy) / s };
+}
+
+/** Zoom about a fixed viewBox point; factor > 1 zooms IN. Clamped to 0.35×..4× of the fit. */
+function zoomAt(px: number, py: number, factor: number): void {
+  const v = view.value;
+  const base = contentBox.value.w;
+  const w = Math.min(Math.max(v.w / factor, base / ZOOM_MAX), base / ZOOM_MIN);
+  const k = w / v.w;
+  view.value = { x: px - (px - v.x) * k, y: py - (py - v.y) * k, w, h: v.h * k };
+}
+
+function onWheel(ev: WheelEvent): void {
+  const dy = ev.deltaMode === 1 ? ev.deltaY * 16 : ev.deltaY; // lines → px (Firefox)
+  const p = clientToView(ev.clientX, ev.clientY);
+  zoomAt(p.x, p.y, Math.exp(-dy * 0.0018));
+}
+
+function zoomStep(dir: 1 | -1): void {
+  const v = view.value;
+  zoomAt(v.x + v.w / 2, v.y + v.h / 2, dir > 0 ? 1.35 : 1 / 1.35);
+}
+
+// Pan: capture the pointer only AFTER >4px of travel, so a plain tap on a node still
+// delivers its click; once a drag happened, the flag swallows the trailing node click.
+let pan: { id: number; sx: number; sy: number; lx: number; ly: number; dragging: boolean } | null = null;
+const panning = ref(false);
+let dragMoved = false;
+
+function onPointerDown(ev: PointerEvent): void {
+  if (ev.button !== 0) return;
+  pan = { id: ev.pointerId, sx: ev.clientX, sy: ev.clientY, lx: ev.clientX, ly: ev.clientY, dragging: false };
+  dragMoved = false;
+}
+function onPointerMove(ev: PointerEvent): void {
+  if (!pan || ev.pointerId !== pan.id) return;
+  if (!pan.dragging) {
+    if (Math.hypot(ev.clientX - pan.sx, ev.clientY - pan.sy) <= 4) return;
+    pan.dragging = true;
+    dragMoved = true;
+    panning.value = true;
+    svgRef.value?.setPointerCapture(ev.pointerId);
+  }
+  const a = clientToView(pan.lx, pan.ly);
+  const b = clientToView(ev.clientX, ev.clientY);
+  view.value = { ...view.value, x: view.value.x - (b.x - a.x), y: view.value.y - (b.y - a.y) };
+  pan.lx = ev.clientX;
+  pan.ly = ev.clientY;
+}
+function onPointerUp(ev: PointerEvent): void {
+  if (!pan || ev.pointerId !== pan.id) return;
+  pan = null;
+  panning.value = false;
+}
+
+function onNodeClick(n: GNode): void {
+  if (dragMoved) {
+    dragMoved = false;
+    return;
+  }
+  n.click?.();
+}
 </script>
 
 <template>
   <div class="ev-graph">
-    <svg v-if="graph" :viewBox="`0 0 ${W} ${graph.h}`" preserveAspectRatio="xMidYMid meet">
-      <path v-for="(e, i) in graph.edges" :key="'e' + i" :d="edgePath(e)" :class="e.cls" fill="none" />
-      <g
-        v-for="(n, i) in graph.nodes"
-        :key="'n' + i"
-        :class="[n.cls, { clickable: !!n.click }]"
-        @click="n.click?.()"
+    <template v-if="graph">
+      <svg
+        ref="svgRef"
+        :viewBox="`${view.x} ${view.y} ${view.w} ${view.h}`"
+        preserveAspectRatio="xMidYMid meet"
+        :class="{ panning }"
+        @wheel.prevent="onWheel"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+        @pointercancel="onPointerUp"
       >
-        <title v-if="n.tip">{{ n.tip }}</title>
-        <rect :x="n.x" :y="n.y" :width="n.w" :height="n.h" rx="7" />
-        <text :x="n.x + 10" :y="n.y + (n.sub ? 15 : n.h / 2 + 4)" class="t-title">
-          <tspan v-if="n.icon" class="t-icon">{{ n.icon }}</tspan>
-          {{ n.title }}
-        </text>
-        <text v-if="n.sub" :x="n.x + 10" :y="n.y + n.h - 7" class="t-sub">{{ n.sub }}</text>
-      </g>
-    </svg>
+        <path v-for="(e, i) in graph.edges" :key="'e' + i" :d="edgePath(e)" :class="e.cls" fill="none" />
+        <g
+          v-for="(n, i) in graph.nodes"
+          :key="'n' + i"
+          :class="[n.cls, { clickable: !!n.click }]"
+          @click="onNodeClick(n)"
+        >
+          <title v-if="n.tip">{{ n.tip }}</title>
+          <rect :x="n.x" :y="n.y" :width="n.w" :height="n.h" rx="7" />
+          <text :x="n.x + 10" :y="n.y + (n.sub ? 15 : n.h / 2 + 4)" class="t-title">
+            <tspan v-if="n.icon" class="t-icon">{{ n.icon }}</tspan>
+            {{ n.title }}
+          </text>
+          <text v-if="n.sub" :x="n.x + 10" :y="n.y + n.h - 7" class="t-sub">{{ n.sub }}</text>
+        </g>
+      </svg>
+      <div class="ev-nav d2-float">
+        <button type="button" class="ev-nav-btn" title="Приблизить" @click="zoomStep(1)">+</button>
+        <button type="button" class="ev-nav-btn" title="Отдалить" @click="zoomStep(-1)">−</button>
+        <button type="button" class="ev-nav-btn" title="Вписать граф" @click="fitToContent()">⤢</button>
+      </div>
+      <!-- auto-wiring: one click = a disabled follow-up event + the enable-chain edge -->
+      <button type="button" class="ev-chain d2-float" title="Создать продолжение: новое (выключенное) событие + эффект «Вкл/выкл событие» на него" @click="chainNext()">
+        ➜ следующее в цепочке
+      </button>
+      <div class="ev-legend">
+        <span><i class="lg lg-cond" />условия</span>
+        <span><i class="lg lg-eff" />эффекты</span>
+        <span><i class="lg lg-evt" />цепочки вкл/выкл</span>
+      </div>
+    </template>
     <el-empty v-else description="Выберите событие — здесь появится его карта связей" :image-size="70" />
   </div>
 </template>
 
 <style scoped>
 .ev-graph {
+  position: relative;
   height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden; /* the viewBox pans/zooms — no scrollbars */
   background:
     radial-gradient(circle at 1px 1px, var(--el-border-color-lighter) 1px, transparent 0) 0 0 / 22px 22px;
   border-radius: var(--d2-radius, 8px);
@@ -204,9 +349,74 @@ function edgePath(e: GEdge): string {
 .ev-graph svg {
   display: block;
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   font-family: inherit;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
+.ev-graph svg.panning {
+  cursor: grabbing;
+}
+/* floating zoom cluster (elevation/glass come from the shared .d2-float) */
+.ev-nav {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+}
+.ev-nav-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--d2-radius);
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.ev-nav-btn:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+/* chain-create action (top-left) */
+.ev-chain {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  padding: 5px 10px;
+  border: none;
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+}
+.ev-chain:hover {
+  color: var(--el-color-primary);
+}
+/* color legend (bottom-left, non-interactive) */
+.ev-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  z-index: 5;
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+  pointer-events: none;
+}
+.ev-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.lg { width: 14px; height: 0; border-top: 2px solid; display: inline-block; }
+.lg-cond { border-color: var(--el-color-warning); }
+.lg-eff { border-color: var(--el-color-success); }
+.lg-evt { border-color: var(--el-color-primary); border-top-style: dashed; }
 /* nodes */
 rect {
   fill: var(--el-bg-color);

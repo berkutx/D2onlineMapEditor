@@ -7,16 +7,25 @@
  * option value, the label is the game name + effect line).
  */
 import { computed } from "vue";
-import { ElInputNumber, ElSwitch, ElInput, ElSelect, ElOption } from "element-plus";
+import { ElInputNumber, ElSwitch, ElInput, ElSelect, ElOption, ElButton, ElTooltip, ElMessage } from "element-plus";
 import type { EventFieldSpec } from "@d2/map-schema";
+import { placeLocationOps } from "@d2/map-edit";
+import { cellToWorld } from "@d2/pixi-render";
+import { getScene } from "../canvas/sceneHolder";
 import { useEditStore } from "../stores/editStore";
+import { useToolStore } from "../stores/toolStore";
+import { useViewStore } from "../stores/viewStore";
 import { useItemStore, ITEM_CAT_LABELS } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
+import CodeInput from "./CodeInput.vue";
+import MiniMap from "./MiniMap.vue";
 
 const props = defineProps<{ field: EventFieldSpec; modelValue: unknown }>();
 const emit = defineEmits<{ (e: "update:modelValue", v: unknown): void }>();
 
 const edit = useEditStore();
+const toolStore = useToolStore();
+const viewStore = useViewStore();
 const itemStore = useItemStore();
 const spellStore = useSpellStore();
 // lazy catalog loads (tiny JSONs, cached across all field inputs)
@@ -82,6 +91,36 @@ const spellOptions = computed<Opt[]>(() =>
 function set(v: unknown): void {
   emit("update:modelValue", v);
 }
+
+// --- ref-loc extras: показать на карте / создать новую локацию / миникарта ---------------
+/** Center the main camera on the referenced object + select it (overlay follows). */
+function showOnMap(): void {
+  const id = props.modelValue as string;
+  const obj = id ? edit.liveDoc?.objects.find((o) => o.id === id) : null;
+  if (!obj) return;
+  if (obj.type === "location" && !viewStore.locationsVisible) viewStore.toggleLocations();
+  toolStore.setSelectedId(obj.id);
+  const w = cellToWorld(obj.pos.x + 0.5, obj.pos.y + 0.5);
+  getScene()?.getCamera()?.centerOn(w.x, w.y);
+}
+
+/** Create a location at the CURRENT view center, assign it to this field, select it. */
+function newLocation(): void {
+  const doc = edit.liveDoc;
+  if (!doc) return;
+  const vc = viewStore.visibleCells;
+  const clampC = (v: number): number => Math.max(0, Math.min(doc.size - 1, v));
+  const cx = clampC(vc ? Math.round(vc.x + vc.w / 2) : Math.floor(doc.size / 2));
+  const cy = clampC(vc ? Math.round(vc.y + vc.h / 2) : Math.floor(doc.size / 2));
+  const ops = placeLocationOps(doc, cx, cy, 2, "Новая локация");
+  const first = ops[0] as { object?: { id: string } } | undefined;
+  if (!first?.object) return;
+  edit.commit(ops);
+  set(first.object.id);
+  if (!viewStore.locationsVisible) viewStore.toggleLocations();
+  toolStore.setSelectedId(first.object.id);
+  ElMessage.success("Локация создана в центре экрана — двигайте инструментом «Двигать», радиус в инспекторе");
+}
 </script>
 
 <template>
@@ -138,6 +177,31 @@ function set(v: unknown): void {
     />
   </div>
 
+  <!-- ref-loc: picker + показать/создать + миникарта для перепроверки места -->
+  <div v-else-if="field.type === 'ref-loc'" class="ev-loc">
+    <div class="ev-loc-row">
+      <el-select
+        :model-value="(modelValue as string) || ''"
+        size="small"
+        filterable
+        clearable
+        placeholder="— локация —"
+        class="ev-loc-sel"
+        @update:model-value="set($event || '')"
+      >
+        <el-option v-for="o in refOptions" :key="o.value" :value="o.value" :label="o.label" />
+      </el-select>
+      <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+        <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
+      </el-tooltip>
+      <el-tooltip content="Новая локация в центре экрана" :show-after="300">
+        <el-button size="small" text class="ev-loc-btn" @click="newLocation()">＋</el-button>
+      </el-tooltip>
+    </div>
+    <!-- мини-вью: где именно эта зона (клик по миникарте центрирует камеру) -->
+    <MiniMap v-if="modelValue" :highlight-id="(modelValue as string)" :size="150" class="ev-loc-map" />
+  </div>
+
   <!-- ref-* pickers (objects / players / events) -->
   <el-select
     v-else-if="isRef"
@@ -169,13 +233,20 @@ function set(v: unknown): void {
     />
   </el-select>
 
+  <!-- код (Lua-скрипт) — с подсветкой синтаксиса -->
+  <CodeInput
+    v-else-if="field.key === 'code'"
+    :model-value="(modelValue as string) ?? ''"
+    @update:model-value="set($event)"
+  />
+
   <!-- free text -->
   <el-input
     v-else
     :model-value="(modelValue as string) ?? ''"
     size="small"
-    :type="field.key === 'text' || field.key === 'code' || field.key === 'desc' ? 'textarea' : 'text'"
-    :autosize="field.key === 'text' || field.key === 'code' || field.key === 'desc' ? { minRows: 1, maxRows: 4 } : undefined"
+    :type="field.key === 'text' || field.key === 'desc' ? 'textarea' : 'text'"
+    :autosize="field.key === 'text' || field.key === 'desc' ? { minRows: 1, maxRows: 4 } : undefined"
     @update:model-value="set($event)"
   />
 </template>
@@ -186,4 +257,10 @@ function set(v: unknown): void {
   gap: 6px;
   align-items: center;
 }
+.ev-loc { display: flex; flex-direction: column; gap: 6px; }
+.ev-loc-row { display: flex; align-items: center; gap: 2px; }
+.ev-loc-sel { flex: 1; min-width: 0; }
+.ev-loc-btn { padding: 4px 6px; opacity: 0.65; transition: opacity 0.12s; }
+.ev-loc-btn:hover { opacity: 1; }
+.ev-loc-map { align-self: flex-start; }
 </style>

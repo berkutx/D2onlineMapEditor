@@ -13,7 +13,7 @@ const edit = useEditStore();
 
 const players = computed(() => edit.liveDoc?.players ?? []);
 
-interface Pair { aName: string; bName: string; race1: number; race2: number; relation: number }
+interface Pair { aName: string; bName: string; aColor?: string; bColor?: string; race1: number; race2: number; relation: number }
 
 const relationOf = (r1: number, r2: number): number => {
   const [x, y] = r1 <= r2 ? [r1, r2] : [r2, r1];
@@ -32,6 +32,7 @@ const pairs = computed<Pair[]>(() => {
       out.push({
         aName: ps[i]!.name || `Игрок ${ps[i]!.playerNo}`,
         bName: ps[j]!.name || `Игрок ${ps[j]!.playerNo}`,
+        aColor: ps[i]!.color, bColor: ps[j]!.color,
         race1: ps[i]!.race, race2: ps[j]!.race,
         relation: relationOf(ps[i]!.race, ps[j]!.race),
       });
@@ -50,11 +51,15 @@ function set(p: Pair, relation: number): void {
 
 <template>
   <div class="dp">
-    <div class="dp-head"><strong class="d2-sec">Дипломатия</strong><span class="dp-sub">{{ players.length }} игрок(ов)</span></div>
+    <div class="dp-head"><span class="dp-sub">{{ players.length }} игрок(ов)</span></div>
     <div class="dp-body">
       <el-empty v-if="pairs.length === 0" description="Нужно ≥ 2 игроков" :image-size="60" />
       <div v-for="p in pairs" :key="p.race1 + '-' + p.race2" class="dp-row">
-        <span class="dp-pair">{{ p.aName }} <span class="dp-vs">↔</span> {{ p.bName }}</span>
+        <span class="dp-pair">
+          <i v-if="p.aColor" class="dp-dot" :style="{ background: p.aColor }" />{{ p.aName }}
+          <span class="dp-vs">↔</span>
+          <i v-if="p.bColor" class="dp-dot" :style="{ background: p.bColor }" />{{ p.bName }}
+        </span>
         <el-select :model-value="p.relation" size="small" style="width: 130px"
           @update:model-value="set(p, $event)">
           <el-option v-for="o in PRESETS" :key="o.value" :value="o.value" :label="o.label" />
@@ -70,10 +75,11 @@ function set(p: Pair, relation: number): void {
 
 <style scoped>
 .dp { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
-.dp-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px; }
-.dp-head .d2-sec { margin: 0; }
+.dp-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 4px; }
 .dp-sub { color: var(--el-text-color-secondary); font-size: 11px; }
-.dp-body { flex: 1; overflow-y: auto; padding: 0 12px; }
+/* cap the block width — names next to their controls, no cross-screen eye travel */
+.dp-body { flex: 1; overflow-y: auto; padding: 0 12px; max-width: 540px; }
+.dp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: baseline; }
 .dp-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
 .dp-pair { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .dp-vs { color: var(--el-text-color-secondary); margin: 0 3px; }

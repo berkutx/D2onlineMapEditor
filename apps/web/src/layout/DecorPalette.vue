@@ -18,9 +18,11 @@ import {
   DECOR_STYLES,
   DECOR_TONES,
   type DecorGroup,
+  type DecorThumb as DecorThumbRect,
 } from "../stores/decorStore";
 import { useToolStore } from "../stores/toolStore";
 import DecorThumb from "./DecorThumb.vue";
+import ThumbPreview from "./ThumbPreview.vue";
 
 const decorStore = useDecorStore();
 const toolStore = useToolStore();
@@ -70,6 +72,15 @@ function pickVariant(id: string): void {
 function rollRandom(): void {
   const next = decorStore.randomVariant(decorId.value);
   if (next) toolStore.setDecor(next);
+}
+
+// one shared floating zoom for variant/catalog cells (see ThumbPreview.vue)
+const preview = ref<InstanceType<typeof ThumbPreview> | null>(null);
+function showPreview(e: MouseEvent, thumb: DecorThumbRect, name: string): void {
+  preview.value?.show(e.currentTarget as HTMLElement, thumb, name);
+}
+function hidePreview(): void {
+  preview.value?.hide();
 }
 
 const FAMILY_CHIPS = [{ key: "all", label: "Все" }, ...DECOR_FAMILIES];
@@ -144,6 +155,8 @@ const variantIndex = computed(() => {
             :class="{ sel: v.id === decorId }"
             :title="v.desc_en"
             @click="pickVariant(v.id)"
+            @mouseenter="showPreview($event, v.thumb, v.desc_en || selectedGroup.label)"
+            @mouseleave="hidePreview()"
           >
             <DecorThumb :thumb="v.thumb" :size="40" />
           </button>
@@ -164,6 +177,8 @@ const variantIndex = computed(() => {
           :class="{ sel: selectedGroup?.key === g.key }"
           :title="`${g.label} · ${g.cx}×${g.cy}`"
           @click="pickGroup(g)"
+          @mouseenter="showPreview($event, g.rep.thumb, g.label)"
+          @mouseleave="hidePreview()"
         >
           <div class="dp-card-thumb">
             <DecorThumb :thumb="g.rep.thumb" :size="64" />
@@ -184,6 +199,8 @@ const variantIndex = computed(() => {
             class="dp-card sm"
             :title="`${g.label} · ${g.cx}×${g.cy}`"
             @click="pickGroup(g)"
+            @mouseenter="showPreview($event, g.rep.thumb, g.label)"
+            @mouseleave="hidePreview()"
           >
             <div class="dp-card-thumb">
               <DecorThumb :thumb="g.rep.thumb" :size="48" />
@@ -196,13 +213,15 @@ const variantIndex = computed(() => {
     </el-scrollbar>
 
     <div v-if="selectedGroup" class="dp-sel">
-      <DecorThumb :thumb="decorStore.get(decorId)?.thumb ?? selectedGroup.rep.thumb" :size="44" />
+      <DecorThumb class="dp-sel-thumb" :thumb="decorStore.get(decorId)?.thumb ?? selectedGroup.rep.thumb" :size="44" />
       <div class="dp-sel-info">
         <div class="dp-sel-name">{{ selectedGroup.label }}</div>
         <div class="dp-sel-meta">{{ selectedGroup.cx }}×{{ selectedGroup.cy }} · {{ selectedGroup.shape }}</div>
         <div class="dp-sel-hint">Клик — поставить · [ ] — вид · R — случайный · колесо — масштаб · Ctrl+тащить — карта</div>
       </div>
     </div>
+
+    <ThumbPreview ref="preview" />
   </div>
 </template>
 
@@ -301,20 +320,22 @@ const variantIndex = computed(() => {
   gap: 4px;
   padding-bottom: 4px;
 }
+/* Checkerboard under every thumb is FIXED LIGHT in both themes: the sprites are
+ * dark, they only read on a light backdrop. Hover/selection = soft rings, no frames. */
 .dp-vcell {
   flex: 0 0 auto;
   padding: 2px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background:
-    repeating-conic-gradient(var(--el-fill-color) 0% 25%, transparent 0% 50%) 0 / 12px 12px;
+  border: none;
+  border-radius: var(--d2-radius);
+  background: repeating-conic-gradient(#e9e5db 0% 25%, #f6f4ee 0% 50%) 0 / 12px 12px;
   cursor: pointer;
+  transition: box-shadow 0.12s ease;
 }
 .dp-vcell:hover {
-  border-color: var(--el-border-color);
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter);
 }
 .dp-vcell.sel {
-  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 2px var(--d2-active-bar);
 }
 .dp-grid {
   flex: 1;
@@ -353,10 +374,9 @@ const variantIndex = computed(() => {
 }
 .dp-card-thumb {
   position: relative;
-  border-radius: 5px;
+  border-radius: var(--d2-radius);
   overflow: hidden;
-  background:
-    repeating-conic-gradient(var(--el-fill-color) 0% 25%, transparent 0% 50%) 0 / 14px 14px;
+  background: repeating-conic-gradient(#e9e5db 0% 25%, #f6f4ee 0% 50%) 0 / 12px 12px;
 }
 .dp-badge {
   position: absolute;
@@ -399,6 +419,11 @@ const variantIndex = computed(() => {
   gap: 8px;
   padding: 8px 12px;
   background: var(--el-fill-color-lighter);
+}
+.dp-sel-thumb {
+  border-radius: var(--d2-radius);
+  overflow: hidden;
+  background: repeating-conic-gradient(#e9e5db 0% 25%, #f6f4ee 0% 50%) 0 / 12px 12px;
 }
 .dp-sel-info {
   min-width: 0;

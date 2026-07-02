@@ -4,13 +4,27 @@
  *  which WRITE it (var-typed effect fields, i.e. «изменить переменную»). Clicking an event
  *  chip jumps to that event in the События tab. No more disconnected numbers in a list —
  *  every variable shows its role in the scenario. */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { ElInput, ElInputNumber, ElButton, ElScrollbar, ElEmpty, ElTag, ElTooltip } from "element-plus";
 import type { MapEvent } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
 
 const store = useEventStore();
+
+/** Usage chips are capped (a heavily-used variable was a screen-tall card); «+N ещё»
+ *  expands one variable's one direction. */
+const CHIP_LIMIT = 8;
+const expandedUse = ref(new Set<string>());
+function toggleUse(key: string): void {
+  const next = new Set(expandedUse.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedUse.value = next;
+}
+function visibleUses(list: VarUse[], key: string): VarUse[] {
+  return expandedUse.value.has(key) ? list : list.slice(0, CHIP_LIMIT);
+}
 
 interface VarUse { ev: MapEvent; what: string }
 interface VarUsage { readers: VarUse[]; writers: VarUse[] }
@@ -51,18 +65,17 @@ const unused = (id: number): boolean => {
   return !u.readers.length && !u.writers.length;
 };
 
-/** Jump to the event in the События tab (same window, tab switch + select). */
+/** Jump to the event in the События tab — recorded in the nav history («← Назад» returns). */
 function jump(ev: MapEvent): void {
-  store.select(ev.id);
-  store.panelTab = "events";
+  store.navigate({ tab: "events", eventId: ev.id });
 }
 </script>
 
 <template>
   <div class="var-editor">
+    <!-- the tab itself is the title — no duplicated heading, just the count + action -->
     <div class="var-head">
-      <strong class="d2-sec">Переменные</strong>
-      <span class="var-count">{{ store.variables.length }}</span>
+      <span class="var-count">{{ store.variables.length }} переменных</span>
       <el-button size="small" type="primary" @click="store.addVariable()">+ Переменная</el-button>
     </div>
     <el-scrollbar class="var-list">
@@ -79,15 +92,21 @@ function jump(ev: MapEvent): void {
         <template v-else>
           <div v-if="useOf(v.id).readers.length" class="var-usage">
             <span class="use-lbl">⚡ читают:</span>
-            <el-tooltip v-for="(u, i) in useOf(v.id).readers" :key="'r' + i" :content="u.what" :show-after="300">
+            <el-tooltip v-for="(u, i) in visibleUses(useOf(v.id).readers, v.id + ':r')" :key="'r' + i" :content="u.what" :show-after="300">
               <el-tag size="small" class="use-chip" @click="jump(u.ev)">{{ u.ev.name || u.ev.id }}</el-tag>
             </el-tooltip>
+            <el-tag v-if="useOf(v.id).readers.length > CHIP_LIMIT" size="small" effect="plain" class="use-chip use-more" @click="toggleUse(v.id + ':r')">
+              {{ expandedUse.has(v.id + ':r') ? 'свернуть' : `+${useOf(v.id).readers.length - CHIP_LIMIT} ещё` }}
+            </el-tag>
           </div>
           <div v-if="useOf(v.id).writers.length" class="var-usage">
             <span class="use-lbl">★ пишут:</span>
-            <el-tooltip v-for="(u, i) in useOf(v.id).writers" :key="'w' + i" :content="u.what" :show-after="300">
+            <el-tooltip v-for="(u, i) in visibleUses(useOf(v.id).writers, v.id + ':w')" :key="'w' + i" :content="u.what" :show-after="300">
               <el-tag size="small" type="success" class="use-chip" @click="jump(u.ev)">{{ u.ev.name || u.ev.id }}</el-tag>
             </el-tooltip>
+            <el-tag v-if="useOf(v.id).writers.length > CHIP_LIMIT" size="small" effect="plain" class="use-chip use-more" @click="toggleUse(v.id + ':w')">
+              {{ expandedUse.has(v.id + ':w') ? 'свернуть' : `+${useOf(v.id).writers.length - CHIP_LIMIT} ещё` }}
+            </el-tag>
           </div>
         </template>
       </div>
@@ -111,6 +130,7 @@ function jump(ev: MapEvent): void {
 .use-lbl { color: var(--el-text-color-secondary); font-size: 11px; margin-right: 2px; }
 .use-chip { cursor: pointer; }
 .use-chip:hover { text-decoration: underline; }
+.use-more { color: var(--el-text-color-secondary); }
 .var-hint { color: var(--el-text-color-secondary); font-size: 11px; padding: 8px 12px; margin: 0; }
 .icon-btn { opacity: 0.6; transition: opacity 0.12s; }
 .icon-btn:hover { opacity: 1; }

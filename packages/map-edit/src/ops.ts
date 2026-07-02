@@ -6,7 +6,8 @@
  * applyBytes.ts; the two are kept consistent by the semantic round-trip check.
  */
 
-import type { MapDocument, MapObject, MapCell, MapEvent } from "@d2/map-schema";
+import type { MapDocument, MapObject, MapCell } from "@d2/map-schema";
+import { MapEvent } from "@d2/map-schema";
 import { EditOp } from "@d2/socket-contract";
 import { makeCell } from "./bits.js";
 
@@ -101,8 +102,12 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
         i < 0
           ? { kind: "deleteEvent", id: op.event.id }
           : { kind: "upsertEvent", event: events[i]! };
-      if (i < 0) events.push(op.event);
-      else events[i] = op.event;
+      // Normalize through Contract A: fields absent in the op (older journals / peers on an
+      // older spec) get their schema defaults — matching what the byte codec writes for an
+      // absent tag, so the semantic round-trip compares like with like.
+      const ev = MapEvent.parse(op.event);
+      if (i < 0) events.push(ev);
+      else events[i] = ev;
       return { doc: { ...doc, events }, inverse };
     }
 

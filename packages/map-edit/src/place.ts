@@ -109,3 +109,24 @@ export function placeLandmarkOps(doc: MapDocument, cx: number, cy: number, lmark
   const id = `${version}MM${hex4(max + 1)}`;
   return [{ kind: "addObject", object: { type: "landmark", id, pos: { x: cx, y: cy }, baseType: lmarkKey } }];
 }
+
+/** Ops to place a location (named region): one addObject. id = a fresh S143LO####
+ *  (max existing + 1, allocated HERE so model and export agree). */
+export function placeLocationOps(
+  doc: MapDocument,
+  cx: number,
+  cy: number,
+  radius: number,
+  name: string,
+): EditOp[] {
+  const version = doc.header.version || "S143";
+  let max = -1;
+  for (const o of doc.objects) {
+    if (o.type === "location") {
+      const m = /LO([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) max = Math.max(max, parseInt(m[1]!, 16));
+    }
+  }
+  const id = `${version}LO${hex4(max + 1)}`;
+  return [{ kind: "addObject", object: { type: "location", id, pos: { x: cx, y: cy }, name, radius } }];
+}

@@ -20,6 +20,7 @@ export {
   appendBlocks,
   roadFrame,
   landmarkFrame,
+  locationFrame,
   mountainsFrame,
   itemFrame,
   unitFrame,

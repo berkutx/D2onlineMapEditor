@@ -7,7 +7,7 @@
  * Tabs: События (3-zone layout) / Настройки / Дипломатия / Переменные / Шаблоны.
  * Edits commit through editStore (undoable + collab).
  */
-import { computed } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount } from "vue";
 import {
   ElDialog, ElInput, ElButton, ElScrollbar, ElInputNumber, ElSwitch, ElCheckbox, ElSelect,
   ElOption, ElTag, ElTooltip, ElEmpty, ElTabs, ElTabPane,
@@ -30,6 +30,25 @@ const visible = computed({
   get: () => view.eventPanelVisible,
   set: (v: boolean) => { if (v !== view.eventPanelVisible) view.toggleEventPanel(); },
 });
+
+/** Список событий сворачивается в узкую полоску — графу достаётся вся ширина. */
+const listCollapsed = ref(false);
+const gridColumns = computed(() =>
+  listCollapsed.value
+    ? "28px minmax(0, 1fr) minmax(280px, 330px)"
+    : "minmax(200px, 250px) minmax(0, 1fr) minmax(280px, 330px)",
+);
+
+/** Alt+← = назад по истории переходов (пока окно открыто). */
+function onNavKey(e: KeyboardEvent): void {
+  if (!view.eventPanelVisible) return;
+  if (e.altKey && e.key === "ArrowLeft") {
+    store.goBack();
+    e.preventDefault();
+  }
+}
+onMounted(() => window.addEventListener("keydown", onNavKey));
+onBeforeUnmount(() => window.removeEventListener("keydown", onNavKey));
 
 const sel = computed(() => store.selected);
 const RACES = [
@@ -89,8 +108,10 @@ function moveEffect(i: number, dir: -1 | 1): void {
   patch({ effects });
 }
 
-const condFields = (c: EventCondition) => CONDITION_BY_KIND[c.kind]?.fields ?? [];
-const effFields = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.fields ?? [];
+const condFields = (c: EventCondition) =>
+  (CONDITION_BY_KIND[c.kind]?.fields ?? []).filter((f) => !f.hidden);
+const effFields = (e: EventEffect) =>
+  (EFFECT_BY_KIND[e.kind]?.fields ?? []).filter((f) => !f.hidden);
 const condLabel = (c: EventCondition) => CONDITION_BY_KIND[c.kind]?.label ?? c.kind;
 const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 </script>
@@ -119,6 +140,22 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
       <el-tab-pane label="Шаблоны" name="templates" />
     </el-tabs>
 
+    <!-- navigation trail: back + breadcrumbs (graph/variable jumps are recorded) -->
+    <div v-if="store.canGoBack" class="sc-nav">
+      <el-tooltip content="Назад (Alt+←)" :show-after="300">
+        <el-button size="small" text class="sc-back" @click="store.goBack()">←</el-button>
+      </el-tooltip>
+      <span
+        v-for="(c, i) in store.breadcrumbs"
+        :key="i"
+        class="sc-crumb"
+        :class="{ current: c.current }"
+        @click="!c.current && store.goToCrumb(i)"
+      >
+        {{ c.label }}<span v-if="!c.current" class="sc-sep">›</span>
+      </span>
+    </div>
+
     <div class="sc-body">
       <ScenarioSettingsEditor v-if="store.panelTab === 'settings'" class="ev-sub" />
       <DiplomacyEditor v-else-if="store.panelTab === 'diplomacy'" class="ev-sub" />
@@ -126,9 +163,18 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
       <TemplatesEditor v-else-if="store.panelTab === 'templates'" class="ev-sub" />
 
       <!-- События: list | star graph | editor -->
-      <div v-else class="ev-grid">
-        <div class="ev-col ev-col-list d2-rail--left">
+      <div v-else class="ev-grid" :style="{ gridTemplateColumns: gridColumns }">
+        <button
+          v-if="listCollapsed"
+          class="ev-list-expand"
+          title="Показать список событий"
+          @click="listCollapsed = false"
+        >▸<span class="ev-list-expand-lbl">события</span></button>
+        <div v-else class="ev-col ev-col-list d2-rail--left">
           <div class="ev-subhead">
+            <el-tooltip content="Свернуть список (графу — вся ширина)" :show-after="300">
+              <el-button size="small" text class="icon-btn" @click="listCollapsed = true">◂</el-button>
+            </el-tooltip>
             <span class="ev-count">{{ store.events.length }} событий</span>
             <el-button size="small" type="primary" @click="store.create()">+ Новое</el-button>
           </div>
@@ -149,7 +195,7 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
               :key="e.id"
               class="ev-row d2-row"
               :class="{ active: e.id === store.selectedId }"
-              @click="store.select(e.id)"
+              @click="store.navigate({ tab: 'events', eventId: e.id })"
             >
               <div class="ev-row-main">
                 <span class="ev-name">{{ e.name || "(без имени)" }}</span>
@@ -255,17 +301,48 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 .sc-title { font-weight: 600; font-size: 14px; }
 .ev-tabs { --el-tabs-header-height: 34px; font-size: 12px; }
 .ev-tabs :deep(.el-tabs__header) { margin: 0 0 8px; }
+/* navigation trail (back + crumbs) */
+.sc-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 0 6px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.sc-back { padding: 2px 8px; font-size: 13px; }
+.sc-crumb { cursor: pointer; }
+.sc-crumb:hover:not(.current) { color: var(--el-color-primary); text-decoration: underline; }
+.sc-crumb.current { color: var(--el-text-color-primary); font-weight: 600; cursor: default; }
+.sc-sep { margin: 0 5px; color: var(--el-border-color); }
 .sc-body { height: min(66vh, 640px); min-height: 380px; font-size: 12px; }
 .ev-sub { height: 100%; }
 
-/* События: list | graph | editor */
+/* События: list | graph | editor (columns come from the gridColumns computed:
+   the list is collapsible so the GRAPH gets the width priority) */
 .ev-grid {
   display: grid;
-  grid-template-columns: 250px 1fr 340px;
   gap: 0;
   height: 100%;
   min-height: 0;
 }
+.ev-list-expand {
+  border: none;
+  background: var(--el-fill-color-lighter);
+  border-radius: var(--d2-radius);
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  padding: 8px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.ev-list-expand:hover { color: var(--el-text-color-primary); background: var(--el-fill-color-light); }
+.ev-list-expand-lbl { writing-mode: vertical-rl; letter-spacing: 0.08em; font-size: 10px; text-transform: uppercase; }
 .ev-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .ev-col-list { padding-right: 8px; }
 .ev-col-graph { padding: 0 8px; }
@@ -286,9 +363,12 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 .ev-editor { flex: 1; min-height: 0; }
 .ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; align-items: center; }
 .ev-props label { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-regular); }
-.ev-races { margin-bottom: 12px; }
-.ev-races-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
-.ev-races-lbl { color: var(--el-text-color-secondary); width: 110px; }
+/* races: a tight 3-column grid (was a wrapping flex that stacked into a 230px block) */
+.ev-races { margin-bottom: 10px; }
+.ev-races-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 8px; margin: 4px 0; }
+.ev-races-lbl { grid-column: 1 / -1; color: var(--el-text-color-secondary); font-size: 11px; }
+.ev-races :deep(.el-checkbox) { height: 22px; margin-right: 0; }
+.ev-races :deep(.el-checkbox__label) { font-size: 12px; padding-left: 5px; }
 .ev-sec-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin: var(--d2-sp-4) 0 6px;

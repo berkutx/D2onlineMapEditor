@@ -74,6 +74,56 @@ export const useEventStore = defineStore("events", () => {
     selectedId.value = id;
   }
 
+  // --- navigation history («хлебные крошки» + назад) ------------------------------------
+  // Every jump inside the scenario window (graph satellite, variable chip, list click,
+  // map context menu) goes through navigate(); goBack() restores the previous stop.
+  type PanelTab = "events" | "vars" | "templates" | "settings" | "diplomacy";
+  interface NavEntry { tab: PanelTab; eventId: string | null }
+  const navStack = ref<NavEntry[]>([]);
+  const TAB_LABELS: Record<PanelTab, string> = {
+    events: "События", vars: "Переменные", templates: "Шаблоны",
+    settings: "Настройки", diplomacy: "Дипломатия",
+  };
+  function navLabel(e: NavEntry): string {
+    if (e.tab === "events" && e.eventId) {
+      const ev = events.value.find((x) => x.id === e.eventId);
+      return ev?.name || e.eventId;
+    }
+    return TAB_LABELS[e.tab];
+  }
+  /** Breadcrumb trail: the last few stops + the current one (labels resolved live). */
+  const breadcrumbs = computed(() => {
+    const cur: NavEntry = { tab: panelTab.value, eventId: selectedId.value };
+    const trail = [...navStack.value.slice(-4), cur];
+    return trail.map((e, i) => ({ ...e, label: navLabel(e), current: i === trail.length - 1 }));
+  });
+  const canGoBack = computed(() => navStack.value.length > 0);
+  /** Jump somewhere, remembering where we were (skips no-op jumps). */
+  function navigate(to: { tab?: PanelTab; eventId?: string | null }): void {
+    const tab = to.tab ?? panelTab.value;
+    const eventId = to.eventId !== undefined ? to.eventId : selectedId.value;
+    if (tab === panelTab.value && eventId === selectedId.value) return;
+    navStack.value = [...navStack.value.slice(-29), { tab: panelTab.value, eventId: selectedId.value }];
+    panelTab.value = tab;
+    if (to.eventId !== undefined) selectedId.value = to.eventId;
+  }
+  function goBack(): void {
+    const prev = navStack.value[navStack.value.length - 1];
+    if (!prev) return;
+    navStack.value = navStack.value.slice(0, -1);
+    panelTab.value = prev.tab;
+    selectedId.value = prev.eventId;
+  }
+  /** Breadcrumb click: index into breadcrumbs (last = current, no-op). */
+  function goToCrumb(i: number): void {
+    const trailStart = Math.max(0, navStack.value.length - 4);
+    const target = navStack.value[trailStart + i];
+    if (!target) return; // clicked the current crumb
+    navStack.value = navStack.value.slice(0, trailStart + i);
+    panelTab.value = target.tab;
+    selectedId.value = target.eventId;
+  }
+
   /** Commit a full event (add or replace) as one undoable edit. */
   function upsert(ev: MapEvent): void {
     edit.commit([{ kind: "upsertEvent", event: ev } as EditOp]);
@@ -98,7 +148,36 @@ export const useEventStore = defineStore("events", () => {
   }
 
   function create(): MapEvent {
-    const ev: MapEvent = {
+    const ev = blankEvent();
+    upsert(ev);
+    return ev;
+  }
+
+  function clone(src: MapEvent): MapEvent {
+    const copy: MapEvent = JSON.parse(JSON.stringify(src));
+    copy.id = newId();
+    copy.name = `${src.name || "Событие"} (копия)`;
+    upsert(copy);
+    return copy;
+  }
+
+  /** Which condition kind (and its ref field) fits an object type — for one-click
+   *  «+ Событие с этим объектом» from the map context menu. */
+  const OBJ_CONDITION: Record<string, { kind: string; key: string }> = {
+    location: { kind: "enterZone", key: "locId" },
+    stack: { kind: "destroyStack", key: "stackId" },
+    village: { kind: "enterCity", key: "cityId" },
+    capital: { kind: "enterCity", key: "cityId" },
+    ruin: { kind: "lootingRuin", key: "ruinId" },
+    merchant: { kind: "visitingSite", key: "siteId" },
+    mage: { kind: "visitingSite", key: "siteId" },
+    trainer: { kind: "visitingSite", key: "siteId" },
+    mercenary: { kind: "visitingSite", key: "siteId" },
+  };
+
+  /** A blank event object (NOT committed) — shared by create/createForObject/chained. */
+  function blankEvent(): MapEvent {
+    return {
       id: newId(),
       name: "Новое событие",
       enabled: true,
@@ -110,16 +189,42 @@ export const useEventStore = defineStore("events", () => {
       conditions: [],
       effects: [],
     };
+  }
+
+  /** Create an event PRE-WIRED to a map object (condition prefilled by its type) —
+   *  one commit, one undo step. */
+  function createForObject(objId: string, objType: string, objName?: string): MapEvent {
+    const map = OBJ_CONDITION[objType];
+    const ev: MapEvent = {
+      ...blankEvent(),
+      ...(objName ? { name: `Событие: ${objName}` } : {}),
+      ...(map
+        ? { conditions: [{ ...makeCondition(map.kind), [map.key]: objId } as EventCondition] }
+        : {}),
+    };
     upsert(ev);
     return ev;
   }
 
-  function clone(src: MapEvent): MapEvent {
-    const copy: MapEvent = JSON.parse(JSON.stringify(src));
-    copy.id = newId();
-    copy.name = `${src.name || "Событие"} (копия)`;
-    upsert(copy);
-    return copy;
+  /** «➜ следующее в цепочке»: creates a DISABLED follow-up event and auto-adds an
+   *  enableEvent effect on `fromId` pointing at it — the chain wires itself.
+   *  Both ops land in ONE commit (one undo step). */
+  function createChainedEvent(fromId: string): MapEvent | null {
+    const from = events.value.find((e) => e.id === fromId);
+    if (!from) return null;
+    const next: MapEvent = {
+      ...blankEvent(),
+      name: `${from.name || "Событие"} — продолжение`,
+      enabled: false, // starts OFF; the chain switches it on
+    };
+    const eff = { ...makeEffect("enableEvent"), eventId: next.id, enable: true } as EventEffect;
+    (eff as { num: number }).num = from.effects.length;
+    edit.commit([
+      { kind: "upsertEvent", event: next } as EditOp,
+      { kind: "upsertEvent", event: { ...from, effects: [...from.effects, eff] } } as EditOp,
+    ]);
+    navigate({ tab: "events", eventId: next.id });
+    return next;
   }
 
   // --- scenario variables (one MidScenVariables block; edited as a whole list) ---
@@ -207,6 +312,8 @@ export const useEventStore = defineStore("events", () => {
   return {
     selectedId, filter, objectFilter, panelTab, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
+    breadcrumbs, canGoBack, navigate, goBack, goToCrumb,
+    createForObject, createChainedEvent,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,
     upsertTemplate, removeTemplate, createTemplate, cloneTemplate,

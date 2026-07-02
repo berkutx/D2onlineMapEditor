@@ -45,6 +45,17 @@ const initials = (name: string): string =>
   name.replace(/[^\p{L}\p{N}]/gu, " ").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 const { dirty, undoable, redoable, report, busy } = storeToRefs(editStore);
 
+/** Current map name for the bar: liveDoc (base + applied edits — reflects a setScenarioInfo
+ *  rename immediately) with the BASE file's name as fallback before a project exists. */
+const liveMapName = computed(() => editStore.liveDoc?.header.name || mapStore.mapName);
+watch(
+  liveMapName,
+  (name) => {
+    document.title = name ? `${name} — D2 Editor` : "D2 Editor";
+  },
+  { immediate: true },
+);
+
 /** Persistent validity indicator ("will this map save?"). null = not checked since the last
  *  edit; the map auto-re-checks ~2.5s after the user stops editing (editStore). */
 const validity = computed<"ok" | "fail" | null>(() => {
@@ -308,7 +319,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
 
     <span class="bar-spacer" />
 
-    <span v-if="mapStore.mapName" class="map-title">{{ mapStore.mapName }}</span>
+    <span v-if="liveMapName" class="map-title">{{ liveMapName }}</span>
     <el-tag v-if="status === 'loading'" size="small" type="warning" effect="plain" round>Загрузка…</el-tag>
     <el-tag v-if="dirty" size="small" type="warning" effect="plain" round>есть правки</el-tag>
 

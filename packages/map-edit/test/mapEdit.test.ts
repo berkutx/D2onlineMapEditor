@@ -22,6 +22,7 @@ import {
   eraseRoadCells,
   placeMountainOps,
   placeLandmarkOps,
+  placeLocationOps,
   placeVisitorOps,
   emptyProject,
   pushOp,
@@ -1103,6 +1104,53 @@ describe("@d2/map-edit location editor", () => {
     expect(reLoc.radius).toBe(3);
     expect(validateMap(re).ok).toBe(true);
     expect(roundTripSemantic(doc, out, ops).ok).toBe(true);
+  });
+
+  it("placing a location appends a MidLocation block (CP1251 name) and round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const before = doc.objects.filter((o) => o.type === "location").length;
+    const ops = placeLocationOps(doc, 33, 34, 2, "Зона испытаний");
+    const id = (ops[0] as Extract<EditOp, { kind: "addObject" }>).object.id;
+    expect(id).toMatch(/LO[0-9a-f]{4}$/);
+    const out = applyEditsToBytes(raw, ops);
+    expect(out.length).toBeGreaterThan(bytes.length); // a block was appended
+    const re = parseScenario(out);
+    expect(re.objects.filter((o) => o.type === "location").length).toBe(before + 1);
+    const reLoc = re.objects.find((o) => o.id === id) as {
+      name: string; radius: number; pos: { x: number; y: number };
+    };
+    expect(reLoc).toBeTruthy();
+    expect(reLoc.name).toBe("Зона испытаний"); // CP1251 survives the round-trip
+    expect(reLoc.radius).toBe(2);
+    expect(reLoc.pos).toEqual({ x: 33, y: 34 });
+    expect(validateMap(re).ok).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("place THEN patch name/radius in one session folds into the appended block", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const place = placeLocationOps(doc, 41, 42, 0, "Старое имя");
+    const id = (place[0] as Extract<EditOp, { kind: "addObject" }>).object.id;
+    const ops: EditOp[] = [
+      ...place,
+      { kind: "patchObject", id, fields: { name: "Новое имя", radius: 1 } },
+      { kind: "moveObject", id, x: 43, y: 44 },
+    ];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const reLoc = re.objects.find((o) => o.id === id) as {
+      name: string; radius: number; pos: { x: number; y: number };
+    };
+    expect(reLoc).toBeTruthy();
+    expect(reLoc.name).toBe("Новое имя");
+    expect(reLoc.radius).toBe(1);
+    expect(reLoc.pos).toEqual({ x: 43, y: 44 });
+    expect(validateMap(re).ok).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
   });
 });
 

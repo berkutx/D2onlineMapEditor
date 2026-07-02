@@ -12,23 +12,25 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "vue": "^3.5.13",
-    "element-plus": "^2.9.1",
+    "@d2/asset-manifest": "workspace:*",
+    "@d2/map-edit": "workspace:*",
+    "@d2/map-schema": "workspace:*",
+    "@d2/pixi-render": "workspace:*",
+    "@d2/socket-contract": "workspace:*",
     "@element-plus/icons-vue": "^2.3.1",
+    "@pixi/tilemap": "^5.0.1",
+    "element-plus": "^2.9.1",
     "pinia": "^2.3.0",
     "pixi.js": "^8.5.0",
-    "@pixi/tilemap": "^5.0.1",
+    "prismjs": "^1.30.0",
     "socket.io-client": "^4.8.1",
-    "@d2/map-schema": "workspace:*",
-    "@d2/asset-manifest": "workspace:*",
-    "@d2/socket-contract": "workspace:*",
-    "@d2/map-edit": "workspace:*",
-    "@d2/pixi-render": "workspace:*"
+    "vue": "^3.5.13"
   },
   "devDependencies": {
-    "vite": "^6.0.7",
+    "@types/prismjs": "^1.26.6",
     "@vitejs/plugin-vue": "^5.2.1",
-    "vue-tsc": "^2.2.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vite": "^6.0.7",
+    "vue-tsc": "^2.2.0"
   }
 }

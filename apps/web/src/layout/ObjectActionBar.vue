@@ -6,12 +6,14 @@
  * one; R / [ ] also work from the keyboard (AppLayout). Drops a `patchObject` commit.
  * Only appears for re-rollable objects (landmarks / mountains with >1 variant).
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { Refresh } from "@element-plus/icons-vue";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useDecorStore } from "../stores/decorStore";
+import type { DecorThumb as DecorThumbRect } from "../stores/decorStore";
 import DecorThumb from "./DecorThumb.vue";
+import ThumbPreview from "./ThumbPreview.vue";
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
@@ -34,11 +36,20 @@ function random(): void {
   const next = decorStore.randomVariant(curId.value);
   if (next) reroll(next);
 }
+
+// one shared floating zoom for the variant cells (see ThumbPreview.vue)
+const preview = ref<InstanceType<typeof ThumbPreview> | null>(null);
+function showPreview(e: MouseEvent, thumb: DecorThumbRect, name: string): void {
+  preview.value?.show(e.currentTarget as HTMLElement, thumb, name);
+}
+function hidePreview(): void {
+  preview.value?.hide();
+}
 </script>
 
 <template>
   <div v-if="carried && reRollable" class="obj-actions d2-float">
-    <DecorThumb :thumb="decorStore.get(curId)?.thumb ?? group!.rep.thumb" :size="40" />
+    <DecorThumb class="oa-thumb" :thumb="decorStore.get(curId)?.thumb ?? group!.rep.thumb" :size="40" />
     <div class="oa-info">
       <div class="oa-name">{{ group!.label }}</div>
       <div class="oa-hint">Облик · R — случайный · [ ] — листать</div>
@@ -54,11 +65,14 @@ function random(): void {
           :class="{ sel: v.id === curId }"
           :title="v.desc_en"
           @click="reroll(v.id)"
+          @mouseenter="showPreview($event, v.thumb, v.desc_en || group!.label)"
+          @mouseleave="hidePreview()"
         >
           <DecorThumb :thumb="v.thumb" :size="30" />
         </button>
       </div>
     </el-scrollbar>
+    <ThumbPreview ref="preview" />
   </div>
 </template>
 
@@ -111,13 +125,20 @@ function random(): void {
   padding-bottom: 4px;
 }
 /* no border framing: the checkerboard fill stays (transparency backdrop);
- * hover/selection are soft rings, not frames */
+ * hover/selection are soft rings, not frames.
+ * The checkerboard is FIXED LIGHT in both themes: the sprites are dark,
+ * they only read on a light backdrop. */
+.oa-thumb {
+  border-radius: var(--d2-radius);
+  overflow: hidden;
+  background: repeating-conic-gradient(#e9e5db 0% 25%, #f6f4ee 0% 50%) 0 / 12px 12px;
+}
 .oa-cell {
   flex: 0 0 auto;
   padding: 2px;
   border: none;
   border-radius: var(--d2-radius);
-  background: repeating-conic-gradient(var(--el-fill-color) 0% 25%, transparent 0% 50%) 0 / 12px 12px;
+  background: repeating-conic-gradient(#e9e5db 0% 25%, #f6f4ee 0% 50%) 0 / 12px 12px;
   cursor: pointer;
   transition: box-shadow 0.12s ease;
 }

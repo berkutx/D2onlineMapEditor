@@ -70,6 +70,25 @@ export function landmarkFrame(
   });
 }
 
+/** A MidLocation block frame (code 0x13, short LO): LOC_ID (self), POS_X, POS_Y,
+ *  NAME_TXT (CP1251), RADIUS — byte-verified field order on Riders.sg. */
+export function locationFrame(
+  version: string,
+  second: number,
+  x: number,
+  y: number,
+  name: string,
+  radius: number,
+): Uint8Array {
+  return emitBlock(version, "MidLocation", 0x13, "LO", second, (w, full) => {
+    w.refField("LOC_ID", full);
+    w.defaultInt("POS_X", x);
+    w.defaultInt("POS_Y", y);
+    w.stringField("NAME_TXT", name);
+    w.defaultInt("RADIUS", radius);
+  });
+}
+
 /** A MidItem block frame (code 0x0f, short IM): ITEM_ID (self) + ITEM_TYPE (global
  *  GItem template id). A scenario item instance referenced by chests/heroes. */
 export function itemFrame(version: string, second: number, templateId: string): Uint8Array {

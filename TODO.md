@@ -97,8 +97,13 @@ decrement twin). Plan:
   and a compiler emits the MidScenVariables ids + varInRange/compareVar/modifyVariable plumbing at
   export. Groundwork already in place: per-variable usage map (VariablesEditor), star graph
   (EventGraph), panelTab jumps. Needs: a stable var-id allocator keyed by the drawn edge (so
-  re-export doesn't renumber), and an importer that folds EXISTING var plumbing back into visual
-  chains (else round-tripping someone else's map explodes the graph).
+  re-export doesn't renumber). **SCOPE DECISION (user, 2026-07-02): design for maps authored FROM
+  SCRATCH in this editor — the compiler owns ALL variables on such maps, no reverse-importer.
+  Uploaded/foreign maps get only the minimal path that already exists (raw variables list + the
+  usage/readers-writers view); do NOT build a decompiler that folds foreign var plumbing back into
+  visual chains.** Practical split: EditorProject carries the visual scenario model (chains,
+  counters) as the source of truth; export compiles model→vars; a map is "editor-native" when its
+  project has that model, otherwise the vars tab stays in raw mode.
 - **Graph polish** — edge hover highlight, drag-to-pan/zoom in the SVG, click a condition/effect
   node to scroll the editor column to that card.
 

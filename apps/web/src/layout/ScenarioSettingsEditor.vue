@@ -25,7 +25,6 @@ const DIFF = [
 
 <template>
   <div v-if="h" class="ss">
-    <div class="ss-head"><strong class="d2-sec">Настройки сценария</strong></div>
     <div class="ss-body">
       <label class="ss-f"><span>Название</span>
         <el-input :model-value="h.name" size="small" @update:model-value="set({ name: $event })" /></label>
@@ -49,36 +48,41 @@ const DIFF = [
           @update:model-value="set({ loseText: $event })" /></label>
 
       <div class="d2-sec">Сложность и уровни</div>
-      <label class="ss-f"><span>Сложность сценария</span>
-        <el-select :model-value="h.difficulty?.scenario ?? 3" size="small" style="width: 150px"
-          @update:model-value="set({ difficulty: { scenario: $event, game: h.difficulty?.game ?? 1 } })">
-          <el-option v-for="d in DIFF" :key="d.value" :value="d.value" :label="d.label" /></el-select></label>
-      <label class="ss-f"><span>Рекоменд. уровень</span>
-        <el-input-number :model-value="h.suggestedLevel ?? 1" :min="1" :max="99" size="small" controls-position="right"
-          style="width: 110px" @update:model-value="set({ suggestedLevel: ($event as number) ?? 1 })" /></label>
+      <div class="ss-grid">
+        <label class="ss-f"><span>Сложность сценария</span>
+          <el-select :model-value="h.difficulty?.scenario ?? 3" size="small" style="width: 150px"
+            @update:model-value="set({ difficulty: { scenario: $event, game: h.difficulty?.game ?? 1 } })">
+            <el-option v-for="d in DIFF" :key="d.value" :value="d.value" :label="d.label" /></el-select></label>
+        <label class="ss-f"><span>Рекоменд. уровень</span>
+          <el-input-number :model-value="h.suggestedLevel ?? 1" :min="1" :max="99" size="small" controls-position="right"
+            style="width: 110px" @update:model-value="set({ suggestedLevel: ($event as number) ?? 1 })" /></label>
+      </div>
 
       <div class="d2-sec">Лимиты</div>
-      <label class="ss-f"><span>Отрядов у игрока</span>
-        <el-input-number :model-value="h.limits?.unit ?? 0" :min="0" :max="99" size="small" controls-position="right"
-          style="width: 110px" @update:model-value="setLimit('unit', ($event as number) ?? 0)" /></label>
-      <label class="ss-f"><span>Заклинаний</span>
-        <el-input-number :model-value="h.limits?.spell ?? 0" :min="0" :max="99" size="small" controls-position="right"
-          style="width: 110px" @update:model-value="setLimit('spell', ($event as number) ?? 0)" /></label>
-      <label class="ss-f"><span>Уровень героя</span>
-        <el-input-number :model-value="h.limits?.leader ?? 0" :min="0" :max="99" size="small" controls-position="right"
-          style="width: 110px" @update:model-value="setLimit('leader', ($event as number) ?? 0)" /></label>
-      <label class="ss-f"><span>Уровень города</span>
-        <el-input-number :model-value="h.limits?.city ?? 0" :min="1" :max="5" size="small" controls-position="right"
-          style="width: 110px" @update:model-value="setLimit('city', ($event as number) ?? 1)" /></label>
+      <div class="ss-grid">
+        <label class="ss-f"><span>Отрядов у игрока</span>
+          <el-input-number :model-value="h.limits?.unit ?? 0" :min="0" :max="99" size="small" controls-position="right"
+            style="width: 110px" @update:model-value="setLimit('unit', ($event as number) ?? 0)" /></label>
+        <label class="ss-f"><span>Заклинаний</span>
+          <el-input-number :model-value="h.limits?.spell ?? 0" :min="0" :max="99" size="small" controls-position="right"
+            style="width: 110px" @update:model-value="setLimit('spell', ($event as number) ?? 0)" /></label>
+        <label class="ss-f"><span>Уровень героя</span>
+          <el-input-number :model-value="h.limits?.leader ?? 0" :min="0" :max="99" size="small" controls-position="right"
+            style="width: 110px" @update:model-value="setLimit('leader', ($event as number) ?? 0)" /></label>
+        <label class="ss-f"><span>Уровень города</span>
+          <el-input-number :model-value="h.limits?.city ?? 0" :min="1" :max="5" size="small" controls-position="right"
+            style="width: 110px" @update:model-value="setLimit('city', ($event as number) ?? 1)" /></label>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
 .ss { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
-.ss-head { padding: 10px 12px 6px; }
-.ss-head .d2-sec { margin: 0; }
-.ss-body { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
+/* wide dialog: cap the form width so inputs don't stretch to 600+px */
+.ss-body { flex: 1; overflow-y: auto; padding: 10px 12px 12px; max-width: 560px; }
+.ss-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.ss-grid .ss-f > span { flex: 0 0 auto; }
 .ss-f { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .ss-f > span { flex: 0 0 130px; color: var(--el-text-color-secondary); font-size: 12px; }
 .ss-f.col { flex-direction: column; align-items: stretch; gap: 4px; }

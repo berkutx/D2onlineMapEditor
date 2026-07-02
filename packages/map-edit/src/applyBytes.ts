@@ -13,6 +13,7 @@ import {
   appendBlocks,
   roadFrame,
   landmarkFrame,
+  locationFrame,
   mountainsFrame,
   itemFrame,
   unitFrame,
@@ -41,6 +42,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
 
   let nextRA = 0;
   let nextMM = 0;
+  let nextLO = 0;
   let nextIM = 0;
   let nextUN = 0;
   let nextKC = 0;
@@ -54,6 +56,9 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     } else if (o.typeName === "MidLandmark") {
       const m = /MM([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextMM = Math.max(nextMM, parseInt(m[1]!, 16) + 1);
+    } else if (o.typeName === "MidLocation") {
+      const m = /LO([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) nextLO = Math.max(nextLO, parseInt(m[1]!, 16) + 1);
     } else if (o.typeName === "MidItem") {
       const m = /IM([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextIM = Math.max(nextIM, parseInt(m[1]!, 16) + 1);
@@ -406,6 +411,12 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       const m = /MM([0-9a-fA-F]{4})$/.exec(o.id);
       const second = m ? parseInt(m[1]!, 16) : nextMM++;
       appends.push(landmarkFrame(raw.version, second, o.pos.x, o.pos.y, o.baseType ?? "G000000000"));
+    } else if (o.type === "location") {
+      // A named region (MidLocation). Same-session patchObject of name/radius already
+      // folded into `o` via the addedObjects {...added, ...fields} merge above.
+      const m = /LO([0-9a-fA-F]{4})$/.exec(o.id);
+      const second = m ? parseInt(m[1]!, 16) : nextLO++;
+      appends.push(locationFrame(raw.version, second, o.pos.x, o.pos.y, o.name ?? "", o.radius ?? 0));
     } else if (o.type === "mountains") {
       addedMountains.push({
         x: o.pos.x, y: o.pos.y, w: o.w ?? 1, h: o.h ?? 1,

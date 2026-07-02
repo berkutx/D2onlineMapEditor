@@ -167,9 +167,12 @@ onMounted(async () => {
   });
 
   setScene(scene);
-  // debug hooks: inspect the live scene graph + asset store from the preview console
+  // debug hooks: inspect the live scene graph + asset store + stores from the preview console
   (window as unknown as { __d2scene?: unknown }).__d2scene = scene;
   (window as unknown as { __d2assets?: unknown }).__d2assets = getAssetStore();
+  (window as unknown as { __d2stores?: unknown }).__d2stores = {
+    edit: editStore, tool: toolStore, view: viewStore, events: eventStore, map: mapStore,
+  };
 
   // Report the cursor cell to the status bar (cheap pointer math via the
   // re-exported pure helpers; no Pixi reactivity involved).
@@ -633,6 +636,28 @@ function ctxAction(action: string): void {
     case "props":
       toolStore.setSelectedId(obj.id);
       break;
+    // scenario shortcuts: the map and the events window work as one surface
+    case "events":
+      eventStore.objectFilter = obj.id;
+      eventStore.panelTab = "events";
+      if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
+      break;
+    case "newEvent": {
+      const ev = eventStore.createForObject(
+        obj.id, obj.type, (obj as { name?: string }).name,
+      );
+      eventStore.panelTab = "events";
+      eventStore.select(ev.id);
+      if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
+      ElMessage.success("Событие создано и привязано к объекту");
+      break;
+    }
+    case "copyId":
+      void navigator.clipboard.writeText(obj.id).then(
+        () => ElMessage.success(`id скопирован: ${obj.id}`),
+        () => ElMessage.info(obj.id),
+      );
+      break;
     case "anchor":
       anchorPickFor.value = obj.id; // next click picks the parent
       if (!viewStore.anchorsVisible) viewStore.toggleAnchors(); // show the links overlay
@@ -1086,9 +1111,15 @@ watch(
     >
       <div class="ctx-title">{{ (ctxMenu.obj as { name?: string }).name || ctxMenu.obj.type }} <code>{{ ctxMenu.obj.id }}</code></div>
       <button class="ctx-item" @click="ctxAction('props')">Свойства</button>
+      <div class="ctx-sep" />
+      <button class="ctx-item" @click="ctxAction('events')">📋 События объекта</button>
+      <button class="ctx-item" @click="ctxAction('newEvent')">＋ Событие с этим объектом</button>
+      <div class="ctx-sep" />
       <button class="ctx-item" @click="ctxAction('anchor')">⚓ Заякорить к…</button>
       <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">Снять якорь</button>
       <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
+      <div class="ctx-sep" />
+      <button class="ctx-item" @click="ctxAction('copyId')">Скопировать id</button>
       <button v-if="ctxMenu.obj.type === 'landmark'" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
     </div>
     <div v-if="debugOverlay && debugStats" class="debug-hud">
@@ -1184,6 +1215,11 @@ watch(
 }
 .ctx-item:hover {
   background: var(--el-fill-color-light);
+}
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--el-border-color-lighter);
 }
 .ctx-danger {
   color: var(--el-color-danger);
