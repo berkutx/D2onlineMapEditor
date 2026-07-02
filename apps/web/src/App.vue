@@ -13,6 +13,7 @@ import { ElMessage, ElButton, ElConfigProvider } from "element-plus";
 import { useMapStore } from "./stores/mapStore";
 import { useAssetStore } from "./stores/assetStore";
 import { useCollabStore } from "./stores/collabStore";
+import { cloneMap } from "./services/api";
 import AppLayout from "./layout/AppLayout.vue";
 
 const mapStore = useMapStore();
@@ -48,6 +49,18 @@ async function boot(): Promise<void> {
         ElMessage.warning("Карта из ссылки недоступна — открываю карту по умолчанию.");
       }
     }
+    // Returning visitor: open their most recent OWN map (the list is owner-filtered, so any
+    // "upload" entry is theirs). First-time visitor: clone the reference map so they edit
+    // their OWN copy (the install stays pristine); fall back to the install if cloning fails.
+    const mine = list
+      .filter((m) => m.source === "upload")
+      .sort((a, b) => b.mtime - a.mtime);
+    if (mine.length > 0) {
+      bootMessage.value = `Открываю вашу карту «${mine[0]!.name}»…`;
+      await mapStore.openMap(mine[0]!.id);
+      bootLoading.value = false;
+      return;
+    }
     const target = mapStore.pickDefaultScenario(list);
     if (!target) {
       bootMessage.value = "No scenarios available on the server.";
@@ -55,8 +68,16 @@ async function boot(): Promise<void> {
       bootLoading.value = false;
       return;
     }
-    bootMessage.value = `Loading "${target.name}"…`;
-    await mapStore.openMap(target.id);
+    try {
+      bootMessage.value = `Создаю вашу копию «${target.name}»…`;
+      const copyId = await cloneMap(target.id);
+      await mapStore.loadScenarios(); // refresh so the copy shows in Файл ▸ Открыть
+      await mapStore.openMap(copyId);
+      ElMessage.success(`Это ваша личная копия «${target.name}» — правьте смело.`);
+    } catch {
+      bootMessage.value = `Loading "${target.name}"…`;
+      await mapStore.openMap(target.id);
+    }
     bootLoading.value = false;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

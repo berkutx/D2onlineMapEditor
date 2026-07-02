@@ -81,6 +81,34 @@ describe("owner-scoped scenario listing", () => {
   });
 });
 
+describe("POST /api/maps/:id/clone", () => {
+  it("makes a byte-exact copy owned by the caller; source untouched; distinct id", async () => {
+    const srcId = await createMap(OWNER);
+    const res = await app.inject({
+      method: "POST",
+      url: REST.mapClone(srcId),
+      headers: { "x-client-id": STRANGER }, // anyone with the id can clone (capability model)
+    });
+    expect(res.statusCode).toBe(201);
+    const copyId = (res.json() as { id: string }).id;
+    expect(copyId).not.toBe(srcId);
+
+    // byte-exact copy
+    const a = await app.inject({ method: "GET", url: REST.mapRaw(srcId) });
+    const b = await app.inject({ method: "GET", url: REST.mapRaw(copyId) });
+    expect(b.rawPayload.equals(a.rawPayload)).toBe(true);
+
+    // listed for the cloner, not for the source owner
+    expect((await listFor(STRANGER)).some((e) => e.id === copyId)).toBe(true);
+    expect((await listFor(OWNER)).some((e) => e.id === copyId)).toBe(false);
+  });
+
+  it("404s for an unknown source id", async () => {
+    const res = await app.inject({ method: "POST", url: REST.mapClone("nope"), headers: { "x-client-id": OWNER } });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe("uploads registry persistence (registry.json)", () => {
   it("a FRESH MapStore (server restart) still resolves + lists an owned map", async () => {
     const id = await createMap(OWNER);

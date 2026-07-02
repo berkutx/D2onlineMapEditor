@@ -302,6 +302,22 @@ export async function registerMapRoutes(
     },
   );
 
+  // POST /api/maps/:id/clone -> byte-exact personal copy of any accessible map, owned by the
+  // caller (x-client-id). This is how a new visitor gets their OWN copy of the reference map
+  // (the install stays pristine; each copy is a separate room/base for the diff journal).
+  app.post<{ Params: { id: string } }>(REST.mapClone(":id"), async (req, reply) => {
+    const { id } = req.params;
+    const src = await store.getRawBytes(id);
+    if (!src) {
+      return reply.code(404).send({ error: "map not found" });
+    }
+    await mkdir(config.UPLOAD_DIR, { recursive: true });
+    const file = join(config.UPLOAD_DIR, `copy-${id.slice(0, 8)}-${Date.now()}.sg`);
+    await writeFile(file, src.bytes);
+    const rec = await store.registerUpload(file, clientIdOf(req));
+    return reply.code(201).send({ id: rec.id });
+  });
+
   // POST /validate and /export share the same build+validate pipeline.
   for (const action of ["validate", "export"] as const) {
     const url = action === "validate" ? REST.mapValidate(":id") : REST.mapExport(":id");

@@ -46,6 +46,30 @@ Things intentionally postponed (decided 2026-06-26). Order is rough priority.
 - **`apps/web` has no vitest tests** -> `pnpm -r run test` exits non-zero on web ("no test files").
   Pre-existing; consider `vitest run --passWithNoTests` for the web test script.
 
+## M4 deleteObject in the byte writer (researched 2026-07-02, ready to implement)
+The reference CAN'T be copied directly — it never patches: save = FULL re-serialization from
+the block list (`D2MapModel::save`, D2MapModel.cpp:155-167), the OB0000 count is just
+`m_blocks.count()` at save time (DataBlock.h:395-397), deletion = drop the block from the list
+(`D2MapModel::remove`, D2MapModel.h:77-85) and simply not re-export orphans. For OUR
+patch-in-place writer the equivalent is a **block-range splice**, and we already have every
+mechanism: parseScenarioRaw's per-object byte ranges (framing), spliceVariableFields
+(highest-offset-first mid-stream splices), the OB0000 count bump (appendBlocks — need the
+decrement twin). Plan:
+- `deleteBlocksSplice(ids)`: remove `[WHAT..ENDOBJECT]` ranges of the object + its DEPENDENT
+  instance blocks (garrison/eq MidUnit + inventory MidItem — same id lists the readers use),
+  decrement the OB0000 count by the number of removed blocks. Header `offset` is unaffected
+  (all object blocks sit after it).
+- Cascades (ported from the reference): item that is a talisman → drop its entry from
+  D2TalismanCharges (D2MapEditor.cpp:234-246); deleting a visiting stack → clear the city's
+  STACK ref to G000000000 (we have the growable string splice); deleting mountains → the
+  delete op must come WITH setCell ops restoring terrain (MapStateHolder.cpp:62-81 restores
+  value 5) — our place/erase flows already pair the stamp, undo pairs the inverse setCells.
+- Referential guard: before deleting, scan other blocks for `0B 00 00 00 + <id>` refs; clear
+  known ones, REJECT loudly on unknown (no-guess).
+- Undo of a base-object delete = addObject of a parsed object — only allowed for types our
+  frames can rebuild (stack/landmark/mountains/road/unit/item); gate the delete UI to those
+  first.
+
 ## Collaboration & editor follow-ups (deferred 2026-06-30)
 - **Events editor** — the one remaining big object type not yet editable (triggers/effects). Research the
   `.sg` event block layout on bitbucket before touching the writer.

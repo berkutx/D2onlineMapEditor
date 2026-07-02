@@ -227,6 +227,12 @@ export async function createNewMap(opts: {
   return (await postJsonRetry<{ id: string }>(u(REST.mapNew), opts)).id;
 }
 
+/** POST /api/maps/:id/clone -> { id }: a byte-exact personal copy owned by this browser.
+ *  Used to hand a new visitor their OWN copy of the reference map (installs stay pristine). */
+export async function cloneMap(id: string): Promise<string> {
+  return (await postJsonRetry<{ id: string }>(u(REST.mapClone(id)), {})).id;
+}
+
 /** Base URL the AssetStore prepends to every manifest-relative path. */
 export const ASSET_BASE_URL = `${BASE}/assets`;
 
