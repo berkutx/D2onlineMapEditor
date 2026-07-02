@@ -18,7 +18,7 @@ const view = useViewStore();
       <span class="mm-title d2-sec">карта</span>
       <button class="mm-close" title="Скрыть миникарту" @click="view.toggleMinimap()">✕</button>
     </div>
-    <MiniMap :size="176" show-objects />
+    <MiniMap :size="220" show-objects />
   </div>
   <button
     v-else

@@ -257,8 +257,9 @@ watch(
         <el-button size="small" text class="ev-loc-btn" @click="newLocation()">＋</el-button>
       </el-tooltip>
     </div>
-    <!-- мини-вью: где именно эта зона (клик по миникарте центрирует камеру) -->
-    <MiniMap v-if="modelValue" :highlight-id="(modelValue as string)" :size="150" class="ev-loc-map" />
+    <!-- мини-вью: где именно эта зона — изометрический ромб, только море + города
+         + подсвеченная локация (клик центрирует камеру) -->
+    <MiniMap v-if="modelValue" :highlight-id="(modelValue as string)" :size="216" mode="simple" class="ev-loc-map" />
   </div>
 
   <!-- ref-stack: grouped picker — отряды по ЛИДЕРУ + шаблоны отрядов, с 📍/🎯 -->
