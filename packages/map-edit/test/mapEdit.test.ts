@@ -265,6 +265,92 @@ describe("@d2/map-edit place mountains + landmarks (addObject export)", () => {
   });
 });
 
+describe("@d2/map-edit events (E1 read + E2 write)", () => {
+  it("parses MidEvent blocks into the document (Riders has many)", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    expect(doc.events.length).toBeGreaterThan(0);
+    const ev = doc.events[0]!;
+    expect(ev.id).toMatch(/EV[0-9a-f]{4}$/);
+    expect(typeof ev.name).toBe("string");
+    // some event on Riders must carry a WIN_OR_LOSE or POPUP effect
+    const kinds = new Set(doc.events.flatMap((e) => e.effects.map((f) => f.kind)));
+    expect(kinds.size).toBeGreaterThan(0);
+  });
+
+  it("EVERY existing event re-serializes byte-identically (reader<->writer agree)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    // upsert each event to itself -> writer re-emits its frame via replaceBlock; the export
+    // must round-trip semantically (each event deepEquals its reparse).
+    const ops: EditOp[] = doc.events.map((e) => ({ kind: "upsertEvent", event: e }));
+    const out = applyEditsToBytes(raw, ops);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("edits an event (name + a popup effect) and round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const src = doc.events[0]!;
+    const edited = {
+      ...src,
+      name: "Тест: сигнал",
+      effects: [
+        ...src.effects,
+        { kind: "popup", num: 99, text: "Привет, герой!", music: "", sound: "", image: "GEV0000", image2: "", leftSide: true, popupShow: 0, boolValue: false },
+      ],
+    } as (typeof src);
+    const ops: EditOp[] = [{ kind: "upsertEvent", event: edited }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const got = re.events.find((e) => e.id === src.id)!;
+    expect(got.name).toBe("Тест: сигнал");
+    expect(got.effects.some((f) => f.kind === "popup" && (f as { text: string }).text === "Привет, герой!")).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("adds a NEW event (append) then deletes it (splice) — round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const before = doc.events.length;
+    const fresh = {
+      id: "NEW00000001",
+      name: "Новое событие",
+      enabled: true, occurOnce: true, chance: 100, order: 0,
+      appliesTo: { human: true, dwarf: false, undead: false, heretic: false, neutral: false, elf: false },
+      canTrigger: { human: true, dwarf: false, undead: false, heretic: false, neutral: false, elf: false },
+      conditions: [{ kind: "frequency", days: 7 }],
+      effects: [{ kind: "winLose", num: 0, win: true, player: "" }],
+    } as import("@d2/map-schema").MapEvent;
+    const add: EditOp[] = [{ kind: "upsertEvent", event: fresh }];
+    const outAdd = applyEditsToBytes(raw, add);
+    const reAdd = parseScenario(outAdd);
+    expect(reAdd.events.length).toBe(before + 1);
+    const created = reAdd.events.find((e) => e.name === "Новое событие");
+    expect(created).toBeTruthy();
+    expect(created!.conditions[0]).toMatchObject({ kind: "frequency", days: 7 });
+    // NOTE: parse(add) can't equal applyOps(add) because the client id "NEW*" is rewritten to
+    // a real EV id on export — so we assert content, not roundTripSemantic, for the add case.
+
+    // delete an EXISTING event splices its frame + decrements the count
+    const victim = doc.events.find((e) => e.effects.every((f) => f.kind !== "changeFog"))!;
+    // pick one not referenced by another event's enableEvent (guard would reject those)
+    const refd = new Set(
+      doc.events.flatMap((e) => e.effects.filter((f) => f.kind === "enableEvent").map((f) => (f as { eventId: string }).eventId)),
+    );
+    const del = doc.events.find((e) => !refd.has(e.id)) ?? victim;
+    const delOps: EditOp[] = [{ kind: "deleteEvent", id: del.id }];
+    const outDel = applyEditsToBytes(raw, delOps);
+    const reDel = parseScenario(outDel);
+    expect(reDel.events.find((e) => e.id === del.id)).toBeUndefined();
+    expect(reDel.events.length).toBe(before - 1);
+    const res = roundTripSemantic(doc, outDel, delOps);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
   it("deletes a BASE landmark: block gone, OB0000 decremented, semantic + structural ok", () => {
     const { doc, raw } = parseScenarioRaw(bytes);

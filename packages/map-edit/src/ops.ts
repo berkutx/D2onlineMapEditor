@@ -6,7 +6,7 @@
  * applyBytes.ts; the two are kept consistent by the semantic round-trip check.
  */
 
-import type { MapDocument, MapObject, MapCell } from "@d2/map-schema";
+import type { MapDocument, MapObject, MapCell, MapEvent } from "@d2/map-schema";
 import { EditOp } from "@d2/socket-contract";
 import { makeCell } from "./bits.js";
 
@@ -92,6 +92,28 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       objects.splice(i, 1);
       const inverse: EditOp = { kind: "addObject", object: removed };
       return { doc: replaceObjects(doc, objects), inverse };
+    }
+
+    case "upsertEvent": {
+      const events = (doc.events ?? []).slice();
+      const i = events.findIndex((e) => e.id === op.event.id);
+      const inverse: EditOp =
+        i < 0
+          ? { kind: "deleteEvent", id: op.event.id }
+          : { kind: "upsertEvent", event: events[i]! };
+      if (i < 0) events.push(op.event);
+      else events[i] = op.event;
+      return { doc: { ...doc, events }, inverse };
+    }
+
+    case "deleteEvent": {
+      const events = (doc.events ?? []).slice();
+      const i = events.findIndex((e) => e.id === op.id);
+      if (i < 0) throw new Error(`applyOp deleteEvent: unknown event ${op.id}`);
+      const removed = events[i]!;
+      events.splice(i, 1);
+      const inverse: EditOp = { kind: "upsertEvent", event: removed };
+      return { doc: { ...doc, events }, inverse };
     }
   }
 }

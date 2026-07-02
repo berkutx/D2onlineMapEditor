@@ -19,6 +19,7 @@ import {
   stackFrame,
   replaceBlock,
   deleteBlocks,
+  eventFrame,
   spliceVariableFields,
   type SgRaw,
   type MountainEntry,
@@ -26,7 +27,7 @@ import {
   type ItemListEdit,
   type QtyListEdit,
 } from "@d2/sg-parser";
-import type { MapObject } from "@d2/map-schema";
+import type { MapObject, MapEvent } from "@d2/map-schema";
 import type { EditOp } from "./ops.js";
 
 export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Array {
@@ -81,6 +82,15 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   const garrisonOps = new Map<string, { cells: GarrCell[]; leaderCell?: number }>();
   /** M4 mid-stream deletes: PRE-EXISTING blocks to splice out at the very end. */
   const deletedIds: string[] = [];
+  /** Event ops, resolved to the FINAL state per event id (last write wins): a MapEvent to
+   *  upsert, or null to delete. Applied at the very end as append/replace/delete of a frame. */
+  const eventOps = new Map<string, MapEvent | null>();
+  /** Fresh EV-block id counter, seeded from existing MidEvent blocks. */
+  let nextEV = 0;
+  for (const o of raw.objects) {
+    const m = /EV([0-9a-fA-F]{4})$/.exec(o.id);
+    if (o.typeName === "MidEvent" && m) nextEV = Math.max(nextEV, parseInt(m[1]!, 16) + 1);
+  }
 
   for (const op of ops) {
     switch (op.kind) {
@@ -283,6 +293,13 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
         deletedIds.push(op.id);
         break;
       }
+
+      case "upsertEvent":
+        eventOps.set(op.event.id, op.event);
+        break;
+      case "deleteEvent":
+        eventOps.set(op.id, null);
+        break;
     }
   }
 
@@ -397,6 +414,28 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     bytes = raw.mountainsBlockId
       ? replaceBlock(bytes, raw.mountainsBlockId, frame)
       : appendBlocks(bytes, [frame]);
+  }
+
+  // Event ops: a MidEvent is a self-contained block, so upsert = replace the frame (existing
+  // id) or append a new frame (fresh id), delete = splice the frame out. Resolve ids and
+  // collect deletes so they go through the single deleteBlocks pass below.
+  if (eventOps.size) {
+    const existing = new Set(
+      raw.objects.filter((o) => o.typeName === "MidEvent").map((o) => o.id),
+    );
+    const newFrames: Uint8Array[] = [];
+    for (const [id, ev] of eventOps) {
+      if (ev === null) {
+        if (existing.has(id)) deletedIds.push(id);
+        continue; // deleting a never-appended event is a no-op
+      }
+      // an event id the client minted (e.g. "NEW*") gets a real EV id at export time
+      const finalId = existing.has(id) ? id : `${raw.version}EV${hex4(nextEV++)}`;
+      const frame = eventFrame(raw.version, { ...ev, id: finalId });
+      if (existing.has(id)) bytes = replaceBlock(bytes, id, frame);
+      else newFrames.push(frame);
+    }
+    if (newFrames.length) bytes = appendBlocks(bytes, newFrames);
   }
 
   // M4 mid-stream deletes — LAST, on the final buffer (deleteBlocks re-locates frames by

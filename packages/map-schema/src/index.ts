@@ -23,6 +23,19 @@ export {
   GenericObject,
 } from "./objects.js";
 export { MapDocument, MapHeader, PlayerInfo } from "./document.js";
+export {
+  MapEvent,
+  EventCondition,
+  EventEffect,
+  EventRaces,
+  CONDITION_SPECS,
+  EFFECT_SPECS,
+  CONDITION_BY_KIND,
+  CONDITION_BY_CODE,
+  EFFECT_BY_KIND,
+  EFFECT_BY_CODE,
+} from "./events.js";
+export type { EventTypeSpec, EventFieldSpec } from "./events.js";
 
 /** Iso transform constants (documented here; applied only in the renderer). */
 export const ISO = {

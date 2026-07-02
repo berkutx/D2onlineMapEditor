@@ -34,8 +34,8 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/** Order-insensitive object comparison keyed by id (every MapObject has an id). */
-function objectsEqualById(a: MapDocument["objects"], b: MapDocument["objects"]): boolean {
+/** Order-insensitive comparison keyed by id (every MapObject / MapEvent has an id). */
+function equalById<T extends { id: string }>(a: readonly T[], b: readonly T[]): boolean {
   if (a.length !== b.length) return false;
   const byId = new Map(b.map((o) => [o.id, o]));
   for (const o of a) {
@@ -68,8 +68,14 @@ export function roundTripSemantic(
   // Objects compared by id, ORDER-INSENSITIVELY: re-emitted blocks (e.g. an
   // appended landmark, or a rebuilt single MidMountains block) can land at a
   // different array index than applyOp's in-memory order, but the set must match.
-  if (!objectsEqualById(reparsed.objects, expected.objects)) {
+  if (!equalById(reparsed.objects, expected.objects)) {
     return { ok: false, reason: "objects differ after round-trip" };
+  }
+  // Events compared by id, order-insensitively (an appended/re-emitted MidEvent can land at a
+  // different index than applyOp's order). A re-emitted event that carried an unknown/custom
+  // condition/effect category the reader dropped would surface here as a mismatch.
+  if (!equalById(reparsed.events ?? [], expected.events ?? [])) {
+    return { ok: false, reason: "events differ after round-trip" };
   }
   if (!deepEqual(reparsed.players, expected.players)) {
     return { ok: false, reason: "players differ after round-trip" };

@@ -32,7 +32,10 @@ import {
   type RoadRecord,
 } from "./blocks/index.js";
 import { readDefaultInt, readDefaultString } from "./bytebuffer.js";
-import type { MapDocument, MapObject, PlayerInfo, MapHeader, GarrisonUnit } from "@d2/map-schema";
+import { readEvent } from "./blocks/events.js";
+import type {
+  MapDocument, MapObject, PlayerInfo, MapHeader, GarrisonUnit, MapEvent,
+} from "@d2/map-schema";
 
 const DEFAULT_SG_VERSION = "S143";
 
@@ -61,6 +64,9 @@ interface Accumulated {
   header: MapHeader | null;
   players: PlayerInfo[];
   objects: MapObject[];
+  events: MapEvent[];
+  /** true for the elf-expansion format (magic D2EESFISIG) — gates ELF/VERELF event race flags. */
+  isEES: boolean;
   blocks: TerrainBlock[];
   roads: RoadRecord[];
   /** MidSubRace block index -> banner number (for stack/fort STACK_BANNER sprites). */
@@ -146,6 +152,9 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       if (u.type === "unit") acc.unitInstances[obj.id] = { implId: u.implId, level: u.level, hp: u.hp };
       return;
     }
+    case "MidEvent":
+      acc.events.push(readEvent(buf, obj, acc.isEES));
+      return;
     case "MidgardPlan": {
       // The placement plan: per-cell {POS_X, POS_Y, ELEMENT->object} entries. NOT a placed
       // object — readGeneric would grab the FIRST entry's POS_X/POS_Y as its "position",
@@ -188,6 +197,9 @@ export function assembleDocument(
     header: null,
     players: [],
     objects: [],
+    events: [],
+    // magic sits at the very start of the file; D2EESFISIG = the elf-expansion (our target) format
+    isEES: buf.asciiSlice(0, 10) === "D2EESFISIG",
     blocks: [],
     roads: [],
     subraceBanners: new Map(),
@@ -302,6 +314,7 @@ export function assembleDocument(
     terrain: { size, cells },
     objects: acc.objects,
     players: acc.players,
+    events: acc.events,
   };
 }
 

@@ -46,7 +46,21 @@ Things intentionally postponed (decided 2026-06-26). Order is rough priority.
 - **`apps/web` has no vitest tests** -> `pnpm -r run test` exits non-zero on web ("no test files").
   Pre-existing; consider `vitest run --passWithNoTests` for the web test script.
 
-## M4 deleteObject in the byte writer (researched 2026-07-02, ready to implement)
+## M4 deleteObject — LANDMARKS DONE (62eaac1); remaining types below
+Landed: `deleteBlocks` (frame splice + OB0000 decrement + referential guard + MidgardPlan
+entry purge), MidgardPlan parser stub (stable pos), eraser deletes decor, delete+undo
+round-trips. REMAINING (per-type unlocks):
+- **stacks**: cascade delete of dependent MidUnit (UNIT_0..5/LEADER_ID) + MidItem (inventory)
+  instance blocks derived from RAW bytes; clear a linked city's STACK ref (or refuse for
+  garrisoned visitors); undo needs the addObject path to also emit garrison/inventory
+  (today stackFrame adds an EMPTY stack — re-add would lose the army -> semantic fail).
+- **mountains**: N-per-block — deleting entry #n renumbers later `${blockId}#${i}` ids, which
+  breaks the BY-ID semantic compare; needs either doc-side renumber ops or an order-stable id.
+- **add-path plan entries (latent, pre-existing)**: added objects never get MidgardPlan
+  entries (and a delete+re-add loses the original's) — semantically invisible (plan is a
+  generic stub) but the GAME uses the plan for passability; emit entries in appendBlocks-time.
+
+## (superseded by the above) M4 deleteObject in the byte writer (researched 2026-07-02, ready to implement)
 The reference CAN'T be copied directly — it never patches: save = FULL re-serialization from
 the block list (`D2MapModel::save`, D2MapModel.cpp:155-167), the OB0000 count is just
 `m_blocks.count()` at save time (DataBlock.h:395-397), deletion = drop the block from the list
