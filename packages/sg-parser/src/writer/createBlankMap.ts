@@ -179,14 +179,18 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   });
 
   const numChunks = (size / 4) * (size / 8);
-  // 15 createMap singletons + the neutral player's own MidgardMapFog (FG0000) — every player
-  // needs a fog block, incl. neutral, or its FOG_ID dangles and the game won't load the map.
-  // + the MidSubRace table (gold-checked as REQUIRED by the game editor): 1 neutral SR + 8
-  // fixed neutral-special SRs (subrace 6..13) + 1 per race player.
-  // per race: fog + buildings + spells + player + capital + guardian unit + hero unit +
-  // hero stack + 3 capital items = 10 blocks
+  // OB0000 count MUST exactly equal the number of block frames emitted — the game trusts it
+  // to know how many blocks to read; an undercount makes the editor refuse to load («Ошибка
+  // запуска редактора сценариев»), even though our self-consistent parser reads it fine.
+  // Verified against a game-CREATED blank map (GTREF.sg): 121 blocks for 2 races @48.
+  //   15 createMap singletons + neutral fog (FG0000)                                = 16
+  //   MidSubRace table: 1 neutral + 8 neutral-special tail (subrace 6..13) + 1/race = 9 + R
+  //   MidgardMapBlock chunks                                                        = numChunks
+  //   per race: fog + buildings + spells + player + 3 items + 2 units + capital +
+  //             hero stack                                                          = 11
   const SUBRACE_FIXED = 9; // neutral SR0000 + 8 neutral-special tail (subrace 6..13)
-  const objCount = 16 + SUBRACE_FIXED + numChunks + races.length * (10 + 1);
+  const objCount =
+    16 + SUBRACE_FIXED + races.length + numChunks + races.length * 11;
 
   const w = new ByteWriter();
 
@@ -228,6 +232,7 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   w.patchI32(offsetAt, w.length - 30);
 
   // ---- block frame helper ---------------------------------------------------
+  let blocksEmitted = 0;
   const frame = (type: string, code: number, short: string, second: number, body: (f: string) => void): void => {
     const f = fullId(short, second);
     w.blockHeader(type, code);
@@ -235,6 +240,7 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
     w.begin();
     body(f);
     w.end();
+    blocksEmitted++;
   };
 
   // ---- 15 singletons, in createMap order ------------------------------------
@@ -290,9 +296,27 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   });
 
   frame("MidQuestLog", 0x13, "QL", 0, (f) => w.defaultInt(f, 0));
+  // MidgardPlan: the game's placement/passability plan — one entry (POS_X, POS_Y, ELEMENT ref)
+  // per cell occupied by a placed object. Verified against GTREF: each capital's 5×5 footprint
+  // → ELEMENT=capitalId, and each hero stack's anchor cell → ELEMENT=stackId (guardian/hero
+  // UNITS get none — they're inside the capital/stack). An EMPTY plan makes the editor refuse
+  // a map that has capitals. mapSize + count + entries.
+  const planEntries: { x: number; y: number; elem: string }[] = [];
+  races.forEach((_key, idx) => {
+    const spot = capitalSpot(idx, size);
+    const capId = fullId("FT", idx);
+    for (let dy = 0; dy < 5; dy++)
+      for (let dx = 0; dx < 5; dx++) planEntries.push({ x: spot.x + dx, y: spot.y + dy, elem: capId });
+    planEntries.push({ x: spot.x, y: spot.y, elem: fullId("KC", idx) }); // hero stack anchor
+  });
   frame("MidgardPlan", 0x13, "PN", 0, (f) => {
     w.defaultInt(f, size); // plan.size = grid columns = N
-    w.defaultInt(f, 0); // no plan elements
+    w.defaultInt(f, planEntries.length);
+    for (const e of planEntries) {
+      w.defaultInt("POS_X", e.x);
+      w.defaultInt("POS_Y", e.y);
+      w.refField("ELEMENT", e.elem);
+    }
   });
   frame("MidgardMap", 0x12, "MP", 0, (f) => w.defaultInt(f, size));
   frame("MidScenVariables", 0x18, "SV", 0, (f) => w.defaultInt(f, 0));
@@ -303,7 +327,22 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
     w.defaultInt(f, 0);
     w.defaultInt(f, 0);
   });
-  frame("MidDiplomacy", 0x14, "DP", 0, (f) => w.defaultInt(f, 0));
+  // Diplomacy: the game writes ALL pairwise player-race relations (RELATION=0 = default).
+  // Verified against a game-created blank (GTREF): count + N×(RACE_1, RACE_2, RELATION) where
+  // RACE_i = the players' race_type values (neutral 4, then each race). An EMPTY diplomacy
+  // block makes the editor refuse a multi-player map.
+  const diploPairs: [number, number][] = [];
+  for (let i = 0; i < playerRaceTypes.length; i++)
+    for (let j = i + 1; j < playerRaceTypes.length; j++)
+      diploPairs.push([playerRaceTypes[i]!, playerRaceTypes[j]!]);
+  frame("MidDiplomacy", 0x14, "DP", 0, (f) => {
+    w.defaultInt(f, diploPairs.length);
+    for (const [a, b] of diploPairs) {
+      w.defaultInt("RACE_1", a);
+      w.defaultInt("RACE_2", b);
+      w.defaultInt("RELATION", 0);
+    }
+  });
 
   frame("MidPlayer", 0x11, "PL", 0, (f) => {
     w.refField("PLAYER_ID", f);
@@ -549,6 +588,16 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
       w.defaultInt("NBBATTLE", 0);
     });
   });
+
+  // Fail loud if the OB0000 header count doesn't match the blocks actually written — a
+  // mismatch is INVISIBLE to our self-consistent parser but makes the game editor refuse
+  // to load the map. (This exact off-by-race-count bug is why from-scratch race maps were
+  // rejected; the guard prevents any future drift.)
+  if (blocksEmitted !== objCount) {
+    throw new Error(
+      `createBlankMap: OB0000 count ${objCount} != ${blocksEmitted} blocks emitted (races=${races.length}, size=${size})`,
+    );
+  }
 
   return w.toBytes();
 }

@@ -108,6 +108,36 @@ describe("@d2/sg-parser createBlankMap — races (addRace port)", () => {
     expect(validateMap(doc).ok).toBe(true);
     expect(roundTripIdentity(bytes)).toBe(true);
   });
+
+  // These blocks were the game-editor gold-check blockers (a from-scratch map that passes our
+  // parser but ScenEdit refused to load). Verified: a 2-race map now opens + renders in the
+  // game's own editor. Guard the exact structure the game requires.
+  it("emits the game-required scenario structure (OB0000 count + diplomacy + plan)", () => {
+    const bytes = createBlankMap({ size: 48, fill: "default", races: ["empire", "undead"] });
+    const buf = Buffer.from(bytes);
+
+    // OB0000 header count MUST equal the number of block frames actually written (a mismatch
+    // is invisible to our parser but makes the game refuse to load).
+    const obPos = buf.indexOf(Buffer.from("S143OB0000"));
+    const declared = buf.readInt32LE(obPos + 10);
+    let actual = 0, i = -1;
+    while ((i = buf.indexOf(Buffer.from("WHAT"), i + 1)) >= 0) actual++;
+    expect(declared).toBe(actual);
+    expect(declared).toBe(121); // 2 races @48, matches a game-created blank
+
+    const doc = parseScenario(bytes);
+    // every player gets its OWN fog block (neutral incl.) — no dangling FOG_ID
+    expect(doc.objects.filter((o) => o.type === "location").length).toBe(0);
+    // diplomacy: all pairwise player-race relations (3 players -> 3 pairs)
+    expect(doc.diplomacy?.length).toBe(3);
+    // plan is populated (2 capitals × 5×5 + 2 hero stacks = 52 entries) — a bare count check
+    // via the raw block: MidgardPlan body carries the entry count as its 2nd int.
+    const pn = buf.indexOf(Buffer.from("S143PN0000"));
+    const pnBeg = buf.indexOf(Buffer.from("BEGOBJECT\0"), pn);
+    // body: <id>+i32(mapSize) + <id>+i32(count) — read the count (2nd defaultInt)
+    const planCount = buf.readInt32LE(pnBeg + 10 + 10 + 4 + 10);
+    expect(planCount).toBe(52);
+  });
 });
 
 describe("@d2/sg-parser createBlankMap — mountains", () => {

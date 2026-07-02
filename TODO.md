@@ -28,11 +28,19 @@ Things intentionally postponed (decided 2026-06-26). Order is rough priority.
 - **M4:** buildings/ruins (needs the growable
   writer: object insert/delete + framing/count fixups + cp1251 string emit). **M5:** relations +
   cascade move (drag-with-bindings, Alt to detach). **M6:** region-regen agent scaffold.
-- **GAME-EDITOR GOLD CHECK (2026-07-02): from-scratch maps still DON'T load in ScenEdit.**
-  Ran the actual game editor (ScenEdit.exe, loads from `Game/Exports/`) on createBlankMap output.
-  Error: «Ошибка запуска редактора сценариев» for 0-race AND race maps. Our 3-tier validator +
-  byte round-trip are self-consistent but the game is stricter. Findings (all byte-verified,
-  no guessing):
+- **GAME-EDITOR GOLD CHECK (2026-07-02): PASSES ✅ — from-scratch race maps now LOAD + RENDER
+  in ScenEdit.** A 2-race (Empire+Undead) 48×48 createBlankMap output opens in the game's own
+  editor with its capital, terrain and object palette (task #26 done). The decisive move was
+  letting ScenEdit CREATE a blank map itself (GTREF.sg) and byte-diffing against it — that
+  ground truth pinpointed every gap with zero guessing. Fixed, in order of discovery:
+  1. dangling neutral fog (below); 2. missing MidSubRace table (below); 3. **OB0000 header count
+     undercounted the per-race MidSubRace blocks** (the game trusts OB0000 to know how many
+     blocks to read — an off-by-race-count made it read short and refuse; added a fail-loud guard
+     that asserts emitted-blocks == OB0000); 4. **empty MidDiplomacy** (the game writes ALL
+     pairwise player-race relations, RELATION=0 — count + N×(RACE_1,RACE_2,RELATION); RACE_i =
+     race_type); 5. **empty MidgardPlan** (the game writes one entry per occupied cell: each
+     capital's 5×5 footprint → ELEMENT=capitalId, each hero stack's anchor → ELEMENT=stackId;
+     units get none). All values extracted from GTREF byte-for-byte. Earlier findings kept:
   - **FIXED — dangling neutral fog:** the neutral MidPlayer references FOG_ID=FG0000 but
     createMap emitted NO fog block → dangling ref. Now every player (incl. neutral) gets its own
     MidgardMapFog, keyed by player index (Riders: player n → FGn). Race fogs renumbered to
@@ -48,12 +56,12 @@ Things intentionally postponed (decided 2026-06-26). Order is rough priority.
   - **RULED OUT — header layout:** MapHeaderBlock::data() order confirmed from source; our header
     is byte-identical to Riders except the offset field (2720 vs 2800, both = (playerCount+67)*40).
     `_playersData` is positioned per source (after the padding-size i32, before S143OB0000).
-  - **STILL FAILS after both fixes** — remaining defect is opaque without the game's internal load
-    error. Candidates to investigate next: exact `_playersData` byte content/position vs a real
-    map at the same absolute offset; whether ScenEdit requires MidSubRace trailing SUBRACE=0
-    blocks; whether a from-scratch map needs to have been through the game's own save once. Repro
-    scripts: scratchpad {findpd,hdrfull,typeorder,subracecmp,race2subrace}.mjs. The fog+subrace
-    fixes are kept (genuine correctness, all tests green) even though they don't alone unblock load.
+  - **RESOLVED** by fixes 3–5 above (OB0000 count + diplomacy + plan). Guarded by a new
+    createBlankMap test (OB0000==blocks, 3 diplomacy pairs, 52 plan entries) + the emit-time
+    fail-loud count assertion. OPEN edge: a 0-race (neutral-only) map wasn't gold-checked — the
+    New Map UI defaults to ≥1 race, so the typical path is validated; gate races≥1 if 0-race
+    turns out unsupported. The ground-truth technique (let ScenEdit create a blank, byte-diff)
+    is the go-to for any future from-scratch byte question.
 
 - **New Map (blank from scratch): DONE (2026-06-28).** `createBlankMap({size, fill:'default'|'water'|'snow',
   name, mountains})` in `packages/sg-parser/src/writer/createBlankMap.ts` ports toolsqt `createMap`+`commitGrid`
