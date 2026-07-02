@@ -134,6 +134,7 @@ export const REST = {
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
   mapNew: "/api/maps/new", // POST { size, fill?, name? } -> { id } (from-scratch blank terrain)
   mapClone: (id: string) => `/api/maps/${id}/clone`, // POST -> { id } (byte-exact personal copy, owned by x-client-id)
+  mapProject: (id: string) => `/api/maps/${id}/project`, // GET -> saved EditorProject (per x-client-id) | 404; PUT EditorProject -> {ok}
   assetsManifest: "/api/assets/manifest", // GET -> AssetManifest
   upload: "/api/maps/upload", // POST .sg -> { id }
   health: "/api/health",

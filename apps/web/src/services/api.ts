@@ -233,6 +233,26 @@ export async function cloneMap(id: string): Promise<string> {
   return (await postJsonRetry<{ id: string }>(u(REST.mapClone(id)), {})).id;
 }
 
+/** GET /api/maps/:id/project — this browser's server-saved EditorProject, or null. */
+export async function fetchProjectRemote(id: string): Promise<EditorProject | null> {
+  const res = await fetch(u(REST.mapProject(id)), {
+    headers: { accept: "application/json", ...idHeaders() },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`project fetch failed: ${res.status}`);
+  return (await res.json()) as EditorProject;
+}
+
+/** PUT /api/maps/:id/project — persist the EditorProject server-side (per x-client-id).
+ *  Fire-and-forget durability mirror of localStorage; failures are non-fatal. */
+export async function saveProjectRemote(id: string, project: EditorProject): Promise<void> {
+  await fetch(u(REST.mapProject(id)), {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...idHeaders() },
+    body: JSON.stringify(project),
+  });
+}
+
 /** Base URL the AssetStore prepends to every manifest-relative path. */
 export const ASSET_BASE_URL = `${BASE}/assets`;
 

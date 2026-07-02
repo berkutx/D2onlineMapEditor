@@ -319,6 +319,42 @@ export async function registerMapRoutes(
     return reply.code(201).send({ id: rec.id });
   });
 
+  // GET/PUT /api/maps/:id/project — server-saved EditorProject (the diff journal), keyed by
+  // (mapId, x-client-id). Durability beyond the browser's localStorage: a new browser (or a
+  // cleared one) restores the user's edits. The project is per-visitor — no cross-user reads.
+  const projectPath = (mapId: string, clientId: string): string =>
+    join(config.PROJECTS_DIR, sanitize(mapId), `${sanitize(clientId)}.json`);
+
+  app.get<{ Params: { id: string } }>(REST.mapProject(":id"), async (req, reply) => {
+    const clientId = clientIdOf(req);
+    if (!clientId) return reply.code(400).send({ error: "x-client-id required" });
+    try {
+      const text = await readFile(projectPath(req.params.id, clientId), "utf-8");
+      return reply.header("cache-control", "no-store").type("application/json").send(text);
+    } catch {
+      return reply.code(404).send({ error: "no saved project" });
+    }
+  });
+
+  app.put<{ Params: { id: string } }>(REST.mapProject(":id"), async (req, reply) => {
+    const clientId = clientIdOf(req);
+    if (!clientId) return reply.code(400).send({ error: "x-client-id required" });
+    const parsed = EditorProject.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "invalid EditorProject", detail: parsed.error.message });
+    }
+    if (parsed.data.baseScenarioId !== req.params.id) {
+      return reply.code(400).send({ error: "project baseScenarioId mismatch" });
+    }
+    const path = projectPath(req.params.id, clientId);
+    await mkdir(join(config.PROJECTS_DIR, sanitize(req.params.id)), { recursive: true });
+    // atomic-ish write: tmp + rename so a crash never leaves a torn JSON
+    const tmp = `${path}.tmp`;
+    await writeFile(tmp, JSON.stringify(parsed.data), "utf-8");
+    await rename(tmp, path);
+    return { ok: true };
+  });
+
   // POST /validate and /export share the same build+validate pipeline.
   for (const action of ["validate", "export"] as const) {
     const url = action === "validate" ? REST.mapValidate(":id") : REST.mapExport(":id");

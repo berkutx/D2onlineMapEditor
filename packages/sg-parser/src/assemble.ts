@@ -146,6 +146,14 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       if (u.type === "unit") acc.unitInstances[obj.id] = { implId: u.implId, level: u.level, hp: u.hp };
       return;
     }
+    case "MidgardPlan": {
+      // The placement plan: per-cell {POS_X, POS_Y, ELEMENT->object} entries. NOT a placed
+      // object — readGeneric would grab the FIRST entry's POS_X/POS_Y as its "position",
+      // coupling the doc to whichever entry happens to be first (deleting an object purges
+      // its plan entries, which could shift that). Keep a stable generic stub instead.
+      acc.objects.push({ type: "generic", id: obj.id, pos: { x: 0, y: 0 }, blockType: obj.typeName, raw: {} });
+      return;
+    }
     default: {
       const reader = SINGLE_READERS[obj.typeName];
       acc.objects.push(reader ? reader(buf, obj) : readGeneric(buf, obj));

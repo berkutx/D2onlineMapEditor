@@ -27,7 +27,15 @@ import {
 } from "@d2/map-edit";
 import type { MapDocument } from "@d2/map-schema";
 import type { ValidationReport, Region, GenDebug } from "@d2/socket-contract";
-import { validateProject, exportProject, generateRegion, copilotLlm, type ExportResult } from "../services/api";
+import {
+  validateProject,
+  exportProject,
+  generateRegion,
+  copilotLlm,
+  fetchProjectRemote,
+  saveProjectRemote,
+  type ExportResult,
+} from "../services/api";
 
 const keyFor = (mapId: string): string => `d2.project.${mapId}`;
 
@@ -95,7 +103,9 @@ export const useEditStore = defineStore("edit", () => {
   );
   const dirty = computed(() => (project.value?.journal.length ?? 0) > 0);
 
-  /** Load (or create) the project for `mapId`, restoring any persisted edits. */
+  /** Load (or create) the project for `mapId`, restoring any persisted edits. localStorage
+   *  first (this device's live state); if it yields an EMPTY project, the server-saved copy
+   *  (per clientId) is adopted asynchronously — so a new/cleared browser restores its edits. */
   function ensureProject(mapId: string): void {
     if (project.value?.baseScenarioId === mapId) return;
     try {
@@ -105,6 +115,23 @@ export const useEditStore = defineStore("edit", () => {
       project.value = emptyProject(mapId);
     }
     report.value = null;
+    const p = project.value;
+    if (p && p.journal.length === 0 && Object.keys(p.captions ?? {}).length === 0) {
+      void fetchProjectRemote(mapId)
+        .then((remote) => {
+          // adopt only if still on this map and nothing was edited in the meantime
+          if (
+            remote &&
+            project.value?.baseScenarioId === mapId &&
+            project.value.journal.length === 0
+          ) {
+            project.value = remote;
+            recompute();
+            persist();
+          }
+        })
+        .catch(() => {/* offline / no server copy — localStorage state stands */});
+    }
   }
 
   /** Set the base document (on map load) and recompute the live doc. */
@@ -122,6 +149,21 @@ export const useEditStore = defineStore("edit", () => {
     objectsRev.value++; // a full rebuild (load / undo / redo) may change the object set
   }
 
+  /** Debounced server mirror of the project (durability beyond this browser). */
+  let remoteSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleRemoteSave(): void {
+    const p = project.value;
+    if (!p) return;
+    clearTimeout(remoteSaveTimer);
+    remoteSaveTimer = setTimeout(() => {
+      const cur = project.value;
+      if (!cur) return;
+      void saveProjectRemote(cur.baseScenarioId, cur).catch(() => {
+        /* offline — localStorage still has it; next persist retries */
+      });
+    }, 1500);
+  }
+
   function persist(): void {
     const p = project.value;
     if (!p) return;
@@ -130,6 +172,7 @@ export const useEditStore = defineStore("edit", () => {
     } catch {
       /* storage unavailable — ignore */
     }
+    scheduleRemoteSave();
   }
 
   /** Low-level: apply ops to the live doc, bumping rev/objectsRev. Returns the exact inverse

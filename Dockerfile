@@ -25,6 +25,7 @@ ENV HOST=0.0.0.0 \
     ASSETS_DIR=/app/public/assets \
     SCENARIO_ROOTS=/app/deploy/scenarios \
     UPLOAD_DIR=/app/var/uploads \
+    PROJECTS_DIR=/app/var/projects \
     LLM_DIR=/app/var/llm
 
 # whole workspace (the .dockerignore keeps node_modules / dist / public/assets / var out)

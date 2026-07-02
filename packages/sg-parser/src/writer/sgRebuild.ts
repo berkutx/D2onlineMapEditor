@@ -219,6 +219,135 @@ export function replaceBlock(bytes: Uint8Array, objId: string, newFrame: Uint8Ar
   return out;
 }
 
+/**
+ * DELETE whole top-level blocks by OBJ_ID (the M4 mid-stream delete): splice each block's
+ * [WHAT .. next WHAT) frame out and decrement the header's OB0000 object count by the number
+ * of removed frames. This mirrors the reference editor, where deletion is simply "the block
+ * is not in the list on the next save" and the count is the list size (D2MapModel::save).
+ *
+ * The OB0000 count lives in the HEADER (before the first WHAT), so frame splices never move
+ * it. Fails loud on an unknown id — a delete that cannot be applied must not be silently
+ * dropped (the validator's semantic tier would then reject the export anyway).
+ */
+export function deleteBlocks(bytes: Uint8Array, objIds: readonly string[]): Uint8Array {
+  if (objIds.length === 0) return bytes;
+  // the placement plan (MidgardPlan) holds one {POS_X,POS_Y,ELEMENT->id} entry per occupied
+  // cell — purge the deleted objects' entries first (the reference rebuilds the whole plan
+  // on save via commitGrid; entry removal is the patch-in-place equivalent)
+  bytes = purgePlanEntries(bytes, new Set(objIds));
+  const buf = new ByteBuffer(bytes);
+  const frames = frameRanges(buf);
+  const ranges: { start: number; end: number }[] = [];
+  for (const id of objIds) {
+    const f = frames.find((r) => r.objId === id);
+    if (!f) throw new Error(`deleteBlocks: block ${id} not found`);
+    ranges.push({ start: f.start, end: f.end });
+  }
+
+  // Referential guard: a 10-char ref VALUE is always [0B 00 00 00] + id. Any such pattern
+  // outside the allowed zones means another live object still points at the deleted one —
+  // fail loud rather than ship a dangling reference. Allowed zones: the deleted frames
+  // (self OBJ_ID / refs between objects deleted together) and any OTHER frame carrying the
+  // same objId (a delete + re-add in one journal leaves a same-id survivor — not dangling).
+  const insideDeleted = (at: number): boolean =>
+    ranges.some((r) => at >= r.start && at < r.end);
+  for (const id of objIds) {
+    const sameId = frames.filter((f) => f.objId === id);
+    if (sameId.length > 1) continue; // a same-id block survives — the id stays resolvable
+    const pat = new Uint8Array(4 + id.length);
+    pat.set([0x0b, 0x00, 0x00, 0x00], 0);
+    for (let i = 0; i < id.length; i++) pat[4 + i] = id.charCodeAt(i);
+    for (let at = indexOfBytes(bytes, pat, 0); at >= 0; at = indexOfBytes(bytes, pat, at + 1)) {
+      if (!insideDeleted(at)) {
+        throw new Error(`deleteBlocks: ${id} is still referenced at byte ${at + 4}`);
+      }
+    }
+  }
+  // locate the count BEFORE splicing (same technique as appendBlocks — it sits in the header)
+  const firstWhat = buf.indexOf("WHAT");
+  const obAt = buf.lastIndexOf("OB0000", firstWhat);
+  if (obAt < 0) throw new Error("deleteBlocks: OB0000 count not found");
+  const objCountAt = obAt + 6;
+  const objCount = buf.readInt32LE(objCountAt);
+
+  // splice highest-offset-first so earlier ranges stay valid
+  ranges.sort((a, b) => b.start - a.start);
+  let out = bytes;
+  for (const r of ranges) {
+    const next = new Uint8Array(out.length - (r.end - r.start));
+    next.set(out.subarray(0, r.start), 0);
+    next.set(out.subarray(r.end), r.start);
+    out = next;
+  }
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(
+    objCountAt,
+    objCount - ranges.length,
+    true,
+  );
+  return out;
+}
+
+/** indexOf for a raw byte pattern (Uint8Array has no pattern indexOf). */
+function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from: number): number {
+  outer: for (let i = Math.max(0, from); i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+/**
+ * Remove every MidgardPlan entry whose ELEMENT references one of `ids`, decrementing the
+ * plan's entry count. Verified layout (Riders bytes): after `BEGOBJECT\0` the plan block is
+ * `<blockId(10)> int32 mapSize`, `<blockId(10)> int32 entryCount`, then entryCount fixed
+ * 40-byte entries `POS_X int32 · POS_Y int32 · ELEMENT [0B 00 00 00] <id(10)> NUL`.
+ * Walks with tag validation and FAILS LOUD on any layout surprise. No plan block = no-op.
+ */
+function purgePlanEntries(bytes: Uint8Array, ids: ReadonlySet<string>): Uint8Array {
+  const buf = new ByteBuffer(bytes);
+  const avc = buf.indexOf(".?AVCMidgardPlan@@");
+  if (avc < 0) return bytes;
+  const beg = buf.indexOf("BEGOBJECT", avc);
+  if (beg < 0) throw new Error("purgePlanEntries: BEGOBJECT not found after MidgardPlan decl");
+  let p = beg + 9;
+  if (bytes[p] === 0) p++;
+  const tag = buf.asciiSlice(p, p + 10); // the block's own compound id doubles as the field tag
+  p += 10 + 4; // + int32 map size
+  if (buf.asciiSlice(p, p + 10) !== tag) {
+    throw new Error("purgePlanEntries: expected the count field (blockId tag) after the size");
+  }
+  const countAt = p + 10;
+  const count = buf.readInt32LE(countAt);
+  let q = countAt + 4;
+  const ranges: { start: number; end: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const start = q;
+    if (buf.asciiSlice(q, q + 5) !== "POS_X") throw new Error(`purgePlanEntries: entry ${i}: POS_X expected at ${q}`);
+    q += 5 + 4;
+    if (buf.asciiSlice(q, q + 5) !== "POS_Y") throw new Error(`purgePlanEntries: entry ${i}: POS_Y expected at ${q}`);
+    q += 5 + 4;
+    if (buf.asciiSlice(q, q + 7) !== "ELEMENT") throw new Error(`purgePlanEntries: entry ${i}: ELEMENT expected at ${q}`);
+    q += 7 + 4;
+    const ref = buf.asciiSlice(q, q + 10);
+    q += 10 + 1; // + NUL
+    if (ids.has(ref)) ranges.push({ start, end: q });
+  }
+  if (ranges.length === 0) return bytes;
+  ranges.sort((a, b) => b.start - a.start);
+  let out = bytes;
+  for (const r of ranges) {
+    const next = new Uint8Array(out.length - (r.end - r.start));
+    next.set(out.subarray(0, r.start), 0);
+    next.set(out.subarray(r.end), r.start);
+    out = next;
+  }
+  // countAt precedes every entry, so the splices above never moved it
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(countAt, count - ranges.length, true);
+  return out;
+}
+
 /** One variable-length string field edit: where to find it + the new value. */
 export interface StringFieldEdit {
   /** the object's BEGOBJECT+1 offset (raw.objectById fieldsFrom) */

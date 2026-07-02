@@ -72,6 +72,11 @@ export const config = {
   UPLOAD_DIR:
     process.env.UPLOAD_DIR ?? resolve(REPO_ROOT, "var", "uploads"),
 
+  /** Server-saved EditorProjects (diff journals), var/projects/<mapId>/<clientId>.json —
+   *  durability beyond the browser's localStorage. */
+  PROJECTS_DIR:
+    process.env.PROJECTS_DIR ?? resolve(REPO_ROOT, "var", "projects"),
+
   /** Copilot LLM file-bridge dir (Phase-4 POC): requests/ + responses/ + archive/. */
   LLM_DIR:
     process.env.LLM_DIR ?? resolve(REPO_ROOT, "var", "llm"),

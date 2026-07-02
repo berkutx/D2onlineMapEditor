@@ -191,6 +191,12 @@ export class MapStore {
       } catch {
         /* file already gone — still drop the record */
       }
+      // server-saved projects for a swept map are orphans — drop them too
+      try {
+        await rm(join(config.PROJECTS_DIR, u.id), { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
       this.registry.delete(u.id);
       this.cache.delete(u.id);
     }

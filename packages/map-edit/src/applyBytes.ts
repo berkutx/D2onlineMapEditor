@@ -18,6 +18,7 @@ import {
   unitFrame,
   stackFrame,
   replaceBlock,
+  deleteBlocks,
   spliceVariableFields,
   type SgRaw,
   type MountainEntry,
@@ -78,6 +79,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
    *  optional leaderCell (stacks only) → which cell's unit becomes LEADER_ID. */
   type GarrCell = { unit: string; hp?: number; level?: number } | null;
   const garrisonOps = new Map<string, { cells: GarrCell[]; leaderCell?: number }>();
+  /** M4 mid-stream deletes: PRE-EXISTING blocks to splice out at the very end. */
+  const deletedIds: string[] = [];
 
   for (const op of ops) {
     switch (op.kind) {
@@ -261,8 +264,25 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
         }
         break;
       }
-      case "deleteObject":
-        throw new Error("applyEditsToBytes: deleteObject requires a mid-stream splice (M4)");
+      case "deleteObject": {
+        // M4 mid-stream delete (block-range splice + OB0000 decrement via deleteBlocks).
+        // v1 scope: MidLandmark only (decor — the eraser's use case; its inverse addObject
+        // is fully reconstructible via landmarkFrame, so collab undo round-trips). Other
+        // types stay fail-loud: stacks need dependent MidUnit/MidItem cascade + a garrison
+        // re-add path for undo; mountains live N-per-block (deleting renumbers ids).
+        const rec = raw.objectById.get(op.id);
+        if (!rec) {
+          // a delete of a CLIENT-added object should have been folded out (foldOps)
+          throw new Error(`applyEditsToBytes: deleteObject of unknown object ${op.id}`);
+        }
+        if (rec.typeName !== "MidLandmark") {
+          throw new Error(
+            `applyEditsToBytes: deleteObject for ${rec.typeName} not supported yet (only MidLandmark)`,
+          );
+        }
+        deletedIds.push(op.id);
+        break;
+      }
     }
   }
 
@@ -377,6 +397,13 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     bytes = raw.mountainsBlockId
       ? replaceBlock(bytes, raw.mountainsBlockId, frame)
       : appendBlocks(bytes, [frame]);
+  }
+
+  // M4 mid-stream deletes — LAST, on the final buffer (deleteBlocks re-locates frames by
+  // OBJ_ID, so earlier resizes/appends are safe; it also runs the referential guard and
+  // decrements the OB0000 count).
+  if (deletedIds.length) {
+    bytes = deleteBlocks(bytes, deletedIds);
   }
   return bytes;
 }

@@ -26,7 +26,7 @@ export const EDIT_TOOLS: ToolDef[] = [
   { value: "forest", label: "Лес", icon: ForestIcon, hint: "сажай лес · Ctrl+тащить — двигать карту" },
   { value: "road", label: "Дорога", icon: RoadIcon, hint: "веди дорогу · авто-стыковка · Ctrl+тащить — двигать карту" },
   { value: "roadsel", label: "Дорога ✂", icon: Scissor, hint: "клик — выделить · ещё раз — расширить · Del — стереть · Esc — снять" },
-  { value: "erase", label: "Ластик", icon: EraseIcon, hint: "стирай рельеф/объекты · Ctrl+тащить — двигать карту" },
+  { value: "erase", label: "Ластик", icon: EraseIcon, hint: "стирай рельеф/дороги/декор · Ctrl+тащить — двигать карту" },
   { value: "decor", label: "Декор", icon: Picture, hint: "клик — поставить · R — другой облик · [ ] — листать" },
   { value: "move", label: "Двигать", icon: Rank, hint: "клик — взять · ⇧+клик — слой ниже · клик — поставить · R — облик · Esc — отмена" },
 ];

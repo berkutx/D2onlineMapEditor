@@ -109,6 +109,61 @@ describe("POST /api/maps/:id/clone", () => {
   });
 });
 
+describe("GET/PUT /api/maps/:id/project (server-saved EditorProject)", () => {
+  it("round-trips a project per (mapId, clientId); other clients see 404; validates shape", async () => {
+    const mapId = await createMap(OWNER);
+    const project = {
+      version: 2,
+      baseScenarioId: mapId,
+      relations: [],
+      journal: [[{ kind: "setCell", x: 1, y: 1, value: 5 }]],
+      cursor: 1,
+      captions: { X: "метка" },
+      meta: {},
+    };
+    const put = await app.inject({
+      method: "PUT",
+      url: REST.mapProject(mapId),
+      headers: { "x-client-id": OWNER, "content-type": "application/json" },
+      payload: project,
+    });
+    expect(put.statusCode).toBe(200);
+
+    const got = await app.inject({
+      method: "GET",
+      url: REST.mapProject(mapId),
+      headers: { "x-client-id": OWNER },
+    });
+    expect(got.statusCode).toBe(200);
+    expect(got.json()).toEqual(project);
+
+    // another visitor has no saved project for this map
+    const other = await app.inject({
+      method: "GET",
+      url: REST.mapProject(mapId),
+      headers: { "x-client-id": STRANGER },
+    });
+    expect(other.statusCode).toBe(404);
+
+    // no identity -> 400; wrong base id -> 400; garbage -> 400
+    expect((await app.inject({ method: "GET", url: REST.mapProject(mapId) })).statusCode).toBe(400);
+    const wrongBase = await app.inject({
+      method: "PUT",
+      url: REST.mapProject(mapId),
+      headers: { "x-client-id": OWNER, "content-type": "application/json" },
+      payload: { ...project, baseScenarioId: "other" },
+    });
+    expect(wrongBase.statusCode).toBe(400);
+    const garbage = await app.inject({
+      method: "PUT",
+      url: REST.mapProject(mapId),
+      headers: { "x-client-id": OWNER, "content-type": "application/json" },
+      payload: { nope: 1 },
+    });
+    expect(garbage.statusCode).toBe(400);
+  });
+});
+
 describe("ephemeral TTL sweeper (temporary first-visit copies)", () => {
   it("sweeps an expired ephemeral clone; permanent maps survive; access refreshes TTL", async () => {
     const permanentId = await createMap(OWNER); // Новая карта — permanent

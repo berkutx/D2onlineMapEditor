@@ -25,6 +25,7 @@ export {
   unitFrame,
   stackFrame,
   replaceBlock,
+  deleteBlocks,
   spliceStringFields,
   spliceVariableFields,
   emitBlock,

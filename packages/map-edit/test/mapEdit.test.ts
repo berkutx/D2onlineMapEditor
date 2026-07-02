@@ -265,6 +265,65 @@ describe("@d2/map-edit place mountains + landmarks (addObject export)", () => {
   });
 });
 
+describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
+  it("deletes a BASE landmark: block gone, OB0000 decremented, semantic + structural ok", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const victim = doc.objects.find((o) => o.type === "landmark" && o.baseType)!;
+    const before = doc.objects.filter((o) => o.type === "landmark").length;
+    const ops: EditOp[] = [{ kind: "deleteObject", id: victim.id }];
+
+    const out = applyEditsToBytes(raw, ops);
+    expect(out.length).toBeLessThan(bytes.length); // a whole block was spliced out
+
+    // OB0000 count decremented by exactly 1
+    const countAt = (b: Uint8Array): number => {
+      const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+      const firstWhat = buf.indexOf("WHAT");
+      const obAt = buf.lastIndexOf("OB0000", firstWhat);
+      return buf.readInt32LE(obAt + 6);
+    };
+    expect(countAt(out)).toBe(countAt(bytes) - 1);
+
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === victim.id)).toBeUndefined();
+    expect(re.objects.filter((o) => o.type === "landmark").length).toBe(before - 1);
+
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("delete then UNDO (inverse addObject) restores the landmark and round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const victim = doc.objects.find((o) => o.type === "landmark" && o.baseType)!;
+    const del: EditOp = { kind: "deleteObject", id: victim.id };
+    const inverse = invertOps(doc, [del]); // = addObject(victim)
+    const journal = [del, ...inverse];
+
+    const out = applyEditsToBytes(raw, journal);
+    const re = parseScenario(out);
+    const restored = re.objects.find(
+      (o) => o.type === "landmark" && o.baseType === victim.baseType && o.pos.x === victim.pos.x && o.pos.y === victim.pos.y,
+    );
+    expect(restored).toBeTruthy();
+    const res = roundTripSemantic(doc, out, journal);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("fails loud on unsupported types and unknown ids", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const stack = doc.objects.find((o) => o.type === "stack")!;
+    expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: stack.id }])).toThrow(
+      /not supported yet/,
+    );
+    expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: "S143XX9999" }])).toThrow(
+      /unknown object/,
+    );
+  });
+});
+
 describe("@d2/map-edit foldOps (collab append-inverse undo of a placement)", () => {
   it("drops add→delete pairs plus every op targeting that id in between", () => {
     const obj = { type: "landmark", id: "CLIENT0001", pos: { x: 1, y: 1 } } as never;

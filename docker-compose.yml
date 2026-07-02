@@ -24,11 +24,13 @@ services:
       ASSETS_DIR: /app/public/assets
       SCENARIO_ROOTS: /app/deploy/scenarios
       UPLOAD_DIR: /app/var/uploads
+      PROJECTS_DIR: /app/var/projects
       LLM_DIR: /app/var/llm
     volumes:
       # atlases (253 MB) are NOT in git — populate this volume once from the dev box (see README)
       - d2editor_assets:/app/public/assets:ro
       - d2editor_uploads:/app/var/uploads
+      - d2editor_projects:/app/var/projects
     networks: [d2map_net]
 
 networks:
@@ -55,3 +57,10 @@ volumes:
       type: none
       o: bind
       device: /mnt/data/d2editor/uploads
+  d2editor_projects:
+    name: d2editor_projects
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/data/d2editor/projects

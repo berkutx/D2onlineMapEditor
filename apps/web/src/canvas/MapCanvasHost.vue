@@ -541,6 +541,17 @@ function paintAt(cx: number, cy: number): void {
     ops = roadBrush(doc, cx, cy); // connectivity-based, ignores brush size
   } else if (toolStore.tool === "erase") {
     ops = eraseBrush(doc, cx, cy, toolStore.size); // clears terrain + roads (+ neighbour recompute)
+    // the eraser also removes DECOR (landmarks) under the brush — an honest deleteObject
+    // (M4 block splice on export). Other object types stay (writer support is per-type).
+    const half = Math.floor(toolStore.size / 2);
+    for (const o of doc.objects) {
+      if (o.type !== "landmark") continue;
+      const { w, h } = objectFootprint(o, landmarkFootprints);
+      const hit =
+        o.pos.x <= cx + half && o.pos.x + w > cx - half &&
+        o.pos.y <= cy + half && o.pos.y + h > cy - half;
+      if (hit) ops.push({ kind: "deleteObject", id: o.id });
+    }
   } else {
     const kind = brushKind();
     if (!kind) return;
