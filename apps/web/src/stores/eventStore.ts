@@ -42,6 +42,9 @@ export const useEventStore = defineStore("events", () => {
   const filter = ref("");
   /** When set, the panel shows only events referencing this object id (per-object view). */
   const objectFilter = ref<string | null>(null);
+  /** Active tab of the scenario window — in the store so «где используется» jumps
+   *  (variables → event, graph var-node → variables tab) can switch it from outside. */
+  const panelTab = ref<"events" | "vars" | "templates" | "settings" | "diplomacy">("events");
 
   const events = computed<MapEvent[]>(() => edit.liveDoc?.events ?? []);
 
@@ -202,7 +205,7 @@ export const useEventStore = defineStore("events", () => {
   }
 
   return {
-    selectedId, filter, objectFilter, events, selected, filtered,
+    selectedId, filter, objectFilter, panelTab, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,

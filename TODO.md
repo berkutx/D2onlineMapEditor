@@ -84,6 +84,24 @@ decrement twin). Plan:
   frames can rebuild (stack/landmark/mountains/road/unit/item); gate the delete UI to those
   first.
 
+## Anchors / scenario-window follow-ups (deferred 2026-07-02)
+- **Road follows anchored building** — when a building anchored to a road moves, re-route the road
+  from the nearest bend (or the second bend) to the building's new entrance. Design: the road is a
+  cell chain (selectRoadSegment gives the strand); find the bend nearest the OLD building cell,
+  erase `bend..end`, re-run `roadBrush` along a straight/L path `bend → new entrance cell`,
+  re-tiling handles the joints. Ship as an OPT-IN per-anchor flag (anchor value could become
+  `{parent, mode: "move"|"reroute-road"}` — today it's a plain child→parent string map in
+  `EditorProject.anchors`).
+- **E5 auto-generated (hidden) variables** — the scenario window could hide raw variables entirely:
+  the user draws chains/state-machines (graph edges «событие A ➜ включает ➜ B», counters on events),
+  and a compiler emits the MidScenVariables ids + varInRange/compareVar/modifyVariable plumbing at
+  export. Groundwork already in place: per-variable usage map (VariablesEditor), star graph
+  (EventGraph), panelTab jumps. Needs: a stable var-id allocator keyed by the drawn edge (so
+  re-export doesn't renumber), and an importer that folds EXISTING var plumbing back into visual
+  chains (else round-tripping someone else's map explodes the graph).
+- **Graph polish** — edge hover highlight, drag-to-pan/zoom in the SVG, click a condition/effect
+  node to scroll the editor column to that card.
+
 ## Collaboration & editor follow-ups (deferred 2026-06-30)
 - **Events editor** — the one remaining big object type not yet editable (triggers/effects). Research the
   `.sg` event block layout on bitbucket before touching the writer.

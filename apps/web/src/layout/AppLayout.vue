@@ -163,9 +163,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <el-aside v-if="toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
         <ObjectInspector />
       </el-aside>
-      <el-aside v-if="view.eventPanelVisible" class="app-events" width="clamp(280px, 30vw, 340px)">
-        <EventsPanel />
-      </el-aside>
+      <!-- scenario WINDOW (draggable non-modal dialog; teleports to <body>) -->
+      <EventsPanel />
     </el-container>
     <el-footer class="app-footer" height="28px">
       <StatusBar />
@@ -190,8 +189,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 }
 .app-aside,
 .app-decor,
-.app-inspector,
-.app-events {
+.app-inspector {
   min-width: 0;
   overflow: hidden;
 }
@@ -200,10 +198,6 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
   overflow: hidden;
 }
 .app-decor {
-  padding: 0;
-  overflow: hidden;
-}
-.app-events {
   padding: 0;
   overflow: hidden;
 }

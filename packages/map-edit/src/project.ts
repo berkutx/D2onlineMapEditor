@@ -31,6 +31,13 @@ export const EditorProject = z.object({
   /** Editor-only, optional per-location display captions (object id → text). NOT written to the
    *  .sg (the game has no such field); shown as a label on the world map. */
   captions: z.record(z.string(), z.string()).default({}),
+  /**
+   * Editor-only ANCHORS (child object id → parent object id): moving the parent moves every
+   * transitively anchored child by the same delta (one undoable stroke). NOT in the .sg —
+   * the game has no such concept; this is the editor's own "надслойка" for keeping a guard
+   * with its chest, a visitor with its building, etc. Cycles are rejected at set time.
+   */
+  anchors: z.record(z.string(), z.string()).default({}),
   meta: z
     .object({
       name: z.string().optional(),
@@ -53,6 +60,7 @@ export function emptyProject(
     journal: [],
     cursor: 0,
     captions: {},
+    anchors: {},
     meta,
   };
 }

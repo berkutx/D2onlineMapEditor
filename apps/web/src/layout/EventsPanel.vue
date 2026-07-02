@@ -1,20 +1,23 @@
 <script setup lang="ts">
 /**
- * Events panel (E1 read + E2 edit): a filterable list of scenario events (global or scoped to
- * a selected object) and an inline editor for the selected event — properties, race gating,
- * and typed condition/effect lists. Selecting an event drives the map overlay (trigger zones +
- * movement arrows) via MapCanvasHost. Edits commit through editStore (undoable + collab).
+ * Scenario WINDOW — a draggable, NON-modal el-dialog (not a docked rail: the scenario needs
+ * width — list | star-topology graph | editor side by side — and the map must stay clickable
+ * so selecting an event shows its zones/arrows on the map while you work).
+ *
+ * Tabs: События (3-zone layout) / Настройки / Дипломатия / Переменные / Шаблоны.
+ * Edits commit through editStore (undoable + collab).
  */
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import {
-  ElInput, ElButton, ElScrollbar, ElInputNumber, ElSwitch, ElCheckbox, ElSelect, ElOption,
-  ElTag, ElTooltip, ElEmpty, ElTabs, ElTabPane,
+  ElDialog, ElInput, ElButton, ElScrollbar, ElInputNumber, ElSwitch, ElCheckbox, ElSelect,
+  ElOption, ElTag, ElTooltip, ElEmpty, ElTabs, ElTabPane,
 } from "element-plus";
 import type { MapEvent, EventCondition, EventEffect } from "@d2/map-schema";
 import { CONDITION_SPECS, EFFECT_SPECS, CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore, makeCondition, makeEffect } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
 import EventFieldInput from "./EventFieldInput.vue";
+import EventGraph from "./EventGraph.vue";
 import VariablesEditor from "./VariablesEditor.vue";
 import TemplatesEditor from "./TemplatesEditor.vue";
 import ScenarioSettingsEditor from "./ScenarioSettingsEditor.vue";
@@ -22,7 +25,11 @@ import DiplomacyEditor from "./DiplomacyEditor.vue";
 
 const store = useEventStore();
 const view = useViewStore();
-const tab = ref<"events" | "vars" | "templates" | "settings" | "diplomacy">("events");
+
+const visible = computed({
+  get: () => view.eventPanelVisible,
+  set: (v: boolean) => { if (v !== view.eventPanelVisible) view.toggleEventPanel(); },
+});
 
 const sel = computed(() => store.selected);
 const RACES = [
@@ -89,14 +96,22 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 </script>
 
 <template>
-  <div class="ev-panel d2-rail">
-    <div class="ev-head">
-      <strong>Сценарий</strong>
-      <span class="ev-count" style="margin-right: auto" />
-      <el-button size="small" text class="icon-btn" @click="view.toggleEventPanel()">✕</el-button>
-    </div>
+  <el-dialog
+    v-model="visible"
+    class="scenario-dialog"
+    :modal="false"
+    draggable
+    :close-on-click-modal="false"
+    :lock-scroll="false"
+    width="min(1220px, 96vw)"
+    top="4vh"
+    append-to-body
+  >
+    <template #header>
+      <span class="sc-title">Сценарий</span>
+    </template>
 
-    <el-tabs v-model="tab" class="ev-tabs">
+    <el-tabs v-model="store.panelTab" class="ev-tabs">
       <el-tab-pane label="События" name="events" />
       <el-tab-pane label="Настройки" name="settings" />
       <el-tab-pane label="Дипломатия" name="diplomacy" />
@@ -104,160 +119,171 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
       <el-tab-pane label="Шаблоны" name="templates" />
     </el-tabs>
 
-    <ScenarioSettingsEditor v-if="tab === 'settings'" class="ev-sub" />
-    <DiplomacyEditor v-else-if="tab === 'diplomacy'" class="ev-sub" />
-    <VariablesEditor v-else-if="tab === 'vars'" class="ev-sub" />
-    <TemplatesEditor v-else-if="tab === 'templates'" class="ev-sub" />
+    <div class="sc-body">
+      <ScenarioSettingsEditor v-if="store.panelTab === 'settings'" class="ev-sub" />
+      <DiplomacyEditor v-else-if="store.panelTab === 'diplomacy'" class="ev-sub" />
+      <VariablesEditor v-else-if="store.panelTab === 'vars'" class="ev-sub" />
+      <TemplatesEditor v-else-if="store.panelTab === 'templates'" class="ev-sub" />
 
-    <template v-else>
-    <div class="ev-subhead">
-      <span class="ev-count">{{ store.events.length }} событий</span>
-      <el-button size="small" type="primary" @click="store.create()">+ Новое</el-button>
+      <!-- События: list | star graph | editor -->
+      <div v-else class="ev-grid">
+        <div class="ev-col ev-col-list d2-rail--left">
+          <div class="ev-subhead">
+            <span class="ev-count">{{ store.events.length }} событий</span>
+            <el-button size="small" type="primary" @click="store.create()">+ Новое</el-button>
+          </div>
+          <el-input
+            v-model="store.filter"
+            size="small"
+            clearable
+            placeholder="Поиск по имени / id…"
+            class="ev-search"
+          />
+          <div v-if="store.objectFilter" class="ev-objfilter">
+            только для объекта <code>{{ store.objectFilter }}</code>
+            <el-button size="small" text @click="store.objectFilter = null">показать все</el-button>
+          </div>
+          <el-scrollbar class="ev-list">
+            <div
+              v-for="e in store.filtered"
+              :key="e.id"
+              class="ev-row d2-row"
+              :class="{ active: e.id === store.selectedId }"
+              @click="store.select(e.id)"
+            >
+              <div class="ev-row-main">
+                <span class="ev-name">{{ e.name || "(без имени)" }}</span>
+                <span class="ev-id">{{ e.id }}</span>
+              </div>
+              <div class="ev-badges">
+                <el-tag v-if="!e.enabled" size="small" type="info" disable-transitions>выкл</el-tag>
+                <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
+                <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
+                <span class="ev-ce">{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
+                <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
+                <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
+              </div>
+            </div>
+            <el-empty v-if="!store.filtered.length" description="Нет событий" :image-size="60" />
+          </el-scrollbar>
+        </div>
+
+        <!-- star topology: what triggers it (left), what it does (right), everything by name -->
+        <EventGraph class="ev-col ev-col-graph" />
+
+        <div class="ev-col ev-col-editor d2-rail--left">
+          <el-scrollbar v-if="sel" class="ev-editor">
+            <el-input :model-value="sel.name" size="small" placeholder="Название события"
+              @update:model-value="patch({ name: $event })" />
+
+            <div class="ev-props">
+              <label><el-switch :model-value="sel.enabled" @update:model-value="patch({ enabled: $event as boolean })" /> активно с начала</label>
+              <label><el-switch :model-value="!sel.occurOnce" @update:model-value="patch({ occurOnce: !($event as boolean) })" /> повторяемое</label>
+              <label>шанс
+                <el-input-number :model-value="sel.chance" :min="0" :max="100" size="small" controls-position="right"
+                  style="width: 96px" @update:model-value="patch({ chance: ($event as number) ?? 100 })" /> %</label>
+              <label>порядок
+                <el-input-number :model-value="sel.order" size="small" controls-position="right"
+                  style="width: 96px" @update:model-value="patch({ order: ($event as number) ?? 0 })" /></label>
+            </div>
+
+            <div class="ev-races">
+              <div class="ev-races-row">
+                <span class="ev-races-lbl">Действует на:</span>
+                <el-checkbox v-for="r in RACES" :key="'a' + r.key" :model-value="sel.appliesTo[r.key]"
+                  @update:model-value="patchRace('appliesTo', r.key, $event as boolean)">{{ r.label }}</el-checkbox>
+              </div>
+              <div class="ev-races-row">
+                <span class="ev-races-lbl">Может запускать:</span>
+                <el-checkbox v-for="r in RACES" :key="'t' + r.key" :model-value="sel.canTrigger[r.key]"
+                  @update:model-value="patchRace('canTrigger', r.key, $event as boolean)">{{ r.label }}</el-checkbox>
+              </div>
+            </div>
+
+            <!-- conditions -->
+            <div class="ev-sec-head">
+              <span class="d2-sec">Условия ({{ sel.conditions.length }})</span>
+              <el-select placeholder="+ условие" size="small" style="width: 190px" :model-value="''"
+                @update:model-value="addCondition($event)">
+                <el-option v-for="s in CONDITION_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
+              </el-select>
+            </div>
+            <div v-for="(c, i) in sel.conditions" :key="'c' + i" class="ev-item d2-card">
+              <div class="ev-item-head">
+                <span>{{ condLabel(c) }}</span>
+                <el-button size="small" text class="icon-btn" @click="removeCondition(i)">🗑</el-button>
+              </div>
+              <div v-for="f in condFields(c)" :key="f.key" class="ev-field">
+                <label>{{ f.label }}</label>
+                <EventFieldInput :field="f" :model-value="(c as Record<string, unknown>)[f.key]"
+                  @update:model-value="setCondField(i, f.key, $event)" />
+              </div>
+            </div>
+
+            <!-- effects -->
+            <div class="ev-sec-head">
+              <span class="d2-sec">Эффекты ({{ sel.effects.length }})</span>
+              <el-select placeholder="+ эффект" size="small" style="width: 190px" :model-value="''"
+                @update:model-value="addEffect($event)">
+                <el-option v-for="s in EFFECT_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
+              </el-select>
+            </div>
+            <div v-for="(e, i) in sel.effects" :key="'e' + i" class="ev-item d2-card">
+              <div class="ev-item-head">
+                <span>{{ i + 1 }}. {{ effLabel(e) }}</span>
+                <span class="ev-item-actions">
+                  <el-button size="small" text class="icon-btn" :disabled="i === 0" @click="moveEffect(i, -1)">↑</el-button>
+                  <el-button size="small" text class="icon-btn" :disabled="i === sel.effects.length - 1" @click="moveEffect(i, 1)">↓</el-button>
+                  <el-button size="small" text class="icon-btn" @click="removeEffect(i)">🗑</el-button>
+                </span>
+              </div>
+              <div v-for="f in effFields(e)" :key="f.key" class="ev-field">
+                <label>{{ f.label }}</label>
+                <EventFieldInput :field="f" :model-value="(e as Record<string, unknown>)[f.key]"
+                  @update:model-value="setEffField(i, f.key, $event)" />
+              </div>
+            </div>
+          </el-scrollbar>
+          <el-empty v-else description="Выберите или создайте событие" :image-size="60" />
+        </div>
+      </div>
     </div>
-
-    <el-input
-      v-model="store.filter"
-      size="small"
-      clearable
-      placeholder="Поиск по имени / id…"
-      class="ev-search"
-    />
-    <div v-if="store.objectFilter" class="ev-objfilter">
-      только для объекта <code>{{ store.objectFilter }}</code>
-      <el-button size="small" text @click="store.objectFilter = null">показать все</el-button>
-    </div>
-
-    <el-scrollbar class="ev-list">
-      <div
-        v-for="e in store.filtered"
-        :key="e.id"
-        class="ev-row d2-row"
-        :class="{ active: e.id === store.selectedId }"
-        @click="store.select(e.id)"
-      >
-        <div class="ev-row-main">
-          <span class="ev-name">{{ e.name || "(без имени)" }}</span>
-          <span class="ev-id">{{ e.id }}</span>
-        </div>
-        <div class="ev-badges">
-          <el-tag v-if="!e.enabled" size="small" type="info" disable-transitions>выкл</el-tag>
-          <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
-          <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
-          <span class="ev-ce">{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
-          <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
-          <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
-        </div>
-      </div>
-      <el-empty v-if="!store.filtered.length" description="Нет событий" :image-size="60" />
-    </el-scrollbar>
-
-    <!-- editor -->
-    <el-scrollbar v-if="sel" class="ev-editor">
-      <el-input :model-value="sel.name" size="small" placeholder="Название события"
-        @update:model-value="patch({ name: $event })" />
-
-      <div class="ev-props">
-        <label><el-switch :model-value="sel.enabled" @update:model-value="patch({ enabled: $event as boolean })" /> активно с начала</label>
-        <label><el-switch :model-value="!sel.occurOnce" @update:model-value="patch({ occurOnce: !($event as boolean) })" /> повторяемое</label>
-        <label>шанс
-          <el-input-number :model-value="sel.chance" :min="0" :max="100" size="small" controls-position="right"
-            style="width: 96px" @update:model-value="patch({ chance: ($event as number) ?? 100 })" /> %</label>
-        <label>порядок
-          <el-input-number :model-value="sel.order" size="small" controls-position="right"
-            style="width: 96px" @update:model-value="patch({ order: ($event as number) ?? 0 })" /></label>
-      </div>
-
-      <div class="ev-races">
-        <div class="ev-races-row">
-          <span class="ev-races-lbl">Действует на:</span>
-          <el-checkbox v-for="r in RACES" :key="'a' + r.key" :model-value="sel.appliesTo[r.key]"
-            @update:model-value="patchRace('appliesTo', r.key, $event as boolean)">{{ r.label }}</el-checkbox>
-        </div>
-        <div class="ev-races-row">
-          <span class="ev-races-lbl">Может запускать:</span>
-          <el-checkbox v-for="r in RACES" :key="'t' + r.key" :model-value="sel.canTrigger[r.key]"
-            @update:model-value="patchRace('canTrigger', r.key, $event as boolean)">{{ r.label }}</el-checkbox>
-        </div>
-      </div>
-
-      <!-- conditions -->
-      <div class="ev-sec-head">
-        <span class="d2-sec">Условия ({{ sel.conditions.length }})</span>
-        <el-select placeholder="+ условие" size="small" style="width: 190px" :model-value="''"
-          @update:model-value="addCondition($event)">
-          <el-option v-for="s in CONDITION_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
-        </el-select>
-      </div>
-      <div v-for="(c, i) in sel.conditions" :key="'c' + i" class="ev-item d2-card">
-        <div class="ev-item-head">
-          <span>{{ condLabel(c) }}</span>
-          <el-button size="small" text class="icon-btn" @click="removeCondition(i)">🗑</el-button>
-        </div>
-        <div v-for="f in condFields(c)" :key="f.key" class="ev-field">
-          <label>{{ f.label }}</label>
-          <EventFieldInput :field="f" :model-value="(c as Record<string, unknown>)[f.key]"
-            @update:model-value="setCondField(i, f.key, $event)" />
-        </div>
-      </div>
-
-      <!-- effects -->
-      <div class="ev-sec-head">
-        <span class="d2-sec">Эффекты ({{ sel.effects.length }})</span>
-        <el-select placeholder="+ эффект" size="small" style="width: 190px" :model-value="''"
-          @update:model-value="addEffect($event)">
-          <el-option v-for="s in EFFECT_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
-        </el-select>
-      </div>
-      <div v-for="(e, i) in sel.effects" :key="'e' + i" class="ev-item d2-card">
-        <div class="ev-item-head">
-          <span>{{ i + 1 }}. {{ effLabel(e) }}</span>
-          <span class="ev-item-actions">
-            <el-button size="small" text class="icon-btn" :disabled="i === 0" @click="moveEffect(i, -1)">↑</el-button>
-            <el-button size="small" text class="icon-btn" :disabled="i === sel.effects.length - 1" @click="moveEffect(i, 1)">↓</el-button>
-            <el-button size="small" text class="icon-btn" @click="removeEffect(i)">🗑</el-button>
-          </span>
-        </div>
-        <div v-for="f in effFields(e)" :key="f.key" class="ev-field">
-          <label>{{ f.label }}</label>
-          <EventFieldInput :field="f" :model-value="(e as Record<string, unknown>)[f.key]"
-            @update:model-value="setEffField(i, f.key, $event)" />
-        </div>
-      </div>
-    </el-scrollbar>
-    </template>
-  </div>
+  </el-dialog>
 </template>
 
 <style scoped>
-.ev-panel {
-  display: flex;
-  flex-direction: column;
+.sc-title { font-weight: 600; font-size: 14px; }
+.ev-tabs { --el-tabs-header-height: 34px; font-size: 12px; }
+.ev-tabs :deep(.el-tabs__header) { margin: 0 0 8px; }
+.sc-body { height: min(66vh, 640px); min-height: 380px; font-size: 12px; }
+.ev-sub { height: 100%; }
+
+/* События: list | graph | editor */
+.ev-grid {
+  display: grid;
+  grid-template-columns: 250px 1fr 340px;
+  gap: 0;
   height: 100%;
-  font-size: 12px;
+  min-height: 0;
 }
-.ev-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px 6px;
-  font-size: 13px;
-}
-.ev-head strong { font-weight: 600; }
+.ev-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.ev-col-list { padding-right: 8px; }
+.ev-col-graph { padding: 0 8px; }
+.ev-col-editor { padding-left: 8px; }
+.d2-rail--left + .ev-col-graph { border-left: none; }
+
+.ev-subhead { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; }
 .ev-count { color: var(--el-text-color-secondary); margin-right: auto; }
-.ev-tabs { padding: 0 12px; --el-tabs-header-height: 34px; }
-.ev-tabs :deep(.el-tabs__header) { margin: 0; }
-.ev-sub { flex: 1; min-height: 0; }
-.ev-subhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px 2px; }
-.ev-search { padding: 8px 12px 4px; }
-.ev-objfilter { padding: 0 12px 6px; color: var(--el-text-color-secondary); }
-.ev-list { max-height: 34%; padding: 0 4px 8px; }
+.ev-search { padding: 0 0 6px; }
+.ev-objfilter { padding: 0 0 6px; color: var(--el-text-color-secondary); }
+.ev-list { flex: 1; min-height: 0; }
 .ev-row { padding: 5px 10px; cursor: pointer; }
 .ev-row-main { display: flex; justify-content: space-between; gap: 8px; }
 .ev-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-id { color: var(--el-text-color-secondary); font-family: monospace; font-size: 11px; }
 .ev-badges { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .ev-ce { color: var(--el-text-color-secondary); margin-left: auto; }
-.ev-editor { flex: 1; padding: 8px 12px; }
+.ev-editor { flex: 1; min-height: 0; }
 .ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; align-items: center; }
 .ev-props label { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-regular); }
 .ev-races { margin-bottom: 12px; }
@@ -268,11 +294,22 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
   margin: var(--d2-sp-4) 0 6px;
 }
 .ev-sec-head .d2-sec { margin: 0; }
-.ev-item { margin-bottom: 8px; }
+.ev-item { margin-bottom: 8px; margin-right: 8px; }
 .ev-item-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 4px; }
 .ev-item-actions { display: inline-flex; }
 .ev-field { display: grid; grid-template-columns: 96px 1fr; gap: 6px; align-items: center; margin: 6px 0; }
 .ev-field > label { color: var(--el-text-color-secondary); }
 .icon-btn { opacity: 0.6; transition: opacity 0.12s; }
 .icon-btn:hover { opacity: 1; }
+</style>
+
+<!-- the dialog itself teleports to <body>: style it unscoped -->
+<style>
+.scenario-dialog {
+  --el-dialog-padding-primary: 12px;
+  border-radius: 12px;
+  box-shadow: var(--el-box-shadow);
+}
+.scenario-dialog .el-dialog__header { padding-bottom: 4px; }
+.scenario-dialog .el-dialog__body { padding-top: 0; }
 </style>

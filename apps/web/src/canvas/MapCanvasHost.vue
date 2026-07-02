@@ -12,6 +12,7 @@
  * element, a loading flag). Pixi objects never enter Vue's reactive graph.
  */
 import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { ElMessage } from "element-plus";
 import { assetUrl } from "../services/api";
 import { storeToRefs } from "pinia";
 import { Scene } from "@d2/pixi-render";
@@ -178,7 +179,10 @@ onMounted(async () => {
     canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("dblclick", onDblClick);
+    canvas.addEventListener("contextmenu", onContextMenu);
   }
+  window.addEventListener("keydown", onKeyDown);
   // make the catalog ready before the user opens the decor palette
   void decorStore.load();
 
@@ -473,19 +477,47 @@ function occupancy(): Map<string, Set<string>> {
 }
 
 /** Can a w×h footprint be placed at (cx,cy)? Bounds + no other object occupies it
- *  (`excludeId` = the object being moved, which may overlap its own cells). */
-function canPlaceFootprint(cx: number, cy: number, w: number, h: number, excludeId?: string): boolean {
+ *  (`exclude` = the object(s) being moved, which may overlap their own cells). */
+function canPlaceFootprint(cx: number, cy: number, w: number, h: number, exclude?: string | ReadonlySet<string>): boolean {
   const doc = editStore.liveDoc;
   if (!doc || w <= 0 || h <= 0) return false;
   const n = doc.size;
   const occ = occupancy();
+  const excluded = (id: string): boolean =>
+    typeof exclude === "string" ? id === exclude : exclude ? exclude.has(id) : false;
   for (let y = cy; y < cy + h; y++)
     for (let x = cx; x < cx + w; x++) {
       if (x < 0 || y < 0 || x >= n || y >= n) return false;
       const s = occ.get(`${x},${y}`);
-      if (s) for (const id of s) if (id !== excludeId) return false;
+      if (s) for (const id of s) if (!excluded(id)) return false;
     }
   return true;
+}
+
+/**
+ * Anchored-group move check: every member of the group placed at (its pos + delta) must be
+ * in bounds and free of NON-group occupancy. Locations skip the occupancy test (they overlap
+ * by design) but still respect the map bounds. Returns null when the whole group fits, else
+ * the id of the first offender (for messaging).
+ */
+function groupMoveBlocked(group: readonly string[], dx: number, dy: number): string | null {
+  const doc = editStore.liveDoc;
+  if (!doc) return group[0] ?? null;
+  const ids = new Set(group);
+  for (const id of group) {
+    const o = doc.objects.find((x) => x.id === id);
+    if (!o) continue;
+    const nx = o.pos.x + dx;
+    const ny = o.pos.y + dy;
+    if (o.type === "location") {
+      const r = o.radius ?? 0;
+      if (nx - r < 0 || ny - r < 0 || nx + r >= doc.size || ny + r >= doc.size) return id;
+      continue;
+    }
+    const { w, h } = objectFootprint(o, landmarkFootprints);
+    if (!canPlaceFootprint(nx, ny, w, h, ids)) return id;
+  }
+  return null;
 }
 
 /**
@@ -569,7 +601,88 @@ function paintAt(cx: number, cy: number): void {
 let roadAnchor: { x: number; y: number } | null = null;
 let roadLevel = 0;
 
+// ---- right-click context menu + anchor-pick mode ("Заякорить к…") -------------------------
+/** Open context menu: screen position + the object it targets. */
+const ctxMenu = ref<{ x: number; y: number; obj: MapObject } | null>(null);
+/** While set, the NEXT left click picks the anchor PARENT for this child id. */
+const anchorPickFor = ref<string | null>(null);
+
+/** Double click = свойства объекта (select -> the inspector rail opens). */
+function onDblClick(e: MouseEvent): void {
+  const cell = cellFromEvent(e as PointerEvent);
+  if (!cell) return;
+  const hit = pickAtCell(cell.x, cell.y, e.shiftKey);
+  if (hit) toolStore.setSelectedId(hit.id);
+}
+
+/** Right click = context menu for the object under the cursor. */
+function onContextMenu(e: MouseEvent): void {
+  e.preventDefault();
+  anchorPickFor.value = null;
+  const cell = cellFromEvent(e as PointerEvent);
+  if (!cell) { ctxMenu.value = null; return; }
+  const hit = pickAtCell(cell.x, cell.y, e.shiftKey);
+  ctxMenu.value = hit ? { x: e.clientX, y: e.clientY, obj: hit } : null;
+}
+
+function ctxAction(action: string): void {
+  const obj = ctxMenu.value?.obj;
+  ctxMenu.value = null;
+  if (!obj) return;
+  switch (action) {
+    case "props":
+      toolStore.setSelectedId(obj.id);
+      break;
+    case "anchor":
+      anchorPickFor.value = obj.id; // next click picks the parent
+      if (!viewStore.anchorsVisible) viewStore.toggleAnchors(); // show the links overlay
+      ElMessage.info("Кликните объект-родитель для якоря (Esc — отмена)");
+      break;
+    case "unanchor":
+      editStore.clearAnchor(obj.id);
+      ElMessage.success("Якорь снят");
+      break;
+    case "links":
+      viewStore.toggleAnchors();
+      break;
+    case "delete":
+      editStore.commit([{ kind: "deleteObject", id: obj.id }]);
+      break;
+  }
+}
+
+/** Complete the anchor-pick: `parent` = the clicked object. */
+function finishAnchorPick(parent: MapObject): void {
+  const child = anchorPickFor.value;
+  anchorPickFor.value = null;
+  if (!child || child === parent.id) return;
+  if (editStore.setAnchor(child, parent.id)) {
+    ElMessage.success("Заякорено — перенос родителя тянет всю связку");
+  } else {
+    ElMessage.warning("Нельзя: цикл якорей");
+  }
+}
+
+/** Esc closes the context menu and cancels a pending anchor pick. */
+function onKeyDown(e: KeyboardEvent): void {
+  if (e.key !== "Escape") return;
+  if (ctxMenu.value) ctxMenu.value = null;
+  if (anchorPickFor.value) {
+    anchorPickFor.value = null;
+    ElMessage.info("Якорение отменено");
+  }
+}
+
 function onPointerDown(e: PointerEvent): void {
+  ctxMenu.value = null; // any left press dismisses the context menu
+  // anchor-pick mode: this click chooses the PARENT for the pending "Заякорить к…"
+  if (anchorPickFor.value) {
+    const cell = cellFromEvent(e);
+    const hit = cell ? pickAtCell(cell.x, cell.y, e.shiftKey) : null;
+    if (hit) finishAnchorPick(hit);
+    else { anchorPickFor.value = null; ElMessage.info("Якорение отменено"); }
+    return;
+  }
   if (e.ctrlKey) return; // Ctrl+drag pans the camera (handled by Scene), not a tool action
   // region tool: start drawing the Copilot generation zone (mode = rect/brush/line/frame).
   if (toolStore.tool === "region") {
@@ -630,13 +743,30 @@ function onPointerDown(e: PointerEvent): void {
     } else {
       const obj = editStore.liveDoc?.objects.find((o) => o.id === toolStore.moveId);
       if (obj) {
-        if (obj.type !== "location") {
-          const { w, h } = objectFootprint(obj, landmarkFootprints);
-          // invalid drop (off-map / onto another object) -> keep carrying, like the editor
-          if (!canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined)) return;
-        }
-        if (obj.pos.x !== cell.x || obj.pos.y !== cell.y) {
-          editStore.commit([{ kind: "moveObject", id: toolStore.moveId, x: cell.x, y: cell.y }]);
+        const dx = cell.x - obj.pos.x;
+        const dy = cell.y - obj.pos.y;
+        // anchored group: the carried object + every transitively anchored child moves by the
+        // same delta — and the WHOLE group must fit (bounds + occupancy), else keep carrying.
+        const group = editStore.anchorGroup(obj.id);
+        if (group.length > 1) {
+          if (dx !== 0 || dy !== 0) {
+            if (groupMoveBlocked(group, dx, dy)) return; // не даём даже попытаться
+            const doc = editStore.liveDoc!;
+            const ops: EditOp[] = group
+              .map((id) => doc.objects.find((o) => o.id === id))
+              .filter((o): o is NonNullable<typeof o> => !!o)
+              .map((o) => ({ kind: "moveObject" as const, id: o.id, x: o.pos.x + dx, y: o.pos.y + dy }));
+            editStore.commit(ops); // one stroke = one undo for the whole group
+          }
+        } else {
+          if (obj.type !== "location") {
+            const { w, h } = objectFootprint(obj, landmarkFootprints);
+            // invalid drop (off-map / onto another object) -> keep carrying, like the editor
+            if (!canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined)) return;
+          }
+          if (dx !== 0 || dy !== 0) {
+            editStore.commit([{ kind: "moveObject", id: toolStore.moveId, x: cell.x, y: cell.y }]);
+          }
         }
       }
       toolStore.setMoveId(null);
@@ -761,7 +891,10 @@ onBeforeUnmount(() => {
     canvas.removeEventListener("pointerleave", onPointerLeave);
     canvas.removeEventListener("pointerdown", onPointerDown);
     canvas.removeEventListener("pointerup", onPointerUp);
+    canvas.removeEventListener("dblclick", onDblClick);
+    canvas.removeEventListener("contextmenu", onContextMenu);
   }
+  window.removeEventListener("keydown", onKeyDown);
   destroyScene();
 });
 
@@ -845,6 +978,18 @@ watch(
     const s = getScene();
     if (s && editStore.liveDoc) s.updateEventOverlay(editStore.liveDoc, eventStore.selected);
   },
+);
+
+// Anchors overlay («Связи»): redraw when an anchor is set/cleared, an object moves,
+// or the visibility toggle flips.
+watch(
+  [() => editStore.anchors, () => editStore.objectsRev, () => viewStore.anchorsVisible],
+  () => {
+    const s = getScene();
+    if (s && editStore.liveDoc)
+      s.updateAnchors(editStore.liveDoc, editStore.anchors, viewStore.anchorsVisible);
+  },
+  { deep: true },
 );
 
 // Collab presence: broadcast my selection to room peers; render their live cursors.
@@ -932,6 +1077,20 @@ watch(
 <template>
   <div class="canvas-host">
     <div ref="mountEl" class="canvas-mount" />
+
+    <!-- right-click object menu (плавающее, закрывается любым кликом/Esc) -->
+    <div
+      v-if="ctxMenu"
+      class="ctx-menu d2-float"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+    >
+      <div class="ctx-title">{{ (ctxMenu.obj as { name?: string }).name || ctxMenu.obj.type }} <code>{{ ctxMenu.obj.id }}</code></div>
+      <button class="ctx-item" @click="ctxAction('props')">Свойства</button>
+      <button class="ctx-item" @click="ctxAction('anchor')">⚓ Заякорить к…</button>
+      <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">Снять якорь</button>
+      <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
+      <button v-if="ctxMenu.obj.type === 'landmark'" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
+    </div>
     <div v-if="debugOverlay && debugStats" class="debug-hud">
       <div class="hud-row hud-head">debug</div>
       <div class="hud-row">
@@ -990,6 +1149,44 @@ watch(
 }
 .canvas-mount :deep(canvas) {
   display: block;
+}
+/* right-click object menu: fixed at the cursor, above every float */
+.ctx-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 190px;
+  padding: 6px;
+  font-size: 12px;
+}
+.ctx-title {
+  padding: 4px 8px 6px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-title code {
+  font-size: 10px;
+  color: var(--el-text-color-secondary);
+  margin-left: 4px;
+}
+.ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  border-radius: var(--d2-radius);
+  cursor: pointer;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+}
+.ctx-item:hover {
+  background: var(--el-fill-color-light);
+}
+.ctx-danger {
+  color: var(--el-color-danger);
 }
 .canvas-overlay {
   position: absolute;

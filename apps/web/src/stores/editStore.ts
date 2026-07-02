@@ -305,6 +305,52 @@ export const useEditStore = defineStore("edit", () => {
     persist(); // editor-only metadata: persist without touching the op journal
   }
 
+  /** Editor-only ANCHORS (child id → parent id): moving the parent drags every transitively
+   *  anchored child along. Persisted with the project, never written to the .sg. */
+  const anchors = computed<Record<string, string>>(() => project.value?.anchors ?? {});
+  /** Anchor `childId` to `parentId`. Rejects self/cycles (walks the parent chain). */
+  function setAnchor(childId: string, parentId: string): boolean {
+    if (!project.value || childId === parentId) return false;
+    // cycle guard: parentId must not be (transitively) anchored to childId
+    let p: string | undefined = parentId;
+    const cur = project.value.anchors ?? {};
+    while (p) {
+      if (p === childId) return false;
+      p = cur[p];
+    }
+    project.value = { ...project.value, anchors: { ...cur, [childId]: parentId } };
+    persist();
+    return true;
+  }
+  function clearAnchor(childId: string): void {
+    if (!project.value) return;
+    const next = { ...(project.value.anchors ?? {}) };
+    delete next[childId];
+    project.value = { ...project.value, anchors: next };
+    persist();
+  }
+  /** The move-group for `id`: itself + every TRANSITIVE anchored child (parents stay put). */
+  function anchorGroup(id: string): string[] {
+    const a = anchors.value;
+    const kids = new Map<string, string[]>();
+    for (const [c, p] of Object.entries(a)) {
+      const arr = kids.get(p) ?? [];
+      arr.push(c);
+      kids.set(p, arr);
+    }
+    const out: string[] = [];
+    const stack = [id];
+    const seen = new Set<string>();
+    while (stack.length) {
+      const cur = stack.pop()!;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      out.push(cur);
+      for (const k of kids.get(cur) ?? []) stack.push(k);
+    }
+    return out;
+  }
+
   async function validate(): Promise<ValidationReport | null> {
     if (!project.value) return null;
     busy.value = true;
@@ -424,6 +470,10 @@ export const useEditStore = defineStore("edit", () => {
     reset,
     captions,
     setCaption,
+    anchors,
+    setAnchor,
+    clearAnchor,
+    anchorGroup,
     validate,
     generate,
     copilot,

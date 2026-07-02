@@ -28,6 +28,7 @@ import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
 import { EventOverlayLayer } from "./EventOverlayLayer.js";
+import { AnchorLayer } from "./AnchorLayer.js";
 import { PresenceLayer, type PeerMarker } from "./PresenceLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
 import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
@@ -123,6 +124,9 @@ export class Scene {
   private eventOverlay?: EventOverlayLayer;
   /** The selected event to visualize; kept so a rebuild after an edit re-draws it. */
   private selectedEvent: import("@d2/map-schema").MapEvent | null = null;
+  private anchorLayer?: AnchorLayer;
+  /** anchors (child->parent) + visibility, kept so a full rebuild restores the overlay. */
+  private anchorState: { anchors: Record<string, string>; visible: boolean } = { anchors: {}, visible: false };
   private presence?: PresenceLayer;
   private overlay?: OverlayLayer;
   private anim?: AnimationManager;
@@ -280,6 +284,12 @@ export class Scene {
     this.eventOverlay.build(map, this.selectedEvent);
     this.world.addChild(this.eventOverlay.view);
 
+    // editor-only anchors («Связи»): ⚓ + child→parent arrows
+    this.anchorLayer = new AnchorLayer();
+    this.anchorLayer.build(map, this.anchorState.anchors);
+    this.anchorLayer.setVisible(this.anchorState.visible);
+    this.world.addChild(this.anchorLayer.view);
+
     // collaborator cursors, above locations
     this.presence = new PresenceLayer();
     this.world.addChild(this.presence.view);
@@ -351,6 +361,15 @@ export class Scene {
     this.selectedEvent = ev;
     if (!this.eventOverlay) return;
     this.eventOverlay.build(map, ev);
+    this.renderNow();
+  }
+
+  /** Redraw the editor-only anchors overlay («Связи»). */
+  updateAnchors(map: MapDocument, anchors: Record<string, string>, visible: boolean): void {
+    this.anchorState = { anchors, visible };
+    if (!this.anchorLayer) return;
+    this.anchorLayer.build(map, anchors);
+    this.anchorLayer.setVisible(visible);
     this.renderNow();
   }
 
@@ -762,6 +781,7 @@ export class Scene {
     this.overlay?.destroy();
     this.presence?.destroy();
     this.eventOverlay?.destroy();
+    this.anchorLayer?.destroy();
     this.locations?.destroy();
     this.grid?.destroy();
     this.terrain?.destroy();
@@ -770,6 +790,7 @@ export class Scene {
     this.objects = undefined;
     this.overlay = undefined;
     this.eventOverlay = undefined;
+    this.anchorLayer = undefined;
     this.locations = undefined;
     this.grid = undefined;
     this.terrain = undefined;

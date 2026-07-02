@@ -43,6 +43,8 @@ export const useViewStore = defineStore("view", () => {
   const objectPanelVisible = ref(bool(p.objectPanelVisible, false));
   /** Events panel (scenario triggers/effects). Hidden by default; toggle from the View menu. */
   const eventPanelVisible = ref(bool(p.eventPanelVisible, false));
+  /** «Связи»: the editor-only anchors overlay (⚓ + child→parent arrows). */
+  const anchorsVisible = ref(bool(p.anchorsVisible, false));
   /** Debug HUD overlay (FPS / render ms / iso engine). OFF by default (product decision);
    *  the one-off migration flips earlier persisted defaults off once. */
   const debugOverlay = ref(p.debugOffMigrated ? bool(p.debugOverlay, false) : false);
@@ -108,6 +110,10 @@ export const useViewStore = defineStore("view", () => {
     eventPanelVisible.value = !eventPanelVisible.value;
   }
 
+  function toggleAnchors(): void {
+    anchorsVisible.value = !anchorsVisible.value;
+  }
+
   function toggleDebugOverlay(): void {
     debugOverlay.value = !debugOverlay.value;
   }
@@ -146,7 +152,7 @@ export const useViewStore = defineStore("view", () => {
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
     [terrainVisible, objectsVisible, gridVisible, locationsVisible, animate,
-      objectPanelVisible, eventPanelVisible, debugOverlay, dark, overlayTints],
+      objectPanelVisible, eventPanelVisible, anchorsVisible, debugOverlay, dark, overlayTints],
     () => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -157,6 +163,7 @@ export const useViewStore = defineStore("view", () => {
           animate: animate.value,
           objectPanelVisible: objectPanelVisible.value,
           eventPanelVisible: eventPanelVisible.value,
+          anchorsVisible: anchorsVisible.value,
           debugOverlay: debugOverlay.value,
           debugOffMigrated: true,
           dark: dark.value,
@@ -177,6 +184,7 @@ export const useViewStore = defineStore("view", () => {
     animate,
     objectPanelVisible,
     eventPanelVisible,
+    anchorsVisible,
     debugOverlay,
     copilotVisible,
     copilotFocusTick,
@@ -193,6 +201,7 @@ export const useViewStore = defineStore("view", () => {
     toggleLocations,
     toggleObjectPanel,
     toggleEventPanel,
+    toggleAnchors,
     toggleDebugOverlay,
     toggleCopilot,
     focusCopilot,
