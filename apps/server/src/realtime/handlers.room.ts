@@ -8,6 +8,11 @@
  *  - edit:op validates + appends to the server-authoritative EditLog (assigning a seq),
  *    acks { ok, seq } to the author, and broadcasts edit:applied to the rest of the room.
  *  - snapshot:request returns the base map + the whole log applied (catch-up / late join).
+ *
+ * Privacy (v0.2): rooms + the EditLog are keyed by roomKey(mapId, channel) — the client's
+ * own persistent channel by default (a PRIVATE per-visitor room), or the channel from a
+ * share link (?map=<id>&room=<channel>), so edits are shared only with invited peers.
+ * The snapshot base is still resolved by the bare mapId (the map file is the same).
  */
 
 import type { Server, Socket } from "socket.io";
@@ -21,7 +26,7 @@ import type {
 import { EditOp } from "@d2/socket-contract";
 import { applyOps } from "@d2/map-edit";
 import type { MapStore } from "../maps/mapStore.js";
-import { RoomManager, roomId } from "./RoomManager.js";
+import { RoomManager, roomId, roomKey } from "./RoomManager.js";
 import type { EditLog } from "./EditLog.js";
 
 type IO = Server<
@@ -62,28 +67,36 @@ export function registerRoomHandlers(
     return false;
   };
 
+  /** The joined room key for a payload that names this socket's current map; null if the
+   *  payload targets a map this socket has not joined (drop it — no cross-room leaks). */
+  const keyFor = (mapId: string): string | null =>
+    socket.data.mapId === mapId && socket.data.roomKey ? socket.data.roomKey : null;
+
   socket.on("room:join", (p, ack) => {
     try {
       if (!p || typeof p.mapId !== "string" || !p.user?.name) {
         ack({ ok: false, error: "invalid room:join payload" });
         return;
       }
+      const channel = typeof p.channel === "string" && p.channel ? p.channel.slice(0, 128) : undefined;
+      const key = roomKey(p.mapId, channel);
       const presence = rooms.join(
-        p.mapId,
+        key,
         socket.id,
         socket.data.userId,
         p.user.name,
         p.user.color,
       );
       socket.data.mapId = p.mapId;
-      void socket.join(roomId(p.mapId));
+      socket.data.roomKey = key;
+      void socket.join(roomId(key));
 
-      const peers = rooms.peers(p.mapId, socket.id);
+      const peers = rooms.peers(key, socket.id);
       // tell existing peers about the newcomer
-      socket.to(roomId(p.mapId)).emit("presence:update", presence);
+      socket.to(roomId(key)).emit("presence:update", presence);
 
       // late joiner gets the current head; if >0 they should snapshot:request to catch up
-      ack({ ok: true, you: presence, peers, snapshotSeq: log.head(p.mapId) });
+      ack({ ok: true, you: presence, peers, snapshotSeq: log.head(key) });
     } catch (err) {
       ack({ ok: false, error: (err as Error).message });
     }
@@ -91,28 +104,35 @@ export function registerRoomHandlers(
 
   socket.on("room:leave", (p) => {
     if (!p || typeof p.mapId !== "string") return;
-    handleLeave(io, socket, rooms, p.mapId);
+    const key = keyFor(p.mapId);
+    if (key) handleLeave(io, socket, rooms, key);
   });
 
   socket.on("presence:cursor", (p) => {
     if (!p || typeof p.mapId !== "string") return;
     if (throttled("cursor")) return;
-    const updated = rooms.update(p.mapId, socket.id, { cursor: p.cursor });
-    if (updated) broadcastPresence(socket, p.mapId, updated);
+    const key = keyFor(p.mapId);
+    if (!key) return;
+    const updated = rooms.update(key, socket.id, { cursor: p.cursor });
+    if (updated) broadcastPresence(socket, key, updated);
   });
 
   socket.on("presence:viewport", (p) => {
     if (!p || typeof p.mapId !== "string") return;
     if (throttled("viewport")) return;
-    const updated = rooms.update(p.mapId, socket.id, { viewport: p.viewport });
-    if (updated) broadcastPresence(socket, p.mapId, updated);
+    const key = keyFor(p.mapId);
+    if (!key) return;
+    const updated = rooms.update(key, socket.id, { viewport: p.viewport });
+    if (updated) broadcastPresence(socket, key, updated);
   });
 
   socket.on("presence:select", (p) => {
     if (!p || typeof p.mapId !== "string") return;
     if (throttled("select")) return;
-    const updated = rooms.update(p.mapId, socket.id, { selection: p.selection });
-    if (updated) broadcastPresence(socket, p.mapId, updated);
+    const key = keyFor(p.mapId);
+    if (!key) return;
+    const updated = rooms.update(key, socket.id, { selection: p.selection });
+    if (updated) broadcastPresence(socket, key, updated);
   });
 
   // Apply a peer's op: validate, append to the authoritative log (assigns seq), ack the
@@ -123,7 +143,8 @@ export function registerRoomHandlers(
       ack({ ok: false, reason: "invalid edit:op payload" });
       return;
     }
-    if (socket.data.mapId !== p.mapId) {
+    const key = keyFor(p.mapId);
+    if (!key) {
       ack({ ok: false, reason: "not joined to this map's room" });
       return;
     }
@@ -132,10 +153,10 @@ export function registerRoomHandlers(
       ack({ ok: false, reason: "invalid op: " + parsed.error.issues[0]?.message });
       return;
     }
-    const entry = log.append(p.mapId, parsed.data, socket.id, p.clientOpId, Date.now());
+    const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now());
     ack({ ok: true, seq: entry.seq });
     socket
-      .to(roomId(p.mapId))
+      .to(roomId(key))
       .emit("edit:applied", { seq: entry.seq, by: socket.id, op: parsed.data });
   });
 
@@ -143,45 +164,49 @@ export function registerRoomHandlers(
   // joiner (or a client that fell behind) can resync to the authoritative shared state.
   socket.on("snapshot:request", (p, ack) => {
     void (async () => {
+      const key = keyFor(p.mapId) ?? p.mapId;
       try {
         const loaded = await store.getMap(p.mapId);
         if (!loaded) {
-          ack({ seq: log.head(p.mapId), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
+          ack({ seq: log.head(key), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
           return;
         }
-        const ops = log.all(p.mapId).map((e) => e.op);
-        ack({ seq: log.head(p.mapId), doc: applyOps(loaded.doc, ops) });
+        const ops = log.all(key).map((e) => e.op);
+        ack({ seq: log.head(key), doc: applyOps(loaded.doc, ops) });
       } catch {
-        ack({ seq: log.head(p.mapId), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
+        ack({ seq: log.head(key), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
       }
     })();
   });
 
   socket.on("disconnect", () => {
-    for (const mapId of rooms.roomsForSocket(socket.id)) {
-      handleLeave(io, socket, rooms, mapId);
+    for (const key of rooms.roomsForSocket(socket.id)) {
+      handleLeave(io, socket, rooms, key);
     }
   });
 }
 
 function broadcastPresence(
   socket: IOSocket,
-  mapId: string,
+  key: string,
   presence: UserPresence,
 ): void {
-  socket.to(roomId(mapId)).emit("presence:update", presence);
+  socket.to(roomId(key)).emit("presence:update", presence);
 }
 
 function handleLeave(
   _io: IO,
   socket: IOSocket,
   rooms: RoomManager,
-  mapId: string,
+  key: string,
 ): void {
-  const left = rooms.leave(mapId, socket.id);
+  const left = rooms.leave(key, socket.id);
   if (left) {
-    socket.to(roomId(mapId)).emit("presence:left", { socketId: socket.id });
+    socket.to(roomId(key)).emit("presence:left", { socketId: socket.id });
   }
-  void socket.leave(roomId(mapId));
-  if (socket.data.mapId === mapId) socket.data.mapId = undefined;
+  void socket.leave(roomId(key));
+  if (socket.data.roomKey === key) {
+    socket.data.roomKey = undefined;
+    socket.data.mapId = undefined;
+  }
 }

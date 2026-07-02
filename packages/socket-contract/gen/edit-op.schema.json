@@ -99,6 +99,9 @@
                     "leaderUnitId": {
                       "type": "string"
                     },
+                    "leaderCell": {
+                      "type": "integer"
+                    },
                     "leaderImage": {
                       "type": "string"
                     },
@@ -108,12 +111,107 @@
                     "banner": {
                       "type": "string"
                     },
+                    "subRace": {
+                      "type": "string"
+                    },
+                    "bannerIndex": {
+                      "type": "integer"
+                    },
+                    "garrisoned": {
+                      "type": "boolean"
+                    },
+                    "order": {
+                      "type": "integer"
+                    },
+                    "morale": {
+                      "type": "integer"
+                    },
+                    "move": {
+                      "type": "integer"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "creatLvl": {
+                      "type": "integer"
+                    },
+                    "equip": {
+                      "type": "object",
+                      "properties": {
+                        "tome": {
+                          "type": "string"
+                        },
+                        "battle1": {
+                          "type": "string"
+                        },
+                        "battle2": {
+                          "type": "string"
+                        },
+                        "artifact1": {
+                          "type": "string"
+                        },
+                        "artifact2": {
+                          "type": "string"
+                        },
+                        "boots": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "inventory": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "units": {
                       "type": "array",
                       "items": {
                         "type": "string"
-                      },
-                      "default": []
+                      }
+                    },
+                    "inside": {
+                      "type": "string"
+                    },
+                    "garrison": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unit": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "integer",
+                                "default": 1
+                              },
+                              "hp": {
+                                "type": "integer",
+                                "default": 0
+                              }
+                            },
+                            "required": [
+                              "unit"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "garrisonRaw": {
+                      "type": "array",
+                      "items": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -247,9 +345,63 @@
                     "race": {
                       "type": "integer"
                     },
+                    "subRace": {
+                      "type": "string"
+                    },
+                    "bannerIndex": {
+                      "type": "integer"
+                    },
                     "name": {
                       "type": "string",
                       "default": ""
+                    },
+                    "desc": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "garrison": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unit": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "integer",
+                                "default": 1
+                              },
+                              "hp": {
+                                "type": "integer",
+                                "default": 0
+                              }
+                            },
+                            "required": [
+                              "unit"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "garrisonRaw": {
+                      "type": "array",
+                      "items": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "stackRef": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -315,13 +467,76 @@
                     "race": {
                       "type": "integer"
                     },
+                    "subRace": {
+                      "type": "string"
+                    },
+                    "bannerIndex": {
+                      "type": "integer"
+                    },
                     "name": {
                       "type": "string",
                       "default": ""
                     },
+                    "desc": {
+                      "type": "string"
+                    },
                     "tier": {
                       "type": "integer",
                       "default": 1
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "morale": {
+                      "type": "integer"
+                    },
+                    "regen": {
+                      "type": "integer"
+                    },
+                    "growth": {
+                      "type": "integer"
+                    },
+                    "garrison": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unit": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "integer",
+                                "default": 1
+                              },
+                              "hp": {
+                                "type": "integer",
+                                "default": 0
+                              }
+                            },
+                            "required": [
+                              "unit"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "garrisonRaw": {
+                      "type": "array",
+                      "items": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "stackRef": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -385,12 +600,27 @@
                       "type": "string",
                       "default": ""
                     },
+                    "desc": {
+                      "type": "string"
+                    },
                     "image": {
                       "type": "integer"
                     },
                     "looted": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "looter": {
+                      "type": "string"
+                    },
+                    "reward": {
+                      "type": "string"
+                    },
+                    "item": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "integer"
                     }
                   },
                   "required": [
@@ -456,6 +686,25 @@
                     "type": {
                       "type": "string",
                       "const": "merchant"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "count"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
@@ -521,6 +770,12 @@
                     "type": {
                       "type": "string",
                       "const": "mage"
+                    },
+                    "spells": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
@@ -651,6 +906,29 @@
                     "type": {
                       "type": "string",
                       "const": "mercenary"
+                    },
+                    "units": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "level": {
+                            "type": "integer"
+                          },
+                          "unique": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "level",
+                          "unique"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
@@ -714,6 +992,12 @@
                       "type": "integer"
                     },
                     "race": {
+                      "type": "integer"
+                    },
+                    "w": {
+                      "type": "integer"
+                    },
+                    "h": {
                       "type": "integer"
                     }
                   },
@@ -964,6 +1248,204 @@
                     },
                     "implId": {
                       "type": "string"
+                    },
+                    "level": {
+                      "type": "integer"
+                    },
+                    "hp": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "treasure"
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "rod"
+                    },
+                    "owner": {
+                      "type": "string"
+                    },
+                    "race": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "tomb"
                     }
                   },
                   "required": [

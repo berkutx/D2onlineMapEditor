@@ -296,7 +296,9 @@ export class Scene {
     this.camera.fitToScreen();
 
     this.updateRenderMode();
-    this.requestRender();
+    // immediate paint (not rAF-scheduled): the first frame after a load must not depend
+    // on rAF, which is throttled while the pointer is off-canvas / window unfocused
+    this.renderNow();
   }
 
   /**
@@ -527,14 +529,19 @@ export class Scene {
   }
 
   /**
-   * Render IMMEDIATELY, bypassing requestAnimationFrame. Used during active pan/zoom:
-   * a single frame is cheap (<2 ms here), but rAF gets throttled in background /
-   * embedded / unfocused contexts, which makes on-demand panning feel laggy even
-   * though the GPU is idle. Rendering straight from the input handler keeps dragging
-   * responsive regardless of rAF cadence. No-op while the continuous loop is running.
+   * Render IMMEDIATELY, bypassing requestAnimationFrame. Used during active pan/zoom
+   * AND after edit-driven scene updates: a single frame is cheap (<2 ms here), but rAF
+   * gets throttled in background / embedded / off-canvas-pointer contexts, which makes
+   * on-demand painting lag even though the GPU is idle.
+   *
+   * Deliberately NOT skipped while the continuous animation loop is running: the ticker
+   * is rAF-driven too, so it stalls under the same throttle — an updateTerrain/
+   * updateObjects after a Copilot generation would otherwise paint nothing until a
+   * pointermove wakes rAF (the "result appears only when I move the mouse" bug). One
+   * extra immediate frame alongside the ticker is harmless.
    */
   private renderNow(): void {
-    if (!this.app || this.animContinuous) return;
+    if (!this.app) return;
     if (this.rafId !== undefined) {
       cancelAnimationFrame(this.rafId);
       this.rafId = undefined;

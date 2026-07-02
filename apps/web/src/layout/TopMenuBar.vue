@@ -25,11 +25,13 @@ const collabStore = useCollabStore();
 const { scenarios, currentScenarioId, status } = storeToRefs(mapStore);
 const { peerList } = storeToRefs(collabStore);
 
-/** Copy a share link (?map=<id>) so a collaborator opens the same map = same room. */
+/** Copy a share link (?map=<id>&room=<channel>): the guest opens the same map AND joins
+ *  THIS session's collab channel (rooms are private per visitor otherwise). */
 async function shareLink(): Promise<void> {
   const id = currentScenarioId.value;
   if (!id) return;
-  const url = `${window.location.origin}${window.location.pathname}?map=${id}`;
+  const chan = collabStore.channel;
+  const url = `${window.location.origin}${window.location.pathname}?map=${id}${chan ? `&room=${chan}` : ""}`;
   try {
     await navigator.clipboard.writeText(url);
     ElMessage.success("Ссылка для совместного редактирования скопирована");
@@ -169,7 +171,15 @@ async function doCreateNewMap(): Promise<void> {
     newMapVisible.value = false;
     ElMessage.success(`Создана карта ${newMap.value.size}×${newMap.value.size}`);
   } catch (e) {
-    ElMessage.error(`Не удалось создать карту: ${e instanceof Error ? e.message : String(e)}`);
+    // PERSISTENT notification (not an auto-dismissing toast): a silent failure here left the
+    // editor on the previous map with its "есть правки" tag — which read as "the new map
+    // inherited the old edits". Be explicit that NOTHING changed.
+    ElNotification({
+      type: "error",
+      title: "Карта НЕ создана",
+      message: `Сервер не ответил (${e instanceof Error ? e.message : String(e)}). Открыта прежняя карта — её правки не тронуты. Попробуйте ещё раз.`,
+      duration: 0,
+    });
   } finally {
     newMapBusy.value = false;
   }

@@ -48,6 +48,9 @@ export function createIo(httpServer: HttpServer, store: MapStore): IoBundle {
 
   io.on("connection", (socket) => {
     socket.data.userId = randomUUID();
+    // persistent anonymous browser identity (v0.2) — optional, for future attribution
+    const auth = (socket.handshake.auth ?? {}) as Record<string, unknown>;
+    socket.data.clientId = typeof auth.clientId === "string" ? auth.clientId.slice(0, 128) : undefined;
     registerRoomHandlers(io, socket, rooms, log, store);
   });
 

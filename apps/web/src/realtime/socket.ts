@@ -8,6 +8,7 @@
 
 import { io, type Socket } from "socket.io-client";
 import type { ClientToServerEvents, ServerToClientEvents } from "@d2/socket-contract";
+import { getClientId } from "../services/clientId";
 
 export type TypedClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -21,6 +22,7 @@ export function getSocket(): TypedClientSocket {
   if (!socket) {
     socket = io({
       path: SOCKET_PATH,
+      auth: { clientId: getClientId() }, // anonymous persistent identity (attribution)
       autoConnect: true,
       transports: ["websocket", "polling"],
       // a dropped connection should re-establish and the collab store will re-join + resync

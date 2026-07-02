@@ -119,3 +119,41 @@ export function invertOps(doc: MapDocument, ops: readonly EditOp[]): EditOp[] {
   }
   return inverses.reverse();
 }
+
+/**
+ * Fold add→delete pairs out of an op sequence: when an object is ADDED by these ops and later
+ * DELETED by them (the collab append-inverse undo of a placement emits exactly that), drop the
+ * addObject, the deleteObject, and every op targeting that id in between. Semantics-preserving
+ * for applyOps (the object ends up not existing either way) — and REQUIRED for the byte writer,
+ * which cannot delete pre-existing blocks (M4 mid-stream splice) but trivially "deletes" a
+ * never-appended one. deleteObject of a BASE object (no matching add) is left as-is so the
+ * writer still fails loudly on the genuinely unsupported case.
+ */
+export function foldOps(ops: readonly EditOp[]): EditOp[] {
+  const out: (EditOp | null)[] = ops.slice();
+  const pendingAdd = new Map<string, number>(); // object id -> index of its addObject
+  for (let i = 0; i < out.length; i++) {
+    const op = out[i];
+    if (!op) continue;
+    if (op.kind === "addObject") {
+      pendingAdd.set(op.object.id, i);
+    } else if (op.kind === "deleteObject") {
+      const ai = pendingAdd.get(op.id);
+      if (ai !== undefined) {
+        for (let j = ai; j <= i; j++) {
+          const o = out[j];
+          if (!o) continue;
+          if (
+            (o.kind === "addObject" && o.object.id === op.id) ||
+            ((o.kind === "moveObject" || o.kind === "patchObject" || o.kind === "deleteObject") &&
+              o.id === op.id)
+          ) {
+            out[j] = null;
+          }
+        }
+        pendingAdd.delete(op.id);
+      }
+    }
+  }
+  return out.filter((o): o is EditOp => o !== null);
+}

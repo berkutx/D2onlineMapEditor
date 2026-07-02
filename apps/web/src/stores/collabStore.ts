@@ -14,6 +14,7 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import type { EditOp, UserPresence } from "@d2/socket-contract";
 import { getSocket } from "../realtime/socket";
+import { getChannelId } from "../services/clientId";
 import { useEditStore } from "./editStore";
 
 const NAME_KEY = "d2.collab.name";
@@ -54,6 +55,11 @@ export const useCollabStore = defineStore("collab", () => {
   const edit = useEditStore();
 
   const mapId = ref<string | null>(null);
+  /** The collab channel this session is in (room = mapId#channel). Defaults to MY persistent
+   *  private channel; a share link (?map=<id>&room=<channel>) puts a guest on the sharer's. */
+  const channel = ref<string | null>(null);
+  /** One-shot channel override parsed from a share link, consumed by the next join(). */
+  let pendingShare: { mapId: string; channel: string } | null = null;
   const me = ref<UserPresence | null>(null);
   const peers = reactive(new Map<string, UserPresence>());
   const history = ref<HistoryEntry[]>([]);
@@ -137,11 +143,22 @@ export const useCollabStore = defineStore("collab", () => {
     }
   }
 
+  /** Adopt a share link's channel for the given map (before it is opened/joined). */
+  function setPendingShare(forMapId: string, chan: string): void {
+    pendingShare = { mapId: forMapId, channel: chan };
+  }
+
   async function doJoin(id: string): Promise<void> {
     const socket = getSocket();
     bindListeners();
+    // a share link's channel wins (joining the sharer's room); a reconnect reuses the
+    // channel we were already in; otherwise my persistent private channel
+    const chan =
+      pendingShare?.mapId === id ? pendingShare.channel : channel.value ?? getChannelId();
+    if (pendingShare?.mapId === id) pendingShare = null; // consume once
+    channel.value = chan;
     await new Promise<void>((resolve) => {
-      socket.emit("room:join", { mapId: id, user: { name: userName.value } }, (r) => {
+      socket.emit("room:join", { mapId: id, channel: chan, user: { name: userName.value } }, (r) => {
         if (!r.ok) {
           // eslint-disable-next-line no-console
           console.warn("[collab] join failed:", r.error);
@@ -183,6 +200,7 @@ export const useCollabStore = defineStore("collab", () => {
     history.value = [];
     lastSeq = 0;
     mapId.value = null;
+    channel.value = null; // the next map joins its own channel (no cross-map channel leaks)
   }
 
   // --- presence senders (throttled lightly client-side; server also throttles ~20Hz) ----
@@ -203,12 +221,14 @@ export const useCollabStore = defineStore("collab", () => {
 
   return {
     mapId,
+    channel,
     me,
     connected,
     peerList,
     history,
     userName,
     setUserName,
+    setPendingShare,
     join,
     leave,
     sendCursor,

@@ -12,10 +12,12 @@ import { onMounted, ref } from "vue";
 import { ElMessage, ElButton, ElConfigProvider } from "element-plus";
 import { useMapStore } from "./stores/mapStore";
 import { useAssetStore } from "./stores/assetStore";
+import { useCollabStore } from "./stores/collabStore";
 import AppLayout from "./layout/AppLayout.vue";
 
 const mapStore = useMapStore();
 const assetStore = useAssetStore();
+const collabStore = useCollabStore();
 
 const bootLoading = ref(true);
 const bootMessage = ref("Loading assets and map…");
@@ -29,10 +31,24 @@ async function boot(): Promise<void> {
   bootMessage.value = "Loading assets and map…";
   try {
     const list = await mapStore.loadScenarios();
-    // a share link (?map=<id>) opens that exact map — and so joins its collaboration room
-    const shared = new URLSearchParams(window.location.search).get("map");
-    const target =
-      (shared && list.find((m) => m.id === shared)) || mapStore.pickDefaultScenario(list);
+    // a share link (?map=<id>[&room=<channel>]) opens that exact map — and joins the
+    // sharer's collab channel when present. The map may be ABSENT from this visitor's own
+    // (owner-filtered) list: the unguessable id is the capability, so open it directly.
+    const params = new URLSearchParams(window.location.search);
+    const shared = params.get("map");
+    const room = params.get("room");
+    if (shared && room) collabStore.setPendingShare(shared, room);
+    if (shared) {
+      try {
+        bootMessage.value = "Загружаю карту по ссылке…";
+        await mapStore.openMap(shared);
+        bootLoading.value = false;
+        return;
+      } catch {
+        ElMessage.warning("Карта из ссылки недоступна — открываю карту по умолчанию.");
+      }
+    }
+    const target = mapStore.pickDefaultScenario(list);
     if (!target) {
       bootMessage.value = "No scenarios available on the server.";
       ElMessage.warning("No scenarios found. Use File ▸ Open map once any exist.");

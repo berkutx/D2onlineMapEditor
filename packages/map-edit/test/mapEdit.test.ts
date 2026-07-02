@@ -12,6 +12,7 @@ import {
   applyOp,
   applyOps,
   invertOps,
+  foldOps,
   applyEditsToBytes,
   roundTripSemantic,
   roadBrush,
@@ -261,6 +262,64 @@ describe("@d2/map-edit place mountains + landmarks (addObject export)", () => {
     const re = parseScenario(out);
     const moved = re.objects.find((o) => o.type === "mountains" && o.pos.x === 25 && o.pos.y === 26);
     expect(moved).toBeTruthy();
+  });
+});
+
+describe("@d2/map-edit foldOps (collab append-inverse undo of a placement)", () => {
+  it("drops add→delete pairs plus every op targeting that id in between", () => {
+    const obj = { type: "landmark", id: "CLIENT0001", pos: { x: 1, y: 1 } } as never;
+    const ops: EditOp[] = [
+      { kind: "setCell", x: 0, y: 0, value: 5 },
+      { kind: "addObject", object: obj },
+      { kind: "moveObject", id: "CLIENT0001", x: 2, y: 2 },
+      { kind: "patchObject", id: "CLIENT0001", fields: { baseType: "MOMNE1" } },
+      { kind: "setCell", x: 1, y: 0, value: 6 },
+      { kind: "deleteObject", id: "CLIENT0001" },
+    ];
+    const folded = foldOps(ops);
+    expect(folded).toEqual([
+      { kind: "setCell", x: 0, y: 0, value: 5 },
+      { kind: "setCell", x: 1, y: 0, value: 6 },
+    ]);
+  });
+
+  it("keeps a deleteObject of a BASE object (no matching add) so the writer fails loudly", () => {
+    const ops: EditOp[] = [{ kind: "deleteObject", id: "S143MM0001" }];
+    expect(foldOps(ops)).toEqual(ops);
+  });
+
+  it("keeps a re-add after an undone add (add,delete,add of the same id)", () => {
+    const obj = { type: "landmark", id: "CLIENT0001", pos: { x: 1, y: 1 } } as never;
+    const ops: EditOp[] = [
+      { kind: "addObject", object: obj },
+      { kind: "deleteObject", id: "CLIENT0001" },
+      { kind: "addObject", object: obj },
+    ];
+    expect(foldOps(ops)).toEqual([{ kind: "addObject", object: obj }]);
+  });
+
+  it("place mountain + append-inverse undo folds to a byte-appliable no-op (the ↻ bug)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const place = placeMountainOps(doc, 20, 20, 2, 2, 5);
+    // collab undo = the exact inverses of the commit, appended as forward ops
+    const undo = invertOps(doc, place);
+    const journal = [...place, ...undo];
+    // unfolded, the writer rejects deleteObject (M4)
+    expect(() => applyEditsToBytes(raw, journal)).toThrow(/deleteObject/);
+    // folded, it exports — and the result matches the in-memory model (semantic tier)
+    const folded = foldOps(journal);
+    expect(folded.some((o) => o.kind === "deleteObject" || o.kind === "addObject")).toBe(false);
+    const out = applyEditsToBytes(raw, folded);
+    const re = parseScenario(out);
+    expect(re.objects.filter((o) => o.type === "mountains").length).toBe(
+      doc.objects.filter((o) => o.type === "mountains").length,
+    );
+    expect(re.terrain.cells[20 * re.size + 20]!.value).toBe(
+      doc.terrain.cells[20 * doc.size + 20]!.value, // 37-stamp restored by the inverse setCells
+    );
+    const res = roundTripSemantic(doc, out, folded);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
   });
 });
 

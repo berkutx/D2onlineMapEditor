@@ -8,7 +8,8 @@
  * runtime-registered uploads.
  */
 
-import { stat, readFile, realpath } from "node:fs/promises";
+import { stat, readFile, writeFile, realpath, mkdir } from "node:fs/promises";
+import { join, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { parseScenario, type MapDocument } from "@d2/sg-parser";
 import type { MapMeta } from "@d2/socket-contract";
@@ -36,6 +37,13 @@ function etagFor(id: string, mtimeMs: number): string {
   return `"${h}"`;
 }
 
+/** On-disk shape of one uploads-registry entry (UPLOAD_DIR/registry.json). */
+interface RegistryEntry {
+  fileName: string;
+  owner?: string;
+  createdAt?: number;
+}
+
 export class MapStore {
   /** id -> server-private record (real path, source, mtime). */
   private registry = new Map<string, ScenarioRecord>();
@@ -43,11 +51,72 @@ export class MapStore {
   private uploads: ScenarioRecord[] = [];
   /** LRU of parsed documents (insertion order = recency). */
   private cache = new Map<string, CacheEntry>();
+  /** One-shot load of the persisted uploads registry (see loadUploads). */
+  private uploadsLoaded = false;
 
   constructor(private readonly cacheMax = config.MAP_CACHE_MAX) {}
 
+  /**
+   * Restore runtime-registered uploads from UPLOAD_DIR/registry.json (written by
+   * registerUpload). Without this, every uploaded/new map's id would 404 after a server
+   * restart (dev tsx-watch reload, prod container redeploy): the files persist on the
+   * volume but the in-memory list is gone and the scanner only walks SCENARIO_ROOTS.
+   * Entries whose file has vanished are skipped silently.
+   */
+  private async loadUploads(): Promise<void> {
+    if (this.uploadsLoaded) return;
+    this.uploadsLoaded = true;
+    let entries: RegistryEntry[];
+    try {
+      entries = JSON.parse(
+        await readFile(join(config.UPLOAD_DIR, "registry.json"), "utf-8"),
+      ) as RegistryEntry[];
+    } catch {
+      return; // no registry yet (fresh install) — nothing to restore
+    }
+    if (!Array.isArray(entries)) return;
+    for (const e of entries) {
+      if (!e || typeof e.fileName !== "string") continue;
+      try {
+        const real = await realpath(join(config.UPLOAD_DIR, e.fileName));
+        const st = await stat(real);
+        const id = idForPath(real);
+        if (this.uploads.some((u) => u.id === id)) continue;
+        this.uploads.push({
+          id,
+          realPath: real,
+          source: "upload",
+          mtimeMs: st.mtimeMs,
+          owner: typeof e.owner === "string" ? e.owner : undefined,
+        });
+      } catch {
+        continue; // file gone — drop from the effective registry
+      }
+    }
+  }
+
+  /** Persist the uploads registry (fileName + owner) next to the files themselves. */
+  private async saveUploads(): Promise<void> {
+    const entries: RegistryEntry[] = this.uploads.map((u) => ({
+      fileName: basename(u.realPath),
+      owner: u.owner,
+      createdAt: Math.floor(u.mtimeMs),
+    }));
+    try {
+      await mkdir(config.UPLOAD_DIR, { recursive: true });
+      await writeFile(
+        join(config.UPLOAD_DIR, "registry.json"),
+        JSON.stringify(entries, null, 2),
+        "utf-8",
+      );
+    } catch {
+      // persistence is best-effort; the in-memory registry still works this session
+    }
+  }
+
   /** Rescan the configured roots and refresh the id->path registry. */
   async refresh(): Promise<ScanResult> {
+    await this.loadUploads();
     const result = await scanScenarios(config.SCENARIO_ROOTS, this.uploads);
     this.registry = result.registry;
     return result;
@@ -59,8 +128,10 @@ export class MapStore {
     return result.entries;
   }
 
-  /** Register an uploaded `.sg` file (already written to disk). */
-  async registerUpload(absPath: string): Promise<ScenarioRecord> {
+  /** Register an uploaded `.sg` file (already written to disk). `owner` = the anonymous
+   *  x-client-id of the creator, so listings can be scoped per visitor. */
+  async registerUpload(absPath: string, owner?: string): Promise<ScenarioRecord> {
+    await this.loadUploads();
     const real = await realpath(absPath);
     const id = idForPath(real);
     const st = await stat(real);
@@ -69,9 +140,11 @@ export class MapStore {
       realPath: real,
       source: "upload",
       mtimeMs: st.mtimeMs,
+      owner,
     };
     this.uploads = this.uploads.filter((u) => u.id !== id).concat(rec);
     this.registry.set(id, rec);
+    await this.saveUploads();
     return rec;
   }
 

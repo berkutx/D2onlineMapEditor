@@ -18,12 +18,17 @@ import type { MapDocument } from "@d2/map-schema";
 import type { EditorProject } from "@d2/map-edit";
 import type { AssetManifest } from "@d2/asset-manifest";
 
+import { getClientId } from "./clientId";
+
 // The base path the app is served under: '/' in dev, '/map/' in the production build (Vite
 // `base`, surfaced as import.meta.env.BASE_URL). Every same-origin URL the client builds is
 // prefixed with it so /api, /assets and /socket.io resolve under /map behind the tunnel.
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, ""); // '' or '/map'
 /** Prefix an absolute server path (e.g. REST.scenarios) with the deploy base. */
 const u = (p: string): string => BASE + p;
+
+/** Anonymous identity header — lets the server scope uploaded/new maps to this browser. */
+const idHeaders = (): Record<string, string> => ({ "x-client-id": getClientId() });
 
 /**
  * GET + parse JSON, with a few retries on TRANSIENT failures (network error / empty body /
@@ -35,7 +40,7 @@ async function getJson<T>(url: string, retries = 4): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(url, { headers: { accept: "application/json" } });
+      const res = await fetch(url, { headers: { accept: "application/json", ...idHeaders() } });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
         throw new Error(
@@ -78,21 +83,13 @@ export function fetchAssetManifest(): Promise<AssetManifest> {
   return getJson<AssetManifest>(u(REST.assetsManifest));
 }
 
-/** POST /api/maps/:id/validate -> ValidationReport (apply the project's ops, validate, no bytes). */
+/** POST /api/maps/:id/validate -> ValidationReport (apply the project's ops, validate, no bytes).
+ *  Pure server-side computation — safe to retry through the dev-proxy flake. */
 export async function validateProject(
   id: string,
   project: EditorProject,
 ): Promise<ValidationReport> {
-  const res = await fetch(u(REST.mapValidate(id)), {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(project),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`validate failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
-  }
-  return (await res.json()) as ValidationReport;
+  return postJsonRetry<ValidationReport>(u(REST.mapValidate(id)), project);
 }
 
 /** Result of an export attempt: the `.sg` blob when valid, else the failing report. */
@@ -136,16 +133,10 @@ export async function generateRegion(
   cells?: [number, number][] | null,
   protect?: boolean,
 ): Promise<GenerateResult> {
-  const res = await fetch(u(REST.mapGenerate(id)), {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ project, recipeId, region, seed, cells: cells ?? undefined, protect: protect || undefined }),
+  // pure computation (ops are only committed client-side afterwards) — retry-safe
+  return postJsonRetry<GenerateResult>(u(REST.mapGenerate(id)), {
+    project, recipeId, region, seed, cells: cells ?? undefined, protect: protect || undefined,
   });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`generate failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
-  }
-  return (await res.json()) as GenerateResult;
 }
 
 /**
@@ -189,22 +180,51 @@ export async function copilotLlm(
   return (await res.json()) as CopilotResult;
 }
 
+/**
+ * POST JSON with the same transient-failure retries as getJson (network error / 5xx /
+ * empty body). In dev the Vite proxy intermittently drops loopback connections
+ * (ECONNREFUSED/ETIMEDOUT -> 500, empty body); an UN-retried POST here made "Новая карта"
+ * silently fail and leave the editor on the previous (dirty) map. Only use for POSTs that
+ * are safe to repeat (worst case for map creation: an orphan blank .sg server-side).
+ */
+async function postJsonRetry<T>(url: string, body: unknown, retries = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json", ...idHeaders() },
+        body: JSON.stringify(body),
+      });
+      if (res.status >= 500) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(`POST ${url}: ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+      }
+      if (!res.ok) {
+        // 4xx is a real, non-transient rejection — surface it without retrying
+        const detail = await res.text().catch(() => "");
+        return Promise.reject(
+          new Error(`POST ${url} failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`),
+        );
+      }
+      const text = await res.text();
+      if (!text) throw new Error(`POST ${url}: empty response (backend restarting?)`);
+      return JSON.parse(text) as T;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 /** POST /api/maps/new -> { id }. Generates a from-scratch blank terrain map server-side. */
 export async function createNewMap(opts: {
   size: number;
   fill: string; // a TerrainFill id; the server validates + defaults
   name: string;
 }): Promise<string> {
-  const res = await fetch(u(REST.mapNew), {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify(opts),
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`new map failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
-  }
-  return ((await res.json()) as { id: string }).id;
+  return (await postJsonRetry<{ id: string }>(u(REST.mapNew), opts)).id;
 }
 
 /** Base URL the AssetStore prepends to every manifest-relative path. */

@@ -23,6 +23,8 @@ export interface ScenarioRecord {
   realPath: string;
   source: "install" | "upload";
   mtimeMs: number;
+  /** Anonymous owner (x-client-id) of an uploaded/new map; installs have none. */
+  owner?: string;
 }
 
 function lowerExt(name: string): string {
@@ -129,6 +131,7 @@ export async function scanScenarios(
         players: h.players.length,
         sizeBytes: st.size,
         mtime: Math.floor(st.mtimeMs),
+        owner: rec.owner,
       });
     } catch {
       continue;

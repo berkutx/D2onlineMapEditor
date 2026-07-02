@@ -12,6 +12,9 @@ export const ScenarioEntry = z.object({
   players: z.number().int(),
   sizeBytes: z.number().int(),
   mtime: z.number(),
+  /** Anonymous owner (x-client-id) of an uploaded/new map (v0.2, additive). The server
+   *  lists an owned upload ONLY to its owner; install maps have no owner. */
+  owner: z.string().optional(),
 });
 export type ScenarioEntry = z.infer<typeof ScenarioEntry>;
 

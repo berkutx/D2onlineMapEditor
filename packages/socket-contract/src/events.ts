@@ -7,7 +7,17 @@ import type { EditOp, OpAck } from "./ops.js";
  *  `Server<...>` / `Socket<...>` on both client and server. */
 export interface ClientToServerEvents {
   "room:join": (
-    p: { mapId: string; user: { name: string; color?: string } },
+    p: {
+      mapId: string;
+      /**
+       * Collab channel (additive, v0.2): the room key becomes `mapId#channel`, so two
+       * visitors of the same map share edits ONLY when they share the channel. The client
+       * sends its own persistent channel by default (private room) or the `?room=` value
+       * from a share link. Absent -> legacy global per-map room.
+       */
+      channel?: string;
+      user: { name: string; color?: string };
+    },
     ack: (
       r:
         | { ok: true; you: UserPresence; peers: UserPresence[]; snapshotSeq: number }
@@ -52,6 +62,10 @@ export interface InterServerEvents {
 export interface SocketData {
   userId: string;
   mapId?: string;
+  /** Persistent anonymous browser identity from the socket auth payload (v0.2, optional). */
+  clientId?: string;
+  /** The composite room key (`mapId#channel`) this socket joined (v0.2, optional). */
+  roomKey?: string;
 }
 
 /** Event name constants (avoid stringly-typed emits in implementations). */

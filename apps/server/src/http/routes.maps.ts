@@ -26,6 +26,7 @@ import {
 import {
   EditorProject,
   activeOps,
+  foldOps,
   applyOps,
   pushCommit,
   applyEditsToBytes,
@@ -37,6 +38,7 @@ import {
   type DecorSet,
 } from "@d2/map-edit";
 import { getRecipe } from "@d2/mapgen";
+import { clientIdOf } from "./routes.scenarios.js";
 import { runGenerationSteps, type PlanStep } from "../maps/generation.js";
 import { config } from "../config.js";
 import type { MapDocument } from "@d2/map-schema";
@@ -54,7 +56,10 @@ function buildAndValidate(
   project: EditorProject,
 ): { report: ValidationReport; bytes?: Uint8Array } {
   const { doc, raw } = parseScenarioRaw(baseBytes);
-  const ops = activeOps(project);
+  // Fold add→delete pairs (a collab undo of a placement) BEFORE the byte writer: it cannot
+  // delete pre-existing blocks (M4), but a never-appended object needs no delete at all.
+  // Semantics-preserving, and the SAME folded ops feed the semantic tier for consistency.
+  const ops = foldOps(activeOps(project));
 
   // Tier 1: base pass-through is byte-exact (BlockComparator equivalent).
   const identity = roundTripIdentity(baseBytes);
@@ -292,7 +297,7 @@ export async function registerMapRoutes(
       await mkdir(config.UPLOAD_DIR, { recursive: true });
       const file = join(config.UPLOAD_DIR, `new-${sanitize(name)}-${size}-${Date.now()}.sg`);
       await writeFile(file, bytes);
-      const rec = await store.registerUpload(file);
+      const rec = await store.registerUpload(file, clientIdOf(req));
       return reply.code(201).send({ id: rec.id });
     },
   );

@@ -13,6 +13,7 @@ import type { FastifyInstance } from "fastify";
 import { REST } from "@d2/socket-contract";
 import { config } from "../config.js";
 import { idForPath } from "../ingest/idCodec.js";
+import { clientIdOf } from "./routes.scenarios.js";
 import type { MapStore } from "../maps/mapStore.js";
 
 const MAGIC = Buffer.from(config.SG_MAGIC, "ascii");
@@ -37,17 +38,18 @@ export async function registerUploadRoute(
       return reply.code(415).send({ error: "not a Disciples 2 .sg scenario" });
     }
 
+    const owner = clientIdOf(req);
     await mkdir(config.UPLOAD_DIR, { recursive: true });
     // id is content-addressed via its eventual realpath; pre-compute by target
     const target = join(config.UPLOAD_DIR, "pending.sg");
     await writeFile(target, buf);
-    const rec = await store.registerUpload(target);
+    const rec = await store.registerUpload(target, owner);
 
     // rename to the stable id-based name so future scans are deterministic
     const finalPath = join(config.UPLOAD_DIR, `${idForPath(rec.realPath)}.sg`);
     if (finalPath !== rec.realPath) {
       await writeFile(finalPath, buf);
-      const finalRec = await store.registerUpload(finalPath);
+      const finalRec = await store.registerUpload(finalPath, owner);
       return reply.code(201).send({ id: finalRec.id });
     }
     return reply.code(201).send({ id: rec.id });

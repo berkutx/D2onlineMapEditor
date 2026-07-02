@@ -24,6 +24,16 @@ export function roomId(mapId: string): string {
   return `map:${mapId}`;
 }
 
+/**
+ * Composite room key (v0.2 privacy): visitors of the same map share a room ONLY when they
+ * share a channel — the client's own persistent channel by default (private), or the value
+ * from a share link. No channel (legacy client) -> the old global per-map key. RoomManager
+ * and EditLog treat the key as an opaque string, so nothing else changes.
+ */
+export function roomKey(mapId: string, channel?: string): string {
+  return channel ? `${mapId}#${channel}` : mapId;
+}
+
 interface Room {
   members: Map<string, UserPresence>; // socketId -> presence
   colorCursor: number;
