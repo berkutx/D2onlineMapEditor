@@ -108,6 +108,7 @@ export const useEditStore = defineStore("edit", () => {
    *  (per clientId) is adopted asynchronously — so a new/cleared browser restores its edits. */
   function ensureProject(mapId: string): void {
     if (project.value?.baseScenarioId === mapId) return;
+    clearTimeout(autoValidateTimer); // don't let a stale timer validate across a map switch
     try {
       const s = localStorage.getItem(keyFor(mapId));
       project.value = s ? deserializeProject(s) : emptyProject(mapId);
@@ -209,6 +210,7 @@ export const useEditStore = defineStore("edit", () => {
     project.value = pushCommit(project.value, ops);
     report.value = null;
     persist();
+    scheduleAutoValidate();
     if (roomConnected.value && outgoing) {
       outgoing(ops);
       myUndo.value = [...myUndo.value, { forward: ops.slice(), inverse }];
@@ -226,6 +228,7 @@ export const useEditStore = defineStore("edit", () => {
     project.value = pushCommit(project.value, ops); // record for export / recompute
     report.value = null;
     persist();
+    scheduleAutoValidate();
   }
 
   /** Atomic apply + record (for non-drag single actions). */
@@ -248,12 +251,14 @@ export const useEditStore = defineStore("edit", () => {
       myUndo.value = myUndo.value.slice(0, -1);
       myRedo.value = [...myRedo.value, entry];
       report.value = null;
+      scheduleAutoValidate();
       return;
     }
     project.value = undo(project.value);
     recompute();
     report.value = null;
     persist();
+    scheduleAutoValidate();
   }
   function redoEdit(): void {
     if (!project.value) return;
@@ -268,17 +273,20 @@ export const useEditStore = defineStore("edit", () => {
       myRedo.value = myRedo.value.slice(0, -1);
       myUndo.value = [...myUndo.value, entry];
       report.value = null;
+      scheduleAutoValidate();
       return;
     }
     project.value = redo(project.value);
     recompute();
     report.value = null;
     persist();
+    scheduleAutoValidate();
   }
 
   /** Discard all edits for the current map, keeping the same base. */
   function reset(): void {
     if (!project.value) return;
+    clearTimeout(autoValidateTimer); // a pending auto-check would race the fresh project
     project.value = emptyProject(project.value.baseScenarioId, project.value.meta);
     recompute();
     report.value = null;
@@ -306,6 +314,28 @@ export const useEditStore = defineStore("edit", () => {
     } finally {
       busy.value = false;
     }
+  }
+
+  /**
+   * AUTO-validation: re-check the map when the user STOPS editing (debounced idle, not a
+   * server-side timer sweep — one cheap request per edit burst, per client). The result
+   * lands in `report`, which drives the top-bar check button's green/red state. Silent:
+   * errors here never pop dialogs (the manual button shows the detailed report).
+   */
+  let autoValidateTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleAutoValidate(): void {
+    clearTimeout(autoValidateTimer);
+    const p = project.value;
+    if (!p || p.journal.length === 0) return; // nothing to check on a pristine map
+    autoValidateTimer = setTimeout(() => {
+      if (busy.value) {
+        scheduleAutoValidate(); // a manual validate/export/generate is running — retry later
+        return;
+      }
+      void validate().catch(() => {
+        /* offline / transient — the button just stays neutral until the next edit */
+      });
+    }, 2500);
   }
 
   /**

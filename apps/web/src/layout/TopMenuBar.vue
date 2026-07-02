@@ -45,13 +45,20 @@ const initials = (name: string): string =>
   name.replace(/[^\p{L}\p{N}]/gu, " ").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 const { dirty, undoable, redoable, report, busy } = storeToRefs(editStore);
 
-/** Persistent validity indicator (bitbucket-style "will this map save?"). null = not checked
- *  since the last edit; the dirty flag invalidates a stale green. */
+/** Persistent validity indicator ("will this map save?"). null = not checked since the last
+ *  edit; the map auto-re-checks ~2.5s after the user stops editing (editStore). */
 const validity = computed<"ok" | "fail" | null>(() => {
   const r = report.value;
   if (!r) return null;
   return r.ok ? "ok" : "fail";
 });
+const validateHint = computed(() =>
+  validity.value === "ok"
+    ? "Проверка пройдена: карта корректна и сохранится/экспортируется"
+    : validity.value === "fail"
+      ? "Карта НЕ пройдёт сохранение — кликните за подробной причиной"
+      : "Проверить карту (после правок проверяется автоматически)",
+);
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
   animate, objectPanelVisible, eventPanelVisible, debugOverlay, copilotVisible, dark, overlayTints,
@@ -235,6 +242,10 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <el-menu-item index="file:export">Экспорт .sg…</el-menu-item>
       </el-sub-menu>
 
+      <!-- Правка / Вид / Карта / Справка consolidated under ONE menu — the freed bar space
+           hosts direct-access buttons (Сценарий, Проверка). Canonical homes stay here. -->
+      <el-sub-menu index="more">
+        <template #title>Меню</template>
       <el-sub-menu index="edit">
         <template #title>Правка</template>
         <el-menu-item index="edit:undo" :disabled="!undoable">Отменить<span class="mkbd">Ctrl+Z</span></el-menu-item>
@@ -281,7 +292,17 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <template #title>Справка</template>
         <el-menu-item index="help:keys">Горячие клавиши…</el-menu-item>
       </el-sub-menu>
+      </el-sub-menu>
     </el-menu>
+
+    <!-- direct-access buttons (rapid surface; canonical homes stay in the menu) -->
+    <el-button
+      class="quick-btn"
+      size="small"
+      :class="{ 'is-open': eventPanelVisible }"
+      :disabled="!currentScenarioId"
+      @click="viewStore.toggleEventPanel()"
+    >Сценарий</el-button>
 
     <span class="bar-spacer" />
 
@@ -289,24 +310,24 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
     <el-tag v-if="status === 'loading'" size="small" type="warning" effect="plain" round>Загрузка…</el-tag>
     <el-tag v-if="dirty" size="small" type="warning" effect="plain" round>есть правки</el-tag>
 
-    <!-- persistent "will this map save?" check (bitbucket-style). The chip shows the last
-         verdict; it greys out after a new edit until re-checked. -->
-    <el-button
-      class="validate-btn"
-      size="small"
-      :loading="busy"
-      :disabled="!currentScenarioId"
-      @click="doValidate()"
-    >Проверить</el-button>
-    <el-tooltip v-if="validity === 'ok'" content="Проверка пройдена: карта корректна и сохранится/экспортируется" placement="bottom">
-      <el-tag size="small" type="success" effect="plain" round>
-        <el-icon class="chip-ico"><CircleCheck /></el-icon>карта ок
-      </el-tag>
-    </el-tooltip>
-    <el-tooltip v-else-if="validity === 'fail'" content="Карта НЕ пройдёт сохранение — причина в Правка → Проверить карту" placement="bottom">
-      <el-tag size="small" type="danger" effect="dark" round>
-        <el-icon class="chip-ico"><WarningFilled /></el-icon>не сохранится!
-      </el-tag>
+    <!-- Check button IS the status (no separate chip): the map auto-re-checks ~2.5s after
+         the last edit; the button turns green (ok) / RED PULSING (won't save; click for the
+         detailed reasons). Neutral while unchecked/pending. -->
+    <el-tooltip :content="validateHint" placement="bottom" :show-after="200">
+      <el-button
+        class="validate-btn"
+        :class="{ pulse: validity === 'fail' }"
+        size="small"
+        :type="validity === 'ok' ? 'success' : validity === 'fail' ? 'danger' : ''"
+        :plain="validity === 'ok'"
+        :loading="busy"
+        :disabled="!currentScenarioId"
+        @click="doValidate()"
+      >
+        <el-icon v-if="validity === 'ok'" class="chip-ico"><CircleCheck /></el-icon>
+        <el-icon v-else-if="validity === 'fail'" class="chip-ico"><WarningFilled /></el-icon>
+        {{ validity === 'fail' ? 'не сохранится!' : 'Проверка' }}
+      </el-button>
     </el-tooltip>
 
     <!-- collaborators present in this map's room (each in their assigned colour) -->
@@ -475,6 +496,23 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
 .validate-btn {
   flex: 0 0 auto;
   margin-left: 4px;
+}
+/* the RED "won't save" state pulses to catch the eye immediately */
+.validate-btn.pulse {
+  animation: d2-pulse 1.1s ease-in-out infinite;
+}
+@keyframes d2-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 108, 108, 0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(245, 108, 108, 0); }
+}
+.quick-btn {
+  flex: 0 0 auto;
+  margin-left: 6px;
+}
+.quick-btn.is-open {
+  background: var(--d2-active-bg);
+  color: var(--d2-active-fg);
+  border-color: transparent;
 }
 .chip-ico {
   vertical-align: -2px;
