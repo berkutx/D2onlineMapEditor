@@ -182,20 +182,21 @@ function onPick(cell: number, v: string | null): void {
 }
 .garr-leader:hover { color: var(--el-color-warning); }
 .garr-leader.active { color: var(--el-color-warning); }
+/* stat rows STACK vertically inside a (narrow, half-width) cell so HP always fits */
 .garr-stats {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 3px;
 }
 .garr-stat {
   display: flex;
   align-items: center;
-  gap: 3px;
-  flex: 1 1 0;
+  gap: 4px;
+  width: 100%;
   min-width: 0;
 }
 .garr-stat label {
-  flex: 0 0 auto;
+  flex: 0 0 22px;
   font-size: 10px;
   color: var(--el-text-color-secondary);
 }
@@ -206,6 +207,6 @@ function onPick(cell: number, v: string | null): void {
 }
 .garr-stat :deep(.el-input-number .el-input__inner) {
   text-align: left;
-  padding: 0 4px;
+  padding: 0 6px;
 }
 </style>

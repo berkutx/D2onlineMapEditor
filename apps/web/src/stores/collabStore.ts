@@ -27,6 +27,8 @@ export interface HistoryEntry {
   byColor: string;
   op: EditOp;
   summary: string;
+  /** A slightly longer, click-to-reveal description (what exactly changed). */
+  detail: string;
   mine: boolean;
 }
 
@@ -35,19 +37,80 @@ function randomName(): string {
   return `Гость-${n}`;
 }
 
+/** Russian labels for the object types + the patchObject field keys, so history rows read
+ *  like the editor, not like the raw model. */
+const TYPE_RU: Record<string, string> = {
+  stack: "отряд", village: "город", capital: "столица", fort: "форт", ruin: "руины",
+  merchant: "лавка", mage: "маг. башня", trainer: "тренер", mercenary: "наёмники",
+  mountains: "горы", crystal: "кристалл", landmark: "декор", location: "локация",
+  unit: "юнит", treasure: "клад", rod: "жезл", tomb: "гробница", generic: "объект",
+};
+const FIELD_RU: Record<string, string> = {
+  name: "имя", owner: "владелец", garrison: "гарнизон", leaderCell: "лидер", order: "приказ",
+  equip: "снаряжение", inventory: "инвентарь", banner: "знамя", baseType: "вид", image: "вид",
+  radius: "радиус", items: "предметы", stock: "товары", school: "школа магии", gold: "золото",
+  facing: "поворот", morale: "мораль", move: "ход", subRace: "фракция", desc: "описание",
+  visitorStack: "гость", tier: "уровень", value: "значение",
+};
+const typeRu = (t: string): string => TYPE_RU[t] ?? t;
+const fieldsRu = (fields: Record<string, unknown>): string =>
+  Object.keys(fields).map((k) => FIELD_RU[k] ?? k).join(", ");
+
 /** A short, human-readable Russian summary of an op for the history panel. */
 function summarize(op: EditOp): string {
   switch (op.kind) {
     case "setCell":
-      return `клетка (${op.x}, ${op.y})`;
+      return op.roadType !== undefined ? `🛣 дорога (${op.x}, ${op.y})` : `⛰ рельеф (${op.x}, ${op.y})`;
     case "addObject":
-      return `+ объект (${op.object.type})`;
+      return `➕ ${typeRu(op.object.type)}`;
     case "moveObject":
-      return `⇄ объект → (${op.x}, ${op.y})`;
+      return `⇄ перемещён → (${op.x}, ${op.y})`;
     case "patchObject":
-      return `✎ свойства объекта`;
+      return `✎ ${fieldsRu(op.fields) || "свойства"}`;
     case "deleteObject":
-      return `✕ удалён объект`;
+      return "🗑 удалён объект";
+    case "upsertEvent":
+      return `⚡ событие «${op.event.name || op.event.id}»`;
+    case "deleteEvent":
+      return "🗑 удалено событие";
+    case "setVariables":
+      return `𝑥 переменные (${op.variables.length})`;
+    case "upsertTemplate":
+      return `⛨ шаблон «${op.template.name || op.template.id}»`;
+    case "deleteTemplate":
+      return "🗑 удалён шаблон";
+  }
+}
+
+/** A slightly longer description revealed when a history row is clicked (not exhaustive). */
+function detailOf(op: EditOp): string {
+  switch (op.kind) {
+    case "setCell":
+      return `клетка (${op.x}, ${op.y}), значение ${op.value}${op.roadType !== undefined ? `, дорога ${op.roadType}` : ""}`;
+    case "addObject":
+      return `${typeRu(op.object.type)} «${(op.object as { name?: string }).name || op.object.id}» в (${op.object.pos.x}, ${op.object.pos.y})`;
+    case "moveObject":
+      return `объект ${op.id} → клетка (${op.x}, ${op.y})`;
+    case "patchObject": {
+      const parts = Object.entries(op.fields).map(([k, v]) => {
+        const label = FIELD_RU[k] ?? k;
+        const val = typeof v === "object" ? "…" : String(v);
+        return val.length && typeof v !== "object" ? `${label}: ${val}` : label;
+      });
+      return `${op.id}\n${parts.join("\n")}`;
+    }
+    case "deleteObject":
+      return `объект ${op.id}`;
+    case "upsertEvent":
+      return `${op.event.id}\nусловий: ${op.event.conditions.length}, эффектов: ${op.event.effects.length}, шанс ${op.event.chance}%`;
+    case "deleteEvent":
+      return `событие ${op.id}`;
+    case "setVariables":
+      return op.variables.map((v) => `${v.name} = ${v.value}`).join("\n") || "нет переменных";
+    case "upsertTemplate":
+      return `${op.template.id}\nюнитов: ${op.template.units.filter(Boolean).length}, лидер: ${op.template.leader || "—"}`;
+    case "deleteTemplate":
+      return `шаблон ${op.id}`;
   }
 }
 
@@ -90,7 +153,7 @@ export const useCollabStore = defineStore("collab", () => {
   function record(seq: number, by: string, op: EditOp, mine: boolean): void {
     history.value = [
       ...history.value,
-      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op), mine },
+      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op), detail: detailOf(op), mine },
     ];
   }
 

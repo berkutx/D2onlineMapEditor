@@ -18,6 +18,14 @@ const open = ref(true);
 /** Newest first, capped so the list stays light. */
 const rows = computed(() => history.value.slice(-200).reverse());
 const show = computed(() => connected.value && (history.value.length > 0 || peerList.value.length > 0));
+
+/** seqs whose detail is expanded (click a row to toggle). */
+const expanded = ref<Set<number>>(new Set());
+function toggle(seq: number): void {
+  const s = new Set(expanded.value);
+  s.has(seq) ? s.delete(seq) : s.add(seq);
+  expanded.value = s;
+}
 </script>
 
 <template>
@@ -31,11 +39,14 @@ const show = computed(() => connected.value && (history.value.length > 0 || peer
     <div v-show="open" class="hist-body">
       <div v-if="!rows.length" class="hist-empty">Пока нет правок в этой сессии.</div>
       <ul v-else class="hist-list">
-        <li v-for="e in rows" :key="e.seq" class="hist-row">
-          <span class="dot" :style="{ background: e.byColor }" />
-          <span class="seq">#{{ e.seq }}</span>
-          <span class="who" :class="{ mine: e.mine }">{{ e.mine ? 'вы' : e.byName }}</span>
-          <span class="what">{{ e.summary }}</span>
+        <li v-for="e in rows" :key="e.seq" class="hist-item">
+          <div class="hist-row" :class="{ expanded: expanded.has(e.seq) }" @click="toggle(e.seq)">
+            <span class="dot" :style="{ background: e.byColor }" />
+            <span class="seq">#{{ e.seq }}</span>
+            <span class="who" :class="{ mine: e.mine }">{{ e.mine ? 'вы' : e.byName }}</span>
+            <span class="what">{{ e.summary }}</span>
+          </div>
+          <pre v-if="expanded.has(e.seq)" class="hist-detail">{{ e.detail }}</pre>
         </li>
       </ul>
     </div>
@@ -75,14 +86,28 @@ const show = computed(() => connected.value && (history.value.length > 0 || peer
 .hist-body { max-height: 240px; overflow-y: auto; }
 .hist-empty { padding: 10px; color: var(--el-text-color-secondary); }
 .hist-list { list-style: none; margin: 0; padding: 4px 0; }
+.hist-item { border-bottom: 1px solid transparent; }
 .hist-row {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
   white-space: nowrap;
+  cursor: pointer;
 }
 .hist-row:hover { background: var(--el-fill-color-light); }
+.hist-row.expanded { background: var(--el-fill-color); }
+.hist-detail {
+  margin: 0;
+  padding: 4px 10px 7px 27px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--el-text-color-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  background: var(--el-fill-color-lighter);
+}
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
 .seq { color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
 .who { font-weight: 600; }

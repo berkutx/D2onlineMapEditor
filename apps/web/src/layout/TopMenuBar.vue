@@ -8,7 +8,7 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { ElMessage, ElNotification } from "element-plus";
-import { Check, Moon, Sunny, Share } from "@element-plus/icons-vue";
+import { Check, Moon, Sunny, Share, CircleCheck, WarningFilled } from "@element-plus/icons-vue";
 import type { ScenarioEntry, ValidationReport } from "@d2/socket-contract";
 import { createNewMap } from "../services/api";
 import { useMapStore } from "../stores/mapStore";
@@ -43,7 +43,15 @@ async function shareLink(): Promise<void> {
 /** Two-letter initials for a peer avatar. */
 const initials = (name: string): string =>
   name.replace(/[^\p{L}\p{N}]/gu, " ").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
-const { dirty, undoable, redoable } = storeToRefs(editStore);
+const { dirty, undoable, redoable, report, busy } = storeToRefs(editStore);
+
+/** Persistent validity indicator (bitbucket-style "will this map save?"). null = not checked
+ *  since the last edit; the dirty flag invalidates a stale green. */
+const validity = computed<"ok" | "fail" | null>(() => {
+  const r = report.value;
+  if (!r) return null;
+  return r.ok ? "ok" : "fail";
+});
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
   animate, objectPanelVisible, eventPanelVisible, debugOverlay, copilotVisible, dark, overlayTints,
@@ -281,6 +289,24 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
     <el-tag v-if="status === 'loading'" size="small" type="warning" effect="plain" round>Загрузка…</el-tag>
     <el-tag v-if="dirty" size="small" type="warning" effect="plain" round>есть правки</el-tag>
 
+    <!-- persistent "will this map save?" check (bitbucket-style). The chip shows the last
+         verdict; it greys out after a new edit until re-checked. -->
+    <el-button
+      class="validate-btn"
+      size="small"
+      :loading="busy"
+      :disabled="!currentScenarioId"
+      @click="doValidate()"
+    >Проверить</el-button>
+    <el-tag v-if="validity === 'ok'" size="small" type="success" effect="dark" round>
+      <el-icon class="chip-ico"><CircleCheck /></el-icon>сохранится
+    </el-tag>
+    <el-tooltip v-else-if="validity === 'fail'" content="Карта НЕ пройдёт сохранение — откройте «Проверить карту» в меню Правка для причины" placement="bottom">
+      <el-tag size="small" type="danger" effect="dark" round>
+        <el-icon class="chip-ico"><WarningFilled /></el-icon>не сохранится
+      </el-tag>
+    </el-tooltip>
+
     <!-- collaborators present in this map's room (each in their assigned colour) -->
     <span v-if="peerList.length" class="peers">
       <el-tooltip
@@ -437,6 +463,14 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
 }
 .appearance {
   flex: 0 0 auto;
+}
+.validate-btn {
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+.chip-ico {
+  vertical-align: -2px;
+  margin-right: 3px;
 }
 .dialog-hint {
   font-size: 12px;

@@ -189,6 +189,7 @@ export const useEditStore = defineStore("edit", () => {
     liveDoc.value = d;
     rev.value++;
     if (touchesObjects(ops)) objectsRev.value++;
+    report.value = null; // any edit invalidates the last validation verdict (top-bar chip)
     return inv;
   }
 
