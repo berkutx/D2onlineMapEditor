@@ -37,6 +37,9 @@ const refOptions = computed<Opt[]>(() => {
   if (t === "ref-event") {
     return (doc.events ?? []).map((e) => ({ value: e.id, label: `${e.name || "событие"} · ${e.id}` }));
   }
+  if (t === "template") {
+    return (doc.templates ?? []).map((tm) => ({ value: tm.id, label: `${tm.name || "шаблон"} · ${tm.id}` }));
+  }
   const types = REF_TYPES[t];
   if (!types) return [];
   return doc.objects
@@ -44,8 +47,14 @@ const refOptions = computed<Opt[]>(() => {
     .map((o) => ({ value: o.id, label: `${(o as { name?: string }).name || o.type} · ${o.id}` }));
 });
 
-const isRef = computed(() => props.field.type.startsWith("ref-"));
-const isGlobalId = computed(() => ["template", "item", "spell"].includes(props.field.type));
+/** Scenario variables (the `var` field type): stored as the variable's numeric id. */
+const varOptions = computed<{ value: number; label: string }[]>(() =>
+  (edit.liveDoc?.variables ?? []).map((v) => ({ value: v.id, label: `${v.name || "var"} (=${v.value})` })),
+);
+
+// ref-* pickers, plus `template` which is a global-id picked from the doc's templates.
+const isRef = computed(() => props.field.type.startsWith("ref-") || props.field.type === "template");
+const isGlobalId = computed(() => ["item", "spell"].includes(props.field.type));
 
 function set(v: unknown): void {
   emit("update:modelValue", v);
@@ -71,8 +80,21 @@ function set(v: unknown): void {
     <el-option v-for="o in field.options ?? []" :key="o.value" :value="o.value" :label="o.label" />
   </el-select>
 
+  <!-- scenario variable picker (stored as the variable's numeric id) -->
+  <el-select
+    v-else-if="field.type === 'var'"
+    :model-value="Number(modelValue) || 0"
+    size="small"
+    filterable
+    style="width: 100%"
+    placeholder="— переменная —"
+    @update:model-value="set($event)"
+  >
+    <el-option v-for="o in varOptions" :key="o.value" :value="o.value" :label="o.label" />
+  </el-select>
+
   <!-- int (optionally with quick presets shown before the number box) -->
-  <div v-else-if="field.type === 'int' || field.type === 'var'" class="ev-int">
+  <div v-else-if="field.type === 'int'" class="ev-int">
     <el-select
       v-if="field.options && field.options.length"
       :model-value="Number(modelValue) || 0"

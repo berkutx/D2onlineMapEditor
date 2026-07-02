@@ -20,6 +20,8 @@ import {
   replaceBlock,
   deleteBlocks,
   eventFrame,
+  scenVariablesFrame,
+  stackTemplateFrame,
   spliceVariableFields,
   type SgRaw,
   type MountainEntry,
@@ -27,7 +29,7 @@ import {
   type ItemListEdit,
   type QtyListEdit,
 } from "@d2/sg-parser";
-import type { MapObject, MapEvent } from "@d2/map-schema";
+import type { MapObject, MapEvent, ScenarioVariable, StackTemplate } from "@d2/map-schema";
 import type { EditOp } from "./ops.js";
 
 export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Array {
@@ -85,6 +87,15 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   /** Event ops, resolved to the FINAL state per event id (last write wins): a MapEvent to
    *  upsert, or null to delete. Applied at the very end as append/replace/delete of a frame. */
   const eventOps = new Map<string, MapEvent | null>();
+  /** The FINAL scenario-variables list (last setVariables wins), or null if untouched. */
+  let variablesFinal: ScenarioVariable[] | null = null;
+  /** Template ops resolved to final state per id (upsert value or null=delete). */
+  const templateOps = new Map<string, StackTemplate | null>();
+  let nextTM = 0;
+  for (const o of raw.objects) {
+    const m = /TM([0-9a-fA-F]{4})$/.exec(o.id);
+    if (o.typeName === "MidStackTemplate" && m) nextTM = Math.max(nextTM, parseInt(m[1]!, 16) + 1);
+  }
   /** Fresh EV-block id counter, seeded from existing MidEvent blocks. */
   let nextEV = 0;
   for (const o of raw.objects) {
@@ -300,6 +311,15 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       case "deleteEvent":
         eventOps.set(op.id, null);
         break;
+      case "setVariables":
+        variablesFinal = op.variables.slice();
+        break;
+      case "upsertTemplate":
+        templateOps.set(op.template.id, op.template);
+        break;
+      case "deleteTemplate":
+        templateOps.set(op.id, null);
+        break;
     }
   }
 
@@ -441,6 +461,41 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       newFrames.push(eventFrame(raw.version, { ...ev, id: finalId }));
     }
     if (newFrames.length) bytes = appendBlocks(bytes, newFrames);
+  }
+
+  // Stack templates: upsert = replace an existing frame or append a new one (fresh TM id for a
+  // client temp id), delete = splice the frame. Templates are self-contained (units are global
+  // Gunit ids), so no dependent-block cascade.
+  if (templateOps.size) {
+    const existing = new Set(
+      raw.objects.filter((o) => o.typeName === "MidStackTemplate").map((o) => o.id),
+    );
+    const tmIdRe = new RegExp(`^${raw.version}TM[0-9a-fA-F]{4}$`);
+    const newFrames: Uint8Array[] = [];
+    for (const [id, tmpl] of templateOps) {
+      if (tmpl === null) {
+        if (existing.has(id)) deletedIds.push(id);
+        continue;
+      }
+      if (existing.has(id)) {
+        bytes = replaceBlock(bytes, id, stackTemplateFrame(raw.version, tmpl));
+        continue;
+      }
+      const finalId = tmIdRe.test(id) ? id : `${raw.version}TM${hex4(nextTM++)}`;
+      newFrames.push(stackTemplateFrame(raw.version, { ...tmpl, id: finalId }));
+    }
+    if (newFrames.length) bytes = appendBlocks(bytes, newFrames);
+  }
+
+  // Scenario variables: rebuild the singleton MidScenVariables block in place (its count is
+  // internal, object count unchanged). If the map lacks the block, append a fresh one.
+  if (variablesFinal) {
+    const sv = raw.objects.find((o) => o.typeName === "MidScenVariables");
+    if (sv) {
+      bytes = replaceBlock(bytes, sv.id, scenVariablesFrame(raw.version, sv.id, variablesFinal));
+    } else {
+      bytes = appendBlocks(bytes, [scenVariablesFrame(raw.version, `${raw.version}SV0000`, variablesFinal)]);
+    }
   }
 
   // M4 mid-stream deletes — LAST, on the final buffer (deleteBlocks re-locates frames by

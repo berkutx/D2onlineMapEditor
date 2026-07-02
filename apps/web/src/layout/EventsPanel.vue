@@ -5,19 +5,22 @@
  * and typed condition/effect lists. Selecting an event drives the map overlay (trigger zones +
  * movement arrows) via MapCanvasHost. Edits commit through editStore (undoable + collab).
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import {
   ElInput, ElButton, ElScrollbar, ElInputNumber, ElSwitch, ElCheckbox, ElSelect, ElOption,
-  ElTag, ElTooltip, ElEmpty,
+  ElTag, ElTooltip, ElEmpty, ElTabs, ElTabPane,
 } from "element-plus";
 import type { MapEvent, EventCondition, EventEffect } from "@d2/map-schema";
 import { CONDITION_SPECS, EFFECT_SPECS, CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore, makeCondition, makeEffect } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
 import EventFieldInput from "./EventFieldInput.vue";
+import VariablesEditor from "./VariablesEditor.vue";
+import TemplatesEditor from "./TemplatesEditor.vue";
 
 const store = useEventStore();
 const view = useViewStore();
+const tab = ref<"events" | "vars" | "templates">("events");
 
 const sel = computed(() => store.selected);
 const RACES = [
@@ -86,10 +89,24 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 <template>
   <div class="ev-panel">
     <div class="ev-head">
-      <strong>События</strong>
-      <span class="ev-count">{{ store.events.length }}</span>
-      <el-button size="small" type="primary" @click="store.create()">+ Новое</el-button>
+      <strong>Сценарий</strong>
+      <span class="ev-count" style="margin-right: auto" />
       <el-button size="small" text @click="view.toggleEventPanel()">✕</el-button>
+    </div>
+
+    <el-tabs v-model="tab" class="ev-tabs" stretch>
+      <el-tab-pane label="События" name="events" />
+      <el-tab-pane label="Переменные" name="vars" />
+      <el-tab-pane label="Шаблоны" name="templates" />
+    </el-tabs>
+
+    <VariablesEditor v-if="tab === 'vars'" class="ev-sub" />
+    <TemplatesEditor v-else-if="tab === 'templates'" class="ev-sub" />
+
+    <template v-else>
+    <div class="ev-subhead">
+      <span class="ev-count">{{ store.events.length }} событий</span>
+      <el-button size="small" type="primary" @click="store.create()">+ Новое</el-button>
     </div>
 
     <el-input
@@ -201,6 +218,7 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
         </div>
       </div>
     </el-scrollbar>
+    </template>
   </div>
 </template>
 
@@ -221,6 +239,10 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .ev-count { color: var(--el-text-color-secondary); margin-right: auto; }
+.ev-tabs { padding: 0 8px; --el-tabs-header-height: 34px; }
+.ev-tabs :deep(.el-tabs__header) { margin: 0; }
+.ev-sub { flex: 1; min-height: 0; }
+.ev-subhead { display: flex; align-items: center; gap: 8px; padding: 6px 10px 2px; }
 .ev-search { padding: 8px 10px 4px; }
 .ev-objfilter { padding: 0 10px 6px; color: var(--el-text-color-secondary); }
 .ev-list { max-height: 34%; border-bottom: 1px solid var(--el-border-color-lighter); }

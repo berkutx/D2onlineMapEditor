@@ -272,6 +272,15 @@ export const EventRaces = z.object({
 });
 export type EventRaces = z.infer<typeof EventRaces>;
 
+/** A scenario script variable (MidScenVariables entry): int-valued, referenced by the
+ *  VARIABLE_IS_IN_RANGE / COMPARE_VAR conditions and the MODIFY_VARIABLE effect (by `id`). */
+export const ScenarioVariable = z.object({
+  id: z.number().int(), // stable numeric id used by event var-fields
+  name: z.string().default(""),
+  value: z.number().int().default(0),
+});
+export type ScenarioVariable = z.infer<typeof ScenarioVariable>;
+
 export const MapEvent = z.object({
   id: z.string(), // on-disk compound id, e.g. "S143EV0001"
   name: z.string().default(""),

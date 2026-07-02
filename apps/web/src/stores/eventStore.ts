@@ -6,7 +6,7 @@
  */
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import type { MapEvent, EventCondition, EventEffect } from "@d2/map-schema";
+import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import type { EditOp } from "@d2/map-edit";
 import { useEditStore } from "./editStore";
@@ -118,8 +118,71 @@ export const useEventStore = defineStore("events", () => {
     return copy;
   }
 
+  // --- scenario variables (one MidScenVariables block; edited as a whole list) ---
+  const variables = computed<ScenarioVariable[]>(() => edit.liveDoc?.variables ?? []);
+  function setVariables(vars: ScenarioVariable[]): void {
+    edit.commit([{ kind: "setVariables", variables: vars } as EditOp]);
+  }
+  function addVariable(): void {
+    const nextId = Math.max(0, ...variables.value.map((v) => v.id)) + 1;
+    setVariables([...variables.value, { id: nextId, name: `VAR_${nextId}`, value: 0 }]);
+  }
+  function patchVariable(id: number, partial: Partial<ScenarioVariable>): void {
+    setVariables(variables.value.map((v) => (v.id === id ? { ...v, ...partial } : v)));
+  }
+  function removeVariable(id: number): void {
+    setVariables(variables.value.filter((v) => v.id !== id));
+  }
+
+  // --- stack templates ---
+  const templates = computed<StackTemplate[]>(() => edit.liveDoc?.templates ?? []);
+  const selectedTemplateId = ref<string | null>(null);
+  const selectedTemplate = computed<StackTemplate | null>(
+    () => templates.value.find((t) => t.id === selectedTemplateId.value) ?? null,
+  );
+  function selectTemplate(id: string | null): void {
+    selectedTemplateId.value = id;
+  }
+  function newTemplateId(): string {
+    const version = edit.liveDoc?.header.version || "S143";
+    let next = 0;
+    for (const t of templates.value) {
+      const m = /TM([0-9a-fA-F]{4})$/.exec(t.id);
+      if (m) next = Math.max(next, parseInt(m[1]!, 16) + 1);
+    }
+    return `${version}TM${next.toString(16).padStart(4, "0")}`;
+  }
+  function upsertTemplate(t: StackTemplate): void {
+    edit.commit([{ kind: "upsertTemplate", template: t } as EditOp]);
+    selectedTemplateId.value = t.id;
+  }
+  function removeTemplate(id: string): void {
+    edit.commit([{ kind: "deleteTemplate", id } as EditOp]);
+    if (selectedTemplateId.value === id) selectedTemplateId.value = null;
+  }
+  function createTemplate(): StackTemplate {
+    const t: StackTemplate = {
+      id: newTemplateId(), name: "Новый шаблон", owner: "", leader: "", leaderLevel: 1,
+      orderTarget: "", subRace: "", order: 1,
+      units: [null, null, null, null, null, null],
+      useFacing: false, facing: 0, aiPriority: 0, modifiers: [],
+    };
+    upsertTemplate(t);
+    return t;
+  }
+  function cloneTemplate(src: StackTemplate): StackTemplate {
+    const copy: StackTemplate = JSON.parse(JSON.stringify(src));
+    copy.id = newTemplateId();
+    copy.name = `${src.name || "Шаблон"} (копия)`;
+    upsertTemplate(copy);
+    return copy;
+  }
+
   return {
     selectedId, filter, objectFilter, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
+    variables, setVariables, addVariable, patchVariable, removeVariable,
+    templates, selectedTemplateId, selectedTemplate, selectTemplate,
+    upsertTemplate, removeTemplate, createTemplate, cloneTemplate,
   };
 });

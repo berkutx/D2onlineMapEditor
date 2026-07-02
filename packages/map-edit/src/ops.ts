@@ -115,6 +115,33 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       const inverse: EditOp = { kind: "upsertEvent", event: removed };
       return { doc: { ...doc, events }, inverse };
     }
+
+    case "setVariables": {
+      const inverse: EditOp = { kind: "setVariables", variables: doc.variables ?? [] };
+      return { doc: { ...doc, variables: op.variables.slice() }, inverse };
+    }
+
+    case "upsertTemplate": {
+      const templates = (doc.templates ?? []).slice();
+      const i = templates.findIndex((t) => t.id === op.template.id);
+      const inverse: EditOp =
+        i < 0
+          ? { kind: "deleteTemplate", id: op.template.id }
+          : { kind: "upsertTemplate", template: templates[i]! };
+      if (i < 0) templates.push(op.template);
+      else templates[i] = op.template;
+      return { doc: { ...doc, templates }, inverse };
+    }
+
+    case "deleteTemplate": {
+      const templates = (doc.templates ?? []).slice();
+      const i = templates.findIndex((t) => t.id === op.id);
+      if (i < 0) throw new Error(`applyOp deleteTemplate: unknown template ${op.id}`);
+      const removed = templates[i]!;
+      templates.splice(i, 1);
+      const inverse: EditOp = { kind: "upsertTemplate", template: removed };
+      return { doc: { ...doc, templates }, inverse };
+    }
   }
 }
 

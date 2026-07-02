@@ -351,6 +351,106 @@ describe("@d2/map-edit events (E1 read + E2 write)", () => {
   });
 });
 
+describe("@d2/map-edit scenario variables (E3)", () => {
+  it("parses MidScenVariables (Riders has named script vars)", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    expect(doc.variables.length).toBeGreaterThan(0);
+    expect(doc.variables[0]).toMatchObject({ id: expect.any(Number), name: expect.any(String) });
+    expect(doc.variables.some((v) => v.name === "QUEST")).toBe(true);
+  });
+
+  it("re-serializes the variables block identically (setVariables to itself)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops: EditOp[] = [{ kind: "setVariables", variables: doc.variables }];
+    const out = applyEditsToBytes(raw, ops);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("edits + adds a variable and round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const nextId = Math.max(0, ...doc.variables.map((v) => v.id)) + 1;
+    const variables = [
+      ...doc.variables.map((v) => (v.name === "QUEST" ? { ...v, value: 42 } : v)),
+      { id: nextId, name: "MY_FLAG", value: 7 },
+    ];
+    const ops: EditOp[] = [{ kind: "setVariables", variables }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect(re.variables.find((v) => v.name === "QUEST")!.value).toBe(42);
+    expect(re.variables.find((v) => v.name === "MY_FLAG")).toMatchObject({ id: nextId, value: 7 });
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+  });
+});
+
+describe("@d2/map-edit stack templates (E3)", () => {
+  it("parses MidStackTemplate blocks (Riders has ~79) with resolved unit cells", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    expect(doc.templates.length).toBeGreaterThan(0);
+    const t = doc.templates.find((x) => x.units.some((u) => u));
+    expect(t).toBeTruthy();
+    expect(t!.leader).toMatch(/^G/); // a global Gunit id
+    expect(t!.units.filter(Boolean).length).toBeGreaterThan(0);
+  });
+
+  it("EVERY template re-serializes semantically (upsert each to itself)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops: EditOp[] = doc.templates.map((t) => ({ kind: "upsertTemplate", template: t }));
+    const out = applyEditsToBytes(raw, ops);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("edits a template (name + a unit cell) and round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const src = doc.templates.find((t) => t.units.some((u) => u))!;
+    const units = src.units.slice();
+    // change the first filled cell's level
+    const ci = units.findIndex((u) => u);
+    units[ci] = { ...(units[ci]!), level: 5 };
+    const edited = { ...src, name: "Тест-шаблон", units };
+    const ops: EditOp[] = [{ kind: "upsertTemplate", template: edited }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const got = re.templates.find((t) => t.id === src.id)!;
+    expect(got.name).toBe("Тест-шаблон");
+    expect(got.units[ci]!.level).toBe(5);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("adds a NEW template (valid TM id) + round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    let next = 0;
+    for (const t of doc.templates) { const m = /TM([0-9a-fA-F]{4})$/.exec(t.id); if (m) next = Math.max(next, parseInt(m[1]!, 16) + 1); }
+    const id = `${doc.header.version}TM${next.toString(16).padStart(4, "0")}`;
+    const leaderUnit = doc.templates.find((t) => t.leader)?.leader ?? "G000UU0001";
+    const fresh = {
+      id, name: "Засадный отряд", owner: "", leader: leaderUnit, leaderLevel: 1,
+      orderTarget: "", subRace: "", order: 1,
+      units: [null, null, { unit: leaderUnit, level: 1 }, null, null, null],
+      useFacing: false, facing: 0, aiPriority: 0, modifiers: [],
+    } as import("@d2/map-schema").StackTemplate;
+    const ops: EditOp[] = [{ kind: "upsertTemplate", template: fresh }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect(re.templates.length).toBe(doc.templates.length + 1);
+    const got = re.templates.find((t) => t.id === id)!;
+    expect(got.name).toBe("Засадный отряд");
+    expect(got.units[2]).toMatchObject({ unit: leaderUnit, level: 1 });
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
   it("deletes a BASE landmark: block gone, OB0000 decremented, semantic + structural ok", () => {
     const { doc, raw } = parseScenarioRaw(bytes);

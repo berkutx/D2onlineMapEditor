@@ -8,7 +8,7 @@
 import { ByteWriter } from "./byteWriter.js";
 import { encodeCp1251 } from "./cp1251.js";
 import { emitBlock } from "./sgRebuild.js";
-import type { MapEvent, EventCondition, EventEffect } from "@d2/map-schema";
+import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import {
   COND_CODEC,
@@ -66,6 +66,61 @@ function writeEffect(w: ByteWriter, eff: EventEffect, eventId: string): void {
   } else {
     for (const fld of EFF_CODEC[eff.kind]!.fields) writeField(w, fld, src);
   }
+}
+
+/** Serialize the singleton MidScenVariables block: count (tag == the block's own id) then
+ *  N × (ID:int, NAME:len-string, VALUE:int). `blockId` is the existing block's 10-char id. */
+export function scenVariablesFrame(version: string, blockId: string, vars: readonly ScenarioVariable[]): Uint8Array {
+  const second = parseInt(blockId.slice(6), 16) || 0;
+  return emitBlock(version, "MidScenVariables", 0x18, "SV", second, (w, full) => {
+    w.defaultInt(full, vars.length); // count tag == the block's own compound id
+    for (const v of vars) {
+      w.defaultInt("ID", v.id);
+      w.stringField("NAME", v.name);
+      w.defaultInt("VALUE", v.value);
+    }
+  });
+}
+
+/** Serialize one MidStackTemplate block (code 0x18, short TM). `tmpl.id` is the final 10-char
+ *  id. Packs the 6 formation cells back into UNIT_/POS_ slots (units are global Gunit ids, so
+ *  no MidUnit instances are created). Modifiers + useFacing/facing/aiPriority are preserved. */
+export function stackTemplateFrame(version: string, tmpl: StackTemplate): Uint8Array {
+  const second = parseInt(tmpl.id.slice(6), 16) || 0;
+  const cells = tmpl.units ?? [];
+  // slot order = filled cells in cell order; POS_i = the slot index of cell i's unit (-1 empty)
+  const filled: { cell: number; unit: string; level: number }[] = [];
+  for (let cell = 0; cell < 6; cell++) {
+    const u = cells[cell];
+    if (u && u.unit) filled.push({ cell, unit: u.unit, level: u.level });
+  }
+  const slotOfCell = [-1, -1, -1, -1, -1, -1];
+  filled.forEach((f, slot) => (slotOfCell[f.cell] = slot));
+
+  return emitBlock(version, "MidStackTemplate", 0x18, "TM", second, (w, full) => {
+    w.refField("ID", full);
+    w.refField("OWNER", tmpl.owner || EMPTY_REF);
+    w.refField("LEADER", tmpl.leader || EMPTY_REF);
+    w.defaultInt("LEADER_LVL", tmpl.leaderLevel);
+    w.stringField("NAME_TXT", tmpl.name ?? "");
+    w.refField("ORDER_TARG", tmpl.orderTarget || EMPTY_REF);
+    w.refField("SUBRACE", tmpl.subRace || EMPTY_REF);
+    w.defaultInt("ORDER", tmpl.order);
+    for (let s = 0; s < 6; s++) {
+      const f = filled[s];
+      w.refField(`UNIT_${s}`, f ? f.unit : EMPTY_REF);
+      w.defaultInt(`UNIT_${s}_LVL`, f ? f.level : 0);
+    }
+    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, slotOfCell[i]!);
+    w.bool("USE_FACING", tmpl.useFacing);
+    w.defaultInt("FACING", tmpl.facing);
+    w.defaultInt(full, tmpl.modifiers.length); // count tag == the block's own compound id
+    for (const m of tmpl.modifiers) {
+      w.defaultInt("UNIT_POS", m.unitPos);
+      w.refField("MODIF_ID", m.modifId || EMPTY_REF);
+    }
+    w.defaultInt("AIPRIORITY", tmpl.aiPriority); // D2EESFISIG (our target) — always present
+  });
 }
 
 /** Serialize one MapEvent into a full MidEvent block frame. `ev.id` is the final 10-char id. */

@@ -20,6 +20,35 @@ export const GarrisonUnit = z.object({
 });
 export type GarrisonUnit = z.infer<typeof GarrisonUnit>;
 
+/** One formation cell of a stack TEMPLATE (MidStackTemplate): a GLOBAL Gunit id + level. Unlike
+ *  a placed stack (MidUnit instances), a template references unit TYPES directly — the block is
+ *  self-contained (no dependent instance blocks). */
+export const TemplateUnit = z.object({
+  unit: z.string(), // global Gunit id
+  level: z.number().int().default(1),
+});
+export type TemplateUnit = z.infer<typeof TemplateUnit>;
+
+/** A reusable army template spawned by events (CREATE_NEW_STACK / MOVE_STACK effects). */
+export const StackTemplate = z.object({
+  id: z.string(), // on-disk compound id, e.g. "S143TM0000"
+  name: z.string().default(""),
+  owner: z.string().default(""), // player uid ("" = neutral/none)
+  leader: z.string().default(""), // leader Gunit id
+  leaderLevel: z.number().int().default(1),
+  orderTarget: z.string().default(""),
+  subRace: z.string().default(""),
+  order: z.number().int().default(1),
+  /** 6 formation cells (index = cell); null = empty. */
+  units: z.array(TemplateUnit.nullable()).default([]),
+  useFacing: z.boolean().default(false),
+  facing: z.number().int().default(0),
+  aiPriority: z.number().int().default(0),
+  /** Unit-modifier list (preserved; advanced-edit later): per entry {unitPos, modifId Gmodif}. */
+  modifiers: z.array(z.object({ unitPos: z.number().int(), modifId: z.string() })).default([]),
+});
+export type StackTemplate = z.infer<typeof StackTemplate>;
+
 /** A stack leader's equipment slots — each a global item id ("000000"/undefined = empty). */
 export const StackEquip = z.object({
   tome: z.string().optional(), // spellbook

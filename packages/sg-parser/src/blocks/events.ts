@@ -7,7 +7,7 @@
 
 import { ByteBuffer, stripTrailingNul } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
-import type { MapEvent, EventCondition, EventEffect } from "@d2/map-schema";
+import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate, TemplateUnit } from "@d2/map-schema";
 import { CONDITION_BY_CODE, EFFECT_BY_CODE } from "@d2/map-schema";
 import {
   COND_CODEC,
@@ -115,6 +115,68 @@ function readEffect(c: Cursor, code: number, eventId: string): EventEffect | nul
     for (const fld of EFF_CODEC[spec.kind]!.fields) readField(c, fld, out);
   }
   return out as EventEffect;
+}
+
+/**
+ * Parse the singleton MidScenVariables block: the count (tag == the block's own compound id)
+ * then N × (ID:int32, NAME:len-string, VALUE:int32). Byte-verified on Riders (count tag =
+ * "S143SV0000"; entries like {1,"QUEST",0}). There is NO inner "ID" ref field before the count.
+ */
+export function readScenVariables(buf: ByteBuffer, obj: FramedObject): ScenarioVariable[] {
+  const c = new Cursor(buf, obj.fieldsFrom, obj.fieldsEnd);
+  const count = c.int(obj.id);
+  const out: ScenarioVariable[] = [];
+  for (let i = 0; i < count; i++) {
+    const id = c.int("ID");
+    const name = c.str("NAME");
+    const value = c.int("VALUE");
+    out.push({ id, name, value });
+  }
+  return out;
+}
+
+/**
+ * Parse one MidStackTemplate block. Byte-verified on Riders (D2StackTemplate.h): inner ID,
+ * OWNER, LEADER(Gunit), LEADER_LVL, NAME_TXT, ORDER_TARG, SUBRACE, ORDER, interleaved
+ * UNIT_i(Gunit)/UNIT_i_LVL ×6, POS_i ×6, USE_FACING(bool), FACING(int), modifier list
+ * (count tag == the block's own id; per mod UNIT_POS:int + MODIF_ID:Gmodif ref), AIPRIORITY.
+ * Units are resolved from the UNIT_/POS_ packing into the 6 FORMATION CELLS (cell i = slot POS_i).
+ */
+export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemplate {
+  const c = new Cursor(buf, obj.fieldsFrom, obj.fieldsEnd);
+  const owner = refNorm(c.str("OWNER"));
+  const leader = refNorm(c.str("LEADER"));
+  const leaderLevel = c.int("LEADER_LVL");
+  const name = c.str("NAME_TXT");
+  const orderTarget = refNorm(c.str("ORDER_TARG"));
+  const subRace = refNorm(c.str("SUBRACE"));
+  const order = c.int("ORDER");
+  const slotUnits: string[] = [];
+  const slotLevels: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    slotUnits.push(refNorm(c.str(`UNIT_${i}`)));
+    slotLevels.push(c.int(`UNIT_${i}_LVL`));
+  }
+  const pos: number[] = [];
+  for (let i = 0; i < 6; i++) pos.push(c.int(`POS_${i}`));
+  const useFacing = c.bool("USE_FACING");
+  const facing = c.int("FACING");
+  const modCount = c.int(obj.id); // count tag == the block's own compound id
+  const modifiers: { unitPos: number; modifId: string }[] = [];
+  for (let i = 0; i < modCount; i++) {
+    modifiers.push({ unitPos: c.int("UNIT_POS"), modifId: refNorm(c.str("MODIF_ID")) });
+  }
+  const aiPriority = c.int("AIPRIORITY");
+
+  // resolve the UNIT_/POS_ packing into 6 formation cells (cell i holds slot POS_i's unit)
+  const units: (TemplateUnit | null)[] = [null, null, null, null, null, null];
+  for (let cell = 0; cell < 6; cell++) {
+    const slot = pos[cell]!;
+    if (slot >= 0 && slot < 6 && slotUnits[slot]) {
+      units[cell] = { unit: slotUnits[slot]!, level: slotLevels[slot] ?? 1 };
+    }
+  }
+  return { id: obj.id, name, owner, leader, leaderLevel, orderTarget, subRace, order, units, useFacing, facing, aiPriority, modifiers };
 }
 
 /** Parse a single MidEvent block into a MapEvent. `isEES` gates the elf-expansion race flags. */

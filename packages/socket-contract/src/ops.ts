@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MapObject, MapEvent } from "@d2/map-schema";
+import { MapObject, MapEvent, ScenarioVariable, StackTemplate } from "@d2/map-schema";
 
 /** Map edit operations. Declared now; the server applies them only from Stage 4
  *  (read-only before that). Coarse, server-validated, last-writer-wins per cell/object.
@@ -25,6 +25,10 @@ export const EditOp = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("deleteObject"), id: z.string() }),
   z.object({ kind: z.literal("upsertEvent"), event: MapEvent }),
   z.object({ kind: z.literal("deleteEvent"), id: z.string() }),
+  // scenario variables live in ONE MidScenVariables block, so the whole list is set at once.
+  z.object({ kind: z.literal("setVariables"), variables: z.array(ScenarioVariable) }),
+  z.object({ kind: z.literal("upsertTemplate"), template: StackTemplate }),
+  z.object({ kind: z.literal("deleteTemplate"), id: z.string() }),
 ]);
 export type EditOp = z.infer<typeof EditOp>;
 

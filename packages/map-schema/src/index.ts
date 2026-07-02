@@ -6,6 +6,8 @@ export { MapCell, TerrainGrid } from "./cells.js";
 export {
   MapObject,
   GarrisonUnit,
+  TemplateUnit,
+  StackTemplate,
   StackObject,
   FortObject,
   CapitalObject,
@@ -25,6 +27,7 @@ export {
 export { MapDocument, MapHeader, PlayerInfo } from "./document.js";
 export {
   MapEvent,
+  ScenarioVariable,
   EventCondition,
   EventEffect,
   EventRaces,

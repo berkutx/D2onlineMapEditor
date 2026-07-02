@@ -77,6 +77,12 @@ export function roundTripSemantic(
   if (!equalById(reparsed.events ?? [], expected.events ?? [])) {
     return { ok: false, reason: "events differ after round-trip" };
   }
+  if (!deepEqual(reparsed.variables ?? [], expected.variables ?? [])) {
+    return { ok: false, reason: "variables differ after round-trip" };
+  }
+  if (!equalById(reparsed.templates ?? [], expected.templates ?? [])) {
+    return { ok: false, reason: "templates differ after round-trip" };
+  }
   if (!deepEqual(reparsed.players, expected.players)) {
     return { ok: false, reason: "players differ after round-trip" };
   }

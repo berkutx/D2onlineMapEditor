@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { TerrainGrid } from "./cells.js";
-import { MapObject } from "./objects.js";
-import { MapEvent } from "./events.js";
+import { MapObject, StackTemplate } from "./objects.js";
+import { MapEvent, ScenarioVariable } from "./events.js";
 
 export const MapHeader = z.object({
   name: z.string().default(""),
@@ -38,5 +38,7 @@ export const MapDocument = z.object({
   objects: z.array(MapObject),
   players: z.array(PlayerInfo).default([]),
   events: z.array(MapEvent).default([]),
+  variables: z.array(ScenarioVariable).default([]),
+  templates: z.array(StackTemplate).default([]),
 });
 export type MapDocument = z.infer<typeof MapDocument>;
