@@ -10,7 +10,7 @@ import { storeToRefs } from "pinia";
 import { ElMessage, ElNotification } from "element-plus";
 import { Check, Moon, Sunny, Share } from "@element-plus/icons-vue";
 import type { ScenarioEntry, ValidationReport } from "@d2/socket-contract";
-import { createNewMap, cloneMap } from "../services/api";
+import { createNewMap } from "../services/api";
 import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
@@ -185,26 +185,11 @@ async function doCreateNewMap(): Promise<void> {
   }
 }
 
-/** Byte-exact personal copy of the open map (a fresh base = fresh journal/room). */
-async function doCloneMap(): Promise<void> {
-  const id = currentScenarioId.value;
-  if (!id) return;
-  try {
-    const copyId = await cloneMap(id);
-    await mapStore.loadScenarios();
-    await mapStore.openMap(copyId);
-    ElMessage.success("Копия создана и открыта (правки исходной карты не переносятся)");
-  } catch (e) {
-    ElMessage.error(`Не удалось дублировать: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
-
 /** el-menu dispatcher — one place routes every menu-item index to its action. */
 function onSelect(index: string): void {
   switch (index) {
     case "file:open": return void openDialog();
     case "file:new": newMapVisible.value = true; return;
-    case "file:clone": return void doCloneMap();
     case "file:export": return void doExport();
     case "edit:undo": return editStore.undoEdit();
     case "edit:redo": return editStore.redoEdit();
@@ -238,7 +223,6 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <template #title>Файл</template>
         <el-menu-item index="file:open">Открыть карту…<span class="mkbd">Ctrl+O</span></el-menu-item>
         <el-menu-item index="file:new">Новая карта…</el-menu-item>
-        <el-menu-item index="file:clone" :disabled="!currentScenarioId">Дублировать карту</el-menu-item>
         <el-menu-item index="file:export">Экспорт .sg…</el-menu-item>
       </el-sub-menu>
 

@@ -17,6 +17,21 @@ async function main(): Promise<void> {
 
   await app.listen({ port: config.PORT, host: config.HOST });
 
+  // The temporary-copy watcher: ephemeral first-visit clones are deleted EPHEMERAL_TTL_MS
+  // (default 2 days) after their last access. Hourly + once at boot.
+  const sweep = async (): Promise<void> => {
+    try {
+      const n = await store.sweepEphemeral(config.EPHEMERAL_TTL_MS);
+      // eslint-disable-next-line no-console
+      if (n > 0) console.log(`[@d2/server] swept ${n} expired ephemeral map(s)`);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[@d2/server] ephemeral sweep failed:", e);
+    }
+  };
+  void sweep();
+  const sweeper = setInterval(() => void sweep(), 60 * 60 * 1000);
+
   // eslint-disable-next-line no-console
   console.log(
     `[@d2/server] listening on http://localhost:${config.PORT} ` +
@@ -26,6 +41,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     // eslint-disable-next-line no-console
     console.log(`[@d2/server] ${signal} -> shutting down`);
+    clearInterval(sweeper);
     io.close();
     await app.close();
     process.exit(0);

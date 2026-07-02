@@ -8,7 +8,7 @@
  * runtime-registered uploads.
  */
 
-import { stat, readFile, writeFile, realpath, mkdir } from "node:fs/promises";
+import { stat, readFile, writeFile, realpath, mkdir, rm } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { createHash } from "node:crypto";
 import { parseScenario, type MapDocument } from "@d2/sg-parser";
@@ -42,7 +42,13 @@ interface RegistryEntry {
   fileName: string;
   owner?: string;
   createdAt?: number;
+  /** Temporary map (first-visit auto-clone) — swept after the TTL since lastAccess. */
+  ephemeral?: boolean;
+  lastAccess?: number;
 }
+
+/** Persist lastAccess at most this often (avoid a registry write on every map fetch). */
+const TOUCH_THROTTLE_MS = 60 * 60 * 1000;
 
 export class MapStore {
   /** id -> server-private record (real path, source, mtime). */
@@ -88,6 +94,8 @@ export class MapStore {
           source: "upload",
           mtimeMs: st.mtimeMs,
           owner: typeof e.owner === "string" ? e.owner : undefined,
+          ephemeral: e.ephemeral === true || undefined,
+          lastAccessMs: typeof e.lastAccess === "number" ? e.lastAccess : e.createdAt,
         });
       } catch {
         continue; // file gone — drop from the effective registry
@@ -95,12 +103,14 @@ export class MapStore {
     }
   }
 
-  /** Persist the uploads registry (fileName + owner) next to the files themselves. */
+  /** Persist the uploads registry (fileName + owner + TTL bookkeeping) next to the files. */
   private async saveUploads(): Promise<void> {
     const entries: RegistryEntry[] = this.uploads.map((u) => ({
       fileName: basename(u.realPath),
       owner: u.owner,
       createdAt: Math.floor(u.mtimeMs),
+      ephemeral: u.ephemeral || undefined,
+      lastAccess: u.lastAccessMs,
     }));
     try {
       await mkdir(config.UPLOAD_DIR, { recursive: true });
@@ -129,8 +139,13 @@ export class MapStore {
   }
 
   /** Register an uploaded `.sg` file (already written to disk). `owner` = the anonymous
-   *  x-client-id of the creator, so listings can be scoped per visitor. */
-  async registerUpload(absPath: string, owner?: string): Promise<ScenarioRecord> {
+   *  x-client-id of the creator, so listings can be scoped per visitor. `ephemeral` marks a
+   *  temporary map (first-visit auto-clone) for the TTL sweeper. */
+  async registerUpload(
+    absPath: string,
+    owner?: string,
+    opts?: { ephemeral?: boolean },
+  ): Promise<ScenarioRecord> {
     await this.loadUploads();
     const real = await realpath(absPath);
     const id = idForPath(real);
@@ -141,11 +156,48 @@ export class MapStore {
       source: "upload",
       mtimeMs: st.mtimeMs,
       owner,
+      ephemeral: opts?.ephemeral || undefined,
+      lastAccessMs: Date.now(),
     };
     this.uploads = this.uploads.filter((u) => u.id !== id).concat(rec);
     this.registry.set(id, rec);
     await this.saveUploads();
     return rec;
+  }
+
+  /** Refresh an ephemeral record's TTL on access (persisted at most hourly). */
+  private touchAccess(rec: ScenarioRecord): void {
+    if (!rec.ephemeral) return;
+    const now = Date.now();
+    const prev = rec.lastAccessMs ?? 0;
+    rec.lastAccessMs = now;
+    if (now - prev > TOUCH_THROTTLE_MS) void this.saveUploads();
+  }
+
+  /**
+   * Delete ephemeral uploads not accessed within `ttlMs` (the "temporary first-visit copy"
+   * watcher): unlink the file, drop the registry entries. Returns how many were swept.
+   */
+  async sweepEphemeral(ttlMs: number): Promise<number> {
+    await this.loadUploads();
+    const cutoff = Date.now() - ttlMs;
+    const expired = this.uploads.filter(
+      (u) => u.ephemeral && (u.lastAccessMs ?? 0) < cutoff,
+    );
+    if (expired.length === 0) return 0;
+    for (const u of expired) {
+      try {
+        await rm(u.realPath, { force: true });
+      } catch {
+        /* file already gone — still drop the record */
+      }
+      this.registry.delete(u.id);
+      this.cache.delete(u.id);
+    }
+    const gone = new Set(expired.map((u) => u.id));
+    this.uploads = this.uploads.filter((u) => !gone.has(u.id));
+    await this.saveUploads();
+    return expired.length;
   }
 
   /** Resolve an opaque id to its server-private record, rescanning if unknown. */
@@ -167,6 +219,7 @@ export class MapStore {
   ): Promise<{ doc: MapDocument; etag: string; mtimeMs: number } | undefined> {
     const rec = await this.resolve(id);
     if (!rec) return undefined;
+    this.touchAccess(rec); // any use refreshes an ephemeral copy's TTL
 
     const st = await stat(rec.realPath);
     const cached = this.cache.get(id);
@@ -192,6 +245,7 @@ export class MapStore {
   ): Promise<{ bytes: Uint8Array; etag: string; mtimeMs: number } | undefined> {
     const rec = await this.resolve(id);
     if (!rec) return undefined;
+    this.touchAccess(rec); // any use refreshes an ephemeral copy's TTL
     const st = await stat(rec.realPath);
     const bytes = new Uint8Array(await readFile(rec.realPath));
     return { bytes, etag: etagFor(id, st.mtimeMs), mtimeMs: st.mtimeMs };

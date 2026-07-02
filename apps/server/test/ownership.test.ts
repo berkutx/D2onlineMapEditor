@@ -109,6 +109,35 @@ describe("POST /api/maps/:id/clone", () => {
   });
 });
 
+describe("ephemeral TTL sweeper (temporary first-visit copies)", () => {
+  it("sweeps an expired ephemeral clone; permanent maps survive; access refreshes TTL", async () => {
+    const permanentId = await createMap(OWNER); // Новая карта — permanent
+    const srcId = await createMap(OWNER);
+    const cloneRes = await app.inject({
+      method: "POST",
+      url: REST.mapClone(srcId),
+      headers: { "x-client-id": OWNER },
+    });
+    const cloneId = (cloneRes.json() as { id: string }).id;
+
+    const store = new MapStore(); // fresh instance reading registry.json
+    // clone was JUST accessed (registered) -> a 2-day TTL sweeps nothing
+    expect(await store.sweepEphemeral(2 * 24 * 3600 * 1000)).toBe(0);
+    // ttl=0 -> anything not accessed "within 0ms" expires; permanent maps are untouched
+    await new Promise((r) => setTimeout(r, 5));
+    const swept = await store.sweepEphemeral(0);
+    expect(swept).toBeGreaterThanOrEqual(1);
+    expect(await store.resolve(cloneId)).toBeUndefined(); // clone gone (file + registry)
+    expect(await store.resolve(permanentId)).toBeTruthy(); // Новая карта survives
+    expect(await store.resolve(srcId)).toBeTruthy(); // clone source survives
+
+    // and a FRESH store agrees (the sweep persisted to registry.json)
+    const store2 = new MapStore();
+    expect(await store2.resolve(cloneId)).toBeUndefined();
+    expect(await store2.resolve(permanentId)).toBeTruthy();
+  });
+});
+
 describe("uploads registry persistence (registry.json)", () => {
   it("a FRESH MapStore (server restart) still resolves + lists an owned map", async () => {
     const id = await createMap(OWNER);

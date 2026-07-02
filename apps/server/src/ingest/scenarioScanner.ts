@@ -25,6 +25,11 @@ export interface ScenarioRecord {
   mtimeMs: number;
   /** Anonymous owner (x-client-id) of an uploaded/new map; installs have none. */
   owner?: string;
+  /** TEMPORARY map (a first-visit auto-clone of the reference): swept after the TTL
+   *  since the last access. Explicit uploads / "Новая карта" creations are permanent. */
+  ephemeral?: boolean;
+  /** Last time this record was accessed (ms epoch) — refreshes the ephemeral TTL. */
+  lastAccessMs?: number;
 }
 
 function lowerExt(name: string): string {

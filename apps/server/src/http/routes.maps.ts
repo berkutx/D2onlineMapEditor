@@ -304,7 +304,8 @@ export async function registerMapRoutes(
 
   // POST /api/maps/:id/clone -> byte-exact personal copy of any accessible map, owned by the
   // caller (x-client-id). This is how a new visitor gets their OWN copy of the reference map
-  // (the install stays pristine; each copy is a separate room/base for the diff journal).
+  // (the install stays pristine). The copy is EPHEMERAL: swept EPHEMERAL_TTL_MS (2 days)
+  // after the visitor's last access — every open/edit refreshes the timer.
   app.post<{ Params: { id: string } }>(REST.mapClone(":id"), async (req, reply) => {
     const { id } = req.params;
     const src = await store.getRawBytes(id);
@@ -314,7 +315,7 @@ export async function registerMapRoutes(
     await mkdir(config.UPLOAD_DIR, { recursive: true });
     const file = join(config.UPLOAD_DIR, `copy-${id.slice(0, 8)}-${Date.now()}.sg`);
     await writeFile(file, src.bytes);
-    const rec = await store.registerUpload(file, clientIdOf(req));
+    const rec = await store.registerUpload(file, clientIdOf(req), { ephemeral: true });
     return reply.code(201).send({ id: rec.id });
   });
 
