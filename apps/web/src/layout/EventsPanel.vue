@@ -17,10 +17,12 @@ import { useViewStore } from "../stores/viewStore";
 import EventFieldInput from "./EventFieldInput.vue";
 import VariablesEditor from "./VariablesEditor.vue";
 import TemplatesEditor from "./TemplatesEditor.vue";
+import ScenarioSettingsEditor from "./ScenarioSettingsEditor.vue";
+import DiplomacyEditor from "./DiplomacyEditor.vue";
 
 const store = useEventStore();
 const view = useViewStore();
-const tab = ref<"events" | "vars" | "templates">("events");
+const tab = ref<"events" | "vars" | "templates" | "settings" | "diplomacy">("events");
 
 const sel = computed(() => store.selected);
 const RACES = [
@@ -94,13 +96,17 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
       <el-button size="small" text @click="view.toggleEventPanel()">✕</el-button>
     </div>
 
-    <el-tabs v-model="tab" class="ev-tabs" stretch>
+    <el-tabs v-model="tab" class="ev-tabs">
       <el-tab-pane label="События" name="events" />
+      <el-tab-pane label="Настройки" name="settings" />
+      <el-tab-pane label="Дипломатия" name="diplomacy" />
       <el-tab-pane label="Переменные" name="vars" />
       <el-tab-pane label="Шаблоны" name="templates" />
     </el-tabs>
 
-    <VariablesEditor v-if="tab === 'vars'" class="ev-sub" />
+    <ScenarioSettingsEditor v-if="tab === 'settings'" class="ev-sub" />
+    <DiplomacyEditor v-else-if="tab === 'diplomacy'" class="ev-sub" />
+    <VariablesEditor v-else-if="tab === 'vars'" class="ev-sub" />
     <TemplatesEditor v-else-if="tab === 'templates'" class="ev-sub" />
 
     <template v-else>

@@ -24,7 +24,7 @@ export {
   UnitObject,
   GenericObject,
 } from "./objects.js";
-export { MapDocument, MapHeader, PlayerInfo } from "./document.js";
+export { MapDocument, MapHeader, PlayerInfo, DiplomacyEntry } from "./document.js";
 export {
   MapEvent,
   ScenarioVariable,

@@ -8,7 +8,7 @@
 import { ByteWriter } from "./byteWriter.js";
 import { encodeCp1251 } from "./cp1251.js";
 import { emitBlock } from "./sgRebuild.js";
-import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate } from "@d2/map-schema";
+import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate, DiplomacyEntry } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import {
   COND_CODEC,
@@ -80,6 +80,39 @@ export function scenVariablesFrame(version: string, blockId: string, vars: reado
       w.defaultInt("VALUE", v.value);
     }
   });
+}
+
+/** Serialize the singleton MidDiplomacy block (code 0x14, short DP): count (tag == the block's
+ *  own id) then N × (RACE_1:int, RACE_2:int, RELATION:int). Races are Grace indices; RELATION
+ *  is the raw int32 (0..100 meter + any preserved high-bit flags). */
+export function diplomacyFrame(version: string, blockId: string, entries: readonly DiplomacyEntry[]): Uint8Array {
+  const second = parseInt(blockId.slice(6), 16) || 0;
+  return emitBlock(version, "MidDiplomacy", 0x14, "DP", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const d of entries) {
+      w.defaultInt("RACE_1", d.race1);
+      w.defaultInt("RACE_2", d.race2);
+      w.defaultInt("RELATION", d.relation);
+    }
+  });
+}
+
+/**
+ * Split a long scenario text into the on-disk '_' multi-part values (D2ScenarioInfo
+ * writeMultyStringPart): CP1251 is single-byte, so chunks are 250 chars; every non-empty part
+ * carries the trailing '_' continuation marker (the reader strips it); unused slots are "".
+ * Fails loud if the text exceeds the slots' capacity.
+ */
+export function splitMultiString(text: string, slots: number, maxChars = 250): string[] {
+  if (text.length > slots * maxChars) {
+    throw new Error(`scenario text too long: ${text.length} chars > ${slots * maxChars}`);
+  }
+  const out: string[] = [];
+  for (let i = 0; i < slots; i++) {
+    const chunk = text.slice(i * maxChars, (i + 1) * maxChars);
+    out.push(chunk ? `${chunk}_` : "");
+  }
+  return out;
 }
 
 /** Serialize one MidStackTemplate block (code 0x18, short TM). `tmpl.id` is the final 10-char

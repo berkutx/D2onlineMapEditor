@@ -34,7 +34,13 @@ export {
   type ItemListEdit,
   type QtyListEdit,
 } from "./sgRebuild.js";
-export { eventFrame, scenVariablesFrame, stackTemplateFrame } from "./eventFrame.js";
+export {
+  eventFrame,
+  scenVariablesFrame,
+  stackTemplateFrame,
+  diplomacyFrame,
+  splitMultiString,
+} from "./eventFrame.js";
 export { ByteWriter, EMPTY_REF } from "./byteWriter.js";
 export { encodeCp1251, cp1251Length } from "./cp1251.js";
 export {

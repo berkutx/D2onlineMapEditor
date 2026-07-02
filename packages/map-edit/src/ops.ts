@@ -142,6 +142,26 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       const inverse: EditOp = { kind: "upsertTemplate", template: removed };
       return { doc: { ...doc, templates }, inverse };
     }
+
+    case "setScenarioInfo": {
+      const header = doc.header as unknown as Record<string, unknown>;
+      const prev: Record<string, unknown> = {};
+      for (const k of Object.keys(op.fields)) {
+        // JSON drops undefined on journal serialization, which would turn the inverse into a
+        // no-op for that key — materialize the reader's defaults instead (texts are "").
+        const v = header[k];
+        prev[k] = v !== undefined ? v
+          : ["name", "description", "author", "objective", "story", "winText", "loseText"].includes(k) ? ""
+          : v;
+      }
+      const inverse: EditOp = { kind: "setScenarioInfo", fields: prev as typeof op.fields };
+      return { doc: { ...doc, header: { ...doc.header, ...op.fields } }, inverse };
+    }
+
+    case "setDiplomacy": {
+      const inverse: EditOp = { kind: "setDiplomacy", diplomacy: doc.diplomacy ?? [] };
+      return { doc: { ...doc, diplomacy: op.diplomacy.slice() }, inverse };
+    }
   }
 }
 

@@ -6,7 +6,8 @@
  */
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate } from "@d2/map-schema";
+import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate, DiplomacyEntry } from "@d2/map-schema";
+import type { ScenarioInfoPatch } from "@d2/socket-contract";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import type { EditOp } from "@d2/map-edit";
 import { useEditStore } from "./editStore";
@@ -178,11 +179,34 @@ export const useEventStore = defineStore("events", () => {
     return copy;
   }
 
+  // --- scenario settings (ScenarioInfo) + diplomacy ---
+  const header = computed(() => edit.liveDoc?.header ?? null);
+  function setScenarioInfo(fields: ScenarioInfoPatch): void {
+    edit.commit([{ kind: "setScenarioInfo", fields } as EditOp]);
+  }
+  const diplomacy = computed<DiplomacyEntry[]>(() => edit.liveDoc?.diplomacy ?? []);
+  function setDiplomacy(entries: DiplomacyEntry[]): void {
+    edit.commit([{ kind: "setDiplomacy", diplomacy: entries } as EditOp]);
+  }
+  function setDiplomacyRelation(race1: number, race2: number, relation: number): void {
+    const norm = (a: number, b: number): [number, number] => (a <= b ? [a, b] : [b, a]);
+    const [x, y] = norm(race1, race2);
+    const list = diplomacy.value.slice();
+    const i = list.findIndex((d) => {
+      const [a, b] = norm(d.race1, d.race2);
+      return a === x && b === y;
+    });
+    if (i >= 0) list[i] = { ...list[i]!, relation };
+    else list.push({ race1: x, race2: y, relation });
+    setDiplomacy(list);
+  }
+
   return {
     selectedId, filter, objectFilter, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,
     upsertTemplate, removeTemplate, createTemplate, cloneTemplate,
+    header, setScenarioInfo, diplomacy, setDiplomacy, setDiplomacyRelation,
   };
 });

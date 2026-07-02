@@ -1,5 +1,27 @@
 import { z } from "zod";
-import { MapObject, MapEvent, ScenarioVariable, StackTemplate } from "@d2/map-schema";
+import { MapObject, MapEvent, ScenarioVariable, StackTemplate, DiplomacyEntry } from "@d2/map-schema";
+
+/** Editable scenario-settings fields (a PARTIAL patch of MapHeader; only present keys apply). */
+export const ScenarioInfoPatch = z.object({
+  name: z.string().optional(),
+  description: z.string().optional(),
+  author: z.string().optional(),
+  objective: z.string().optional(),
+  story: z.string().optional(),
+  winText: z.string().optional(),
+  loseText: z.string().optional(),
+  suggestedLevel: z.number().int().optional(),
+  difficulty: z.object({ scenario: z.number().int(), game: z.number().int() }).optional(),
+  limits: z
+    .object({
+      unit: z.number().int(),
+      spell: z.number().int(),
+      leader: z.number().int(),
+      city: z.number().int(),
+    })
+    .optional(),
+});
+export type ScenarioInfoPatch = z.infer<typeof ScenarioInfoPatch>;
 
 /** Map edit operations. Declared now; the server applies them only from Stage 4
  *  (read-only before that). Coarse, server-validated, last-writer-wins per cell/object.
@@ -29,6 +51,9 @@ export const EditOp = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("setVariables"), variables: z.array(ScenarioVariable) }),
   z.object({ kind: z.literal("upsertTemplate"), template: StackTemplate }),
   z.object({ kind: z.literal("deleteTemplate"), id: z.string() }),
+  z.object({ kind: z.literal("setScenarioInfo"), fields: ScenarioInfoPatch }),
+  // diplomacy lives in ONE MidDiplomacy block, so the whole list is set at once.
+  z.object({ kind: z.literal("setDiplomacy"), diplomacy: z.array(DiplomacyEntry) }),
 ]);
 export type EditOp = z.infer<typeof EditOp>;
 

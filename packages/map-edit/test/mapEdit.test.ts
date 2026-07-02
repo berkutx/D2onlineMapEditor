@@ -451,6 +451,69 @@ describe("@d2/map-edit stack templates (E3)", () => {
   });
 });
 
+describe("@d2/map-edit scenario settings + diplomacy (E4)", () => {
+  it("parses the extended ScenarioInfo (texts + limits) and diplomacy from Riders", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    expect(doc.header.winText).toContain("Поздравляем");
+    expect(doc.header.story!.length).toBeGreaterThan(300); // BRIEFLONG1-3 joined
+    expect(doc.header.loseText!.length).toBeGreaterThan(0);
+    expect(doc.header.limits).toEqual({ unit: 10, spell: 5, leader: 99, city: 5 });
+    expect(doc.header.suggestedLevel).toBe(1);
+    expect(doc.diplomacy).toEqual([
+      { race1: 4, race2: 0, relation: 0 },
+      { race1: 4, race2: 1, relation: 0 },
+      { race1: 0, race2: 1, relation: 0 },
+    ]);
+  });
+
+  it("setScenarioInfo round-trips: name (header+block), long win text (multi-part), limits", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const longWin = "Победа! ".repeat(60).trim(); // ~470 chars -> needs 2 multi-parts
+    const ops: EditOp[] = [{
+      kind: "setScenarioInfo",
+      fields: {
+        name: "Riders-2",
+        author: "тест",
+        objective: "Новая цель",
+        winText: longWin,
+        limits: { unit: 8, spell: 4, leader: 50, city: 4 },
+        suggestedLevel: 3,
+      },
+    }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect(re.header.name).toBe("Riders-2");
+    expect(re.header.author).toBe("тест");
+    expect(re.header.objective).toBe("Новая цель");
+    expect(re.header.winText).toBe(longWin);
+    expect(re.header.limits).toEqual({ unit: 8, spell: 4, leader: 50, city: 4 });
+    expect(re.header.suggestedLevel).toBe(3);
+    // the FILE HEADER name (fixed offset 321, 64B zero-padded) must match too
+    const headerName = Buffer.from(out.buffer, out.byteOffset + 321, 64);
+    expect(headerName.toString("latin1").replace(/\0+$/, "")).toBe("Riders-2");
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("setDiplomacy round-trips (change relation + add a pair)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const diplomacy = [
+      { race1: 4, race2: 0, relation: 49 },
+      { race1: 4, race2: 1, relation: 0 },
+      { race1: 0, race2: 1, relation: 100 },
+    ];
+    const ops: EditOp[] = [{ kind: "setDiplomacy", diplomacy }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect(re.diplomacy).toEqual(diplomacy);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
   it("deletes a BASE landmark: block gone, OB0000 decremented, semantic + structural ok", () => {
     const { doc, raw } = parseScenarioRaw(bytes);

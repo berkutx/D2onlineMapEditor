@@ -22,6 +22,9 @@ import {
   eventFrame,
   scenVariablesFrame,
   stackTemplateFrame,
+  diplomacyFrame,
+  splitMultiString,
+  encodeCp1251,
   spliceVariableFields,
   type SgRaw,
   type MountainEntry,
@@ -29,7 +32,8 @@ import {
   type ItemListEdit,
   type QtyListEdit,
 } from "@d2/sg-parser";
-import type { MapObject, MapEvent, ScenarioVariable, StackTemplate } from "@d2/map-schema";
+import type { MapObject, MapEvent, ScenarioVariable, StackTemplate, DiplomacyEntry } from "@d2/map-schema";
+import type { ScenarioInfoPatch } from "@d2/socket-contract";
 import type { EditOp } from "./ops.js";
 
 export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Array {
@@ -91,6 +95,10 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   let variablesFinal: ScenarioVariable[] | null = null;
   /** Template ops resolved to final state per id (upsert value or null=delete). */
   const templateOps = new Map<string, StackTemplate | null>();
+  /** Scenario-settings patch, merged across ops (later keys win). */
+  let scenInfoPatch: ScenarioInfoPatch | null = null;
+  /** The FINAL diplomacy list (last setDiplomacy wins), or null if untouched. */
+  let diplomacyFinal: DiplomacyEntry[] | null = null;
   let nextTM = 0;
   for (const o of raw.objects) {
     const m = /TM([0-9a-fA-F]{4})$/.exec(o.id);
@@ -320,6 +328,12 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       case "deleteTemplate":
         templateOps.set(op.id, null);
         break;
+      case "setScenarioInfo":
+        scenInfoPatch = { ...(scenInfoPatch ?? {}), ...op.fields };
+        break;
+      case "setDiplomacy":
+        diplomacyFinal = op.diplomacy.slice();
+        break;
     }
   }
 
@@ -414,7 +428,63 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     }
   }
 
+  // Scenario settings: ints are fixed-width (SgWriter), texts are growable string splices on
+  // the ScenarioInfo block, and name/desc/author ALSO live in the FILE HEADER at fixed,
+  // zero-padded offsets (desc @43×256B, author @299×21B, name @321×64B — the D2EESFISIG
+  // MapHeaderBlock layout, before every object frame, so later splices never move them).
+  const headerPatches: { at: number; size: number; value: string }[] = [];
+  if (scenInfoPatch) {
+    const info = raw.objects.find((o) => o.typeName === "ScenarioInfo");
+    if (!info) throw new Error("applyEditsToBytes: setScenarioInfo — no ScenarioInfo block");
+    const p = scenInfoPatch;
+    const str = (tag: string, value: string): void => {
+      stringEdits.push({ fieldsFrom: info.fieldsFrom, fieldsEnd: info.fieldsEnd, tag, value });
+    };
+    if (p.name !== undefined) {
+      if (encodeCp1251(p.name).length > 64) throw new Error("setScenarioInfo: name > 64 bytes");
+      str("NAME", p.name);
+      headerPatches.push({ at: 321, size: 64, value: p.name });
+    }
+    if (p.description !== undefined) {
+      if (encodeCp1251(p.description).length > 256) throw new Error("setScenarioInfo: description > 256 bytes");
+      str("DESC", p.description);
+      headerPatches.push({ at: 43, size: 256, value: p.description });
+    }
+    if (p.author !== undefined) {
+      if (encodeCp1251(p.author).length > 21) throw new Error("setScenarioInfo: author > 21 bytes");
+      str("CREATOR", p.author);
+      headerPatches.push({ at: 299, size: 21, value: p.author });
+    }
+    if (p.objective !== undefined) str("BRIEFING", p.objective);
+    if (p.loseText !== undefined) str("DEBUNKL", p.loseText);
+    if (p.winText !== undefined) {
+      const parts = splitMultiString(p.winText, 5);
+      ["DEBUNKW", "DEBUNKW2", "DEBUNKW3", "DEBUNKW4", "DEBUNKW5"].forEach((tag, i) => str(tag, parts[i]!));
+    }
+    if (p.story !== undefined) {
+      const parts = splitMultiString(p.story, 5);
+      ["BRIEFLONG1", "BRIEFLONG2", "BRIEFLONG3", "BRIEFLONG4", "BRIEFLONG5"].forEach((tag, i) => str(tag, parts[i]!));
+    }
+    if (p.limits !== undefined) {
+      w.setObjectInt(info.id, "MAX_UNIT", p.limits.unit);
+      w.setObjectInt(info.id, "MAX_SPELL", p.limits.spell);
+      w.setObjectInt(info.id, "MAX_LEADER", p.limits.leader);
+      w.setObjectInt(info.id, "MAX_CITY", p.limits.city);
+    }
+    if (p.difficulty !== undefined) {
+      w.setObjectInt(info.id, "DIFFSCEN", p.difficulty.scenario);
+      w.setObjectInt(info.id, "DIFFGAME", p.difficulty.game);
+    }
+    if (p.suggestedLevel !== undefined) w.setObjectInt(info.id, "SUGG_LVL", p.suggestedLevel);
+  }
+
   let bytes = w.toBytes();
+  // file-header fixed-offset text patches (CP1251, zero-padded to the field size)
+  for (const hp of headerPatches) {
+    const enc = encodeCp1251(hp.value);
+    bytes.fill(0, hp.at, hp.at + hp.size);
+    bytes.set(enc, hp.at);
+  }
   // M4: resize variable-length string fields + ITEM_ID lists in place (object count
   // unchanged by the splice itself; new MidItem blocks are appended below). Done before the
   // append/replace passes; those re-scan markers + the header count (all preserved). Both
@@ -495,6 +565,16 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       bytes = replaceBlock(bytes, sv.id, scenVariablesFrame(raw.version, sv.id, variablesFinal));
     } else {
       bytes = appendBlocks(bytes, [scenVariablesFrame(raw.version, `${raw.version}SV0000`, variablesFinal)]);
+    }
+  }
+
+  // Diplomacy: rebuild the singleton MidDiplomacy block in place (append if absent).
+  if (diplomacyFinal) {
+    const dp = raw.objects.find((o) => o.typeName === "MidDiplomacy");
+    if (dp) {
+      bytes = replaceBlock(bytes, dp.id, diplomacyFrame(raw.version, dp.id, diplomacyFinal));
+    } else {
+      bytes = appendBlocks(bytes, [diplomacyFrame(raw.version, `${raw.version}DP0000`, diplomacyFinal)]);
     }
   }
 

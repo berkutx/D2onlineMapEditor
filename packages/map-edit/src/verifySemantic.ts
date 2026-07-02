@@ -83,6 +83,9 @@ export function roundTripSemantic(
   if (!equalById(reparsed.templates ?? [], expected.templates ?? [])) {
     return { ok: false, reason: "templates differ after round-trip" };
   }
+  if (!deepEqual(reparsed.diplomacy ?? [], expected.diplomacy ?? [])) {
+    return { ok: false, reason: "diplomacy differs after round-trip" };
+  }
   if (!deepEqual(reparsed.players, expected.players)) {
     return { ok: false, reason: "players differ after round-trip" };
   }
