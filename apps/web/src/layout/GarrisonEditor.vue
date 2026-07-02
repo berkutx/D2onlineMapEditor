@@ -114,7 +114,7 @@ function onPick(cell: number, v: string | null): void {
 .garr-cols span {
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   color: var(--el-text-color-placeholder);
   text-align: center;
 }
@@ -123,18 +123,19 @@ function onPick(cell: number, v: string | null): void {
   grid-template-columns: repeat(2, 1fr);
   gap: var(--d2-sp-1, 4px);
 }
+/* empty cell = soft-fill placeholder (no dashed frame); filled = .d2-card look
+ * (fill only, no border) */
 .garr-cell {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 5px;
+  padding: 6px;
   min-width: 0;
-  border: 1px dashed var(--el-border-color);
-  border-radius: var(--d2-radius-sm, 6px);
+  background: var(--el-fill-color-lighter);
+  border-radius: var(--d2-radius);
 }
 .garr-cell.filled {
-  border-style: solid;
-  background: var(--el-fill-color-lighter);
+  background: var(--el-fill-color-light);
 }
 .garr-cell.ro {
   gap: 2px;

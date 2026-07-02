@@ -25,7 +25,7 @@ const DIFF = [
 
 <template>
   <div v-if="h" class="ss">
-    <div class="ss-head"><strong>Настройки сценария</strong></div>
+    <div class="ss-head"><strong class="d2-sec">Настройки сценария</strong></div>
     <div class="ss-body">
       <label class="ss-f"><span>Название</span>
         <el-input :model-value="h.name" size="small" @update:model-value="set({ name: $event })" /></label>
@@ -48,7 +48,7 @@ const DIFF = [
         <el-input :model-value="h.loseText ?? ''" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" size="small"
           @update:model-value="set({ loseText: $event })" /></label>
 
-      <div class="ss-sec">Сложность и уровни</div>
+      <div class="d2-sec">Сложность и уровни</div>
       <label class="ss-f"><span>Сложность сценария</span>
         <el-select :model-value="h.difficulty?.scenario ?? 3" size="small" style="width: 150px"
           @update:model-value="set({ difficulty: { scenario: $event, game: h.difficulty?.game ?? 1 } })">
@@ -57,7 +57,7 @@ const DIFF = [
         <el-input-number :model-value="h.suggestedLevel ?? 1" :min="1" :max="99" size="small" controls-position="right"
           style="width: 110px" @update:model-value="set({ suggestedLevel: ($event as number) ?? 1 })" /></label>
 
-      <div class="ss-sec">Лимиты</div>
+      <div class="d2-sec">Лимиты</div>
       <label class="ss-f"><span>Отрядов у игрока</span>
         <el-input-number :model-value="h.limits?.unit ?? 0" :min="0" :max="99" size="small" controls-position="right"
           style="width: 110px" @update:model-value="setLimit('unit', ($event as number) ?? 0)" /></label>
@@ -75,15 +75,12 @@ const DIFF = [
 </template>
 
 <style scoped>
-.ss { display: flex; flex-direction: column; height: 100%; }
-.ss-head { padding: 8px 10px; font-weight: 600; }
-.ss-body { flex: 1; overflow-y: auto; padding: 0 10px 12px; }
+.ss { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.ss-head { padding: 10px 12px 6px; }
+.ss-head .d2-sec { margin: 0; }
+.ss-body { flex: 1; overflow-y: auto; padding: 0 12px 12px; }
 .ss-f { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .ss-f > span { flex: 0 0 130px; color: var(--el-text-color-secondary); font-size: 12px; }
-.ss-f.col { flex-direction: column; align-items: stretch; gap: 3px; }
+.ss-f.col { flex-direction: column; align-items: stretch; gap: 4px; }
 .ss-f.col > span { flex: none; }
-.ss-sec {
-  margin: 12px 0 4px; font-weight: 600; font-size: 12px;
-  border-top: 1px solid var(--el-border-color-lighter); padding-top: 8px;
-}
 </style>

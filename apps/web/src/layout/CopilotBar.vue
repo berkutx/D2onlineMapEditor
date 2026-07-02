@@ -645,8 +645,8 @@ watch(
 }
 .cp-who {
   flex: 0 0 20px;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
   padding-top: 2px;
   color: var(--el-text-color-secondary);
@@ -683,6 +683,14 @@ watch(
 .cp-ico,
 .cp-send {
   flex: 0 0 auto;
+  /* icon-only actions sit back until pointed at (calmer) */
+  opacity: 0.6;
+  transition: opacity 0.12s ease;
+}
+.cp-ico:hover,
+.cp-send:hover,
+.cp-ico.el-button--primary {
+  opacity: 1;
 }
 .cp-badge {
   margin-left: 3px;
@@ -713,14 +721,14 @@ watch(
   gap: 8px;
 }
 .cp-zlabel {
-  font-weight: 700;
+  font-weight: 600;
 }
 .cp-zhelp {
   color: var(--el-text-color-secondary);
   flex: 1;
 }
 .cp-zsel {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--el-text-color-primary);
 }
 .cp-close {
@@ -763,8 +771,8 @@ watch(
 }
 .cp-ex-gtitle {
   font-size: 11px;
-  font-weight: 700;
-  color: var(--el-text-color-regular);
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
   padding: 4px 4px 2px;
 }
 .cp-ex-item {
@@ -785,23 +793,24 @@ watch(
 .cp-ex-item:hover {
   background: var(--el-fill-color-light);
 }
+/* badges: soft fill instead of an outlined frame (fills, not borders) */
 .cp-ex-llm {
   flex: 0 0 auto;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   color: var(--el-color-primary);
-  border: 1px solid var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
   border-radius: 5px;
-  padding: 0 4px;
+  padding: 0 5px;
 }
 .cp-ex-mj {
   flex: 0 0 auto;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
   color: var(--el-color-success);
-  border: 1px solid var(--el-color-success);
+  background: var(--el-color-success-light-9);
   border-radius: 5px;
-  padding: 0 4px;
+  padding: 0 5px;
 }
 .cp-ex-legend {
   margin-top: 5px;

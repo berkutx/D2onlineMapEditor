@@ -93,6 +93,12 @@ function random(): void {
 }
 .oa-roll {
   flex: 0 0 auto;
+  /* icon-only action sits back until pointed at (calmer) */
+  opacity: 0.6;
+  transition: opacity 0.12s ease;
+}
+.oa-roll:hover {
+  opacity: 1;
 }
 .oa-strip {
   flex: 1;
@@ -104,19 +110,21 @@ function random(): void {
   gap: 4px;
   padding-bottom: 4px;
 }
+/* no border framing: the checkerboard fill stays (transparency backdrop);
+ * hover/selection are soft rings, not frames */
 .oa-cell {
   flex: 0 0 auto;
   padding: 2px;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  border: none;
+  border-radius: var(--d2-radius);
   background: repeating-conic-gradient(var(--el-fill-color) 0% 25%, transparent 0% 50%) 0 / 12px 12px;
   cursor: pointer;
+  transition: box-shadow 0.12s ease;
 }
 .oa-cell:hover {
-  border-color: var(--el-border-color);
+  box-shadow: 0 0 0 1px var(--el-border-color-lighter);
 }
 .oa-cell.sel {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 2px var(--el-color-primary-light-7);
+  box-shadow: 0 0 0 2px var(--d2-active-bar);
 }
 </style>

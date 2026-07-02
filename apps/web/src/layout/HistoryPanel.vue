@@ -40,7 +40,7 @@ function toggle(seq: number): void {
       <div v-if="!rows.length" class="hist-empty">Пока нет правок в этой сессии.</div>
       <ul v-else class="hist-list">
         <li v-for="e in rows" :key="e.seq" class="hist-item">
-          <div class="hist-row" :class="{ expanded: expanded.has(e.seq) }" @click="toggle(e.seq)">
+          <div class="hist-row d2-row" :class="{ active: expanded.has(e.seq) }" @click="toggle(e.seq)">
             <span class="dot" :style="{ background: e.byColor }" />
             <span class="seq">#{{ e.seq }}</span>
             <span class="who" :class="{ mine: e.mine }">{{ e.mine ? 'вы' : e.byName }}</span>
@@ -61,20 +61,19 @@ function toggle(seq: number): void {
   width: 248px;
   z-index: 30;
   font-size: 12px;
-  border-radius: 10px;
   overflow: hidden;
 }
+/* single top header row: spacing separates it, no border-bottom */
 .hist-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
+  padding: 10px 12px 6px;
   cursor: pointer;
   user-select: none;
-  border-bottom: var(--d2-hairline, 1px solid var(--el-border-color-light));
 }
 .hist-ico { font-size: 14px; color: var(--el-text-color-secondary); }
-.hist-title { font-weight: 600; }
+.hist-title { font-size: 13px; font-weight: 600; }
 .hist-count {
   margin-left: 2px;
   padding: 0 6px;
@@ -82,24 +81,27 @@ function toggle(seq: number): void {
   background: var(--el-fill-color);
   color: var(--el-text-color-secondary);
 }
-.hist-toggle { margin-left: auto; }
+.hist-toggle {
+  margin-left: auto;
+  opacity: 0.6;
+  transition: opacity 0.12s ease;
+}
+.hist-head:hover .hist-toggle { opacity: 1; }
 .hist-body { max-height: 240px; overflow-y: auto; }
-.hist-empty { padding: 10px; color: var(--el-text-color-secondary); }
-.hist-list { list-style: none; margin: 0; padding: 4px 0; }
-.hist-item { border-bottom: 1px solid transparent; }
+.hist-empty { padding: 6px 12px 10px; color: var(--el-text-color-secondary); }
+.hist-list { list-style: none; margin: 0; padding: 2px 6px 6px; }
+/* rows are .d2-row (hover wash + inset accent when .active) — no per-row borders */
 .hist-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
+  padding: 5px 10px;
   white-space: nowrap;
   cursor: pointer;
 }
-.hist-row:hover { background: var(--el-fill-color-light); }
-.hist-row.expanded { background: var(--el-fill-color); }
 .hist-detail {
-  margin: 0;
-  padding: 4px 10px 7px 27px;
+  margin: 2px 0 4px;
+  padding: 6px 10px 8px 27px;
   font-size: 11px;
   line-height: 1.35;
   color: var(--el-text-color-secondary);
@@ -107,6 +109,7 @@ function toggle(seq: number): void {
   word-break: break-word;
   font-family: inherit;
   background: var(--el-fill-color-lighter);
+  border-radius: var(--d2-radius);
 }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
 .seq { color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }

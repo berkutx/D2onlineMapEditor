@@ -92,3 +92,80 @@ body,
 .d2-num {
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- Lightness pass primitives (2026-07: «прям лёгкость») -------------------
+ * Side rails are calm sheets: page-tinted bg, ONE hairline seam, no slabs.
+ * Sections separate by AIR + micro-caps labels, not by boxes-in-boxes. */
+
+/* A docked side rail (inspector / scenario / objects / palette). */
+.d2-rail {
+  background: var(--el-bg-color);
+  border-left: var(--d2-hairline);
+}
+.d2-rail--left {
+  border-left: none;
+  border-right: var(--d2-hairline);
+}
+
+/* Micro-caps section label — the ONLY section-header style in rails. */
+.d2-sec {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--el-text-color-secondary);
+  margin: var(--d2-sp-4) 0 var(--d2-sp-1);
+}
+
+/* A soft card: subtle fill, NO border (fills instead of frames). */
+.d2-card {
+  background: var(--el-fill-color-light);
+  border-radius: var(--d2-radius);
+  padding: var(--d2-sp-2);
+}
+
+/* Quiet list row: hover wash + active accent bar, no per-row borders. */
+.d2-row {
+  border-radius: var(--d2-radius);
+  transition: background 0.12s;
+}
+.d2-row:hover {
+  background: var(--el-fill-color-light);
+}
+.d2-row.active {
+  background: var(--d2-active-bg);
+  box-shadow: inset 2px 0 0 var(--d2-active-bar);
+}
+
+/* Thin, unobtrusive scrollbars across the chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--el-border-color) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--el-border-color);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Element Plus retunes for airiness: quieter tab headers, softer dialogs. */
+.el-tabs__header {
+  margin-bottom: var(--d2-sp-2);
+}
+.el-tabs__item {
+  font-size: 12px;
+}
+.el-dialog {
+  border-radius: var(--d2-radius-lg);
+}
+.el-input-number.is-controls-right .el-input__wrapper {
+  padding-left: 8px;
+}

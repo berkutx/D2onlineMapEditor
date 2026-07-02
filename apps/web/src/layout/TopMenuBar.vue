@@ -251,7 +251,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <el-menu-item index="view:locations"><el-icon class="mck" :style="{ visibility: locationsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Локации<span class="mkbd">L</span></el-menu-item>
         <el-menu-item index="view:animate"><el-icon class="mck" :style="{ visibility: animate ? 'visible' : 'hidden' }"><Check /></el-icon>Анимация<span class="mkbd">A</span></el-menu-item>
         <el-menu-item index="view:objectPanel"><el-icon class="mck" :style="{ visibility: objectPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Панель объектов<span class="mkbd">P</span></el-menu-item>
-        <el-menu-item index="view:eventPanel"><el-icon class="mck" :style="{ visibility: eventPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>События<span class="mkbd">E</span></el-menu-item>
+        <el-menu-item index="view:eventPanel"><el-icon class="mck" :style="{ visibility: eventPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Сценарий (события)<span class="mkbd">E</span></el-menu-item>
         <el-menu-item index="view:debug"><el-icon class="mck" :style="{ visibility: debugOverlay ? 'visible' : 'hidden' }"><Check /></el-icon>Отладка<span class="mkbd">D</span></el-menu-item>
         <el-sub-menu index="view:tints">
           <template #title>Подсветки</template>
@@ -299,7 +299,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
       @click="doValidate()"
     >Проверить</el-button>
     <el-tooltip v-if="validity === 'ok'" content="Проверка пройдена: карта корректна и сохранится/экспортируется" placement="bottom">
-      <el-tag size="small" type="success" effect="dark" round>
+      <el-tag size="small" type="success" effect="plain" round>
         <el-icon class="chip-ico"><CircleCheck /></el-icon>карта ок
       </el-tag>
     </el-tooltip>
@@ -465,6 +465,12 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
 }
 .appearance {
   flex: 0 0 auto;
+  /* icon-only actions sit back until pointed at (calmer) */
+  opacity: 0.6;
+  transition: opacity 0.12s ease;
+}
+.appearance:hover {
+  opacity: 1;
 }
 .validate-btn {
   flex: 0 0 auto;

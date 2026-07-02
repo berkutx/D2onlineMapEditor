@@ -43,8 +43,9 @@ export const useViewStore = defineStore("view", () => {
   const objectPanelVisible = ref(bool(p.objectPanelVisible, false));
   /** Events panel (scenario triggers/effects). Hidden by default; toggle from the View menu. */
   const eventPanelVisible = ref(bool(p.eventPanelVisible, false));
-  /** Debug HUD overlay (FPS / render ms / iso engine). On by default for now. */
-  const debugOverlay = ref(bool(p.debugOverlay, true));
+  /** Debug HUD overlay (FPS / render ms / iso engine). OFF by default (product decision);
+   *  the one-off migration flips earlier persisted defaults off once. */
+  const debugOverlay = ref(p.debugOffMigrated ? bool(p.debugOverlay, false) : false);
   /** Copilot floating command input. Always shown on load (NOT persisted, so it can't get
    *  "lost"); toggle for the session via the toolbar / ✕, "/" reveals + focuses it. */
   const copilotVisible = ref(true);
@@ -157,6 +158,7 @@ export const useViewStore = defineStore("view", () => {
           objectPanelVisible: objectPanelVisible.value,
           eventPanelVisible: eventPanelVisible.value,
           debugOverlay: debugOverlay.value,
+          debugOffMigrated: true,
           dark: dark.value,
           overlayTints: overlayTints.value,
         }));

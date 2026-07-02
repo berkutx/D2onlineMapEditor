@@ -399,7 +399,7 @@ function close(): void {
 </script>
 
 <template>
-  <div v-if="obj" class="inspector">
+  <div v-if="obj" class="inspector d2-rail">
     <div class="ins-head">
       <SpriteThumb v-if="headerSpriteKey" :sprite-key="headerSpriteKey" :size="34" class="ins-icon" />
       <span class="ins-title">{{ typeLabel }}</span>
@@ -420,9 +420,9 @@ function close(): void {
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div class="ro-block">
-          <div class="ro-label">Предметы <span class="muted">({{ chestItems.length }})</span></div>
+          <div class="d2-sec">Предметы <span class="muted">({{ chestItems.length }})</span></div>
           <div v-if="chestItems.length" class="items-list">
-            <div v-for="(it, i) in chestItems" :key="it.key" class="item-line">
+            <div v-for="(it, i) in chestItems" :key="it.key" class="item-line d2-row">
               <ItemIcon :id="it.template" :cat="itemStore.get(it.template)?.cat ?? -1" :size="24" />
               <span class="item-name" :title="it.name">{{ it.name }}</span>
               <span v-if="itemStore.get(it.template)?.gold" class="item-gold">{{ itemStore.get(it.template)?.gold }}</span>
@@ -457,7 +457,7 @@ function close(): void {
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div v-if="reward" class="ro-block">
-          <div class="ro-label">Награда (золото и мана)</div>
+          <div class="d2-sec">Награда (золото и мана)</div>
           <div class="reward-edit">
             <div v-for="r in reward" :key="r.k" class="rw-edit">
               <SpriteThumb :sprite-key="REWARD_CRYSTAL[r.k]" :size="20" :title="r.label" />
@@ -559,9 +559,9 @@ function close(): void {
 
         <!-- Торговец: список товаров (предмет + количество) -->
         <div v-if="obj.type === 'merchant'" class="ro-block">
-          <div class="ro-label">Товары <span class="muted">({{ merchantItems.length }})</span></div>
+          <div class="d2-sec">Товары <span class="muted">({{ merchantItems.length }})</span></div>
           <div v-if="merchantItems.length" class="items-list">
-            <div v-for="(it, i) in merchantItems" :key="`${it.id}#${i}`" class="item-line">
+            <div v-for="(it, i) in merchantItems" :key="`${it.id}#${i}`" class="item-line d2-row">
               <ItemIcon :id="it.id" :cat="itemStore.get(it.id)?.cat ?? -1" :size="24" />
               <span class="item-name" :title="itemStore.nameOf(it.id) || it.id">{{ itemStore.nameOf(it.id) || it.id }}</span>
               <el-input-number
@@ -582,9 +582,9 @@ function close(): void {
 
         <!-- Маг: список заклинаний -->
         <div v-else-if="obj.type === 'mage'" class="ro-block">
-          <div class="ro-label">Заклинания <span class="muted">({{ mageSpells.length }})</span></div>
+          <div class="d2-sec">Заклинания <span class="muted">({{ mageSpells.length }})</span></div>
           <div v-if="mageSpells.length" class="items-list">
-            <div v-for="(sid, i) in mageSpells" :key="`${sid}#${i}`" class="item-line">
+            <div v-for="(sid, i) in mageSpells" :key="`${sid}#${i}`" class="item-line d2-row">
               <SpellIcon :id="sid" :level="spellStore.get(sid)?.level" :cat="spellStore.get(sid)?.cat ?? -1" :size="26" />
               <span class="stk-text">
                 <span class="item-name" :title="spellStore.get(sid)?.desc || spellStore.nameOf(sid) || sid">{{ spellStore.nameOf(sid) || sid }}</span>
@@ -600,9 +600,9 @@ function close(): void {
 
         <!-- Наёмники: список юнитов (юнит + уровень + уникальность) -->
         <div v-else-if="obj.type === 'mercenary'" class="ro-block">
-          <div class="ro-label">Наёмники <span class="muted">({{ mercUnits.length }})</span></div>
+          <div class="d2-sec">Наёмники <span class="muted">({{ mercUnits.length }})</span></div>
           <div v-if="mercUnits.length" class="merc-list">
-            <div v-for="(u, i) in mercUnits" :key="`${u.id}#${i}`" class="merc-line">
+            <div v-for="(u, i) in mercUnits" :key="`${u.id}#${i}`" class="merc-line d2-row">
               <UnitIcon :id="u.id" :level="u.level" :subrace-id="unitStore.get(u.id)?.subraceId ?? -1" :size="26" />
               <span class="item-name" :title="unitStore.get(u.id)?.desc || unitStore.nameOf(u.id) || u.id">{{ unitStore.nameOf(u.id) || u.id }}</span>
               <el-input-number
@@ -661,7 +661,7 @@ function close(): void {
           <el-input-number :model-value="obj.priority" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
 
-        <div class="section-head">Состав отряда <span class="muted">({{ stackCount }}/6)</span></div>
+        <div class="d2-sec">Состав отряда <span class="muted">({{ stackCount }}/6)</span></div>
         <GarrisonEditor
           :garrison="stackGarrison"
           :count="stackCount"
@@ -672,7 +672,7 @@ function close(): void {
           @set-leader="(c) => stackSetLeader(obj, c)"
         />
 
-        <div class="section-head">Экипировка лидера</div>
+        <div class="d2-sec">Экипировка лидера</div>
         <div class="equip-grid">
           <div class="equip-row">
             <label>Знамя</label>
@@ -685,9 +685,9 @@ function close(): void {
         </div>
 
         <div class="ro-block">
-          <div class="ro-label">Инвентарь <span class="muted">({{ stackInventory.length }})</span></div>
+          <div class="d2-sec">Инвентарь <span class="muted">({{ stackInventory.length }})</span></div>
           <div v-if="stackInventory.length" class="items-list">
-            <div v-for="(it, i) in stackInventory" :key="`${it}#${i}`" class="item-line">
+            <div v-for="(it, i) in stackInventory" :key="`${it}#${i}`" class="item-line d2-row">
               <ItemIcon :id="it" :cat="itemStore.get(it)?.cat ?? -1" :size="24" />
               <span class="item-name" :title="itemStore.nameOf(it) || it">{{ itemStore.nameOf(it) || it }}</span>
               <span v-if="itemStore.get(it)?.gold" class="item-gold">{{ itemStore.get(it)?.gold }}</span>
@@ -725,11 +725,13 @@ function close(): void {
         </div>
         <div class="col">
           <label>Подпись на карте <span class="muted xs">(своя, не в .sg)</span></label>
+          <!-- live @input (not @change): the label on the canvas updates as you type, and a
+               mid-typing re-render can never wipe the draft -->
           <el-input
             :model-value="editStore.captions[obj.id] ?? ''"
             size="small"
             placeholder="опционально"
-            @change="(v: string) => editStore.setCaption(obj.id, v)"
+            @input="(v: string) => editStore.setCaption(obj.id, v)"
           />
         </div>
       </template>
@@ -766,7 +768,7 @@ function close(): void {
 
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
       <template v-if="obj.type === 'village' || obj.type === 'capital'">
-        <div class="section-head">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
+        <div class="d2-sec">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
         <GarrisonEditor
           :garrison="defenseGarrison"
           :count="defenseCount"
@@ -775,7 +777,7 @@ function close(): void {
           @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"
         />
         <div class="section-divider" />
-        <div class="section-head">
+        <div class="d2-sec">
           Гость (герой)
           <span class="muted">{{ visitorStack ? `(${visitorCount}/6)` : "— нет —" }}</span>
           <el-button v-if="visitorStack" class="visitor-open" size="small" text @click="openVisitor">Свойства гостя →</el-button>
@@ -805,27 +807,27 @@ function close(): void {
 </template>
 
 <style scoped>
+/* Root = right rail; .d2-rail owns the bg + single hairline seam. */
 .inspector {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--el-bg-color);
-  border-left: var(--d2-hairline);
-  padding: var(--d2-sp-3);
   overflow-y: auto;
 }
 .ins-head {
   display: flex;
   align-items: center;
   gap: var(--d2-sp-2);
+  padding: 10px 12px 6px;
 }
 .ins-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
 .ins-id {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 11px;
   color: var(--el-text-color-secondary);
   font-variant-numeric: tabular-nums;
@@ -833,16 +835,37 @@ function close(): void {
 .ins-close {
   margin-left: auto;
   flex: 0 0 auto;
+  font-size: 16px;
+  opacity: 0.7;
+}
+.ins-close:hover {
+  opacity: 1;
 }
 .ins-sub {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 11px;
   color: var(--el-text-color-secondary);
-  margin: 2px 0 var(--d2-sp-3);
+  margin: 0;
+  padding: 0 12px var(--d2-sp-2);
 }
 .ins-body {
   display: flex;
   flex-direction: column;
   gap: var(--d2-sp-2);
+  padding: 0 12px var(--d2-sp-3);
+}
+/* The flex gap already adds 8px around section labels — trim .d2-sec margins
+ * so sections net out at 16px above / 4px below the label. */
+.ins-body > .d2-sec {
+  margin: var(--d2-sp-2) 0 -4px;
+}
+.ro-block > .d2-sec {
+  margin: var(--d2-sp-2) 0 0;
+}
+/* action button living inside a micro-caps header keeps its own case */
+.d2-sec .visitor-open {
+  text-transform: none;
+  letter-spacing: normal;
 }
 .row {
   display: flex;
@@ -866,7 +889,7 @@ function close(): void {
 .reward-edit {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 4px;
+  gap: 6px;
 }
 .rw-edit {
   display: flex;
@@ -903,20 +926,14 @@ function close(): void {
   flex-direction: column;
   gap: 4px;
 }
-.section-head {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--el-text-color-regular);
-  margin-top: var(--d2-sp-2, 8px);
-}
+/* sections separate by air (.d2-sec margins), not rules */
 .section-divider {
-  border-top: var(--d2-hairline, 1px solid var(--el-border-color-lighter));
-  margin: var(--d2-sp-2, 8px) 0 0;
+  display: none;
 }
 .equip-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 4px;
+  gap: 6px;
 }
 .equip-row {
   display: flex;
@@ -957,10 +974,6 @@ function close(): void {
   display: inline-flex;
   gap: 2px;
 }
-.ro-label {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
 .reward {
   display: flex;
   flex-wrap: wrap;
@@ -983,15 +996,12 @@ function close(): void {
   max-height: 200px;
   overflow-y: auto;
 }
+/* .d2-row owns hover wash + radius */
 .item-line {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 4px;
-  border-radius: 4px;
-}
-.item-line:hover {
-  background: var(--el-fill-color-light);
+  padding: 5px 10px;
 }
 .item-name {
   flex: 1 1 auto;
@@ -1033,6 +1043,10 @@ function close(): void {
   padding: 0 3px;
   min-height: 22px;
   height: 22px;
+  opacity: 0.6;
+}
+.item-act:hover {
+  opacity: 1;
 }
 .item-add {
   margin-top: 6px;
@@ -1057,11 +1071,7 @@ function close(): void {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 4px;
-  border-radius: 4px;
-}
-.merc-line:hover {
-  background: var(--el-fill-color-light);
+  padding: 5px 10px;
 }
 .merc-line :deep(.el-checkbox) {
   flex: 0 0 auto;

@@ -81,7 +81,7 @@ const variantIndex = computed(() => {
 </script>
 
 <template>
-  <div class="decor-palette">
+  <div class="decor-palette d2-rail">
     <div class="dp-head">
       <span class="dp-title">Декорации</span>
       <el-tag size="small" type="info" effect="plain" round>{{ filtered.length }}</el-tag>
@@ -120,7 +120,7 @@ const variantIndex = computed(() => {
     </div>
 
     <!-- variant strip for the selected group (the "look" chooser) -->
-    <div v-if="selectedGroup" class="dp-variants">
+    <div v-if="selectedGroup" class="dp-variants d2-card">
       <div class="dp-variants-head">
         <span class="dp-vlabel">{{ selectedGroup.label }}</span>
         <span class="dp-vcount">вид {{ variantIndex }}/{{ selectedGroup.variants.length }}</span>
@@ -175,7 +175,7 @@ const variantIndex = computed(() => {
 
       <!-- similar (same shape + footprint) -->
       <div v-if="similar.length" class="dp-similar">
-        <div class="dp-similar-head">Похожие</div>
+        <div class="d2-sec dp-similar-head">Похожие</div>
         <div class="dp-cards">
           <button
             v-for="g in similar"
@@ -207,19 +207,18 @@ const variantIndex = computed(() => {
 </template>
 
 <style scoped>
+/* Root = right rail; .d2-rail owns the bg + single hairline seam. */
 .decor-palette {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--el-bg-color);
-  border-left: 1px solid var(--el-border-color-light);
   font-size: 12px;
 }
 .dp-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px 6px;
+  padding: 10px 12px 6px;
 }
 .dp-title {
   font-weight: 600;
@@ -227,7 +226,7 @@ const variantIndex = computed(() => {
   color: var(--el-text-color-primary);
 }
 .dp-search {
-  padding: 0 10px;
+  padding: 0 12px;
 }
 .dp-search-icon {
   font-size: 14px;
@@ -237,38 +236,37 @@ const variantIndex = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 8px 10px 4px;
+  padding: 8px 12px 4px;
 }
+/* fills, not frames; active = the restrained primary wash */
 .dp-chip {
-  padding: 3px 9px;
+  padding: 3px 10px;
   font-size: 11px;
-  border-radius: 999px;
-  border: 1px solid var(--el-border-color);
+  border-radius: var(--d2-radius-pill);
+  border: none;
   background: var(--el-fill-color-light);
   color: var(--el-text-color-regular);
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 .dp-chip:hover {
-  border-color: var(--el-color-primary-light-5);
+  background: var(--el-fill-color);
 }
 .dp-chip.on {
-  background: var(--el-color-primary);
-  border-color: var(--el-color-primary);
-  color: #fff;
+  background: var(--d2-active-bg);
+  color: var(--d2-active-fg);
 }
 .dp-filters {
   display: flex;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 6px 12px;
 }
 .dp-filter {
   flex: 1;
 }
+/* .d2-card owns fill + radius + padding — the strip floats as a soft card */
 .dp-variants {
-  padding: 6px 10px;
-  border-top: 1px solid var(--el-border-color-lighter);
-  background: var(--el-fill-color-lighter);
+  margin: 6px 12px 2px;
 }
 .dp-variants-head {
   display: flex;
@@ -290,6 +288,10 @@ const variantIndex = computed(() => {
 }
 .dp-roll {
   flex: 0 0 auto;
+  opacity: 0.6;
+}
+.dp-roll:hover {
+  opacity: 1;
 }
 .dp-vstrip {
   max-width: 100%;
@@ -313,19 +315,18 @@ const variantIndex = computed(() => {
 }
 .dp-vcell.sel {
   border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 2px var(--el-color-primary-light-7);
 }
 .dp-grid {
   flex: 1;
   min-height: 0;
-  border-top: 1px solid var(--el-border-color-lighter);
 }
 .dp-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, 80px);
   gap: 6px;
-  padding: 8px;
+  padding: 8px 12px;
 }
+/* soft card: fill only, no frame, no lift/shadow */
 .dp-card {
   display: flex;
   flex-direction: column;
@@ -334,21 +335,18 @@ const variantIndex = computed(() => {
   width: 80px;
   padding: 5px 3px;
   background: var(--el-fill-color-light);
-  border: 1px solid transparent;
-  border-radius: 7px;
+  border: none;
+  border-radius: var(--d2-radius);
   cursor: pointer;
   overflow: hidden;
-  transition: transform 0.1s ease, border-color 0.1s ease, box-shadow 0.1s ease;
+  transition: background 0.12s ease;
 }
 .dp-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--el-border-color);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+  background: var(--el-fill-color);
 }
 .dp-card.sel {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-  box-shadow: 0 0 0 2px var(--el-color-primary-light-7);
+  background: var(--d2-active-bg);
+  box-shadow: inset 0 0 0 1px var(--el-color-primary-light-5);
 }
 .dp-card.sm {
   width: 64px;
@@ -384,14 +382,12 @@ const variantIndex = computed(() => {
 }
 .dp-similar {
   padding: 0 0 8px;
-  border-top: 1px dashed var(--el-border-color-lighter);
   margin-top: 4px;
 }
+/* .d2-sec owns the micro-caps look; just align it with the card grid */
 .dp-similar-head {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
-  padding: 6px 8px 0;
+  padding: 0 12px;
+  margin-bottom: 0;
 }
 .dp-empty {
   padding: 16px;
@@ -401,8 +397,7 @@ const variantIndex = computed(() => {
 .dp-sel {
   display: flex;
   gap: 8px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--el-border-color-light);
+  padding: 8px 12px;
   background: var(--el-fill-color-lighter);
 }
 .dp-sel-info {
@@ -421,7 +416,7 @@ const variantIndex = computed(() => {
 }
 .dp-sel-hint {
   font-size: 11px;
-  color: var(--el-color-primary);
+  color: var(--el-text-color-secondary);
   margin-top: 2px;
 }
 </style>

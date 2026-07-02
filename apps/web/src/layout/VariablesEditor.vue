@@ -11,7 +11,7 @@ const store = useEventStore();
 <template>
   <div class="var-editor">
     <div class="var-head">
-      <strong>Переменные</strong>
+      <strong class="d2-sec">Переменные</strong>
       <span class="var-count">{{ store.variables.length }}</span>
       <el-button size="small" type="primary" @click="store.addVariable()">+ Переменная</el-button>
     </div>
@@ -22,7 +22,7 @@ const store = useEventStore();
           @update:model-value="store.patchVariable(v.id, { name: $event })" />
         <el-input-number :model-value="v.value" size="small" controls-position="right" style="width: 110px"
           @update:model-value="store.patchVariable(v.id, { value: ($event as number) ?? 0 })" />
-        <el-button size="small" text @click="store.removeVariable(v.id)">🗑</el-button>
+        <el-button size="small" text class="icon-btn" @click="store.removeVariable(v.id)">🗑</el-button>
       </div>
       <el-empty v-if="!store.variables.length" description="Нет переменных" :image-size="60" />
     </el-scrollbar>
@@ -31,11 +31,14 @@ const store = useEventStore();
 </template>
 
 <style scoped>
-.var-editor { display: flex; flex-direction: column; height: 100%; }
-.var-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.var-editor { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.var-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+.var-head .d2-sec { margin: 0; }
 .var-count { color: var(--el-text-color-secondary); margin-right: auto; }
-.var-list { flex: 1; padding: 0 10px; }
-.var-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.var-list { flex: 1; padding: 0 12px; }
+.var-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
 .var-id { color: var(--el-text-color-secondary); width: 34px; font-family: monospace; font-size: 11px; }
-.var-hint { color: var(--el-text-color-secondary); font-size: 11px; padding: 8px 10px; margin: 0; }
+.var-hint { color: var(--el-text-color-secondary); font-size: 11px; padding: 8px 12px; margin: 0; }
+.icon-btn { opacity: 0.6; transition: opacity 0.12s; }
+.icon-btn:hover { opacity: 1; }
 </style>

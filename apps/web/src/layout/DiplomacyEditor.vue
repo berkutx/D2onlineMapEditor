@@ -50,7 +50,7 @@ function set(p: Pair, relation: number): void {
 
 <template>
   <div class="dp">
-    <div class="dp-head"><strong>Дипломатия</strong><span class="dp-sub">{{ players.length }} игрок(ов)</span></div>
+    <div class="dp-head"><strong class="d2-sec">Дипломатия</strong><span class="dp-sub">{{ players.length }} игрок(ов)</span></div>
     <div class="dp-body">
       <el-empty v-if="pairs.length === 0" description="Нужно ≥ 2 игроков" :image-size="60" />
       <div v-for="p in pairs" :key="p.race1 + '-' + p.race2" class="dp-row">
@@ -69,13 +69,13 @@ function set(p: Pair, relation: number): void {
 </template>
 
 <style scoped>
-.dp { display: flex; flex-direction: column; height: 100%; }
-.dp-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px; }
-.dp-head strong { font-weight: 600; }
+.dp { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.dp-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px 6px; }
+.dp-head .d2-sec { margin: 0; }
 .dp-sub { color: var(--el-text-color-secondary); font-size: 11px; }
-.dp-body { flex: 1; overflow-y: auto; padding: 0 10px; }
-.dp-row { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+.dp-body { flex: 1; overflow-y: auto; padding: 0 12px; }
+.dp-row { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
 .dp-pair { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .dp-vs { color: var(--el-text-color-secondary); margin: 0 3px; }
-.dp-hint { color: var(--el-text-color-secondary); font-size: 11px; padding: 8px 10px; margin: 0; }
+.dp-hint { color: var(--el-text-color-secondary); font-size: 11px; padding: 8px 12px; margin: 0; }
 </style>

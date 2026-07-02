@@ -37,13 +37,13 @@ const rows = computed(() =>
 </script>
 
 <template>
-  <div class="object-panel">
+  <div class="object-panel d2-rail d2-rail--left">
     <div class="panel-header">Objects</div>
     <div v-if="!currentMap" class="panel-empty">No map loaded</div>
     <template v-else>
       <el-scrollbar class="panel-scroll">
         <ul class="count-list">
-          <li v-for="row in rows" :key="row.type" class="count-row">
+          <li v-for="row in rows" :key="row.type" class="count-row d2-row">
             <span class="count-label">{{ row.label }}</span>
             <el-tag size="small" type="info" effect="plain">{{ row.count }}</el-tag>
           </li>
@@ -51,48 +51,45 @@ const rows = computed(() =>
       </el-scrollbar>
       <div class="panel-total">
         <span>Total</span>
-        <b>{{ totalObjects }}</b>
+        <b class="d2-num">{{ totalObjects }}</b>
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
+/* Root = left rail; .d2-rail/.d2-rail--left own the bg + single hairline seam. */
 .object-panel {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--el-bg-color);
-  border-right: 1px solid var(--el-border-color-light);
+  font-size: 12px;
 }
 .panel-header {
-  padding: 10px 12px;
+  padding: 10px 12px 6px;
   font-weight: 600;
   font-size: 13px;
-  border-bottom: 1px solid var(--el-border-color-light);
 }
 .panel-empty {
   padding: 16px 12px;
   color: var(--el-text-color-secondary);
-  font-size: 13px;
+  font-size: 12px;
 }
 .panel-scroll {
   flex: 1;
 }
 .count-list {
   margin: 0;
-  padding: 4px 0;
+  padding: 4px 2px;
   list-style: none;
 }
+/* .d2-row owns hover wash + radius */
 .count-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 12px;
-  font-size: 13px;
-}
-.count-row:hover {
-  background: var(--el-fill-color-light);
+  padding: 5px 10px;
+  font-size: 12px;
 }
 .count-label {
   color: var(--el-text-color-regular);
@@ -102,10 +99,11 @@ const rows = computed(() =>
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-top: 1px solid var(--el-border-color-light);
-  font-size: 13px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .panel-total b {
   font-weight: 600;
+  color: var(--el-text-color-primary);
 }
 </style>

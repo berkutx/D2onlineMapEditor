@@ -43,7 +43,7 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
 <template>
   <div class="tpl-editor">
     <div class="tpl-head">
-      <strong>Шаблоны отрядов</strong>
+      <strong class="d2-sec">Шаблоны отрядов</strong>
       <span class="tpl-count">{{ store.templates.length }}</span>
       <el-button size="small" type="primary" @click="store.createTemplate()">+ Шаблон</el-button>
     </div>
@@ -52,15 +52,15 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
       <div
         v-for="t in store.templates"
         :key="t.id"
-        class="tpl-row"
+        class="tpl-row d2-row"
         :class="{ active: t.id === store.selectedTemplateId }"
         @click="store.selectTemplate(t.id)"
       >
         <span class="tpl-name">{{ t.name || "(без имени)" }}</span>
         <span class="tpl-meta">{{ unitCount(t) }}⚔ <code>{{ t.id }}</code></span>
         <span class="tpl-actions">
-          <el-tooltip content="Клонировать"><el-button size="small" text @click.stop="store.cloneTemplate(t)">⧉</el-button></el-tooltip>
-          <el-tooltip content="Удалить"><el-button size="small" text @click.stop="store.removeTemplate(t.id)">🗑</el-button></el-tooltip>
+          <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.cloneTemplate(t)">⧉</el-button></el-tooltip>
+          <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.removeTemplate(t.id)">🗑</el-button></el-tooltip>
         </span>
       </div>
       <el-empty v-if="!store.templates.length" description="Нет шаблонов" :image-size="60" />
@@ -84,7 +84,7 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
           style="width: 92px" @update:model-value="patch({ leaderLevel: ($event as number) ?? 1 })" />
       </div>
       <div class="tpl-units">
-        <div class="tpl-units-lbl">Состав (6 ячеек):</div>
+        <div class="tpl-units-lbl d2-sec">Состав (6 ячеек):</div>
         <div v-for="i in 6" :key="i" class="tpl-cell">
           <span class="tpl-cell-n">{{ i - 1 }}</span>
           <UnitPicker :model-value="cell(i - 1)?.unit ?? null" nullable
@@ -100,21 +100,21 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
 </template>
 
 <style scoped>
-.tpl-editor { display: flex; flex-direction: column; height: 100%; }
-.tpl-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.tpl-editor { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
+.tpl-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+.tpl-head .d2-sec { margin: 0; }
 .tpl-count { color: var(--el-text-color-secondary); margin-right: auto; }
-.tpl-list { max-height: 38%; border-bottom: 1px solid var(--el-border-color-lighter); }
-.tpl-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; border-bottom: 1px solid var(--el-border-color-lighter); }
-.tpl-row:hover { background: var(--el-fill-color-light); }
-.tpl-row.active { background: var(--el-color-primary-light-9); box-shadow: inset 3px 0 0 var(--el-color-primary); }
+.tpl-list { max-height: 38%; padding: 0 4px 8px; }
+.tpl-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; }
 .tpl-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tpl-meta { color: var(--el-text-color-secondary); margin-left: auto; font-size: 11px; }
-.tpl-form { flex: 1; padding: 8px 10px; }
+.tpl-form { flex: 1; padding: 8px 12px; }
 .tpl-props { margin: 8px 0; }
 .tpl-props label, .tpl-leader label { color: var(--el-text-color-secondary); margin-right: 6px; }
 .tpl-leader { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
-.tpl-units-lbl { color: var(--el-text-color-secondary); margin: 8px 0 4px; }
-.tpl-cell { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
-.tpl-cell-n { width: 16px; color: var(--el-text-color-secondary); font-family: monospace; }
-.tpl-hint { color: var(--el-text-color-secondary); font-size: 11px; margin-top: 10px; }
+.tpl-cell { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.tpl-cell-n { width: 16px; color: var(--el-text-color-secondary); font-family: monospace; font-size: 11px; }
+.tpl-hint { color: var(--el-text-color-secondary); font-size: 11px; margin-top: 12px; }
+.icon-btn { opacity: 0.6; transition: opacity 0.12s; }
+.icon-btn:hover { opacity: 1; }
 </style>

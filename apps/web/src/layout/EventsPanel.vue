@@ -89,11 +89,11 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 </script>
 
 <template>
-  <div class="ev-panel">
+  <div class="ev-panel d2-rail">
     <div class="ev-head">
       <strong>Сценарий</strong>
       <span class="ev-count" style="margin-right: auto" />
-      <el-button size="small" text @click="view.toggleEventPanel()">✕</el-button>
+      <el-button size="small" text class="icon-btn" @click="view.toggleEventPanel()">✕</el-button>
     </div>
 
     <el-tabs v-model="tab" class="ev-tabs">
@@ -131,7 +131,7 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
       <div
         v-for="e in store.filtered"
         :key="e.id"
-        class="ev-row"
+        class="ev-row d2-row"
         :class="{ active: e.id === store.selectedId }"
         @click="store.select(e.id)"
       >
@@ -144,8 +144,8 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
           <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
           <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
           <span class="ev-ce">{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
-          <el-tooltip content="Клонировать"><el-button size="small" text @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
-          <el-tooltip content="Удалить"><el-button size="small" text @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
+          <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
+          <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
         </div>
       </div>
       <el-empty v-if="!store.filtered.length" description="Нет событий" :image-size="60" />
@@ -182,16 +182,16 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 
       <!-- conditions -->
       <div class="ev-sec-head">
-        <span>Условия ({{ sel.conditions.length }})</span>
+        <span class="d2-sec">Условия ({{ sel.conditions.length }})</span>
         <el-select placeholder="+ условие" size="small" style="width: 190px" :model-value="''"
           @update:model-value="addCondition($event)">
           <el-option v-for="s in CONDITION_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
         </el-select>
       </div>
-      <div v-for="(c, i) in sel.conditions" :key="'c' + i" class="ev-item">
+      <div v-for="(c, i) in sel.conditions" :key="'c' + i" class="ev-item d2-card">
         <div class="ev-item-head">
           <span>{{ condLabel(c) }}</span>
-          <el-button size="small" text @click="removeCondition(i)">🗑</el-button>
+          <el-button size="small" text class="icon-btn" @click="removeCondition(i)">🗑</el-button>
         </div>
         <div v-for="f in condFields(c)" :key="f.key" class="ev-field">
           <label>{{ f.label }}</label>
@@ -202,19 +202,19 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 
       <!-- effects -->
       <div class="ev-sec-head">
-        <span>Эффекты ({{ sel.effects.length }})</span>
+        <span class="d2-sec">Эффекты ({{ sel.effects.length }})</span>
         <el-select placeholder="+ эффект" size="small" style="width: 190px" :model-value="''"
           @update:model-value="addEffect($event)">
           <el-option v-for="s in EFFECT_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
         </el-select>
       </div>
-      <div v-for="(e, i) in sel.effects" :key="'e' + i" class="ev-item">
+      <div v-for="(e, i) in sel.effects" :key="'e' + i" class="ev-item d2-card">
         <div class="ev-item-head">
           <span>{{ i + 1 }}. {{ effLabel(e) }}</span>
           <span class="ev-item-actions">
-            <el-button size="small" text :disabled="i === 0" @click="moveEffect(i, -1)">↑</el-button>
-            <el-button size="small" text :disabled="i === sel.effects.length - 1" @click="moveEffect(i, 1)">↓</el-button>
-            <el-button size="small" text @click="removeEffect(i)">🗑</el-button>
+            <el-button size="small" text class="icon-btn" :disabled="i === 0" @click="moveEffect(i, -1)">↑</el-button>
+            <el-button size="small" text class="icon-btn" :disabled="i === sel.effects.length - 1" @click="moveEffect(i, 1)">↓</el-button>
+            <el-button size="small" text class="icon-btn" @click="removeEffect(i)">🗑</el-button>
           </span>
         </div>
         <div v-for="f in effFields(e)" :key="f.key" class="ev-field">
@@ -233,56 +233,46 @@ const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--el-bg-color);
-  border-left: 1px solid var(--el-border-color);
   font-size: 12px;
 }
 .ev-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  padding: 10px 12px 6px;
+  font-size: 13px;
 }
+.ev-head strong { font-weight: 600; }
 .ev-count { color: var(--el-text-color-secondary); margin-right: auto; }
-.ev-tabs { padding: 0 8px; --el-tabs-header-height: 34px; }
+.ev-tabs { padding: 0 12px; --el-tabs-header-height: 34px; }
 .ev-tabs :deep(.el-tabs__header) { margin: 0; }
 .ev-sub { flex: 1; min-height: 0; }
-.ev-subhead { display: flex; align-items: center; gap: 8px; padding: 6px 10px 2px; }
-.ev-search { padding: 8px 10px 4px; }
-.ev-objfilter { padding: 0 10px 6px; color: var(--el-text-color-secondary); }
-.ev-list { max-height: 34%; border-bottom: 1px solid var(--el-border-color-lighter); }
-.ev-row {
-  padding: 5px 10px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-.ev-row:hover { background: var(--el-fill-color-light); }
-.ev-row.active { background: var(--el-color-primary-light-9); box-shadow: inset 3px 0 0 var(--el-color-primary); }
+.ev-subhead { display: flex; align-items: center; gap: 8px; padding: 8px 12px 2px; }
+.ev-search { padding: 8px 12px 4px; }
+.ev-objfilter { padding: 0 12px 6px; color: var(--el-text-color-secondary); }
+.ev-list { max-height: 34%; padding: 0 4px 8px; }
+.ev-row { padding: 5px 10px; cursor: pointer; }
 .ev-row-main { display: flex; justify-content: space-between; gap: 8px; }
 .ev-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-id { color: var(--el-text-color-secondary); font-family: monospace; font-size: 11px; }
 .ev-badges { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
 .ev-ce { color: var(--el-text-color-secondary); margin-left: auto; }
-.ev-editor { flex: 1; padding: 8px 10px; }
-.ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 8px 0; align-items: center; }
+.ev-editor { flex: 1; padding: 8px 12px; }
+.ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; align-items: center; }
 .ev-props label { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-regular); }
-.ev-races { margin-bottom: 8px; }
-.ev-races-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 3px 0; }
+.ev-races { margin-bottom: 12px; }
+.ev-races-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
 .ev-races-lbl { color: var(--el-text-color-secondary); width: 110px; }
 .ev-sec-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin: 12px 0 6px; font-weight: 600; border-top: 1px solid var(--el-border-color-lighter); padding-top: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin: var(--d2-sp-4) 0 6px;
 }
-.ev-item {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin-bottom: 6px;
-  background: var(--el-fill-color-lighter);
-}
+.ev-sec-head .d2-sec { margin: 0; }
+.ev-item { margin-bottom: 8px; }
 .ev-item-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 4px; }
 .ev-item-actions { display: inline-flex; }
-.ev-field { display: grid; grid-template-columns: 96px 1fr; gap: 6px; align-items: center; margin: 3px 0; }
+.ev-field { display: grid; grid-template-columns: 96px 1fr; gap: 6px; align-items: center; margin: 6px 0; }
 .ev-field > label { color: var(--el-text-color-secondary); }
+.icon-btn { opacity: 0.6; transition: opacity 0.12s; }
+.icon-btn:hover { opacity: 1; }
 </style>

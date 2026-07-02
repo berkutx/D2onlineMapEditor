@@ -96,8 +96,8 @@ const hint = computed(() => {
   flex: 1;
 }
 .status-bar :deep(.el-divider--vertical) {
-  height: 14px;
-  margin: 0 2px;
-  border-color: var(--el-border-color);
+  height: 12px;
+  margin: 0 var(--d2-sp-1);
+  border-color: var(--el-border-color-lighter);
 }
 </style>

@@ -78,6 +78,12 @@ function onKey(e: KeyboardEvent): void {
     e.preventDefault();
     return;
   }
+  // Escape clears the selection (closes the object inspector rail).
+  if (e.key === "Escape" && toolStore.selectedId) {
+    toolStore.setSelectedId(null);
+    e.preventDefault();
+    return;
+  }
   // move tool, carrying a re-rollable object: R = random look, [ ] , . = cycle look.
   if (toolStore.tool === "move" && toolStore.moveId) {
     const obj = editStore.liveDoc?.objects.find((o) => o.id === toolStore.moveId);

@@ -35,7 +35,7 @@ const layers = [
 </script>
 
 <template>
-  <div class="dock">
+  <div class="dock d2-rail d2-rail--left">
     <el-popover :width="210" placement="right-start" trigger="click" popper-class="dock-pop">
       <template #reference>
         <button class="d2-tool-btn" title="Слои вида">
@@ -93,6 +93,7 @@ const layers = [
 </template>
 
 <style scoped>
+/* bg + seam come from the shared .d2-rail / .d2-rail--left primitive */
 .dock {
   width: var(--d2-dock-w);
   height: 100%;
@@ -101,8 +102,6 @@ const layers = [
   align-items: center;
   gap: 2px;
   padding: var(--d2-sp-2) 0;
-  background: var(--el-bg-color-page);
-  border-right: var(--d2-hairline);
 }
 .d2-tool-btn {
   width: var(--d2-hit);
@@ -154,10 +153,12 @@ const layers = [
   padding: 6px;
   border-radius: var(--d2-radius);
 }
+/* micro-caps label, matching .d2-sec (local margins: popover, not a rail) */
 .dock-pop .pop-head {
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.08em;
   color: var(--el-text-color-secondary);
   padding: 2px 8px 6px;
 }
