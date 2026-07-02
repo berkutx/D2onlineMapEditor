@@ -98,6 +98,86 @@ export function itemFrame(version: string, second: number, templateId: string): 
   });
 }
 
+/** A MidBag block frame (code 0x0e, short BG) — a treasure chest/bag. Field order
+ *  byte-verified on Riders.sg (incl. the empty-list block S143BG000a and the 17-item
+ *  S143BG0000): BAG_ID(self) · POS_X · POS_Y · IMAGE · AIPRIORITY · <ownId> item count ·
+ *  N×ITEM_ID. The ITEM_ID entries are MidItem INSTANCE refs — the caller mints the
+ *  instances (itemFrame) and appends them alongside this frame. */
+export function bagFrame(
+  version: string,
+  second: number,
+  o: { posX: number; posY: number; image: number; priority?: number; itemIds?: readonly string[] },
+): Uint8Array {
+  return emitBlock(version, "MidBag", 0x0e, "BG", second, (w, full) => {
+    w.refField("BAG_ID", full);
+    w.defaultInt("POS_X", o.posX);
+    w.defaultInt("POS_Y", o.posY);
+    w.defaultInt("IMAGE", o.image);
+    w.defaultInt("AIPRIORITY", o.priority ?? 0);
+    const items = o.itemIds ?? [];
+    w.defaultInt(full, items.length); // item-list count (tag = the bag's own id)
+    for (const id of items) w.refField("ITEM_ID", id);
+  });
+}
+
+/** A MidVillage block frame (code 0x12, short FT — the fort id prefix SHARED with Capital).
+ *  Field order byte-verified on Riders.sg (all MidVillage blocks agree, incl. the empty-
+ *  garrison/empty-item-list S143FT0005): CITY_ID(self) · NAME_TXT · DESC_TXT · OWNER ·
+ *  SUBRACE · STACK · POS_X · POS_Y · GROUP_ID(self) · UNIT_0..5 · POS_0..5 · <ownId> item
+ *  count + N×ITEM_ID · AIPRIORITY · PROTECT_B(ref) · REGEN_B · MORALE · GROWTH_T · SIZE ·
+ *  P_O_UN/P_O_HE/P_O_HU/P_O_DW/P_O_EL (bools) · RIOT_T.
+ *  Garrison encoding matches the fort garrison writer: `unitSlots` = MidUnit instance refs
+ *  packed in insertion order, `posOfCell[i]` = the UNIT_ slot of FORMATION CELL i (-1 =
+ *  empty) — cell i = UNIT_[POS_i]. */
+export function villageFrame(
+  version: string,
+  second: number,
+  o: {
+    posX: number;
+    posY: number;
+    name?: string;
+    desc?: string;
+    owner?: string;
+    subRace?: string;
+    stackRef?: string;
+    tier?: number;
+    priority?: number;
+    regen?: number;
+    morale?: number;
+    growth?: number;
+    riot?: number;
+    unitSlots?: readonly string[];
+    posOfCell?: readonly number[];
+    itemIds?: readonly string[];
+  },
+): Uint8Array {
+  const NIL = "G000000000";
+  return emitBlock(version, "MidVillage", 0x12, "FT", second, (w, full) => {
+    w.refField("CITY_ID", full);
+    w.stringField("NAME_TXT", o.name ?? "");
+    w.stringField("DESC_TXT", o.desc ?? "");
+    w.refField("OWNER", o.owner || NIL);
+    w.refField("SUBRACE", o.subRace || NIL);
+    w.refField("STACK", o.stackRef || NIL);
+    w.defaultInt("POS_X", o.posX);
+    w.defaultInt("POS_Y", o.posY);
+    w.refField("GROUP_ID", full);
+    for (let i = 0; i < 6; i++) w.refField(`UNIT_${i}`, o.unitSlots?.[i] ?? NIL);
+    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, o.posOfCell?.[i] ?? -1);
+    const items = o.itemIds ?? [];
+    w.defaultInt(full, items.length); // captured-loot item list (tag = the village's own id)
+    for (const id of items) w.refField("ITEM_ID", id);
+    w.defaultInt("AIPRIORITY", o.priority ?? 0);
+    w.refField("PROTECT_B", NIL);
+    w.defaultInt("REGEN_B", o.regen ?? 0);
+    w.defaultInt("MORALE", o.morale ?? 0);
+    w.defaultInt("GROWTH_T", o.growth ?? 0);
+    w.defaultInt("SIZE", o.tier ?? 1);
+    for (const tag of ["P_O_UN", "P_O_HE", "P_O_HU", "P_O_DW", "P_O_EL"]) w.bool(tag, false);
+    w.defaultInt("RIOT_T", o.riot ?? 0);
+  });
+}
+
 /** A MidUnit block frame (code 0x0f, short UN): a unit INSTANCE referenced by a fort garrison
  *  or a stack. Minimal body verified on real bytes: UNIT_ID(self) + TYPE(global Gunit id) +
  *  LEVEL + MODIF count(0, tag=self id) + CREATION(0) + NAME_TXT("") + TRANSF/DYNLEVEL(false) +
@@ -124,50 +204,77 @@ export function unitFrame(
   });
 }
 
-/** A MidStack block frame (code 0x10, short KC) — a fresh EMPTY hero stack, used to add a
- *  city/capital VISITOR. Body matches D2Stack::data() field order exactly; empty refs are the
- *  "G000000000" sentinel (verified on real bytes — the struct's "000000" QString defaults
- *  normalize to it on disk). Formation/leader/items/equip start empty; the editor fills them
- *  afterwards via the normal garrison/equip/inventory ops on this stack's id. */
+/** A MidStack block frame (code 0x10, short KC) — a hero stack. Body matches D2Stack::data()
+ *  field order exactly; empty refs are the "G000000000" sentinel (verified on real bytes —
+ *  the struct's "000000" QString defaults normalize to it on disk). With only the required
+ *  fields it emits a fresh EMPTY stack (the city-VISITOR case); the optional formation/
+ *  inventory/equip/scalar fields emit a REAL army in one frame:
+ *   - `unitSlots` = MidUnit instance refs in insertion order; `posOfCell[i]` = the UNIT_
+ *     slot of FORMATION CELL i (-1 = empty) — cell i = UNIT_[POS_i] (the garrison encoding);
+ *   - `leaderId` = the leader cell's MidUnit instance ref (LEADER_ID);
+ *   - `itemIds`  = carried-inventory MidItem instance refs (minted by the caller). */
 export function stackFrame(
   version: string,
   second: number,
-  o: { owner: string; inside: string; subRace?: string; posX: number; posY: number },
+  o: {
+    owner: string;
+    inside: string;
+    subRace?: string;
+    posX: number;
+    posY: number;
+    unitSlots?: readonly string[];
+    posOfCell?: readonly number[];
+    leaderId?: string;
+    itemIds?: readonly string[];
+    morale?: number;
+    move?: number;
+    facing?: number;
+    banner?: string;
+    equip?: {
+      tome?: string; battle1?: string; battle2?: string;
+      artifact1?: string; artifact2?: string; boots?: string;
+    };
+    order?: number;
+    priority?: number;
+    creatLvl?: number;
+  },
 ): Uint8Array {
   const NIL = "G000000000";
   return emitBlock(version, "MidStack", 0x10, "KC", second, (w, full) => {
     w.refField("GROUP_ID", full);
-    for (let i = 0; i < 6; i++) w.refField(`UNIT_${i}`, NIL);
-    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, -1);
-    w.defaultInt(full, 0); // carried-items count (tag = own id) = 0
+    for (let i = 0; i < 6; i++) w.refField(`UNIT_${i}`, o.unitSlots?.[i] ?? NIL);
+    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, o.posOfCell?.[i] ?? -1);
+    const items = o.itemIds ?? [];
+    w.defaultInt(full, items.length); // carried-items count (tag = own id)
+    for (const id of items) w.refField("ITEM_ID", id);
     w.refField("STACK_ID", full);
     w.refField("SRCTMPL_ID", NIL);
-    w.refField("LEADER_ID", NIL);
+    w.refField("LEADER_ID", o.leaderId ?? NIL);
     w.bool("LEADR_ALIV", true);
     w.defaultInt("POS_X", o.posX);
     w.defaultInt("POS_Y", o.posY);
-    w.defaultInt("MORALE", 0);
-    w.defaultInt("MOVE", 20);
-    w.defaultInt("FACING", 0);
-    w.refField("BANNER", NIL);
-    w.refField("TOME", NIL);
-    w.refField("BATTLE1", NIL);
-    w.refField("BATTLE2", NIL);
-    w.refField("ARTIFACT1", NIL);
-    w.refField("ARTIFACT2", NIL);
-    w.refField("BOOTS", NIL);
+    w.defaultInt("MORALE", o.morale ?? 0);
+    w.defaultInt("MOVE", o.move ?? 20);
+    w.defaultInt("FACING", o.facing ?? 0);
+    w.refField("BANNER", o.banner || NIL);
+    w.refField("TOME", o.equip?.tome || NIL);
+    w.refField("BATTLE1", o.equip?.battle1 || NIL);
+    w.refField("BATTLE2", o.equip?.battle2 || NIL);
+    w.refField("ARTIFACT1", o.equip?.artifact1 || NIL);
+    w.refField("ARTIFACT2", o.equip?.artifact2 || NIL);
+    w.refField("BOOTS", o.equip?.boots || NIL);
     w.refField("OWNER", o.owner);
     w.refField("INSIDE", o.inside);
     w.refField("SUBRACE", o.subRace || NIL);
     w.bool("INVISIBLE", false);
     w.bool("AI_IGNORE", false);
     w.defaultInt("UPGCOUNT", 0);
-    w.defaultInt("ORDER", 1); // Normal
+    w.defaultInt("ORDER", o.order ?? 1); // 1 = Normal
     w.refField("ORDER_TARG", NIL);
     w.defaultInt("AIORDER", 2); // Stand
     w.refField("AIORDERTAR", NIL);
-    w.defaultInt("AIPRIORITY", 3);
-    w.defaultInt("CREAT_LVL", 1);
+    w.defaultInt("AIPRIORITY", o.priority ?? 3);
+    w.defaultInt("CREAT_LVL", o.creatLvl ?? 1);
     w.defaultInt("NBBATTLE", 0);
   });
 }
@@ -318,41 +425,98 @@ function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from: number): n
 }
 
 /**
- * Remove every MidgardPlan entry whose ELEMENT references one of `ids`, decrementing the
- * plan's entry count. Verified layout (Riders bytes): after `BEGOBJECT\0` the plan block is
- * `<blockId(10)> int32 mapSize`, `<blockId(10)> int32 entryCount`, then entryCount fixed
- * 40-byte entries `POS_X int32 · POS_Y int32 · ELEMENT [0B 00 00 00] <id(10)> NUL`.
- * Walks with tag validation and FAILS LOUD on any layout surprise. No plan block = no-op.
+ * Locate the MidgardPlan entry table. Verified layout (Riders bytes): after `BEGOBJECT\0`
+ * the plan block is `<blockId(10)> int32 mapSize`, `<blockId(10)> int32 entryCount`, then
+ * entryCount fixed 40-byte entries `POS_X int32 · POS_Y int32 · ELEMENT [0B 00 00 00]
+ * <id(10)> NUL`. Walks with tag validation and FAILS LOUD on any layout surprise.
+ * Returns null when the map has no plan block.
  */
-function purgePlanEntries(bytes: Uint8Array, ids: ReadonlySet<string>): Uint8Array {
-  const buf = new ByteBuffer(bytes);
+function locatePlanEntries(
+  buf: ByteBuffer,
+): { countAt: number; count: number; entries: { start: number; end: number; ref: string }[] } | null {
   const avc = buf.indexOf(".?AVCMidgardPlan@@");
-  if (avc < 0) return bytes;
+  if (avc < 0) return null;
   const beg = buf.indexOf("BEGOBJECT", avc);
-  if (beg < 0) throw new Error("purgePlanEntries: BEGOBJECT not found after MidgardPlan decl");
+  if (beg < 0) throw new Error("MidgardPlan: BEGOBJECT not found after decl");
   let p = beg + 9;
-  if (bytes[p] === 0) p++;
+  if (buf.bytes[p] === 0) p++;
   const tag = buf.asciiSlice(p, p + 10); // the block's own compound id doubles as the field tag
   p += 10 + 4; // + int32 map size
   if (buf.asciiSlice(p, p + 10) !== tag) {
-    throw new Error("purgePlanEntries: expected the count field (blockId tag) after the size");
+    throw new Error("MidgardPlan: expected the count field (blockId tag) after the size");
   }
   const countAt = p + 10;
   const count = buf.readInt32LE(countAt);
   let q = countAt + 4;
-  const ranges: { start: number; end: number }[] = [];
+  const entries: { start: number; end: number; ref: string }[] = [];
   for (let i = 0; i < count; i++) {
     const start = q;
-    if (buf.asciiSlice(q, q + 5) !== "POS_X") throw new Error(`purgePlanEntries: entry ${i}: POS_X expected at ${q}`);
+    if (buf.asciiSlice(q, q + 5) !== "POS_X") throw new Error(`MidgardPlan: entry ${i}: POS_X expected at ${q}`);
     q += 5 + 4;
-    if (buf.asciiSlice(q, q + 5) !== "POS_Y") throw new Error(`purgePlanEntries: entry ${i}: POS_Y expected at ${q}`);
+    if (buf.asciiSlice(q, q + 5) !== "POS_Y") throw new Error(`MidgardPlan: entry ${i}: POS_Y expected at ${q}`);
     q += 5 + 4;
-    if (buf.asciiSlice(q, q + 7) !== "ELEMENT") throw new Error(`purgePlanEntries: entry ${i}: ELEMENT expected at ${q}`);
+    if (buf.asciiSlice(q, q + 7) !== "ELEMENT") throw new Error(`MidgardPlan: entry ${i}: ELEMENT expected at ${q}`);
     q += 7 + 4;
     const ref = buf.asciiSlice(q, q + 10);
     q += 10 + 1; // + NUL
-    if (ids.has(ref)) ranges.push({ start, end: q });
+    entries.push({ start, end: q, ref });
   }
+  return { countAt, count, entries };
+}
+
+/** One MidgardPlan entry to add: an occupied cell + the occupying object's compound id. */
+export interface PlanEntry {
+  x: number;
+  y: number;
+  /** the placed object's full 10-char compound id (the ELEMENT ref). */
+  element: string;
+}
+
+/**
+ * ADD MidgardPlan entries — the placement-plan counterpart of appendBlocks: one 40-byte
+ * entry per occupied footprint cell, inserted after the existing entries, bumping the
+ * plan's entry count. Same fail-loud locator/walk as the delete-side purge. A map without
+ * a plan block is left unchanged (mirrors purge; the reference editor rebuilds the whole
+ * plan from footprints on save — we patch it in place).
+ */
+export function addPlanEntries(bytes: Uint8Array, entries: readonly PlanEntry[]): Uint8Array {
+  if (entries.length === 0) return bytes;
+  const buf = new ByteBuffer(bytes);
+  const plan = locatePlanEntries(buf);
+  if (!plan) return bytes;
+  const w = new ByteWriter();
+  for (const e of entries) {
+    w.defaultInt("POS_X", e.x);
+    w.defaultInt("POS_Y", e.y);
+    w.refField("ELEMENT", e.element);
+  }
+  const region = w.toBytes();
+  const insertAt = plan.entries.length
+    ? plan.entries[plan.entries.length - 1]!.end
+    : plan.countAt + 4;
+  const out = new Uint8Array(bytes.length + region.length);
+  out.set(bytes.subarray(0, insertAt), 0);
+  out.set(region, insertAt);
+  out.set(bytes.subarray(insertAt), insertAt + region.length);
+  // countAt precedes every entry, so the insert above never moved it
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(
+    plan.countAt,
+    plan.count + entries.length,
+    true,
+  );
+  return out;
+}
+
+/**
+ * Remove every MidgardPlan entry whose ELEMENT references one of `ids`, decrementing the
+ * plan's entry count. No plan block = no-op.
+ */
+function purgePlanEntries(bytes: Uint8Array, ids: ReadonlySet<string>): Uint8Array {
+  const buf = new ByteBuffer(bytes);
+  const plan = locatePlanEntries(buf);
+  if (!plan) return bytes;
+  const { countAt, count } = plan;
+  const ranges: { start: number; end: number }[] = plan.entries.filter((e) => ids.has(e.ref));
   if (ranges.length === 0) return bytes;
   ranges.sort((a, b) => b.start - a.start);
   let out = bytes;

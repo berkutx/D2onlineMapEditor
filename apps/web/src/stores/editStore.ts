@@ -329,6 +329,24 @@ export const useEditStore = defineStore("edit", () => {
     project.value = { ...project.value, anchors: next };
     persist();
   }
+  /** Editor-GENERATED variable ids (counter gates etc.); persisted with the project, NOT in
+   *  the .sg beyond the variables themselves. Drives the collapsed «Автоматические» group. */
+  const autoVars = computed<number[]>(() => project.value?.autoVars ?? []);
+  function markAutoVar(id: number): void {
+    if (!project.value) return;
+    const cur = project.value.autoVars ?? [];
+    if (cur.includes(id)) return;
+    project.value = { ...project.value, autoVars: [...cur, id] };
+    persist(); // editor-only metadata: persist without touching the op journal
+  }
+  function unmarkAutoVar(id: number): void {
+    if (!project.value) return;
+    const cur = project.value.autoVars ?? [];
+    if (!cur.includes(id)) return;
+    project.value = { ...project.value, autoVars: cur.filter((x) => x !== id) };
+    persist();
+  }
+
   /** The move-group for `id`: itself + every TRANSITIVE anchored child (parents stay put). */
   function anchorGroup(id: string): string[] {
     const a = anchors.value;
@@ -474,6 +492,9 @@ export const useEditStore = defineStore("edit", () => {
     setAnchor,
     clearAnchor,
     anchorGroup,
+    autoVars,
+    markAutoVar,
+    unmarkAutoVar,
     validate,
     generate,
     copilot,

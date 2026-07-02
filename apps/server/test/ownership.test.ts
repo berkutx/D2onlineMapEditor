@@ -135,7 +135,8 @@ describe("GET/PUT /api/maps/:id/project (server-saved EditorProject)", () => {
       headers: { "x-client-id": OWNER },
     });
     expect(got.statusCode).toBe(200);
-    expect(got.json()).toEqual(project);
+    // the server zod-normalizes on PUT: editor-only fields get their schema defaults
+    expect(got.json()).toEqual({ ...project, anchors: {}, autoVars: [] });
 
     // another visitor has no saved project for this map
     const other = await app.inject({

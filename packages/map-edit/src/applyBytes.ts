@@ -18,8 +18,11 @@ import {
   itemFrame,
   unitFrame,
   stackFrame,
+  bagFrame,
+  villageFrame,
   replaceBlock,
   deleteBlocks,
+  addPlanEntries,
   eventFrame,
   scenVariablesFrame,
   stackTemplateFrame,
@@ -32,6 +35,7 @@ import {
   type StringFieldEdit,
   type ItemListEdit,
   type QtyListEdit,
+  type PlanEntry,
 } from "@d2/sg-parser";
 import type { MapObject, MapEvent, ScenarioVariable, StackTemplate, DiplomacyEntry } from "@d2/map-schema";
 import type { ScenarioInfoPatch } from "@d2/socket-contract";
@@ -46,6 +50,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   let nextIM = 0;
   let nextUN = 0;
   let nextKC = 0;
+  let nextBG = 0;
+  let nextFT = 0;
   for (const o of raw.objects) {
     if (o.typeName === "MidRoad") {
       const m = /RA([0-9a-fA-F]{4})$/.exec(o.id);
@@ -65,7 +71,14 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     } else if (o.typeName === "MidUnit") {
       const m = /UN([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextUN = Math.max(nextUN, parseInt(m[1]!, 16) + 1);
+    } else if (o.typeName === "MidBag") {
+      const m = /BG([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) nextBG = Math.max(nextBG, parseInt(m[1]!, 16) + 1);
     }
+    // the FT prefix is SHARED by MidVillage/MidFort/Capital — seed from every FT id
+    // regardless of TypeName so a fresh village never collides with a capital/fort.
+    const mFT = /FT([0-9a-fA-F]{4})$/.exec(o.id);
+    if (mFT) nextFT = Math.max(nextFT, parseInt(mFT[1]!, 16) + 1);
   }
   const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
   const appends: (Uint8Array | null)[] = []; // null = a removed/superseded pending block
@@ -342,6 +355,15 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     }
   }
 
+  /** Mint one appended MidItem instance per global GItem template id, returning the new
+   *  instance ids (shared by chest lists, stack inventories and added-object frames). */
+  const mintItems = (templates: readonly string[] | undefined): string[] =>
+    (templates ?? []).map((template) => {
+      const second = nextIM++;
+      appends.push(itemFrame(raw.version, second, String(template)));
+      return `${raw.version}IM${hex4(second)}`;
+    });
+
   // Resolve each edited chest's FINAL item list (last write won): the list holds global
   // GItem template ids, so instantiate a fresh MidItem block per entry and point the bag's
   // ITEM_ID list at the new instances. The chest's original instances are left in place
@@ -350,12 +372,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   for (const [objId, templates] of chestItemOps) {
     const o = raw.objectById.get(objId);
     if (!o) throw new Error(`applyEditsToBytes: chest items edit for unknown object ${objId}`);
-    const instanceIds = templates.map((template) => {
-      const second = nextIM++;
-      appends.push(itemFrame(raw.version, second, template));
-      return `${raw.version}IM${hex4(second)}`;
-    });
-    listEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds });
+    listEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds: mintItems(templates) });
   }
 
   // Stack inventory: same MidItem-instance re-creation as a chest, but the list is mid-block so it
@@ -364,12 +381,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   for (const [objId, templates] of stackItemOps) {
     const o = raw.objectById.get(objId);
     if (!o) throw new Error(`applyEditsToBytes: stack inventory edit for unknown object ${objId}`);
-    const instanceIds = templates.map((template) => {
-      const second = nextIM++;
-      appends.push(itemFrame(raw.version, second, template));
-      return `${raw.version}IM${hex4(second)}`;
-    });
-    stackListEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds });
+    stackListEdits.push({ fieldsFrom: o.fieldsFrom, fieldsEnd: o.fieldsEnd, objId, instanceIds: mintItems(templates) });
   }
 
   // Resolve each edited fort's FINAL garrison (last write won): create a fresh MidUnit instance
@@ -405,35 +417,132 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     }
   }
 
-  // Emit added objects at their FINAL position (place + later moves coalesced).
+  /** Pack a formation for an ADDED fort/stack: mint one appended MidUnit instance per filled
+   *  cell and return the parallel arrays the .sg stores — unitSlots (instances in insertion
+   *  order) + posOfCell (cell i -> UNIT_ slot, -1 empty; cell i = UNIT_[POS_i]) — plus the
+   *  per-cell instance ids (for LEADER_ID resolution). Same encoding as the garrisonOps
+   *  writer above, but into a fresh frame instead of fixed-width splices. */
+  const packFormation = (
+    cells: readonly ({ unit: string; level?: number; hp?: number } | null)[] | undefined,
+  ): { unitSlots: string[]; posOfCell: number[]; instOfCell: (string | null)[] } => {
+    const unitSlots: string[] = [];
+    const posOfCell = [-1, -1, -1, -1, -1, -1];
+    const instOfCell: (string | null)[] = [null, null, null, null, null, null];
+    for (let cell = 0; cell < 6; cell++) {
+      const gu = cells?.[cell];
+      if (!gu || !gu.unit) continue;
+      const second = nextUN++;
+      const inst = `${raw.version}UN${hex4(second)}`;
+      appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0));
+      posOfCell[cell] = unitSlots.length;
+      instOfCell[cell] = inst;
+      unitSlots.push(inst);
+    }
+    return { unitSlots, posOfCell, instOfCell };
+  };
+
+  // MidgardPlan entries for ADDED objects: one {POS_X, POS_Y, ELEMENT} per occupied footprint
+  // cell, mirroring the purge on delete. Byte-verified membership on the Riders plan:
+  //   landmark = its w×h footprint (not available in map-edit -> 1×1, see below);
+  //   location = EXACTLY ONE entry (its anchor cell, radius-independent — all 418 Riders
+  //              MidLocations have one entry each);
+  //   stack    = 1 cell (garrisoned visitors included — all 119 KC ids are in the plan);
+  //   chest    = 1 cell; village = 4×4 (16 entries per FT village id; capitals are 5×5);
+  //   mountains = NONE (zero ML refs in the plan — passability comes from the 37-stamped
+  //               cells), and new roads are likewise left to a later refinement.
+  const planAdds: PlanEntry[] = [];
+
+  // Emit added objects at their FINAL state (place + later moves/patches coalesced).
   for (const o of addedObjects.values()) {
     if (o.type === "landmark") {
       const m = /MM([0-9a-fA-F]{4})$/.exec(o.id);
       const second = m ? parseInt(m[1]!, 16) : nextMM++;
+      const full = `${raw.version}MM${hex4(second)}`;
       appends.push(landmarkFrame(raw.version, second, o.pos.x, o.pos.y, o.baseType ?? "G000000000"));
+      // plan: 1×1 — the landmark's true GLmark footprint isn't available in map-edit (the
+      // reference rebuilds the whole plan from footprints; per-type exactness is a refinement).
+      planAdds.push({ x: o.pos.x, y: o.pos.y, element: full });
     } else if (o.type === "location") {
       // A named region (MidLocation). Same-session patchObject of name/radius already
       // folded into `o` via the addedObjects {...added, ...fields} merge above.
       const m = /LO([0-9a-fA-F]{4})$/.exec(o.id);
       const second = m ? parseInt(m[1]!, 16) : nextLO++;
       appends.push(locationFrame(raw.version, second, o.pos.x, o.pos.y, o.name ?? "", o.radius ?? 0));
+      planAdds.push({ x: o.pos.x, y: o.pos.y, element: `${raw.version}LO${hex4(second)}` });
     } else if (o.type === "mountains") {
+      // no plan entries for mountains (byte-verified: none in Riders)
       addedMountains.push({
         x: o.pos.x, y: o.pos.y, w: o.w ?? 1, h: o.h ?? 1,
         image: o.image ?? 0, race: o.race ?? 0,
       });
     } else if (o.type === "stack") {
-      // A visiting hero stack added to a city (empty formation; INSIDE → the city). The
-      // city.STACK link is a separate patchObject (stackRef → STACK). Subsequent unit/equip/
-      // inventory edits target this id via the normal ops.
+      // A hero stack: either a city VISITOR (empty formation; INSIDE → the city, whose
+      // STACK link is a separate patchObject stackRef edit) or a REAL army placed on the
+      // map (formation cells + leaderCell from the object model — placeStackOps). Same-
+      // session formation/equip/inventory/scalar patches on this ADDED stack FOLD into `o`
+      // via the addedObjects merge and are consumed here.
       const m = /KC([0-9a-fA-F]{4})$/.exec(o.id);
       const second = m ? parseInt(m[1]!, 16) : nextKC++;
+      const g = packFormation(o.garrison);
       appends.push(stackFrame(raw.version, second, {
         owner: o.owner ?? "G000000000",
         inside: o.inside ?? "G000000000",
+        subRace: o.subRace,
         posX: o.pos.x,
         posY: o.pos.y,
+        unitSlots: g.unitSlots,
+        posOfCell: g.posOfCell,
+        leaderId: o.leaderCell !== undefined ? g.instOfCell[o.leaderCell] ?? undefined : undefined,
+        itemIds: mintItems(o.inventory),
+        morale: o.morale, move: o.move, facing: o.facing,
+        banner: o.banner, equip: o.equip,
+        order: o.order, priority: o.priority, creatLvl: o.creatLvl,
       }));
+      planAdds.push({ x: o.pos.x, y: o.pos.y, element: `${raw.version}KC${hex4(second)}` });
+    } else if (o.type === "treasure") {
+      // A chest (MidBag). `o.items` are global GItem template ids; same-session item edits
+      // on this ADDED chest folded into `o` (the addedObjects merge above), NOT into the
+      // raw-bytes list splice — the whole final list lands in the fresh frame here.
+      const m = /BG([0-9a-fA-F]{4})$/.exec(o.id);
+      const second = m ? parseInt(m[1]!, 16) : nextBG++;
+      appends.push(bagFrame(raw.version, second, {
+        posX: o.pos.x,
+        posY: o.pos.y,
+        image: o.image ?? 0,
+        priority: o.priority ?? 0,
+        itemIds: mintItems(o.items),
+      }));
+      planAdds.push({ x: o.pos.x, y: o.pos.y, element: `${raw.version}BG${hex4(second)}` });
+    } else if (o.type === "village") {
+      // A village (MidVillage). Same-session garrison/name/etc. patches on this ADDED
+      // village FOLD into `o` (addedObjects merge) and are consumed here — never routed
+      // to the fixed-width fort-slot splices (which need pre-existing raw ranges).
+      const m = /FT([0-9a-fA-F]{4})$/.exec(o.id);
+      const second = m ? parseInt(m[1]!, 16) : nextFT++;
+      const full = `${raw.version}FT${hex4(second)}`;
+      const g = packFormation(o.garrison);
+      appends.push(villageFrame(raw.version, second, {
+        posX: o.pos.x,
+        posY: o.pos.y,
+        name: o.name ?? "",
+        desc: o.desc ?? "",
+        owner: o.owner,
+        subRace: o.subRace,
+        stackRef: o.stackRef,
+        tier: o.tier ?? 1,
+        priority: o.priority ?? 0,
+        regen: o.regen ?? 0,
+        morale: o.morale ?? 0,
+        growth: o.growth ?? 0,
+        unitSlots: g.unitSlots,
+        posOfCell: g.posOfCell,
+      }));
+      // village footprint = 4×4 (byte-verified: every Riders MidVillage id has 16 plan entries)
+      for (let dy = 0; dy < 4; dy++) {
+        for (let dx = 0; dx < 4; dx++) {
+          planAdds.push({ x: o.pos.x + dx, y: o.pos.y + dy, element: full });
+        }
+      }
     } else {
       throw new Error(`applyEditsToBytes: addObject type '${o.type}' not supported yet (M4)`);
     }
@@ -505,6 +614,10 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   }
   const frames = appends.filter((f): f is Uint8Array => f !== null);
   if (frames.length) bytes = appendBlocks(bytes, frames);
+  // placement plan: one entry per footprint cell of every ADDED object (the add-side
+  // counterpart of deleteBlocks' purge; addPlanEntries re-locates the block by marker,
+  // so the earlier splices/appends are safe).
+  if (planAdds.length) bytes = addPlanEntries(bytes, planAdds);
   if (addedMountains.length || mountainPatches.size) {
     const base = raw.mountains.map((m, i) =>
       mountainPatches.has(i) ? { ...m, ...mountainPatches.get(i) } : m,

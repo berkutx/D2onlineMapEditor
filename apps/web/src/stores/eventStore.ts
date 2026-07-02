@@ -227,6 +227,48 @@ export const useEventStore = defineStore("events", () => {
     return next;
   }
 
+  /** «⏱ после N раз…»: builds a COUNTER GATE off `fromId` with an AUTO-generated (hidden)
+   *  variable — the E5 answer to «скрыть переменные, если генерим их риалтайм при связях»:
+   *  (a) a new variable (value 0), (b) a «+1» modifyVariable effect appended to the source
+   *  event, (c) a NEW enabled event firing once the counter reaches `threshold`
+   *  («переменная в диапазоне»). All THREE ops in ONE commit = one undo step. The auto mark
+   *  is editor-only metadata OUTSIDE the journal (an orphaned mark is harmless — the
+   *  variables tab filters marks against the live variable list). */
+  function createCounterGate(fromId: string, threshold: number): MapEvent | null {
+    const from = events.value.find((e) => e.id === fromId);
+    if (!from) return null;
+    const newVarId = Math.max(0, ...variables.value.map((v) => v.id)) + 1;
+    const slug =
+      (from.name || fromId)
+        .replace(/[^0-9A-Za-zА-Яа-яЁё]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 24) || fromId;
+    const newVar: ScenarioVariable = { id: newVarId, name: `AUTO_${slug}_${threshold}`, value: 0 };
+    const inc = { ...makeEffect("modifyVariable"), lookup: 0, val1: 1, val2: newVarId } as EventEffect;
+    (inc as { num: number }).num = from.effects.length;
+    const gate: MapEvent = {
+      ...blankEvent(),
+      name: `${from.name || "Событие"} — после ${threshold} раз`,
+      enabled: true,
+      conditions: [
+        {
+          ...makeCondition("varInRange"),
+          var1: newVarId, min1: threshold, max1: 9999,
+          var2: 0, min2: 0, max2: 0,
+          relation: 0, // Игнор. 2-ю
+        } as EventCondition,
+      ],
+    };
+    edit.commit([
+      { kind: "setVariables", variables: [...variables.value, newVar] } as EditOp,
+      { kind: "upsertEvent", event: { ...from, effects: [...from.effects, inc] } } as EditOp,
+      { kind: "upsertEvent", event: gate } as EditOp,
+    ]);
+    edit.markAutoVar(newVarId);
+    navigate({ tab: "events", eventId: gate.id });
+    return gate;
+  }
+
   // --- scenario variables (one MidScenVariables block; edited as a whole list) ---
   const variables = computed<ScenarioVariable[]>(() => edit.liveDoc?.variables ?? []);
   function setVariables(vars: ScenarioVariable[]): void {
@@ -313,7 +355,7 @@ export const useEventStore = defineStore("events", () => {
     selectedId, filter, objectFilter, panelTab, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
     breadcrumbs, canGoBack, navigate, goBack, goToCrumb,
-    createForObject, createChainedEvent,
+    createForObject, createChainedEvent, createCounterGate,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,
     upsertTemplate, removeTemplate, createTemplate, cloneTemplate,

@@ -72,7 +72,7 @@ const validateHint = computed(() =>
 );
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
-  animate, objectPanelVisible, eventPanelVisible, anchorsVisible, debugOverlay, copilotVisible, dark, overlayTints,
+  animate, objectPanelVisible, eventPanelVisible, anchorsVisible, minimapVisible, debugOverlay, copilotVisible, dark, overlayTints,
 } = storeToRefs(viewStore);
 
 const dialogVisible = ref(false);
@@ -177,7 +177,17 @@ async function doExport(): Promise<void> {
 // --- New Map -----------------------------------------------------------------
 const newMapVisible = ref(false);
 const newMapBusy = ref(false);
-const newMap = ref<{ size: number; fill: string; name: string }>({ size: 72, fill: "default", name: "Новая карта" });
+const newMap = ref<{ size: number; fill: string; name: string; races: string[] }>(
+  { size: 72, fill: "default", name: "Новая карта", races: ["empire", "undead"] },
+);
+/** Playable races (the addRace port): each = player + capital + guardian + hero. */
+const raceOptions = [
+  { value: "empire", label: "Империя" },
+  { value: "undead", label: "Орды Нежити" },
+  { value: "legions", label: "Легионы Проклятых" },
+  { value: "clans", label: "Горные Кланы" },
+  { value: "elves", label: "Эльфы" },
+];
 const fillOptions = [
   { value: "default", label: "Нейтральная земля" },
   { value: "empire", label: "Империя (зелень)" },
@@ -229,6 +239,7 @@ function onSelect(index: string): void {
     case "view:objectPanel": return viewStore.toggleObjectPanel();
     case "view:eventPanel": return viewStore.toggleEventPanel();
     case "view:anchors": return viewStore.toggleAnchors();
+    case "view:minimap": return viewStore.toggleMinimap();
     case "view:debug": return viewStore.toggleDebugOverlay();
     case "view:fit": getScene()?.fitView(); return;
     case "view:copilot": return viewStore.toggleCopilot();
@@ -276,6 +287,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <el-menu-item index="view:objectPanel"><el-icon class="mck" :style="{ visibility: objectPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Панель объектов<span class="mkbd">P</span></el-menu-item>
         <el-menu-item index="view:eventPanel"><el-icon class="mck" :style="{ visibility: eventPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Сценарий (события)<span class="mkbd">E</span></el-menu-item>
         <el-menu-item index="view:anchors"><el-icon class="mck" :style="{ visibility: anchorsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Связи (якоря ⚓)</el-menu-item>
+        <el-menu-item index="view:minimap"><el-icon class="mck" :style="{ visibility: minimapVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Миникарта</el-menu-item>
         <el-menu-item index="view:debug"><el-icon class="mck" :style="{ visibility: debugOverlay ? 'visible' : 'hidden' }"><Check /></el-icon>Отладка<span class="mkbd">D</span></el-menu-item>
         <el-sub-menu index="view:tints">
           <template #title>Подсветки</template>
@@ -402,6 +414,12 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
           <el-select v-model="newMap.fill">
             <el-option v-for="o in fillOptions" :key="o.value" :label="o.label" :value="o.value" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="Фракции">
+          <el-checkbox-group v-model="newMap.races" class="nm-races">
+            <el-checkbox v-for="r in raceOptions" :key="r.value" :value="r.value">{{ r.label }}</el-checkbox>
+          </el-checkbox-group>
+          <div class="nm-hint">Каждая фракция получает игрока, столицу со стражем и героя (как «добавить расу» в редакторе игры).</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -534,6 +552,21 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
 .dialog-hint {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.nm-races {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+.nm-races :deep(.el-checkbox) {
+  height: 24px;
+  margin-right: 0;
+}
+.nm-hint {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
+  margin-top: 2px;
 }
 .keys {
   display: flex;

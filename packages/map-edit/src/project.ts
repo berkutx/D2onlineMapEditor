@@ -38,6 +38,13 @@ export const EditorProject = z.object({
    * with its chest, a visitor with its building, etc. Cycles are rejected at set time.
    */
   anchors: z.record(z.string(), z.string()).default({}),
+  /**
+   * Editor-GENERATED variable ids (builders like «после N раз» allocate a counter variable
+   * and mark it here). The VARIABLES themselves live in the document/.sg as usual — this is
+   * only editor metadata that folds them into a collapsed «Автоматические» group in the UI.
+   * An id that no longer exists in the document is simply ignored (orphaned marks are harmless).
+   */
+  autoVars: z.array(z.number().int()).default([]),
   meta: z
     .object({
       name: z.string().optional(),
@@ -61,6 +68,7 @@ export function emptyProject(
     cursor: 0,
     captions: {},
     anchors: {},
+    autoVars: [],
     meta,
   };
 }

@@ -13,7 +13,7 @@
  * cluster top-right; selecting another event re-fits to the content bbox.
  */
 import { computed, ref, watch } from "vue";
-import { ElEmpty } from "element-plus";
+import { ElEmpty, ElMessageBox } from "element-plus";
 import type { EventCondition, EventEffect } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
@@ -172,6 +172,26 @@ function chainNext(): void {
   if (store.selectedId) store.createChainedEvent(store.selectedId);
 }
 
+/** «⏱ после N раз…»: prompts for N and builds a counter gate — a HIDDEN auto-variable,
+ *  «+1» on this event, and a new event firing once the counter reaches N. One undo step. */
+function gateAfterN(): void {
+  const fromId = store.selectedId;
+  if (!fromId) return;
+  void ElMessageBox.prompt("Через сколько срабатываний этого события создать продолжение?", "После N раз", {
+    confirmButtonText: "Создать",
+    cancelButtonText: "Отмена",
+    inputValue: "3",
+    inputPattern: /^[1-9]\d{0,2}$/,
+    inputErrorMessage: "Число от 1 до 999",
+  })
+    .then(({ value }) => {
+      store.createCounterGate(fromId, Number(value));
+    })
+    .catch(() => {
+      /* отмена — ничего не делаем */
+    });
+}
+
 /** Slightly curved edge path (cubic, horizontal tangents). */
 function edgePath(e: GEdge): string {
   const mx = (e.x1 + e.x2) / 2;
@@ -323,9 +343,14 @@ function onNodeClick(n: GNode): void {
         <button type="button" class="ev-nav-btn" title="Вписать граф" @click="fitToContent()">⤢</button>
       </div>
       <!-- auto-wiring: one click = a disabled follow-up event + the enable-chain edge -->
-      <button type="button" class="ev-chain d2-float" title="Создать продолжение: новое (выключенное) событие + эффект «Вкл/выкл событие» на него" @click="chainNext()">
-        ➜ следующее в цепочке
-      </button>
+      <div class="ev-actions">
+        <button type="button" class="ev-chain d2-float" title="Создать продолжение: новое (выключенное) событие + эффект «Вкл/выкл событие» на него" @click="chainNext()">
+          ➜ следующее в цепочке
+        </button>
+        <button type="button" class="ev-chain d2-float" title="Счётчик: скрытая авто-переменная, «+1» на этом событии и новое событие, срабатывающее после N раз" @click="gateAfterN()">
+          ⏱ после N раз…
+        </button>
+      </div>
       <div class="ev-legend">
         <span><i class="lg lg-cond" />условия</span>
         <span><i class="lg lg-eff" />эффекты</span>
@@ -385,12 +410,16 @@ function onNodeClick(n: GNode): void {
   background: var(--el-fill-color-light);
   color: var(--el-text-color-primary);
 }
-/* chain-create action (top-left) */
-.ev-chain {
+/* chain-create actions (top-left cluster) */
+.ev-actions {
   position: absolute;
   top: 10px;
   left: 10px;
   z-index: 5;
+  display: flex;
+  gap: 6px;
+}
+.ev-chain {
   padding: 5px 10px;
   border: none;
   font-size: 11px;

@@ -26,6 +26,7 @@ import DecorPalette from "./DecorPalette.vue";
 import EventsPanel from "./EventsPanel.vue";
 import ObjectActionBar from "./ObjectActionBar.vue";
 import HistoryPanel from "./HistoryPanel.vue";
+import MinimapDock from "./MinimapDock.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
 
 const view = useViewStore();
@@ -156,6 +157,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <ObjectActionBar v-if="toolStore.tool === 'move'" />
         <CopilotBar v-show="view.copilotVisible" />
         <HistoryPanel />
+        <MinimapDock v-if="currentScenarioId" />
       </el-main>
       <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="clamp(240px, 26vw, 300px)">
         <DecorPalette />

@@ -21,6 +21,8 @@ import {
   validateMap,
   createBlankMap,
   TERRAIN_FILLS,
+  RACE_KEYS,
+  type RaceKey,
   type TerrainFill,
 } from "@d2/sg-parser";
 import {
@@ -278,7 +280,7 @@ export async function registerMapRoutes(
   });
 
   // POST /api/maps/new -> generate a from-scratch blank terrain map, register it, return its id.
-  app.post<{ Body: { size?: number; fill?: string; name?: string } }>(
+  app.post<{ Body: { size?: number; fill?: string; name?: string; races?: string[] } }>(
     REST.mapNew,
     async (req, reply) => {
       const body = req.body ?? {};
@@ -288,9 +290,13 @@ export async function registerMapRoutes(
       if (!Number.isInteger(size) || size <= 0 || size % 8 !== 0) {
         return reply.code(400).send({ error: "size must be a positive multiple of 8" });
       }
+      // playable races (the addRace port): validated against the RACES table, deduped
+      const races = Array.isArray(body.races)
+        ? [...new Set(body.races)].filter((r): r is RaceKey => RACE_KEYS.includes(r as RaceKey))
+        : [];
       let bytes: Uint8Array;
       try {
-        bytes = createBlankMap({ size, fill, name, author: "web-editor" });
+        bytes = createBlankMap({ size, fill, name, author: "web-editor", races });
       } catch (e) {
         return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) });
       }

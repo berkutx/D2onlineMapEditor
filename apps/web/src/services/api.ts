@@ -223,6 +223,8 @@ export async function createNewMap(opts: {
   size: number;
   fill: string; // a TerrainFill id; the server validates + defaults
   name: string;
+  /** playable races to add (addRace: player + capital + hero each); server-validated */
+  races?: string[];
 }): Promise<string> {
   return (await postJsonRetry<{ id: string }>(u(REST.mapNew), opts)).id;
 }

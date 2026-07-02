@@ -61,6 +61,55 @@ describe("@d2/sg-parser createBlankMap — structural validity", () => {
   });
 });
 
+describe("@d2/sg-parser createBlankMap — races (addRace port)", () => {
+  it("empire + undead: players, capitals with guardians, hero stacks, fogs — validateMap ok", () => {
+    const bytes = createBlankMap({ size: 48, fill: "default", races: ["empire", "undead"] });
+    const doc = parseScenario(bytes);
+
+    // 3 players: neutral + 2 races, in block order
+    expect(doc.players.length).toBe(3);
+    expect(doc.players[0]!.race).toBe(4);
+    const byName = new Map(doc.players.map((p) => [p.name, p]));
+    expect(byName.has("Империя")).toBe(true);
+    expect(byName.has("Орды Нежити")).toBe(true);
+
+    // 2 capitals at the preset corners, each owned by its race player
+    const caps = doc.objects.filter((o) => o.type === "capital");
+    expect(caps.length).toBe(2);
+    const empireCap = caps.find((c) => (c as { owner?: string }).owner === byName.get("Империя")!.id);
+    expect(empireCap).toBeTruthy();
+    expect(empireCap!.pos).toEqual({ x: 6, y: 6 });
+
+    // 2 hero stacks inside the capitals, each with a leader
+    const stacks = doc.objects.filter((o) => o.type === "stack");
+    expect(stacks.length).toBe(2);
+
+    // the 5×5 terrain stamp under the empire capital = terrain 1
+    for (let x = 6; x < 11; x++)
+      for (let y = 6; y < 11; y++) expect(doc.terrain.cells[y * 48 + x]!.value).toBe(1);
+
+    // schema + validator + byte-exact writer round-trip
+    expect(() => MapDocument.parse(doc)).not.toThrow();
+    const v = validateMap(doc);
+    expect(v.errors).toEqual([]);
+    expect(v.ok).toBe(true);
+    expect(roundTripIdentity(bytes)).toBe(true);
+  });
+
+  it("all 5 races fit and validate on a 72 map", () => {
+    const bytes = createBlankMap({
+      size: 72, fill: "default",
+      races: ["empire", "undead", "legions", "clans", "elves"],
+    });
+    const doc = parseScenario(bytes);
+    expect(doc.players.length).toBe(6);
+    expect(doc.objects.filter((o) => o.type === "capital").length).toBe(5);
+    expect(doc.objects.filter((o) => o.type === "stack").length).toBe(5);
+    expect(validateMap(doc).ok).toBe(true);
+    expect(roundTripIdentity(bytes)).toBe(true);
+  });
+});
+
 describe("@d2/sg-parser createBlankMap — mountains", () => {
   it("stamps mountain footprint cells to 37 and emits a MidMountains object", () => {
     const bytes = createBlankMap({

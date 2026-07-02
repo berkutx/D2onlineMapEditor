@@ -24,6 +24,9 @@ import {
   placeLandmarkOps,
   placeLocationOps,
   placeVisitorOps,
+  placeChestOps,
+  placeVillageOps,
+  placeStackOps,
   emptyProject,
   pushOp,
   undo,
@@ -1151,6 +1154,230 @@ describe("@d2/map-edit location editor", () => {
     const res = roundTripSemantic(doc, out, ops);
     expect(res.reason).toBeUndefined();
     expect(res.ok).toBe(true);
+  });
+});
+
+describe("@d2/map-edit addObject writers (chest / village / stack) + MidgardPlan", () => {
+  /** Walk the MidgardPlan block of `b` and return its entry count. Layout byte-verified:
+   *  BEGOBJECT\0 · <blockId(10)> i32 mapSize · <blockId(10)> i32 count · 40-byte entries. */
+  const planCount = (b: Uint8Array): number => {
+    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+    const avc = buf.indexOf(".?AVCMidgardPlan@@");
+    expect(avc).toBeGreaterThan(0);
+    const beg = buf.indexOf("BEGOBJECT", avc);
+    return buf.readInt32LE(beg + 10 + 10 + 4 + 10);
+  };
+  /** All plan cells whose ELEMENT ref equals `id` (entry = POS_X i32 POS_Y i32 ELEMENT ref). */
+  const planCellsOf = (b: Uint8Array, id: string): { x: number; y: number }[] => {
+    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+    const avc = buf.indexOf(".?AVCMidgardPlan@@");
+    const beg = buf.indexOf("BEGOBJECT", avc);
+    let p = beg + 10 + 10 + 4 + 10;
+    const count = buf.readInt32LE(p);
+    p += 4;
+    const out: { x: number; y: number }[] = [];
+    for (let i = 0; i < count; i++) {
+      const x = buf.readInt32LE(p + 5);
+      const y = buf.readInt32LE(p + 14);
+      const ref = buf.toString("latin1", p + 29, p + 39);
+      if (ref === id) out.push({ x, y });
+      p += 40;
+    }
+    return out;
+  };
+  const addedId = (ops: EditOp[]): string =>
+    (ops.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
+
+  it("places a chest with 2 items: fresh MidBag + MidItem instances, plan +1, round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops = placeChestOps(doc, 18, 19, 2, ["G001IG0108", "G000IG0001"]);
+    const id = addedId(ops);
+    expect(id).toMatch(/BG[0-9a-f]{4}$/);
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const chest = re.objects.find((o) => o.id === id) as {
+      items?: string[]; image?: number; pos: { x: number; y: number };
+    };
+    expect(chest).toBeTruthy();
+    expect(chest.pos).toEqual({ x: 18, y: 19 });
+    expect(chest.image).toBe(2);
+    expect(chest.items).toEqual(["G001IG0108", "G000IG0001"]); // instances resolve to the templates
+    expect(re.objects.length).toBe(doc.objects.length + 1); // MidItem instances aren't placed objects
+    expect(validateMap(re).ok).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    // plan: exactly ONE new entry, at the chest's cell
+    expect(planCount(out)).toBe(planCount(bytes) + 1);
+    expect(planCellsOf(out, id)).toEqual([{ x: 18, y: 19 }]);
+  });
+
+  it("SAME-SESSION item edit on an ADDED chest folds into the appended frame (no splice)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const place = placeChestOps(doc, 18, 19, 1, ["G001IG0108"]);
+    const id = addedId(place);
+    const ops: EditOp[] = [
+      ...place,
+      { kind: "patchObject", id, fields: { items: ["G000IG0001", "G001IG0108"] } },
+    ];
+    const out = applyEditsToBytes(raw, ops); // must NOT throw (no raw ranges for an added id)
+    const re = parseScenario(out);
+    expect((re.objects.find((o) => o.id === id) as { items?: string[] }).items).toEqual([
+      "G000IG0001", "G001IG0108",
+    ]);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("places a village 'Тестбург': CP1251 name, neutral owner, tier 1, plan +16 (4×4)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops = placeVillageOps(doc, 20, 30, "Тестбург");
+    const id = addedId(ops);
+    expect(id).toMatch(/FT[0-9a-f]{4}$/);
+    // fresh id must not collide with ANY existing FT id (capitals share the prefix)
+    expect(doc.objects.some((o) => o.id === id)).toBe(false);
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const v = re.objects.find((o) => o.id === id) as {
+      name?: string; tier?: number; owner?: string; race?: number;
+      garrison?: (unknown | null)[]; pos: { x: number; y: number };
+    };
+    expect(v).toBeTruthy();
+    expect(v.name).toBe("Тестбург"); // CP1251 survives
+    expect(v.tier).toBe(1);
+    expect(v.owner).toBeUndefined(); // race-neutral
+    expect(v.race).toBeUndefined();
+    expect((v.garrison ?? []).filter(Boolean).length).toBe(0);
+    expect(v.pos).toEqual({ x: 20, y: 30 });
+    expect(validateMap(re).ok).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    // plan: the 4×4 fort footprint (16 entries) anchored at the village pos
+    expect(planCount(out)).toBe(planCount(bytes) + 16);
+    const cells = planCellsOf(out, id);
+    expect(cells.length).toBe(16);
+    for (let dy = 0; dy < 4; dy++) {
+      for (let dx = 0; dx < 4; dx++) {
+        expect(cells).toContainEqual({ x: 20 + dx, y: 30 + dy });
+      }
+    }
+  });
+
+  it("SAME-SESSION garrison edit on an ADDED village folds into the appended frame", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const place = placeVillageOps(doc, 20, 30, "Гарнизонный");
+    const id = addedId(place);
+    const g = [null, null, null, { unit: "G000UU0001", level: 1, hp: 110 }, null, null];
+    const ops: EditOp[] = [...place, { kind: "patchObject", id, fields: { garrison: g } }];
+    const out = applyEditsToBytes(raw, ops); // must NOT throw (fort-slot splices need raw ranges)
+    const re = parseScenario(out);
+    const reV = re.objects.find((o) => o.id === id) as { garrison?: ({ unit: string } | null)[] };
+    expect(reV.garrison?.[3]?.unit).toBe("G000UU0001");
+    expect(reV.garrison?.filter(Boolean).length).toBe(1);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("places a REAL stack (leader + 1 unit): formation + LEADER_ID round-trip, plan +1", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    // a real Gunit id from an existing Riders stack's leader
+    const src = doc.objects.find(
+      (o) => o.type === "stack" && (o as { leaderCell?: number }).leaderCell !== undefined,
+    ) as { leaderCell: number; garrison: ({ unit: string } | null)[] };
+    expect(src).toBeTruthy();
+    const leaderUnit = src.garrison[src.leaderCell]!.unit;
+    const owner = doc.players[0]!.id;
+    const units: ({ unit: string; level?: number; hp?: number } | null)[] =
+      [{ unit: "G000UU0001", level: 1, hp: 110 }, null, { unit: leaderUnit, level: 3, hp: 50 }, null, null, null];
+    const ops = placeStackOps(doc, 22, 23, { owner, units, leaderCell: 2 });
+    const id = addedId(ops);
+    expect(id).toMatch(/KC[0-9a-f]{4}$/);
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const st = re.objects.find((o) => o.id === id) as {
+      owner?: string; leaderCell?: number; leaderImage?: string;
+      garrison: ({ unit: string; level: number; hp: number } | null)[];
+      pos: { x: number; y: number };
+    };
+    expect(st).toBeTruthy();
+    expect(st.pos).toEqual({ x: 22, y: 23 });
+    expect(st.owner).toBe(owner);
+    // formation matches cell-for-cell (cell i = UNIT_[POS_i] decoding)
+    expect(st.garrison[0]).toMatchObject({ unit: "G000UU0001", level: 1, hp: 110 });
+    expect(st.garrison[2]).toMatchObject({ unit: leaderUnit, level: 3, hp: 50 });
+    expect(st.garrison[1]).toBeNull();
+    expect(st.leaderCell).toBe(2); // LEADER_ID resolved back to the leader's cell
+    expect(st.leaderImage).toBe(leaderUnit);
+    expect(re.objects.length).toBe(doc.objects.length + 1); // MidUnit instances aren't placed objects
+    expect(validateMap(re).ok).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(planCount(out)).toBe(planCount(bytes) + 1);
+    expect(planCellsOf(out, id)).toEqual([{ x: 22, y: 23 }]);
+  });
+
+  it("SAME-SESSION formation edit (the stack editor's op) on an ADDED stack folds in", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const src = doc.objects.find(
+      (o) => o.type === "stack" && (o as { leaderCell?: number }).leaderCell !== undefined,
+    ) as { leaderCell: number; garrison: ({ unit: string } | null)[] };
+    const leaderUnit = src.garrison[src.leaderCell]!.unit;
+    const place = placeStackOps(doc, 24, 25, {
+      units: [{ unit: leaderUnit, level: 1, hp: 50 }, null, null, null, null, null],
+      leaderCell: 0,
+    });
+    const id = addedId(place);
+    // the stack editor emits patchObject {garrison, leaderCell, leaderImage}
+    const g = [
+      { unit: leaderUnit, level: 1, hp: 50 },
+      { unit: "G000UU0001", level: 1, hp: 110 },
+      null, null, null, null,
+    ];
+    const ops: EditOp[] = [
+      ...place,
+      { kind: "patchObject", id, fields: { garrison: g, leaderCell: 0, leaderImage: leaderUnit } },
+    ];
+    const out = applyEditsToBytes(raw, ops); // must NOT throw
+    const re = parseScenario(out);
+    const st = re.objects.find((o) => o.id === id) as {
+      leaderCell?: number; garrison: ({ unit: string } | null)[];
+    };
+    expect(st.garrison[1]?.unit).toBe("G000UU0001");
+    expect(st.leaderCell).toBe(0);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("plan entries for landmark (1×1) and location (anchor only) placements", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const lm = doc.objects.find((o) => o.type === "landmark" && o.baseType)!;
+    const ops: EditOp[] = [
+      ...placeLandmarkOps(doc, 31, 32, lm.baseType!),
+      ...placeLocationOps(doc, 35, 36, 2, "Зона плана"),
+    ];
+    const ids = ops
+      .filter((o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject")
+      .map((o) => o.object.id);
+    const out = applyEditsToBytes(raw, ops);
+    expect(planCount(out)).toBe(planCount(bytes) + 2);
+    expect(planCellsOf(out, ids[0]!)).toEqual([{ x: 31, y: 32 }]);
+    // a location gets EXACTLY ONE entry (anchor cell), radius-independent — as in Riders
+    expect(planCellsOf(out, ids[1]!)).toEqual([{ x: 35, y: 36 }]);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("mountains get NO plan entries (byte-verified: none in Riders)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops = placeMountainOps(doc, 40, 40, 2, 2, 5);
+    const out = applyEditsToBytes(raw, ops);
+    expect(planCount(out)).toBe(planCount(bytes));
   });
 });
 

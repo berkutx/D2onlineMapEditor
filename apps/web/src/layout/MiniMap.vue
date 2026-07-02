@@ -23,11 +23,14 @@ const props = withDefaults(
     size?: number;
     /** Click → center the main camera on the clicked cell. */
     clickToCenter?: boolean;
+    /** Draw small colored dots for concrete map objects (cities/stacks/sites…). */
+    showObjects?: boolean;
   }>(),
   {
     highlightId: null,
     size: 160,
     clickToCenter: true,
+    showObjects: false,
   },
 );
 
@@ -62,6 +65,20 @@ const RACE_COLORS: Readonly<Record<number, Rgb>> = {
 };
 const FALLBACK = hexRgb("#857a5f");
 const ACCENT = "#ffb44a";
+
+/** Opt-in object dots (`showObjects`): color + radius (px) per concrete type.
+ *  Types NOT listed (landmark/mountains/location/unit/…) are noise — skipped. */
+const OBJECT_DOTS: Readonly<Record<string, { color: string; r: number }>> = {
+  capital: { color: "#ffd700", r: 1.5 },
+  village: { color: "#ffa640", r: 1.5 },
+  stack: { color: "#e05555", r: 1 },
+  merchant: { color: "#7fd0ff", r: 1 },
+  mage: { color: "#7fd0ff", r: 1 },
+  trainer: { color: "#7fd0ff", r: 1 },
+  mercenary: { color: "#7fd0ff", r: 1 },
+  ruin: { color: "#b08fd0", r: 1 },
+  crystal: { color: "#6fe0c0", r: 1 },
+};
 
 // ---------------------------------------------------------------------------
 // Painting
@@ -136,6 +153,19 @@ function paint(): void {
     ctx.stroke();
   }
 
+  // --- Objects (opt-in): small colored dots for the concrete objects; drawn over
+  //     the location circles but under the highlight ring + viewport bbox. ---
+  if (props.showObjects) {
+    for (const o of doc.objects) {
+      const dot = OBJECT_DOTS[o.type];
+      if (!dot) continue;
+      ctx.beginPath();
+      ctx.arc((o.pos.x + 0.5) * scale, (o.pos.y + 0.5) * scale, dot.r, 0, Math.PI * 2);
+      ctx.fillStyle = dot.color;
+      ctx.fill();
+    }
+  }
+
   // --- Highlighted object: accent dot + ring, plus an outer ring for visibility. ---
   const hi = props.highlightId
     ? doc.objects.find((o) => o.id === props.highlightId)
@@ -195,6 +225,7 @@ watch(
     () => props.highlightId,
     () => viewStore.visibleCells,
     () => props.size,
+    () => props.showObjects,
   ],
   schedulePaint,
 );

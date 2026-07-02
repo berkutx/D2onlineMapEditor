@@ -67,6 +67,57 @@ export interface BlankMountain {
   race?: number;
 }
 
+/**
+ * Playable races for `addRace` (port of toolsqt D2MapEditor::addRace, lines 97-207).
+ * Constants extracted VERBATIM from the game's Globals DBFs (Grace.dbf / Glord.dbf /
+ * Gunits.dbf, deletion-flagged rows skipped) — do not re-derive:
+ *   Grace: RACE_ID, RACE_TYPE, GUARDIAN, LEADER_1;
+ *   Glord: the race's category-0 («воин») lord;
+ *   Gunits: base LEVEL=1 HIT_POINT for the guardian/leader (addUnit at base level
+ *   writes hp = unit->hit_point — the dyn-upgrade math only kicks in above base level).
+ * `terrain` = the Lterrain id addRace stamps 5×5 under the capital (raw cell value).
+ */
+export type RaceKey = "empire" | "legions" | "clans" | "undead" | "elves";
+export interface RaceDef {
+  raceId: string;
+  raceType: number;
+  guardian: string;
+  guardianHp: number;
+  leader: string;
+  leaderHp: number;
+  lord: string;
+  terrain: number;
+  name: string;
+}
+export const RACES: Record<RaceKey, RaceDef> = {
+  empire: { raceId: "G000RR0000", raceType: 0, guardian: "G000UU3001", guardianHp: 900, leader: "G000UU0019", leaderHp: 135, lord: "G000LR0003", terrain: 1, name: "Империя" },
+  legions: { raceId: "G000RR0001", raceType: 3, guardian: "G000UU3002", guardianHp: 900, leader: "G000UU0044", leaderHp: 200, lord: "G000LR0006", terrain: 3, name: "Легионы Проклятых" },
+  clans: { raceId: "G000RR0002", raceType: 2, guardian: "G000UU3003", guardianHp: 900, leader: "G000UU0070", leaderHp: 150, lord: "G000LR0009", terrain: 2, name: "Горные Кланы" },
+  undead: { raceId: "G000RR0003", raceType: 1, guardian: "G000UU3004", guardianHp: 900, leader: "G000UU0096", leaderHp: 135, lord: "G000LR0012", terrain: 4, name: "Орды Нежити" },
+  elves: { raceId: "G000RR0005", raceType: 5, guardian: "G000UU8040", guardianHp: 900, leader: "G000UU8009", leaderHp: 135, lord: "G000LR0018", terrain: 6, name: "Эльфийский Союз" },
+};
+export const RACE_KEYS = Object.keys(RACES) as RaceKey[];
+
+/** addRace's capital starting item — 3× G000IG0006 (verbatim constant; not a talisman,
+ *  so no TalismanCharges entry). */
+const CAPITAL_ITEM = "G000IG0006";
+
+/** Preset capital anchors (the reference takes a user click; a blank map spreads them
+ *  to the corners / top edge, 5×5 footprint kept in bounds with a margin). */
+function capitalSpot(index: number, size: number): { x: number; y: number } {
+  const m = 6;
+  const far = size - m - 5;
+  const mid = Math.floor(size / 2) - 2;
+  const spots = [
+    { x: m, y: m },
+    { x: far, y: far },
+    { x: m, y: far },
+    { x: far, y: m },
+    { x: mid, y: m },
+  ];
+  return spots[index % spots.length]!;
+}
+
 export interface BlankMapOptions {
   /** Map dimension N (cells per side). Must be a positive multiple of 8. */
   size: number;
@@ -80,6 +131,9 @@ export interface BlankMapOptions {
   author?: string;
   /** Optional mountains (object + a 37-stamp on their footprint cells). */
   mountains?: BlankMountain[];
+  /** Playable races to add (each = player + fog + capital + guardian + hero, the
+   *  addRace port). Order picks the capital corner. Max 5. */
+  races?: RaceKey[];
 }
 
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
@@ -95,6 +149,10 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   const description = opts.description ?? "";
   const author = opts.author ?? "";
   const mountains = opts.mountains ?? [];
+  const races = opts.races ?? [];
+  if (races.length > 5) throw new Error("createBlankMap: max 5 races");
+  for (const r of races) if (!RACES[r]) throw new Error(`createBlankMap: unknown race '${r}'`);
+  if (size < 24 && races.length > 0) throw new Error("createBlankMap: races need size >= 24");
 
   if (cp1251Length(name) > 64) throw new Error("createBlankMap: name too long (max 64 bytes)");
   if (cp1251Length(description) > 256) throw new Error("createBlankMap: description too long (max 256)");
@@ -111,9 +169,19 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
       }
     }
   }
+  // addRace: stamp the race's Lterrain value on the 5×5 under each capital (raw cell
+  // value = the terrain id; the reference writes it verbatim, no ground bits).
+  races.forEach((key, idx) => {
+    const spot = capitalSpot(idx, size);
+    const t = RACES[key].terrain;
+    for (let i = 0; i < 5; i++)
+      for (let k = 0; k < 5; k++) grid[(spot.y + k) * size + (spot.x + i)] = t;
+  });
 
   const numChunks = (size / 4) * (size / 8);
-  const objCount = 15 + numChunks;
+  // per race: fog + buildings + spells + player + capital + guardian unit + hero unit +
+  // hero stack + 3 capital items = 10 blocks
+  const objCount = 15 + numChunks + races.length * 10;
 
   const w = new ByteWriter();
 
@@ -144,9 +212,11 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   // _playersData — the game's CScenarioInfo::StreamRaces reads this blob:
   //   i32(playerCount) + playerCount * 40-byte record (first i32 = race index, rest 0).
   // An EMPTY blob makes the game read the "S143" sentinel as a huge count and crash.
-  // Decoded from real maps: neutral race index = 4 (matches RACE_ID RR0004).
-  w.i32(1); // one player (the neutral), matching the single MidPlayer block
-  w.i32(4).repitable(0, 36); // neutral race record
+  // Decoded from real maps: neutral race index = 4 (matches RACE_ID RR0004). With races
+  // this is updateSubraces verbatim: one record per MidPlayer in block order.
+  const playerRaceTypes = [4, ...races.map((r) => RACES[r].raceType)];
+  w.i32(playerRaceTypes.length);
+  for (const rt of playerRaceTypes) w.i32(rt).repitable(0, 36);
   w.cp(VERSION);
   w.cp("OB0000");
   w.i32(objCount);
@@ -195,7 +265,8 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
     w.defaultInt("DIFFSCEN", 3);
     w.defaultInt("DIFFGAME", 1);
     w.stringField("CREATOR", author);
-    for (let i = 0; i < 13; i++) w.defaultInt(`PLAYER_${i + 1}`, i === 0 ? 4 : 99);
+    // updateSubraces: PLAYER_i = each player's race_type (block order), 99 for unused slots
+    for (let i = 0; i < 13; i++) w.defaultInt(`PLAYER_${i + 1}`, playerRaceTypes[i] ?? 99);
     w.defaultInt("SUGG_LVL", 1);
     w.defaultInt("MAP_SEED", 390690065);
   });
@@ -279,6 +350,162 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
       });
     }
   }
+
+  // ---- races (D2MapEditor::addRace, verbatim port) --------------------------
+  // Block order per addRace's replace/addDataBlock sequence: fog, buildings, spells,
+  // player, 3 capital items, guardian unit, hero unit, capital, hero stack.
+  // Ids follow m_idsHelper.nextId per type: neutral owns PL0000/PB0000/KS0000; race
+  // #idx gets PL/PB/KS(idx+1), FG/FT/KC(idx), UN(idx*2, idx*2+1), IM(idx*3..+2).
+  const NIL = EMPTY_REF;
+  races.forEach((key, idx) => {
+    const race = RACES[key];
+    const spot = capitalSpot(idx, size);
+    const playerNo = idx + 1;
+    const playerId = fullId("PL", playerNo);
+    const fogId = fullId("FG", idx);
+    const pbId = fullId("PB", playerNo);
+    const ksId = fullId("KS", playerNo);
+    const capitalId = fullId("FT", idx);
+    const guardianId = fullId("UN", idx * 2);
+    const heroId = fullId("UN", idx * 2 + 1);
+    const stackId = fullId("KC", idx);
+    // capital.subRace = {IDataBlock::SubRace, player.uid.second} — an "SR"+playerNo ref
+    // (the reference does NOT create a MidSubRace block; the game editor materializes
+    // them on re-save — matching toolsqt output exactly).
+    const subRaceId = fullId("SR", playerNo);
+    const itemIds = [0, 1, 2].map((n) => fullId("IM", idx * 3 + n));
+
+    // fog: entryCount(tag=own id) + per row POS_Y + FOG(len=size/8, all dark) —
+    // addRace fills the bitmap with '\0' (its reveal loop is dead code).
+    frame("MidgardMapFog", 0x15, "FG", idx, (f) => {
+      w.defaultInt(f, size);
+      for (let y = 0; y < size; y++) {
+        w.defaultInt("POS_Y", y);
+        w.cp("FOG").i32(size / 8).repitable(0, size / 8);
+      }
+    });
+
+    frame("PlayerBuildings", 0x17, "PB", playerNo, (f) => w.defaultInt(f, 0));
+    frame("PlayerKnownSpells", 0x19, "KS", playerNo, (f) => w.defaultInt(f, 0));
+
+    // player: same body as the neutral above, with addRace's values (bank with 100 gold,
+    // face 0, the race's category-0 lord).
+    frame("MidPlayer", 0x11, "PL", playerNo, (f) => {
+      w.refField("PLAYER_ID", f);
+      w.stringField("NAME_TXT", race.name);
+      w.stringField("DESC_TXT", "");
+      w.stringField("LORD_ID", race.lord);
+      w.stringField("RACE_ID", race.raceId);
+      w.refField("FOG_ID", fogId);
+      w.refField("KNOWN_ID", ksId);
+      w.refField("BUILDS_ID", pbId);
+      w.defaultInt("FACE", 0);
+      w.defaultInt("QTY_BREAKS", 0);
+      w.stringField("BANK", "G0100:R0000:Y0000:E0000:W0000:B0000");
+      w.bool("IS_HUMAN", false);
+      w.stringField("SPELL_BANK", "G0000:R0000:Y0000:E0000:W0000:B0000");
+      w.defaultInt("ATTITUDE", 1);
+      w.defaultInt("RESEAR_T", 0);
+      w.defaultInt("CONSTR_T", 0);
+      w.refField("SPY_1", NIL);
+      w.refField("SPY_2", NIL);
+      w.refField("SPY_3", NIL);
+      w.refField("CAPT_BY", NIL);
+      w.bool("ALWAYSAI", false);
+      w.refField("EXMAPID1", NIL);
+      w.defaultInt("EXMAPTURN1", 0);
+      w.refField("EXMAPID2", NIL);
+      w.defaultInt("EXMAPTURN2", 0);
+      w.refField("EXMAPID3", NIL);
+      w.defaultInt("EXMAPTURN3", 0);
+    });
+
+    // 3 capital items (addItem: MidItem instance per G000IG0006; not a talisman)
+    for (const im of itemIds) {
+      frame("MidItem", 0x0f, "IM", parseInt(im.slice(6), 16), (f) => {
+        w.refField("ITEM_ID", f);
+        w.refField("ITEM_TYPE", CAPITAL_ITEM);
+      });
+    }
+
+    // guardian + hero unit instances (unitFrame body, byte-verified)
+    const unit = (second: number, typeId: string, hp: number, unitName: string): void => {
+      frame("MidUnit", 0x0f, "UN", second, (f) => {
+        w.refField("UNIT_ID", f);
+        w.refField("TYPE", typeId);
+        w.defaultInt("LEVEL", 1);
+        w.defaultInt(f, 0); // MODIF list count (tag = own id)
+        w.defaultInt("CREATION", 0);
+        w.stringField("NAME_TXT", unitName);
+        w.bool("TRANSF", false);
+        w.bool("DYNLEVEL", false);
+        w.defaultInt("HP", hp);
+        w.defaultInt("XP", 0);
+      });
+    };
+    unit(idx * 2, race.guardian, race.guardianHp, "");
+    unit(idx * 2 + 1, race.leader, race.leaderHp, "Герой");
+
+    // capital (body order byte-verified on Riders FT0000): guardian in cell 2 (pos[2]=0)
+    frame("Capital", 0x0f, "FT", idx, (f) => {
+      w.refField("CITY_ID", f);
+      w.stringField("NAME_TXT", `Столица (${race.name})`);
+      w.stringField("DESC_TXT", "");
+      w.refField("OWNER", playerId);
+      w.refField("SUBRACE", subRaceId);
+      w.refField("STACK", stackId);
+      w.defaultInt("POS_X", spot.x);
+      w.defaultInt("POS_Y", spot.y);
+      w.refField("GROUP_ID", f);
+      w.refField("UNIT_0", guardianId);
+      for (let i = 1; i < 6; i++) w.refField(`UNIT_${i}`, NIL);
+      const pos = [-1, -1, 0, -1, -1, -1]; // capital.stack.pos[2] = 0 (slot 0 in cell 2)
+      for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, pos[i]!);
+      w.defaultInt(f, itemIds.length); // item list count (tag = own id)
+      for (const im of itemIds) w.refField("ITEM_ID", im);
+      w.defaultInt("AIPRIORITY", 0);
+    });
+
+    // hero stack (stackFrame body order, byte-verified) — hero leads from cell 2,
+    // inside the capital; addRace: move=35, aiorder=1.
+    frame("MidStack", 0x10, "KC", idx, (f) => {
+      w.refField("GROUP_ID", f);
+      w.refField("UNIT_0", heroId);
+      for (let i = 1; i < 6; i++) w.refField(`UNIT_${i}`, NIL);
+      const pos = [-1, -1, 0, -1, -1, -1]; // stack.pos[2] = 0
+      for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, pos[i]!);
+      w.defaultInt(f, 0); // carried-items count
+      w.refField("STACK_ID", f);
+      w.refField("SRCTMPL_ID", NIL);
+      w.refField("LEADER_ID", heroId);
+      w.bool("LEADR_ALIV", true);
+      w.defaultInt("POS_X", spot.x);
+      w.defaultInt("POS_Y", spot.y);
+      w.defaultInt("MORALE", 0);
+      w.defaultInt("MOVE", 35);
+      w.defaultInt("FACING", 0);
+      w.refField("BANNER", NIL);
+      w.refField("TOME", NIL);
+      w.refField("BATTLE1", NIL);
+      w.refField("BATTLE2", NIL);
+      w.refField("ARTIFACT1", NIL);
+      w.refField("ARTIFACT2", NIL);
+      w.refField("BOOTS", NIL);
+      w.refField("OWNER", playerId);
+      w.refField("INSIDE", capitalId);
+      w.refField("SUBRACE", subRaceId);
+      w.bool("INVISIBLE", false);
+      w.bool("AI_IGNORE", false);
+      w.defaultInt("UPGCOUNT", 0);
+      w.defaultInt("ORDER", 1); // Normal
+      w.refField("ORDER_TARG", NIL);
+      w.defaultInt("AIORDER", 1); // addRace: heroStack.aiorder = 1
+      w.refField("AIORDERTAR", NIL);
+      w.defaultInt("AIPRIORITY", 3);
+      w.defaultInt("CREAT_LVL", 1);
+      w.defaultInt("NBBATTLE", 0);
+    });
+  });
 
   return w.toBytes();
 }

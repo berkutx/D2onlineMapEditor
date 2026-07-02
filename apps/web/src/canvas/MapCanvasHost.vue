@@ -25,6 +25,9 @@ import {
   eraseBrush,
   placeMountainOps,
   placeLandmarkOps,
+  placeVillageOps,
+  placeChestOps,
+  placeStackOps,
   selectRoadSegment,
   type BrushKind,
   type EditOp,
@@ -35,6 +38,7 @@ import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useDecorStore, type DecorEntry } from "../stores/decorStore";
+import { useUnitStore } from "../stores/unitStore";
 import { useCollabStore } from "../stores/collabStore";
 import { useEventStore } from "../stores/eventStore";
 import { getAssetStore, getScene, setScene, destroyScene } from "./sceneHolder";
@@ -45,6 +49,7 @@ const viewStore = useViewStore();
 const toolStore = useToolStore();
 const editStore = useEditStore();
 const decorStore = useDecorStore();
+const unitStore = useUnitStore();
 const collabStore = useCollabStore();
 const eventStore = useEventStore();
 
@@ -186,8 +191,9 @@ onMounted(async () => {
     canvas.addEventListener("contextmenu", onContextMenu);
   }
   window.addEventListener("keydown", onKeyDown);
-  // make the catalog ready before the user opens the decor palette
+  // make the catalogs ready before the user opens the decor palette / places a stack
   void decorStore.load();
+  void unitStore.load();
 
   // poll debug stats for the HUD
   debugTimer = window.setInterval(() => {
@@ -605,8 +611,9 @@ let roadAnchor: { x: number; y: number } | null = null;
 let roadLevel = 0;
 
 // ---- right-click context menu + anchor-pick mode ("Заякорить к…") -------------------------
-/** Open context menu: screen position + the object it targets. */
-const ctxMenu = ref<{ x: number; y: number; obj: MapObject } | null>(null);
+/** Open context menu: screen position + the object it targets (obj=null → the EMPTY-cell
+ *  placement menu at `cell`). */
+const ctxMenu = ref<{ x: number; y: number; obj: MapObject | null; cell: { x: number; y: number } } | null>(null);
 /** While set, the NEXT left click picks the anchor PARENT for this child id. */
 const anchorPickFor = ref<string | null>(null);
 
@@ -618,14 +625,49 @@ function onDblClick(e: MouseEvent): void {
   if (hit) toolStore.setSelectedId(hit.id);
 }
 
-/** Right click = context menu for the object under the cursor. */
+/** Right click = context menu: the object under the cursor, or the EMPTY-cell placement menu. */
 function onContextMenu(e: MouseEvent): void {
   e.preventDefault();
   anchorPickFor.value = null;
   const cell = cellFromEvent(e as PointerEvent);
   if (!cell) { ctxMenu.value = null; return; }
   const hit = pickAtCell(cell.x, cell.y, e.shiftKey);
-  ctxMenu.value = hit ? { x: e.clientX, y: e.clientY, obj: hit } : null;
+  ctxMenu.value = { x: e.clientX, y: e.clientY, obj: hit, cell };
+}
+
+/** Empty-cell placement («Поставить здесь»): village 4×4 / chest 1×1 / stack 1×1 with a
+ *  default hero leader — everything is then edited in the inspector (fully editable). */
+function placeAction(kind: "village" | "chest" | "stack"): void {
+  const at = ctxMenu.value?.cell;
+  ctxMenu.value = null;
+  const doc = editStore.liveDoc;
+  if (!at || !doc) return;
+  const need = kind === "village" ? 4 : 1;
+  if (!canPlaceFootprint(at.x, at.y, need, need)) {
+    ElMessage.warning(kind === "village" ? "Не помещается: деревне нужно 4×4 свободных клетки" : "Клетка занята");
+    return;
+  }
+  let ops: EditOp[] = [];
+  if (kind === "village") ops = placeVillageOps(doc, at.x, at.y, "Новая деревня", 1);
+  else if (kind === "chest") ops = placeChestOps(doc, at.x, at.y, 0, []);
+  else {
+    // default leader = the first hero (L_LEADER) from the catalog; change it in the editor
+    const hero = unitStore.all
+      .filter((u) => u.catKey === "L_LEADER")
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"))[0];
+    if (!hero) {
+      ElMessage.warning("Каталог юнитов ещё загружается — попробуйте через секунду");
+      return;
+    }
+    ops = placeStackOps(doc, at.x, at.y, {
+      units: [null, null, { unit: hero.id, level: hero.level, hp: hero.hp }, null, null, null],
+      leaderCell: 2,
+    });
+  }
+  const first = ops[0] as { object?: { id: string } } | undefined;
+  editStore.commit(ops);
+  if (first?.object) toolStore.setSelectedId(first.object.id);
+  ElMessage.success("Поставлено — свойства в инспекторе справа");
 }
 
 function ctxAction(action: string): void {
@@ -1109,18 +1151,26 @@ watch(
       class="ctx-menu d2-float"
       :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
     >
-      <div class="ctx-title">{{ (ctxMenu.obj as { name?: string }).name || ctxMenu.obj.type }} <code>{{ ctxMenu.obj.id }}</code></div>
-      <button class="ctx-item" @click="ctxAction('props')">Свойства</button>
-      <div class="ctx-sep" />
-      <button class="ctx-item" @click="ctxAction('events')">📋 События объекта</button>
-      <button class="ctx-item" @click="ctxAction('newEvent')">＋ Событие с этим объектом</button>
-      <div class="ctx-sep" />
-      <button class="ctx-item" @click="ctxAction('anchor')">⚓ Заякорить к…</button>
-      <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">Снять якорь</button>
-      <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
-      <div class="ctx-sep" />
-      <button class="ctx-item" @click="ctxAction('copyId')">Скопировать id</button>
-      <button v-if="ctxMenu.obj.type === 'landmark'" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
+      <template v-if="ctxMenu.obj">
+        <div class="ctx-title">{{ (ctxMenu.obj as { name?: string }).name || ctxMenu.obj.type }} <code>{{ ctxMenu.obj.id }}</code></div>
+        <button class="ctx-item" @click="ctxAction('props')">Свойства</button>
+        <div class="ctx-sep" />
+        <button class="ctx-item" @click="ctxAction('events')">📋 События объекта</button>
+        <button class="ctx-item" @click="ctxAction('newEvent')">＋ Событие с этим объектом</button>
+        <div class="ctx-sep" />
+        <button class="ctx-item" @click="ctxAction('anchor')">⚓ Заякорить к…</button>
+        <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">Снять якорь</button>
+        <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
+        <div class="ctx-sep" />
+        <button class="ctx-item" @click="ctxAction('copyId')">Скопировать id</button>
+        <button v-if="ctxMenu.obj.type === 'landmark'" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
+      </template>
+      <template v-else>
+        <div class="ctx-title">Поставить здесь <code>{{ ctxMenu.cell.x }}, {{ ctxMenu.cell.y }}</code></div>
+        <button class="ctx-item" @click="placeAction('village')">🏘 Деревню (4×4)</button>
+        <button class="ctx-item" @click="placeAction('stack')">⚔️ Отряд (герой)</button>
+        <button class="ctx-item" @click="placeAction('chest')">📦 Сундук</button>
+      </template>
     </div>
     <div v-if="debugOverlay && debugStats" class="debug-hud">
       <div class="hud-row hud-head">debug</div>
