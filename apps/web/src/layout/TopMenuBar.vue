@@ -298,12 +298,14 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
       :disabled="!currentScenarioId"
       @click="doValidate()"
     >Проверить</el-button>
-    <el-tag v-if="validity === 'ok'" size="small" type="success" effect="dark" round>
-      <el-icon class="chip-ico"><CircleCheck /></el-icon>сохранится
-    </el-tag>
-    <el-tooltip v-else-if="validity === 'fail'" content="Карта НЕ пройдёт сохранение — откройте «Проверить карту» в меню Правка для причины" placement="bottom">
+    <el-tooltip v-if="validity === 'ok'" content="Проверка пройдена: карта корректна и сохранится/экспортируется" placement="bottom">
+      <el-tag size="small" type="success" effect="dark" round>
+        <el-icon class="chip-ico"><CircleCheck /></el-icon>карта ок
+      </el-tag>
+    </el-tooltip>
+    <el-tooltip v-else-if="validity === 'fail'" content="Карта НЕ пройдёт сохранение — причина в Правка → Проверить карту" placement="bottom">
       <el-tag size="small" type="danger" effect="dark" round>
-        <el-icon class="chip-ico"><WarningFilled /></el-icon>не сохранится
+        <el-icon class="chip-ico"><WarningFilled /></el-icon>не сохранится!
       </el-tag>
     </el-tooltip>
 
