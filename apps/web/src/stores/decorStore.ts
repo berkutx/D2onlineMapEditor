@@ -127,7 +127,7 @@ export const useDecorStore = defineStore("decor", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("decorCatalog.json"), { cache: "no-store" });
+      const res = await fetch(assetUrl("decorCatalog.json"));
       if (!res.ok) throw new Error(`decorCatalog.json ${res.status}`);
       catalog.value = (await res.json()) as Record<string, DecorEntry>;
       loaded.value = true;

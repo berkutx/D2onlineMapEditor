@@ -76,7 +76,7 @@ export const useUnitStore = defineStore("unit", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("unitCatalog.json"), { cache: "no-store" });
+      const res = await fetch(assetUrl("unitCatalog.json"));
       if (!res.ok) throw new Error(`unitCatalog.json ${res.status}`);
       const arr = (await res.json()) as UnitEntry[];
       const map: Record<string, UnitEntry> = {};

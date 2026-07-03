@@ -89,7 +89,7 @@ export const useItemStore = defineStore("item", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("itemCatalog.json"), { cache: "no-store" });
+      const res = await fetch(assetUrl("itemCatalog.json"));
       if (!res.ok) throw new Error(`itemCatalog.json ${res.status}`);
       const arr = (await res.json()) as ItemEntry[];
       const map: Record<string, ItemEntry> = {};

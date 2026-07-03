@@ -55,7 +55,7 @@ export const useSpellStore = defineStore("spell", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("spellCatalog.json"), { cache: "no-store" });
+      const res = await fetch(assetUrl("spellCatalog.json"));
       if (!res.ok) throw new Error(`spellCatalog.json ${res.status}`);
       const arr = (await res.json()) as SpellEntry[];
       const map: Record<string, SpellEntry> = {};

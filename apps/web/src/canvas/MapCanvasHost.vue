@@ -117,10 +117,10 @@ async function rebuild(): Promise<void> {
     // the SHARED tile atlas in the manifest — no per-map PNG fetch. So any map renders
     // without a per-map asset build.
     // object placement data (landmark footprints, graceFortCodes from the DBFs).
-    // A pipeline output like the manifest -> fetch fresh (the static mount serves
-    // /assets with a long immutable cache, which would otherwise pin a stale copy).
+    // Let the browser cache it per the server headers (/assets = max-age + stale-while-
+    // revalidate, NOT immutable) — a rare pipeline rebuild self-heals within a day.
     const objectData = await (
-      await fetch(assetUrl("objectdata.json"), { cache: "no-store" })
+      await fetch(assetUrl("objectdata.json"))
     ).json();
     landmarkFootprints = objectData?.landmarkFootprints;
     spriteTables = objectData;
