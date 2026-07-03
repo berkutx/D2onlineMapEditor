@@ -289,19 +289,57 @@ function locationIdsAtCell(cx: number, cy: number): string[] {
   return ids;
 }
 
+// --- «Локации»-tool role filter: scenario role counts cached per objectsRev ------------
+let locRolesRev = -1;
+let locRolesCache: Record<string, { trigger: number; spawn: number; destination: number; env: number }> = {};
+function locRoles(): typeof locRolesCache {
+  const doc = editStore.liveDoc;
+  if (!doc) return locRolesCache;
+  if (locRolesRev !== editStore.objectsRev) {
+    locRolesCache = locationRoleCounts(doc);
+    locRolesRev = editStore.objectsRev;
+  }
+  return locRolesCache;
+}
+/** Does a location pass the active «Локации»-tool role filter? (all = no filter) */
+function locMatchesFilter(id: string): boolean {
+  const f = toolStore.locFilter;
+  if (f === "all") return true;
+  const c = locRoles()[id];
+  if (f === "free") return !c;
+  return !!c && c[f] > 0;
+}
+/** The filter set (matching location ids) or null when inactive/off-tool. */
+function locFilterSet(): string[] | null {
+  if (toolStore.tool !== "locations" || toolStore.locFilter === "all") return null;
+  const doc = editStore.liveDoc;
+  if (!doc) return null;
+  return doc.objects.filter((o) => o.type === "location" && locMatchesFilter(o.id)).map((o) => o.id);
+}
+
 /** Hover spotlight: locations under the cursor light up (rings + names), the rest fade.
- *  Recomputed only when the hovered CELL changes; off-map clears the spotlight. */
-function updateLocationFocus(cell: { x: number; y: number } | null): void {
+ *  With the «Локации»-tool role filter active, the spotlight is constrained to matching
+ *  locations — and with NO hover the whole matching set stays lit (все прочие гаснут).
+ *  Recomputed only when the hovered CELL changes; off-map falls back to the filter set. */
+function updateLocationFocus(cell: { x: number; y: number } | null, force = false): void {
   const key = cell ? `${cell.x},${cell.y}` : null;
-  if (key === hoverKey) return;
+  if (!force && key === hoverKey) return;
   hoverKey = key;
   const s = getScene();
   if (!s) return;
+  const filter = locFilterSet();
   if (cell && (locationsVisible.value || viewStore.rolesVisible)) {
-    const ids = locationIdsAtCell(cell.x, cell.y);
-    s.setLocationFocus(ids.length ? ids : null);
+    let ids = locationIdsAtCell(cell.x, cell.y);
+    if (filter) {
+      const set = new Set(filter);
+      ids = ids.filter((id) => set.has(id));
+      // hovering empty/non-matching cells keeps the filtered set lit (steady context)
+      s.setLocationFocus(ids.length ? ids : filter);
+    } else {
+      s.setLocationFocus(ids.length ? ids : null);
+    }
   } else {
-    s.setLocationFocus(null);
+    s.setLocationFocus(filter);
   }
 }
 
@@ -913,7 +951,10 @@ function onPointerDown(e: PointerEvent): void {
   if (toolStore.tool === "locations") {
     const cell = cellFromEvent(e);
     if (!cell) return;
-    const locs = objectsAtCell(cell.x, cell.y).filter((o) => o.type === "location");
+    // the role filter constrains picking too: dimmed-out locations are not clickable
+    const locs = objectsAtCell(cell.x, cell.y).filter(
+      (o) => o.type === "location" && locMatchesFilter(o.id),
+    );
     if (!locs.length) {
       toolStore.setSelectedId(null);
       return;
@@ -1234,11 +1275,13 @@ watch(
     if (t === "locations") {
       s?.setLocationsMode(true);
       if (!viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
+      updateLocationFocus(lastCell, true); // apply the role filter's steady spotlight
     } else if (prev === "locations") {
       s?.setLocationsMode(false);
       locDown = null;
       locDragId = null;
       locDragging = false;
+      updateLocationFocus(lastCell, true); // drop the filter spotlight with the mode
     }
     if (t === "decor" || t === "move") refreshGhost(lastCell);
     else if (t === "region") showZone(); // re-show the existing zone (mask or bbox)
@@ -1270,6 +1313,12 @@ watch(
   () => toolStore.roadSel,
   (cells) => getScene()?.setRoadSelection(cells),
   { deep: true },
+);
+
+// «Локации»: re-apply the spotlight when the role filter changes (steady filtered set).
+watch(
+  () => toolStore.locFilter,
+  () => updateLocationFocus(lastCell, true),
 );
 
 // Refresh the ghost when the picked decoration or carried object changes.

@@ -18,6 +18,7 @@ import { useViewStore } from "../stores/viewStore";
 import { useItemStore, ITEM_CAT_LABELS } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
 import { useRefNames } from "../services/refNames";
+import { locationRoleCounts, ROLE_META, type RoleClass, type RoleCounts } from "../services/scenarioRoles";
 import CodeInput from "./CodeInput.vue";
 import MiniMap from "./MiniMap.vue";
 
@@ -92,6 +93,41 @@ const stackGroups = computed<{ label: string; options: Opt[] }[]>(() => {
 
 /** Object-ref types that get the 📍/🎯 helper buttons (players/events are not on the map). */
 const isObjRef = computed(() => props.field.type in REF_TYPES);
+
+/** Location picker GROUPS by scenario role — so «свободные» (не задействованные ни одним
+ *  событием) выбираются сразу, а вход-триггерные и прочие занятые легко исключить взглядом.
+ *  Dominance order matches the on-map roles overlay: trigger > spawn > destination > env.
+ *  Option labels carry ALL role badges («⚡2 ✨») so multi-role locations are explicit. */
+const ROLE_ORDER: RoleClass[] = ["trigger", "spawn", "destination", "env"];
+const badgesOf = (c: RoleCounts): string =>
+  ROLE_ORDER.filter((k) => c[k] > 0)
+    .map((k) => ROLE_META[k].icon + (c[k] > 1 ? c[k] : ""))
+    .join(" ");
+const locGroups = computed<{ label: string; options: Opt[] }[]>(() => {
+  const doc = edit.liveDoc;
+  if (!doc) return [];
+  const counts = locationRoleCounts(doc);
+  const buckets: Record<string, Opt[]> = { free: [], trigger: [], spawn: [], destination: [], env: [] };
+  for (const o of doc.objects) {
+    if (o.type !== "location") continue;
+    const c = counts[o.id];
+    const name = (o as { name?: string }).name || o.id;
+    if (!c) {
+      buckets.free!.push({ value: o.id, label: `${name} · ${o.pos.x},${o.pos.y}` });
+      continue;
+    }
+    const dominant = ROLE_ORDER.find((k) => c[k] > 0)!;
+    buckets[dominant]!.push({ value: o.id, label: `${name} · ${o.pos.x},${o.pos.y} · ${badgesOf(c)}` });
+  }
+  for (const list of Object.values(buckets)) list.sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  const out: { label: string; options: Opt[] }[] = [];
+  if (buckets.free!.length) out.push({ label: `Свободные — не в сценарии (${buckets.free!.length})`, options: buckets.free! });
+  for (const k of ROLE_ORDER) {
+    if (buckets[k]!.length)
+      out.push({ label: `${ROLE_META[k].icon} ${ROLE_META[k].label} (${buckets[k]!.length})`, options: buckets[k]! });
+  }
+  return out;
+});
 
 /** Scenario variables (the `var` field type): stored as the variable's numeric id. */
 const varOptions = computed<{ value: number; label: string }[]>(() =>
@@ -245,7 +281,11 @@ watch(
         class="ev-loc-sel"
         @update:model-value="set($event || '')"
       >
-        <el-option v-for="o in refOptions" :key="o.value" :value="o.value" :label="o.label" />
+        <!-- группы по роли: «Свободные» первыми — их берут для нового спавна/зоны;
+             вход-триггерные и прочие занятые исключаются одним взглядом -->
+        <el-option-group v-for="g in locGroups" :key="g.label" :label="g.label">
+          <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
+        </el-option-group>
       </el-select>
       <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>

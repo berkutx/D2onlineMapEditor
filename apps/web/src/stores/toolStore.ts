@@ -46,6 +46,13 @@ export const useToolStore = defineStore("tool", () => {
    *  Set by a click in the "select" tool; drives ObjectInspector + the selection outline. */
   const selectedId = ref<string | null>(null);
 
+  /** «Локации»-tool role filter: which locations stay bright + pickable in the mode.
+   *  free = не используется ни одним событием; the rest = dominant scenario role. */
+  const locFilter = ref<"all" | "free" | "trigger" | "spawn" | "destination" | "env">("all");
+  function setLocFilter(f: "all" | "free" | "trigger" | "spawn" | "destination" | "env"): void {
+    locFilter.value = f;
+  }
+
   /** «🎯 выбрать на карте» pick mode for event ref-fields: while non-null, the NEXT map
    *  click on an object of one of these types resolves the pick (MapCanvasHost hooks it;
    *  Esc cancels). startObjectPick returns a TOKEN; the result carries it back so ONLY the
@@ -117,6 +124,7 @@ export const useToolStore = defineStore("tool", () => {
 
   return {
     tool, size, terrainId, decorId, moveId, roadSel, region, zoneMode, regionMask, zoneHidden, eyeZone, selectedId,
+    locFilter, setLocFilter,
     objectPickTypes, objectPickResult, startObjectPick, finishObjectPick,
     painting, setTool, setSize, setTerrainId, setDecor, setMoveId, setRoadSel,
     setRegion, setZoneMode, setRegionMask, setZoneHidden, setEyeZone, setSelectedId, clearZone,
