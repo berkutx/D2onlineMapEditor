@@ -8,6 +8,9 @@
  * the single source of truth for role semantics) and passed in as plain data; this layer
  * only renders. Non-interactive.
  *
+ * Each location renders into its OWN child container so `setFocus` can spotlight the
+ * rings under the cursor while the rest fade (mirrors LocationLayer.setFocus).
+ *
  * Touches `pixi.js` -> COMPILE-ONLY under vitest.
  */
 import { Container, Graphics, Text } from "pixi.js";
@@ -35,8 +38,13 @@ const ROLE_ORDER: ReadonlyArray<{ key: keyof RoleCounts; icon: string; color: nu
 /** «не используется»: locations no event references. */
 const UNUSED = 0x8a8a8a;
 
+/** Non-focused markers fade to this alpha while something is hovered. */
+const DIM = 0.12;
+
 export class ScenarioRolesLayer {
   readonly view: Container;
+  private items = new Map<string, Container>();
+  private focus: ReadonlySet<string> | null = null;
 
   constructor() {
     this.view = new Container();
@@ -46,30 +54,31 @@ export class ScenarioRolesLayer {
 
   /** Redraw all location role markers. `roles` = location id → per-class counts. */
   build(doc: MapDocument, roles: Record<string, RoleCounts>): void {
-    this.view.removeChildren().forEach((c) => c.destroy());
-    const g = new Graphics();
-    const badges: Text[] = [];
+    this.view.removeChildren().forEach((c) => c.destroy({ children: true }));
+    this.items.clear();
 
     for (const o of doc.objects) {
       if (o.type !== "location") continue;
+      const root = new Container();
+      root.eventMode = "none";
+      const g = new Graphics();
+      root.addChild(g);
       const r = o.radius ?? 0;
       // center of the (2r+1)² cell square; cellToWorld(x,y) = cell TOP vertex
       const c = cellToWorld(o.pos.x + 0.5, o.pos.y + 0.5);
       const counts = roles[o.id];
-      if (!counts) {
+      const active = counts ? ROLE_ORDER.filter(({ key }) => counts[key] > 0) : [];
+      const dominant = active[0]; // ROLE_ORDER is the dominance priority
+      if (!counts || !dominant) {
         // faint gray dot — «не используется»
         g.circle(c.x, c.y, 3).fill({ color: UNUSED, alpha: 0.5 });
+        this.items.set(o.id, root);
+        this.view.addChild(root);
         continue;
       }
 
       // ring covering the location's iso diamond: half-extents (2r+1)·HALF_W/HALF_H
       const span = 2 * r + 1;
-      const active = ROLE_ORDER.filter(({ key }) => counts[key] > 0);
-      const dominant = active[0]; // ROLE_ORDER is the dominance priority
-      if (!dominant) {
-        g.circle(c.x, c.y, 3).fill({ color: UNUSED, alpha: 0.5 });
-        continue;
-      }
       g.ellipse(c.x, c.y, span * HALF_W, span * HALF_H)
         .stroke({ color: dominant.color, alpha: 0.9, width: 2 });
 
@@ -93,12 +102,26 @@ export class ScenarioRolesLayer {
         t.anchor.set(0, 1);
         t.position.set(x, topY - 2);
         x += t.width + GAP;
-        badges.push(t);
+        root.addChild(t);
       }
-    }
 
-    this.view.addChild(g);
-    for (const t of badges) this.view.addChild(t);
+      this.items.set(o.id, root);
+      this.view.addChild(root);
+    }
+    this.applyFocus(); // a rebuild keeps the current hover spotlight
+  }
+
+  /** Spotlight `ids` (full alpha), fade the rest; null = normal (no hover). */
+  setFocus(ids: ReadonlySet<string> | null): void {
+    this.focus = ids && ids.size ? ids : null;
+    this.applyFocus();
+  }
+
+  private applyFocus(): void {
+    for (const [id, root] of this.items) {
+      const focused = this.focus?.has(id) ?? false;
+      root.alpha = this.focus === null || focused ? 1 : DIM;
+    }
   }
 
   setVisible(v: boolean): void {
@@ -106,6 +129,7 @@ export class ScenarioRolesLayer {
   }
 
   destroy(): void {
+    this.items.clear();
     this.view.destroy({ children: true });
   }
 }

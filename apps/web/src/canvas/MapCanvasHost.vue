@@ -266,6 +266,45 @@ let selDown: { x: number; y: number } | null = null;
 /** Last hovered cell (null = off-map); used to refresh the decor ghost on cycle. */
 let lastCell: { x: number; y: number } | null = null;
 
+// --- locations tool («режим локаций») + hover spotlight ----------------------
+/** Press state: click (no drag) cycles the pick; a drag ≥1 cell moves the location. */
+let locDown: { cell: { x: number; y: number }; locs: MapObject[] } | null = null;
+let locDragId: string | null = null;
+let locDragging = false;
+/** Last hovered cell key for the location spotlight (avoid re-computing per pixel). */
+let hoverKey: string | null = null;
+
+/** Ids of every location whose area covers the cell (the hover spotlight set). */
+function locationIdsAtCell(cx: number, cy: number): string[] {
+  const doc = editStore.liveDoc;
+  if (!doc) return [];
+  const ids: string[] = [];
+  for (const o of doc.objects) {
+    if (o.type !== "location") continue;
+    const r = o.radius ?? 0;
+    if (cx >= o.pos.x - r && cx <= o.pos.x + r && cy >= o.pos.y - r && cy <= o.pos.y + r) {
+      ids.push(o.id);
+    }
+  }
+  return ids;
+}
+
+/** Hover spotlight: locations under the cursor light up (rings + names), the rest fade.
+ *  Recomputed only when the hovered CELL changes; off-map clears the spotlight. */
+function updateLocationFocus(cell: { x: number; y: number } | null): void {
+  const key = cell ? `${cell.x},${cell.y}` : null;
+  if (key === hoverKey) return;
+  hoverKey = key;
+  const s = getScene();
+  if (!s) return;
+  if (cell && (locationsVisible.value || viewStore.rolesVisible)) {
+    const ids = locationIdsAtCell(cell.x, cell.y);
+    s.setLocationFocus(ids.length ? ids : null);
+  } else {
+    s.setLocationFocus(null);
+  }
+}
+
 // --- region select (zone for Copilot generation) -----------------------------
 let regionDragging = false;
 let regionStart: { x: number; y: number } | null = null;
@@ -869,6 +908,24 @@ function onPointerDown(e: PointerEvent): void {
     }
     return;
   }
+  // locations tool («режим локаций»): pick ONLY locations — the world is veiled. A click
+  // selects (re-click cycles the overlapping locations, smaller-first); drag ≥1 cell moves.
+  if (toolStore.tool === "locations") {
+    const cell = cellFromEvent(e);
+    if (!cell) return;
+    const locs = objectsAtCell(cell.x, cell.y).filter((o) => o.type === "location");
+    if (!locs.length) {
+      toolStore.setSelectedId(null);
+      return;
+    }
+    // drag target: keep the current selection if it covers the cell, else the topmost
+    const selHit = locs.find((o) => o.id === toolStore.selectedId);
+    locDragId = (selHit ?? locs[0]!).id;
+    locDown = { cell, locs };
+    locDragging = false;
+    getScene()?.canvas?.setPointerCapture(e.pointerId);
+    return;
+  }
   // select/inspect tool: remember the press; a click (no drag) on pointerup selects the
   // object under it (drag still pans the camera — we don't capture the pointer here).
   if (toolStore.tool === "select") {
@@ -917,6 +974,41 @@ function onPointerUp(e: PointerEvent): void {
     }
     return;
   }
+  // locations tool: finish the press — a drag commits the move (locations skip occupancy,
+  // only bounds are enforced), a click (no drag) selects / cycles the overlap.
+  if (locDown) {
+    const start = locDown;
+    const dragId = locDragId;
+    const dragged = locDragging;
+    locDown = null;
+    locDragId = null;
+    locDragging = false;
+    clearPreview();
+    try {
+      getScene()?.canvas?.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    const cell = cellFromEvent(e);
+    if (dragged && dragId && cell) {
+      const doc = editStore.liveDoc;
+      const o = doc?.objects.find((x) => x.id === dragId);
+      if (o && doc) {
+        const nx = o.pos.x + (cell.x - start.cell.x);
+        const ny = o.pos.y + (cell.y - start.cell.y);
+        if (nx >= 0 && ny >= 0 && nx < doc.size && ny < doc.size && (nx !== o.pos.x || ny !== o.pos.y)) {
+          editStore.commit([{ kind: "moveObject", id: dragId, x: nx, y: ny }]);
+        }
+      }
+      toolStore.setSelectedId(dragId);
+    } else {
+      const list = start.locs;
+      const i = list.findIndex((o) => o.id === toolStore.selectedId);
+      const next = list[(i + 1) % list.length]!;
+      toolStore.setSelectedId(next.id);
+    }
+    return;
+  }
   // select/inspect tool: a click (negligible movement) picks the topmost object → inspector.
   // Hold Shift to step one level below the current pick (overlapping locations/objects).
   if (toolStore.tool === "select" && selDown) {
@@ -953,6 +1045,21 @@ function onPointerMove(e: PointerEvent): void {
     getScene()?.setCursorCell(null);
   }
   if (toolStore.tool === "decor" || toolStore.tool === "move") refreshGhost(cell);
+  // hover spotlight for location overlays (all tools — this is what declutters the soup)
+  updateLocationFocus(cell);
+  // locations tool: a drag ≥1 cell moves the location — live footprint preview at the target
+  if (locDown && locDragId && cell) {
+    if (!locDragging && (cell.x !== locDown.cell.x || cell.y !== locDown.cell.y)) locDragging = true;
+    if (locDragging) {
+      const o = editStore.liveDoc?.objects.find((x) => x.id === locDragId);
+      if (o && o.type === "location") {
+        const r = o.radius ?? 0;
+        const nx = o.pos.x + (cell.x - locDown.cell.x);
+        const ny = o.pos.y + (cell.y - locDown.cell.y);
+        getScene()?.setFootprint(footprintCells(nx - r, ny - r, 2 * r + 1, 2 * r + 1), true);
+      }
+    }
+  }
   if (regionDragging && regionStart && cell) {
     const mode = toolStore.zoneMode;
     const s = getScene();
@@ -1123,6 +1230,16 @@ watch(
       roadLevel = 0;
     }
     if (prev === "region") regionDragging = false;
+    // «режим локаций»: veil the world; make sure the location layer is actually visible
+    if (t === "locations") {
+      s?.setLocationsMode(true);
+      if (!viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
+    } else if (prev === "locations") {
+      s?.setLocationsMode(false);
+      locDown = null;
+      locDragId = null;
+      locDragging = false;
+    }
     if (t === "decor" || t === "move") refreshGhost(lastCell);
     else if (t === "region") showZone(); // re-show the existing zone (mask or bbox)
     else clearPreview();

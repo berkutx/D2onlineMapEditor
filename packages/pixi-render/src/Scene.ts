@@ -32,7 +32,7 @@ import { AnchorLayer } from "./AnchorLayer.js";
 import { ScenarioRolesLayer, type RoleCounts } from "./ScenarioRolesLayer.js";
 import { PresenceLayer, type PeerMarker } from "./PresenceLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
-import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
+import { cellToWorld, mapWorldBounds, HALF_W, HALF_H } from "./iso.js";
 import type { LandmarkFootprints } from "./objectSprite.js";
 import { AnimationManager } from "./AnimationManager.js";
 import { Camera, type CameraSnapshot } from "./Camera.js";
@@ -131,6 +131,13 @@ export class Scene {
   private scenarioRoles?: ScenarioRolesLayer;
   /** location roles + visibility, kept so a full rebuild restores the overlay. */
   private scenarioRolesState: { roles: Record<string, RoleCounts>; visible: boolean } = { roles: {}, visible: true };
+  /** «режим локаций»: a dark veil between objects and location overlays + its toggle state
+   *  (kept so buildScene restores the mode after a map rebuild). */
+  private locVeil?: Graphics;
+  private locationsModeOn = false;
+  private mapSizeCur = 0;
+  /** hover spotlight (location ids under the cursor), kept to re-apply after rebuilds. */
+  private locFocus: ReadonlySet<string> | null = null;
   private presence?: PresenceLayer;
   private overlay?: OverlayLayer;
   private anim?: AnimationManager;
@@ -279,9 +286,12 @@ export class Scene {
     this.world.addChild(this.objects.view);
 
     // event-location highlights, drawn on top of everything (editor getZ ~1300)
+    this.mapSizeCur = map.size;
     this.locations = new LocationLayer();
     this.locations.build(map.objects, this.locOpts);
+    this.locations.setFocus(this.locFocus);
     this.world.addChild(this.locations.view);
+    if (this.locationsModeOn) this.addLocVeil(); // restore «режим локаций» after a rebuild
 
     // event overlay (trigger zones / movement arrows), above locations
     this.eventOverlay = new EventOverlayLayer();
@@ -298,6 +308,7 @@ export class Scene {
     this.scenarioRoles = new ScenarioRolesLayer();
     this.scenarioRoles.build(map, this.scenarioRolesState.roles);
     this.scenarioRoles.setVisible(this.scenarioRolesState.visible);
+    this.scenarioRoles.setFocus(this.locFocus);
     this.world.addChild(this.scenarioRoles.view);
 
     // collaborator cursors, above locations
@@ -571,6 +582,45 @@ export class Scene {
     this.renderNow();
   }
 
+  /** Hover spotlight for location overlays: the ids under the cursor render at full alpha
+   *  (+ their name labels), every other location/ring fades. null = no hover, all normal.
+   *  This is what keeps a 400-location map readable — see LocationLayer/ScenarioRolesLayer. */
+  setLocationFocus(ids: ReadonlyArray<string> | null): void {
+    this.locFocus = ids && ids.length ? new Set(ids) : null;
+    this.locations?.setFocus(this.locFocus);
+    this.scenarioRoles?.setFocus(this.locFocus);
+    this.requestRender();
+  }
+
+  /** «Режим локаций»: dim the WORLD (terrain + objects) under a dark veil so the location
+   *  overlays read at full strength while the user works with locations. The veil sits
+   *  between the object layer and the location overlays. */
+  setLocationsMode(on: boolean): void {
+    this.locationsModeOn = on;
+    if (on) this.addLocVeil();
+    else this.removeLocVeil();
+    this.renderNow(); // programmatic scene change — paint now (rAF may be throttled)
+  }
+
+  private addLocVeil(): void {
+    if (this.locVeil || !this.world || !this.locations) return;
+    const b = mapWorldBounds(Math.max(1, this.mapSizeCur));
+    const pad = 512; // cover the pan margin too
+    const g = new Graphics();
+    g.rect(b.minX - pad, b.minY - pad, b.width + 2 * pad, b.height + 2 * pad)
+      .fill({ color: 0x05070a, alpha: 0.55 });
+    g.eventMode = "none";
+    g.label = "locations-veil";
+    this.world.addChildAt(g, this.world.getChildIndex(this.locations.view));
+    this.locVeil = g;
+  }
+
+  private removeLocVeil(): void {
+    if (!this.locVeil) return;
+    this.locVeil.destroy();
+    this.locVeil = undefined;
+  }
+
   /** Start/stop all sprite animation (single shared ticker). */
   setAnimationEnabled(on: boolean): void {
     this.anim?.setEnabled(on);
@@ -806,6 +856,7 @@ export class Scene {
       this.selection.destroy();
       this.selection = undefined;
     }
+    this.removeLocVeil();
     if (this.objects && this.anim) this.objects.destroy(this.anim);
     this.overlay?.destroy();
     this.presence?.destroy();

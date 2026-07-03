@@ -45,3 +45,12 @@ export const RoadIcon = icon("RoadIcon", [
 export const EraseIcon = icon("EraseIcon", [
   { d: "M250 632 L566 316 L828 578 L512 894 Z M150 904 h360 v64 h-360 Z" },
 ]);
+
+/** Locations — a target: outer ring (even-odd cutout) + centre dot. */
+export const LocationsIcon = icon("LocationsIcon", [
+  {
+    rule: "evenodd",
+    d: "M512 112a400 400 0 1 0 0.1 0Z M512 212a300 300 0 1 0 0.1 0Z",
+  },
+  { d: "M512 372a140 140 0 1 0 0.1 0Z" },
+]);

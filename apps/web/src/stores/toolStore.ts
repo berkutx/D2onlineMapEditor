@@ -8,10 +8,11 @@ import { ref } from "vue";
 
 /** select = pan/inspect (no painting); terrain/water/forest/road/erase paint cells;
  *  decor = place a decoration; move = pick+drop an object; roadsel = select a road segment;
- *  region = drag a rectangle for Copilot generation. */
+ *  region = drag a rectangle for Copilot generation; locations = «режим локаций» (world
+ *  dimmed under a veil, clicks pick/drag ONLY locations). */
 export type EditTool =
   | "select" | "terrain" | "water" | "forest" | "road" | "erase"
-  | "decor" | "move" | "roadsel" | "region";
+  | "decor" | "move" | "roadsel" | "region" | "locations";
 
 /** How the "region" tool paints a generation zone: a rectangle, a freehand brush, a
  *  thick line, or just the rectangle's perimeter (frame). rect = the whole bbox; the
