@@ -104,12 +104,19 @@ describe("GET /api/assets/manifest", () => {
 });
 
 describe("static /assets/*", () => {
-  it("serves an atlas PNG with revalidating cache headers (no-cache + ETag)", async () => {
-    const res = await app.inject({ method: "GET", url: "/assets/iso-terrn-0.png" });
+  it("serves an atlas PNG cacheable (max-age + swr + ETag, no Vary:Origin)", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/assets/iso-terrn-0.png",
+      headers: { origin: "https://example.com" },
+    });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toMatch(/image\/png/);
-    // atlas filenames are not content-hashed -> no-cache (see static.ts rationale)
-    expect(String(res.headers["cache-control"])).toMatch(/no-cache/);
+    // atlas filenames are not content-hashed -> cache a day + stale-while-revalidate (static.ts)
+    expect(String(res.headers["cache-control"])).toMatch(/max-age=\d+/);
+    expect(String(res.headers["cache-control"])).toMatch(/stale-while-revalidate/);
     expect(res.headers.etag).toBeTruthy();
+    // CORS is a static wildcard, so no Vary:Origin to fragment the browser/CDN cache
+    expect(String(res.headers.vary ?? "")).not.toMatch(/origin/i);
   });
 });

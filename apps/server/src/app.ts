@@ -48,7 +48,13 @@ export async function buildApp(): Promise<BuiltApp> {
     rewriteUrl: makeRewriteUrl(config.BASE_PATH),
   });
 
-  await app.register(cors, { origin: true });
+  // origin: "*" (static), NOT true (reflect). Reflecting the Origin makes @fastify/cors add
+  // `Vary: Origin` to EVERY response — including the static atlases. That Vary is a browser-cache
+  // footgun: once assets became `max-age`-cacheable (was `no-cache`), the browser tries to reuse
+  // the cached copy directly, and the Vary:Origin key (esp. for the pixi worker's fetch) can miss
+  // → full 200 re-download instead of a cache hit. Assets/API are public + credential-free
+  // (x-client-id header, no cookies), so a wildcard is safe and drops the Vary entirely.
+  await app.register(cors, { origin: "*" });
   await app.register(multipart, {
     limits: { fileSize: config.UPLOAD_MAX_BYTES, files: 1 },
   });
