@@ -131,10 +131,30 @@ function toggleEye(): void {
   markActive();
   toolStore.setEyeZone(!toolStore.eyeZone);
 }
+/** One-time onboarding: the first time the user focuses the Copilot, draw their eye to the
+ *  «Примеры» button (pulse) and pop it open, so they discover the command catalogue. Persisted
+ *  so it fires exactly once per browser. */
+const EX_HINT_KEY = "d2.cp.exHinted.v1";
+const examplesPulse = ref(false);
+const exBtn = ref<{ $el?: HTMLElement } | null>(null);
+function maybeHintExamples(): void {
+  try {
+    if (localStorage.getItem(EX_HINT_KEY)) return;
+    localStorage.setItem(EX_HINT_KEY, "1");
+  } catch {
+    return; // storage unavailable — skip the one-time hint rather than repeat it every focus
+  }
+  examplesPulse.value = true;
+  window.setTimeout(() => { examplesPulse.value = false; }, 5200);
+  // …and open the popover (trigger="click") by clicking its reference button
+  void nextTick(() => exBtn.value?.$el?.click?.());
+}
+
 function onFocus(): void {
   expanded.value = true;
   inputFocused.value = true;
   markActive();
+  maybeHintExamples();
 }
 function onBlur(): void {
   inputFocused.value = false;
@@ -550,7 +570,7 @@ watch(
       <span class="cp-grip" title="Перетащите копайлот (позиция запомнится)" @pointerdown="onHandlePointerDown">⠿</span>
       <el-popover ref="exPop" :width="328" placement="top-start" trigger="click" popper-class="cp-ex-pop">
         <template #reference>
-          <el-button class="cp-ico" text :icon="Reading" title="Примеры команд" />
+          <el-button ref="exBtn" class="cp-ico cp-examples" :class="{ pulse: examplesPulse }" text :icon="Reading" title="Примеры команд" />
         </template>
         <div class="cp-ex-head">
           Примеры — кликни, затем Enter
@@ -721,6 +741,16 @@ watch(
   margin-left: 3px;
   font-size: 10px;
   opacity: 0.8;
+}
+/* one-time onboarding pulse on the «Примеры» button (first Copilot focus) */
+.cp-examples.pulse {
+  color: var(--el-color-primary);
+  opacity: 1;
+  animation: cpExPulse 0.85s ease-in-out 5;
+}
+@keyframes cpExPulse {
+  0%, 100% { transform: scale(1); filter: none; }
+  50% { transform: scale(1.28); filter: drop-shadow(0 0 6px var(--el-color-primary)); }
 }
 .cp-close {
   color: var(--el-text-color-secondary);

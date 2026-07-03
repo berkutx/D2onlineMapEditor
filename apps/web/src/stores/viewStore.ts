@@ -32,11 +32,17 @@ export const useViewStore = defineStore("view", () => {
   const p = loadPersisted();
   const pt = (p.overlayTints ?? {}) as Partial<OverlayTints>;
 
+  /** One-off migration: the map now loads CLEAN — locations/roles overlays off and the minimap
+   *  collapsed. Older browsers persisted these ON; force them off ONCE (then respect the user's
+   *  choice). New defaults are also false, so fresh loads are clean too. */
+  const cleanMigrated = p.cleanDefaultsMigrated === true;
+
   const terrainVisible = ref(bool(p.terrainVisible, true));
   const objectsVisible = ref(bool(p.objectsVisible, true));
   const gridVisible = ref(bool(p.gridVisible, true));
-  /** Event-location highlights (spawns / trigger regions). On by default. */
-  const locationsVisible = ref(bool(p.locationsVisible, true));
+  /** Event-location highlights (spawns / trigger regions). OFF by default — the map is cluttered
+   *  with 400+ of them on real maps; turn on from Вид, or the «Локации» tool enables them. */
+  const locationsVisible = ref(cleanMigrated ? bool(p.locationsVisible, false) : false);
   // Animation off for now (objects render their first frame statically); toggle in View.
   const animate = ref(bool(p.animate, false));
   /** Left "Objects" panel — hidden by default; toggle from the View menu. */
@@ -49,11 +55,12 @@ export const useViewStore = defineStore("view", () => {
   const eventGraphVisible = ref(bool(p.eventGraphVisible, false));
   /** «Связи»: the editor-only anchors overlay (⚓ + child→parent arrows). */
   const anchorsVisible = ref(bool(p.anchorsVisible, false));
-  /** «Роли локаций»: rings + role badges (⚡✨➜☁) on event-wired locations. ON by
-   *  default — the overlay is how users DISCOVER that locations carry scenario roles. */
-  const rolesVisible = ref(bool(p.rolesVisible, true));
-  /** Floating minimap dock (bottom-right of the canvas). On by default. */
-  const minimapVisible = ref(bool(p.minimapVisible, true));
+  /** «Роли локаций»: rings + role badges (⚡✨➜☁) on event-wired locations. OFF by default
+   *  (part of the clean-map default); turn on from Вид or via the «Локации» tool. */
+  const rolesVisible = ref(cleanMigrated ? bool(p.rolesVisible, false) : false);
+  /** Floating minimap dock. COLLAPSED by default (a small 🗺 button, bottom-right); click to
+   *  expand. true = expanded card, false = collapsed FAB. */
+  const minimapVisible = ref(cleanMigrated ? bool(p.minimapVisible, false) : false);
   /** Debug HUD overlay (FPS / render ms / iso engine). OFF by default (product decision);
    *  the one-off migration flips earlier persisted defaults off once. */
   const debugOverlay = ref(p.debugOffMigrated ? bool(p.debugOverlay, false) : false);
@@ -190,6 +197,7 @@ export const useViewStore = defineStore("view", () => {
           minimapVisible: minimapVisible.value,
           debugOverlay: debugOverlay.value,
           debugOffMigrated: true,
+          cleanDefaultsMigrated: true,
           dark: dark.value,
           overlayTints: overlayTints.value,
         }));
