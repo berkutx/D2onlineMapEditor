@@ -32,13 +32,15 @@ const visible = computed({
   set: (v: boolean) => { if (v !== view.eventPanelVisible) view.toggleEventPanel(); },
 });
 
-/** Список событий сворачивается в узкую полоску — графу достаётся вся ширина. */
+/** Список событий сворачивается в узкую полоску; граф связей опционален (по умолчанию скрыт),
+ *  так что стандартная раскладка — просторные 2 колонки «список | редактор». */
 const listCollapsed = ref(false);
-const gridColumns = computed(() =>
-  listCollapsed.value
-    ? "28px minmax(0, 1fr) minmax(280px, 330px)"
-    : "minmax(200px, 250px) minmax(0, 1fr) minmax(280px, 330px)",
-);
+const gridColumns = computed(() => {
+  const list = listCollapsed.value ? "28px" : "minmax(240px, 320px)";
+  return view.eventGraphVisible
+    ? `${list} minmax(0, 1fr) minmax(300px, 340px)` // список | граф | редактор
+    : `${list} minmax(360px, 1fr)`; //                список | редактор (граф скрыт)
+});
 
 /** Alt+← = назад по истории переходов (пока окно открыто). */
 function onNavKey(e: KeyboardEvent): void {
@@ -165,8 +167,20 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
       <VariablesEditor v-else-if="store.panelTab === 'vars'" class="ev-sub" />
       <TemplatesEditor v-else-if="store.panelTab === 'templates'" class="ev-sub" />
 
-      <!-- События: list | star graph | editor -->
-      <div v-else class="ev-grid" :style="{ gridTemplateColumns: gridColumns }">
+      <!-- События: list | (опц.) star graph | editor -->
+      <div v-else class="ev-events">
+        <div class="ev-toolbar">
+          <el-tooltip :content="view.eventGraphVisible ? 'Скрыть граф связей' : 'Показать граф связей события'" :show-after="300">
+            <el-button
+              size="small"
+              :type="view.eventGraphVisible ? 'primary' : 'default'"
+              text
+              class="ev-graph-toggle"
+              @click="view.toggleEventGraph()"
+            >🕸 Граф связей</el-button>
+          </el-tooltip>
+        </div>
+        <div class="ev-grid" :style="{ gridTemplateColumns: gridColumns }">
         <button
           v-if="listCollapsed"
           class="ev-list-expand"
@@ -175,7 +189,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
         >▸<span class="ev-list-expand-lbl">события</span></button>
         <div v-else class="ev-col ev-col-list d2-rail--left">
           <div class="ev-subhead">
-            <el-tooltip content="Свернуть список (графу — вся ширина)" :show-after="300">
+            <el-tooltip content="Свернуть список (больше места редактору/графу)" :show-after="300">
               <el-button size="small" text class="icon-btn" @click="listCollapsed = true">◂</el-button>
             </el-tooltip>
             <span class="ev-count">{{ store.events.length }} событий</span>
@@ -219,7 +233,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
         </div>
 
         <!-- star topology: what triggers it (left), what it does (right), everything by name -->
-        <EventGraph class="ev-col ev-col-graph" />
+        <EventGraph v-if="view.eventGraphVisible" class="ev-col ev-col-graph" />
 
         <div class="ev-col ev-col-editor d2-rail--left">
           <el-scrollbar v-if="sel" class="ev-editor">
@@ -296,6 +310,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
           </el-scrollbar>
           <el-empty v-else description="Выберите или создайте событие" :image-size="60" />
         </div>
+        </div>
       </div>
     </div>
   </el-dialog>
@@ -324,12 +339,17 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 .sc-body { height: min(66vh, 640px); min-height: 380px; font-size: 12px; }
 .ev-sub { height: 100%; }
 
-/* События: list | graph | editor (columns come from the gridColumns computed:
-   the list is collapsible so the GRAPH gets the width priority) */
+/* События tab = a compact toolbar (graph toggle) над сеткой list|(graph)|editor. */
+.ev-events { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.ev-toolbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
+.ev-graph-toggle { font-size: 12px; }
+
+/* columns come from the gridColumns computed: the list is collapsible and the graph is
+   OPTIONAL (off by default), so the default is a roomy list | editor 2-column layout. */
 .ev-grid {
   display: grid;
   gap: 0;
-  height: 100%;
+  flex: 1;
   min-height: 0;
 }
 .ev-list-expand {

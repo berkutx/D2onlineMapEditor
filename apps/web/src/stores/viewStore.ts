@@ -43,6 +43,10 @@ export const useViewStore = defineStore("view", () => {
   const objectPanelVisible = ref(bool(p.objectPanelVisible, false));
   /** Events panel (scenario triggers/effects). Hidden by default; toggle from the View menu. */
   const eventPanelVisible = ref(bool(p.eventPanelVisible, false));
+  /** Scenario «Граф связей» column inside the events tab. OFF by default so the default
+   *  layout is a roomy list | editor 2-column (the graph is a space hog that shows little
+   *  until you want it); toggled from a button in the events toolbar. Persisted. */
+  const eventGraphVisible = ref(bool(p.eventGraphVisible, false));
   /** «Связи»: the editor-only anchors overlay (⚓ + child→parent arrows). */
   const anchorsVisible = ref(bool(p.anchorsVisible, false));
   /** «Роли локаций»: rings + role badges (⚡✨➜☁) on event-wired locations. ON by
@@ -115,6 +119,10 @@ export const useViewStore = defineStore("view", () => {
     eventPanelVisible.value = !eventPanelVisible.value;
   }
 
+  function toggleEventGraph(): void {
+    eventGraphVisible.value = !eventGraphVisible.value;
+  }
+
   function toggleAnchors(): void {
     anchorsVisible.value = !anchorsVisible.value;
   }
@@ -165,7 +173,7 @@ export const useViewStore = defineStore("view", () => {
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
     [terrainVisible, objectsVisible, gridVisible, locationsVisible, animate,
-      objectPanelVisible, eventPanelVisible, anchorsVisible, rolesVisible, minimapVisible, debugOverlay, dark, overlayTints],
+      objectPanelVisible, eventPanelVisible, eventGraphVisible, anchorsVisible, rolesVisible, minimapVisible, debugOverlay, dark, overlayTints],
     () => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -176,6 +184,7 @@ export const useViewStore = defineStore("view", () => {
           animate: animate.value,
           objectPanelVisible: objectPanelVisible.value,
           eventPanelVisible: eventPanelVisible.value,
+          eventGraphVisible: eventGraphVisible.value,
           anchorsVisible: anchorsVisible.value,
           rolesVisible: rolesVisible.value,
           minimapVisible: minimapVisible.value,
@@ -199,6 +208,7 @@ export const useViewStore = defineStore("view", () => {
     animate,
     objectPanelVisible,
     eventPanelVisible,
+    eventGraphVisible,
     anchorsVisible,
     rolesVisible,
     minimapVisible,
@@ -218,6 +228,7 @@ export const useViewStore = defineStore("view", () => {
     toggleLocations,
     toggleObjectPanel,
     toggleEventPanel,
+    toggleEventGraph,
     toggleAnchors,
     toggleRoles,
     toggleMinimap,

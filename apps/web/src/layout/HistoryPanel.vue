@@ -10,9 +10,13 @@ import { storeToRefs } from "pinia";
 import { ElButton } from "element-plus";
 import { Clock, ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import { useCollabStore } from "../stores/collabStore";
+import { useFloatingDock } from "../composables/useFloatingDock";
 
 const collab = useCollabStore();
 const { history, connected, peerList } = storeToRefs(collab);
+
+const card = ref<HTMLElement | null>(null);
+const { style, onHandlePointerDown } = useFloatingDock("history", card);
 
 const open = ref(true);
 /** Newest first, capped so the list stays light. */
@@ -29,8 +33,9 @@ function toggle(seq: number): void {
 </script>
 
 <template>
-  <div v-if="show" class="history d2-float" :class="{ collapsed: !open }">
-    <div class="hist-head" @click="open = !open">
+  <div v-if="show" ref="card" class="history d2-float" :class="{ collapsed: !open }" :style="style">
+    <div class="hist-head" title="Перетащите за заголовок" @pointerdown="onHandlePointerDown" @click="open = !open">
+      <span class="hist-grip">⠿</span>
       <el-icon class="hist-ico"><Clock /></el-icon>
       <span class="hist-title">История</span>
       <span class="hist-count">{{ history.length }}</span>
@@ -54,12 +59,15 @@ function toggle(seq: number): void {
 </template>
 
 <style scoped>
+/* Default corner = TOP-right of .app-main (Copilot owns bottom-centre, minimap bottom-right,
+   so the top-right corner is free — no more three-way pile-up). Once dragged, useFloatingDock
+   supplies inline left/top and this right/top is overridden. */
 .history {
   position: absolute;
   right: 12px;
-  bottom: 40px;
+  top: 12px;
   width: 248px;
-  z-index: 30;
+  z-index: 27;
   font-size: 12px;
   overflow: hidden;
 }
@@ -69,8 +77,18 @@ function toggle(seq: number): void {
   align-items: center;
   gap: 6px;
   padding: 10px 12px 6px;
-  cursor: pointer;
+  cursor: grab;
   user-select: none;
+  touch-action: none;
+}
+.hist-head:active {
+  cursor: grabbing;
+}
+.hist-grip {
+  color: var(--el-text-color-secondary);
+  opacity: 0.5;
+  font-size: 12px;
+  line-height: 1;
 }
 .hist-ico { font-size: 14px; color: var(--el-text-color-secondary); }
 .hist-title { font-size: 13px; font-weight: 600; }

@@ -1,20 +1,25 @@
 <script setup lang="ts">
 /**
- * MinimapDock — постоянная миникарта: a floating .d2-float card at the canvas'
- * bottom-RIGHT corner (Copilot owns bottom-center, so the corner is free) hosting
- * the reusable <MiniMap> with the object-dots layer on. Collapsed state = a small
- * round 🗺 button in the same corner. Visibility persists via viewStore
- * (`minimapVisible`, d2.view.v1) and is also toggleable from Вид ▸ Миникарта.
+ * MinimapDock — a persistent minimap: a floating .d2-float card hosting the reusable
+ * <MiniMap> (object-dots layer on). DRAGGABLE by its header (position remembered per browser
+ * via useFloatingDock, key "minimap") and clamped to the canvas. Default corner = bottom-right.
+ * Collapsed state = a small round 🗺 button in the same corner. Visibility persists via
+ * viewStore (minimapVisible) and is toggleable from Вид ▸ Миникарта.
  */
+import { ref } from "vue";
 import { useViewStore } from "../stores/viewStore";
+import { useFloatingDock } from "../composables/useFloatingDock";
 import MiniMap from "./MiniMap.vue";
 
 const view = useViewStore();
+const card = ref<HTMLElement | null>(null);
+const { style, onHandlePointerDown } = useFloatingDock("minimap", card);
 </script>
 
 <template>
-  <div v-if="view.minimapVisible" class="minimap-dock d2-float">
-    <div class="mm-head">
+  <div v-if="view.minimapVisible" ref="card" class="minimap-dock d2-float" :style="style">
+    <div class="mm-head" title="Перетащите за заголовок" @pointerdown="onHandlePointerDown">
+      <span class="mm-grip">⠿</span>
       <span class="mm-title d2-sec">карта</span>
       <button class="mm-close" title="Скрыть миникарту" @click="view.toggleMinimap()">✕</button>
     </div>
@@ -29,13 +34,14 @@ const view = useViewStore();
 </template>
 
 <style scoped>
-/* Bottom-right of .app-main; Copilot floats bottom-CENTER, so no overlap. Sits
-   under body-teleported dialogs (z≈2000) and under the История card (z 30). */
+/* Default corner = bottom-right of .app-main (Copilot floats bottom-CENTER, so no overlap).
+   Once dragged, useFloatingDock supplies inline left/top and these right/bottom are overridden.
+   Sits under body-teleported dialogs (z≈2000). */
 .minimap-dock {
   position: absolute;
   right: 12px;
   bottom: 12px;
-  z-index: 25;
+  z-index: 26;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -45,6 +51,18 @@ const view = useViewStore();
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.mm-head:active {
+  cursor: grabbing;
+}
+.mm-grip {
+  color: var(--el-text-color-secondary);
+  opacity: 0.5;
+  font-size: 12px;
+  line-height: 1;
 }
 .mm-title {
   margin: 0; /* .d2-sec carries rail margins — the dock header is tight */
@@ -70,7 +88,7 @@ const view = useViewStore();
   position: absolute;
   right: 12px;
   bottom: 12px;
-  z-index: 25;
+  z-index: 26;
   width: 34px;
   height: 34px;
   padding: 0;
