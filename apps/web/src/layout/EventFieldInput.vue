@@ -130,7 +130,7 @@ function showOnMap(): void {
   if (obj.type === "location" && !viewStore.locationsVisible) viewStore.toggleLocations();
   toolStore.setSelectedId(obj.id);
   const w = cellToWorld(obj.pos.x + 0.5, obj.pos.y + 0.5);
-  getScene()?.getCamera()?.centerOn(w.x, w.y);
+  getScene()?.centerOn(w.x, w.y); // centers AND paints now (rAF is throttled off-canvas)
 }
 
 /** Create a location at the CURRENT view center, assign it to this field, select it. */

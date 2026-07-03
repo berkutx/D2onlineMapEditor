@@ -23,6 +23,38 @@ const open = ref(true);
 const rows = computed(() => history.value.slice(-200).reverse());
 const show = computed(() => connected.value && (history.value.length > 0 || peerList.value.length > 0));
 
+// --- resizable body: drag the bottom edge to make the log taller/shorter (persisted) -------
+const HIST_H_KEY = "d2.hist.h.v1";
+function loadHeight(): number {
+  try { const v = Number(localStorage.getItem(HIST_H_KEY)); return v >= 120 ? v : 240; } catch { return 240; }
+}
+const bodyHeight = ref(loadHeight());
+let resizing = false;
+let startY = 0;
+let startH = 0;
+function onResizeMove(e: PointerEvent): void {
+  if (!resizing) return;
+  const max = Math.max(200, Math.round(window.innerHeight * 0.7));
+  bodyHeight.value = Math.max(120, Math.min(startH + (e.clientY - startY), max));
+  e.preventDefault();
+}
+function endResize(): void {
+  window.removeEventListener("pointermove", onResizeMove);
+  window.removeEventListener("pointerup", endResize);
+  if (!resizing) return;
+  resizing = false;
+  try { localStorage.setItem(HIST_H_KEY, String(Math.round(bodyHeight.value))); } catch { /* ignore */ }
+}
+function startResize(e: PointerEvent): void {
+  if (e.button !== 0) return;
+  resizing = true;
+  startY = e.clientY;
+  startH = bodyHeight.value;
+  window.addEventListener("pointermove", onResizeMove);
+  window.addEventListener("pointerup", endResize);
+  e.preventDefault();
+}
+
 /** seqs whose detail is expanded (click a row to toggle). */
 const expanded = ref<Set<number>>(new Set());
 function toggle(seq: number): void {
@@ -41,7 +73,7 @@ function toggle(seq: number): void {
       <span class="hist-count">{{ history.length }}</span>
       <el-button text size="small" class="hist-toggle" :icon="open ? ArrowDown : ArrowUp" />
     </div>
-    <div v-show="open" class="hist-body">
+    <div v-show="open" class="hist-body" :style="{ height: bodyHeight + 'px' }">
       <div v-if="!rows.length" class="hist-empty">Пока нет правок в этой сессии.</div>
       <ul v-else class="hist-list">
         <li v-for="e in rows" :key="e.seq" class="hist-item">
@@ -55,6 +87,12 @@ function toggle(seq: number): void {
         </li>
       </ul>
     </div>
+    <div
+      v-show="open"
+      class="hist-resize"
+      title="Потяните, чтобы изменить высоту"
+      @pointerdown="startResize"
+    ><span class="hist-resize-grip">⣒</span></div>
   </div>
 </template>
 
@@ -105,7 +143,22 @@ function toggle(seq: number): void {
   transition: opacity 0.12s ease;
 }
 .hist-head:hover .hist-toggle { opacity: 1; }
-.hist-body { max-height: 240px; overflow-y: auto; }
+/* height is bound inline (resizable via the bottom grip) — scroll the overflow */
+.hist-body { overflow-y: auto; }
+/* bottom resize grip: a thin bar the user drags to grow/shrink the log height */
+.hist-resize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  cursor: ns-resize;
+  color: var(--el-text-color-secondary);
+  opacity: 0.5;
+  user-select: none;
+  touch-action: none;
+}
+.hist-resize:hover { opacity: 1; }
+.hist-resize-grip { font-size: 11px; line-height: 1; letter-spacing: 2px; }
 .hist-empty { padding: 6px 12px 10px; color: var(--el-text-color-secondary); }
 .hist-list { list-style: none; margin: 0; padding: 2px 6px 6px; }
 /* rows are .d2-row (hover wash + inset accent when .active) — no per-row borders */

@@ -562,6 +562,15 @@ export class Scene {
     this.requestRender();
   }
 
+  /** Center the camera on a WORLD point and paint IMMEDIATELY (minimap click, "show on map").
+   *  renderNow, not requestRender: rAF is throttled while the pointer sits off the canvas —
+   *  which is exactly the minimap-click case — so a plain requestRender would leave the map
+   *  frozen until the next pointermove ("moves only when I wave the mouse over it"). */
+  centerOn(worldX: number, worldY: number): void {
+    this.camera?.centerOn(worldX, worldY);
+    this.renderNow();
+  }
+
   /** Start/stop all sprite animation (single shared ticker). */
   setAnimationEnabled(on: boolean): void {
     this.anim?.setEnabled(on);

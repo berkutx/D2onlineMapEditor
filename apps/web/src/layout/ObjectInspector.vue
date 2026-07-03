@@ -20,6 +20,8 @@ import { useEventStore } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
 import { computeObjectRoles, ROLE_META, type ObjectRole } from "../services/scenarioRoles";
 import DecorThumb from "./DecorThumb.vue";
+import ThumbPreview from "./ThumbPreview.vue";
+import type { DecorThumb as DecorThumbRect } from "../stores/decorStore";
 import ItemPicker from "./ItemPicker.vue";
 import ItemIcon from "./ItemIcon.vue";
 import UnitPicker from "./UnitPicker.vue";
@@ -90,18 +92,22 @@ const decorGroup = computed(() => decorStore.groupOf(decorVariantId.value));
 const decorVariantCount = computed(() => decorGroup.value?.variants.length ?? 0);
 /** Human decoration name: RU game name → group label; the raw G000MG#### id lives in tooltips only. */
 const decorName = computed(() => decorEntry.value?.name_ru || decorGroup.value?.label || "—");
-/** 1-based position of the current look inside its variant group («вариант 3 из 8»); 0 = unknown. */
-const decorVariantPos = computed(() => {
-  const g = decorGroup.value;
-  return g ? g.variants.findIndex((v) => v.id === decorVariantId.value) + 1 : 0;
-});
-function cycleDecor(dir: number): void {
-  const next = decorStore.neighbor(decorVariantId.value, dir);
-  if (next && obj.value) { const p = decorStore.variantPatch(obj.value, next); if (p) patch(p); }
+/** Apply a specific look (thumbnail-strip click) to the placed decor object. */
+function pickVariant(id: string): void {
+  if (obj.value) { const p = decorStore.variantPatch(obj.value, id); if (p) patch(p); }
 }
 function rerollDecor(): void {
   const r = decorStore.randomVariant(decorVariantId.value);
   if (r && obj.value) { const p = decorStore.variantPatch(obj.value, r); if (p) patch(p); }
+}
+
+// hover-zoom for the narrow inspector strip (shared floating preview, see ThumbPreview.vue)
+const decorPreview = ref<InstanceType<typeof ThumbPreview> | null>(null);
+function showDecorPreview(e: MouseEvent, thumb: DecorThumbRect, name: string): void {
+  decorPreview.value?.show(e.currentTarget as HTMLElement, thumb, name);
+}
+function hideDecorPreview(): void {
+  decorPreview.value?.hide();
 }
 
 /** ── «Сценарий»: the selected object's scenario roles (trigger/spawn/destination/env), from
@@ -787,17 +793,26 @@ function close(): void {
             <div v-if="decorEntry" class="muted xs">{{ decorEntry.cx }}×{{ decorEntry.cy }} клеток</div>
           </div>
         </div>
-        <div class="row">
-          <label :title="decorVariantId ?? undefined">Вид
-            <span v-if="decorVariantPos" class="muted">вариант {{ decorVariantPos }} из {{ decorVariantCount }}</span>
-            <span v-else-if="decorVariantCount" class="muted">{{ decorVariantCount }}</span>
-          </label>
-          <span class="decor-cycle">
-            <el-button size="small" :disabled="decorVariantCount < 2" title="Предыдущий" @click="cycleDecor(-1)">‹</el-button>
-            <el-button size="small" text title="Случайный вид" @click="rerollDecor()">⟳</el-button>
-            <el-button size="small" :disabled="decorVariantCount < 2" title="Следующий" @click="cycleDecor(1)">›</el-button>
-          </span>
+        <div v-if="decorVariantCount > 1" class="decor-variants-head">
+          <span class="d2-sec">Вид <span class="muted">— выберите ({{ decorVariantCount }})</span></span>
+          <el-button size="small" text title="Случайный вид" @click="rerollDecor()">⟳</el-button>
         </div>
+        <div v-if="decorVariantCount > 1" class="decor-variants">
+          <button
+            v-for="v in decorGroup!.variants"
+            :key="v.id"
+            type="button"
+            class="dv-cell"
+            :class="{ sel: v.id === decorVariantId }"
+            :title="v.desc_en || v.name_ru"
+            @click="pickVariant(v.id)"
+            @mouseenter="showDecorPreview($event, v.thumb, v.name_ru || v.desc_en || decorName)"
+            @mouseleave="hideDecorPreview()"
+          >
+            <DecorThumb :thumb="v.thumb" :size="40" />
+          </button>
+        </div>
+        <ThumbPreview ref="decorPreview" />
       </template>
 
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
@@ -1038,6 +1053,33 @@ function close(): void {
   display: inline-flex;
   gap: 2px;
 }
+/* variant looks = a visual thumbnail grid (not a blind «1 из 4» cycler). Same look as the
+   on-canvas ObjectActionBar strip: checkerboard cells, soft ring on hover / accent on the
+   current one. Hover shows a zoomed ThumbPreview (the inspector rail is narrow). */
+.decor-variants-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: var(--d2-sp-3, 10px) 0 4px;
+}
+.decor-variants-head .d2-sec { margin: 0; }
+.decor-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.dv-cell {
+  flex: 0 0 auto;
+  padding: 2px;
+  border: none;
+  border-radius: var(--d2-radius);
+  /* fixed-light checkerboard: the sprites are dark, they only read on a light backdrop */
+  background: repeating-conic-gradient(#e9e5db 0% 25%, #f6f4ee 0% 50%) 0 / 12px 12px;
+  cursor: pointer;
+  transition: box-shadow 0.12s ease;
+}
+.dv-cell:hover { box-shadow: 0 0 0 1px var(--el-border-color-lighter); }
+.dv-cell.sel { box-shadow: 0 0 0 2px var(--d2-active-bar); }
 /* «Сценарий»: compact clickable role rows (.d2-row owns hover wash + radius) */
 .roles-list {
   display: flex;

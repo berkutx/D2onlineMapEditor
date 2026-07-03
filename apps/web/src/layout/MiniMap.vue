@@ -307,7 +307,7 @@ function onClick(ev: MouseEvent): void {
   const x = clamp((dx + sy) / 2);
   const y = clamp((sy - dx) / 2);
   const w = cellToWorld(x + 0.5, y + 0.5);
-  getScene()?.getCamera()?.centerOn(w.x, w.y); // emits camera-change → re-render
+  getScene()?.centerOn(w.x, w.y); // centers AND paints now (rAF is throttled off-canvas)
   emit("centered", { x, y });
 }
 </script>
