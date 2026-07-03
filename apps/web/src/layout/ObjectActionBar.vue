@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
  * ObjectActionBar — a light floating panel shown while the Move tool is carrying an
- * object, for RE-ROLLING its look (keeping its footprint), like the game's "change
- * appearance". 🎲 picks a random variant of the same group; the strip picks a specific
- * one; R / [ ] also work from the keyboard (AppLayout). Drops a `patchObject` commit.
- * Only appears for re-rollable objects (landmarks / mountains with >1 variant).
+ * object, for RE-ROLLING its look (keeping its footprint). 🎲 picks a random variant of
+ * the same group; the strip picks a specific one; R / [ ] also work from the keyboard
+ * (AppLayout). Drops a `patchObject` commit. Only appears for re-rollable objects
+ * (landmarks / mountains with >1 variant).
  */
 import { computed, ref } from "vue";
 import { Refresh } from "@element-plus/icons-vue";

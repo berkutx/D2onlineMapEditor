@@ -263,8 +263,8 @@ export function decodeGrid(
   let work = doc;
 
   // 2a: wall landmarks — ONE consistent art set, auto-tiled by the 4-neighbour mask. At
-  // scale 2 the maze is coarse and uses the 2×2 stone wall pieces (like the game's castles);
-  // neighbours are checked at the coarse `scale` spacing.
+  // scale 2 the maze is coarse and uses the 2×2 stone wall pieces; neighbours are checked
+  // at the coarse `scale` spacing.
   const wantS2 = scale >= 2;
   const style = walls.styles.find((s) => wallComplete(wantS2 ? s.s2 : s.s1)) ?? walls.styles[0];
   const pieces = style ? (wantS2 && wallComplete(style.s2) ? style.s2 : style.s1) : undefined;

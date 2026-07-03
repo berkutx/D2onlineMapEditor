@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * MiniMap — an ISOMETRIC diamond render of the map (same orientation as the main
- * canvas and the game's own minimap), embedded in popovers/panels. Two modes:
+ * canvas), embedded in popovers/panels. Two modes:
  *  - "terrain": full relief palette + object dots (the dock minimap);
  *  - "simple":  orientation-only — sea + capital/city dots + the highlighted
  *    object, no relief (the event ref-loc picker: relative points beat noise).

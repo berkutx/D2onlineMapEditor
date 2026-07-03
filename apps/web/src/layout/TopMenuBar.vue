@@ -423,7 +423,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
           </el-checkbox-group>
           <!-- гейт ≥1 фракции: сервер отклоняет карту без рас — подсказываем сразу -->
           <div v-if="!newMap.races.length" class="nm-hint nm-hint-error">выберите хотя бы одну фракцию</div>
-          <div class="nm-hint">Каждая фракция получает игрока, столицу со стражем и героя (как «добавить расу» в редакторе игры).</div>
+          <div class="nm-hint">Каждая фракция получает игрока, столицу со стражем и героя.</div>
         </el-form-item>
       </el-form>
       <template #footer>
