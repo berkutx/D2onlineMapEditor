@@ -21,6 +21,12 @@ export async function registerSpa(app: FastifyInstance): Promise<void> {
 
   // Serve real built files (/index.html, /app/*.js, /app/*.css). wildcard:false → a missing
   // path 404s through to the SPA fallback below instead of being swallowed by a catch-all.
+  //
+  // Cache policy: Vite CONTENT-HASHES the bundle (build.assetsDir 'app' → /app/[name]-[hash].js),
+  // so those URLs change whenever the file changes → safe to pin `immutable` for a year (the
+  // big win: repeat visits load zero JS/CSS from the network). index.html must NOT be cached —
+  // it's the manifest that points at the hashed bundle, so it must revalidate every load to pick
+  // up a new deploy's hashes.
   await app.register(fastifyStatic, {
     root: dist,
     prefix: "/",
@@ -28,10 +34,16 @@ export async function registerSpa(app: FastifyInstance): Promise<void> {
     wildcard: false,
     decorateReply: false, // /assets already added reply.sendFile
     cacheControl: true,
-    setHeaders: (res) => res.setHeader("cache-control", "no-cache"),
+    setHeaders: (res, filePath) => {
+      res.setHeader(
+        "cache-control",
+        /\.html$/i.test(filePath) ? "no-cache" : "public, max-age=31536000, immutable",
+      );
+    },
   });
 
   // SPA history fallback: any other GET (not API / atlases / socket.io) returns index.html.
+  // Always revalidate the fallback HTML too (same reason as index.html above).
   const indexHtml = readFileSync(join(dist, "index.html"));
   app.setNotFoundHandler((req, reply) => {
     if (
@@ -40,7 +52,7 @@ export async function registerSpa(app: FastifyInstance): Promise<void> {
       !req.url.startsWith("/assets") &&
       !req.url.startsWith("/socket.io")
     ) {
-      reply.type("text/html").send(indexHtml);
+      reply.header("cache-control", "no-cache").type("text/html").send(indexHtml);
       return;
     }
     reply.code(404).send({ error: "Not Found" });
