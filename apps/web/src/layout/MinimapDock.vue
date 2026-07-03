@@ -34,13 +34,14 @@ const { style, onHandlePointerDown } = useFloatingDock("minimap", card);
 </template>
 
 <style scoped>
-/* Default corner = bottom-right of .app-main (Copilot floats bottom-CENTER, so no overlap).
-   Once dragged, useFloatingDock supplies inline left/top and these right/bottom are overridden.
-   Sits under body-teleported dialogs (z≈2000). */
+/* Default corner = bottom-LEFT of .app-main. The inspector rail opens on the RIGHT and narrows
+   app-main from that side, which used to push the (centre) Copilot over a bottom-RIGHT minimap;
+   the bottom-left corner stays clear of both the inspector and the centred Copilot. Draggable —
+   once moved, useFloatingDock supplies inline left/top. Sits under body-teleported dialogs. */
 .minimap-dock {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  left: 12px;
+  bottom: 8px;
   z-index: 26;
   display: flex;
   flex-direction: column;
@@ -86,8 +87,8 @@ const { style, onHandlePointerDown } = useFloatingDock("minimap", card);
 }
 .minimap-fab {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  left: 12px;
+  bottom: 8px;
   z-index: 26;
   width: 34px;
   height: 34px;

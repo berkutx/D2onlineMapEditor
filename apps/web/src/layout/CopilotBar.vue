@@ -12,6 +12,7 @@ import { computed } from "vue";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
 import { useToolStore } from "../stores/toolStore";
+import { useFloatingDock } from "../composables/useFloatingDock";
 
 interface Msg {
   role: "user" | "assistant";
@@ -21,6 +22,15 @@ interface Msg {
 const view = useViewStore();
 const editStore = useEditStore();
 const toolStore = useToolStore();
+
+// Draggable + persistent (like the minimap / history docks): grab the ⠿ grip to park the bar
+// anywhere; the position is remembered per browser. Default = bottom-centre (CSS). When dragged
+// we override the translateX(-50%) centering with transform:none so left/top position it exactly.
+const floatEl = ref<HTMLElement | null>(null);
+const { style: dockStyle, onHandlePointerDown, pos: dockPos } = useFloatingDock("copilot", floatEl);
+const floatStyle = computed(() =>
+  dockPos.value ? { ...dockStyle.value, transform: "none" } : dockStyle.value,
+);
 
 const zoneActive = computed(() => toolStore.tool === "region");
 const region = computed(() => toolStore.region);
@@ -504,7 +514,7 @@ watch(
 </script>
 
 <template>
-  <div class="copilot-float" @mouseenter="markActive()" @pointerdown="markActive()">
+  <div ref="floatEl" class="copilot-float" :style="floatStyle" @mouseenter="markActive()" @pointerdown="markActive()">
     <transition name="cp-fade">
       <div v-if="expanded" ref="scroller" class="copilot-log d2-float" :class="{ idle: idleEffective }">
         <div v-for="(m, i) in log" :key="i" class="cp-msg" :class="m.role">
@@ -537,6 +547,7 @@ watch(
     </div>
 
     <div class="copilot-bar d2-float" :class="{ idle: idleEffective }">
+      <span class="cp-grip" title="Перетащите копайлот (позиция запомнится)" @pointerdown="onHandlePointerDown">⠿</span>
       <el-popover ref="exPop" :width="328" placement="top-start" trigger="click" popper-class="cp-ex-pop">
         <template #reference>
           <el-button class="cp-ico" text :icon="Reading" title="Примеры команд" />
@@ -607,15 +618,29 @@ watch(
 .copilot-float {
   position: absolute;
   left: 50%;
-  bottom: 16px;
+  bottom: 34px; /* lifted off the very bottom (status bar) — was 16 */
   transform: translateX(-50%);
   width: min(560px, 90%);
-  z-index: 30;
+  z-index: 31; /* above the minimap dock (26) — the copilot is the front-most floater */
   display: flex;
   flex-direction: column;
   gap: 8px;
   pointer-events: none; /* let the canvas receive events except on our controls */
 }
+.cp-grip {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  cursor: grab;
+  color: var(--el-text-color-secondary);
+  opacity: 0.5;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  touch-action: none;
+  transition: opacity 0.12s ease;
+}
+.cp-grip:hover { opacity: 1; }
+.cp-grip:active { cursor: grabbing; }
 .copilot-log,
 .copilot-bar {
   pointer-events: auto;
