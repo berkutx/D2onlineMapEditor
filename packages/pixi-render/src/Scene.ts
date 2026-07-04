@@ -360,10 +360,14 @@ export class Scene {
   /**
    * Re-tile the terrain layer from an edited document (M2 brushes). Lighter than a
    * full buildScene: only the terrain layer rebuilds; objects/grid/camera untouched.
+   * With `dirtyCells` given (and the layer already built for this map size), only the
+   * touched chunks re-tile — the brush-stroke fast path; omit for a full rebuild
+   * (load / undo / redo / map switch).
    */
-  updateTerrain(map: MapDocument): void {
+  updateTerrain(map: MapDocument, dirtyCells?: readonly { x: number; y: number }[]): void {
     if (!this.terrain || !this.assets) return;
-    this.terrain.build(map, this.assets, this.terrainCodes);
+    if (dirtyCells?.length && this.terrain.canUpdate(map)) this.terrain.updateCells(map, dirtyCells);
+    else this.terrain.build(map, this.assets, this.terrainCodes);
     this.renderNow(); // paint immediately — rAF is throttled when the pointer is off-canvas
   }
 

@@ -166,6 +166,7 @@ export const useEditStore = defineStore("edit", () => {
     const base = baseDoc.value;
     liveDoc.value = base && project.value ? applyOps(base, activeOps(project.value)) : base;
     pendingInverses = []; // a full rebuild abandons any in-progress preview accumulation
+    terrainDirty = null; // wholesale change — the terrain layer must fully rebuild
     rev.value++;
     objectsRev.value++; // a full rebuild (load / undo / redo) may change the object set
   }
@@ -244,6 +245,20 @@ export const useEditStore = defineStore("edit", () => {
     });
   }
 
+  // --- terrain dirty tracking (incremental re-tile) ---------------------------
+  // setCell ops touched since the canvas last collected them; null = something did a full
+  // liveDoc rebuild (recompute) and the terrain layer must rebuild wholesale. Object-only
+  // edits leave this empty — the canvas then skips the terrain layer entirely.
+  let terrainDirty: { x: number; y: number }[] | null = [];
+  const TERRAIN_DIRTY_CAP = 4096; // huge batches (mapgen fills) re-tile faster wholesale
+  /** Hand the accumulated dirty terrain cells to the canvas (and reset the buffer). */
+  function takeTerrainDirty(): { full: boolean; cells: { x: number; y: number }[] } {
+    const full = terrainDirty === null;
+    const cells = terrainDirty ?? [];
+    terrainDirty = [];
+    return { full, cells };
+  }
+
   /** Low-level: apply ops to the live doc, bumping rev/objectsRev. Returns the exact inverse
    *  ops (in undo order) so callers can capture them for undo without re-deriving. */
   function applyToLive(ops: readonly EditOp[]): EditOp[] {
@@ -254,6 +269,10 @@ export const useEditStore = defineStore("edit", () => {
       const r = applyOp(d, op);
       d = r.doc;
       inv.unshift(r.inverse); // prepend → final array undoes in reverse application order
+      if (op.kind === "setCell" && terrainDirty) {
+        if (terrainDirty.length >= TERRAIN_DIRTY_CAP) terrainDirty = null;
+        else terrainDirty.push({ x: op.x, y: op.y });
+      }
     }
     liveDoc.value = d;
     rev.value++;
@@ -727,6 +746,7 @@ export const useEditStore = defineStore("edit", () => {
     commit,
     ensureJournalUids,
     applyIncoming,
+    takeTerrainDirty,
     setCollab,
     roomConnected,
     undoEdit,

@@ -1569,6 +1569,9 @@ watch([currentMap, manifest], () => {
 // Re-tile the terrain after an edit. Coalesced via setTimeout (NOT requestAnimationFrame):
 // rAF is throttled when the pointer sits off-canvas (e.g. on the Copilot panel), which made
 // "↻ another variant" not repaint until you moved onto the map. updateTerrain paints now.
+// Incremental (#35): editStore accumulates the setCell coordinates since the last tick —
+// a brush stroke re-tiles only the touched chunks; an object-only edit skips the terrain
+// layer entirely; undo/redo/load (recompute) falls back to the full rebuild.
 let retileScheduled = false;
 watch(
   () => editStore.rev,
@@ -1578,7 +1581,11 @@ watch(
     setTimeout(() => {
       retileScheduled = false;
       const s = getScene();
-      if (s && editStore.liveDoc) s.updateTerrain(editStore.liveDoc);
+      if (!s || !editStore.liveDoc) return;
+      const dirty = editStore.takeTerrainDirty();
+      if (dirty.full) s.updateTerrain(editStore.liveDoc);
+      else if (dirty.cells.length) s.updateTerrain(editStore.liveDoc, dirty.cells);
+      // else: object-only edit — terrain unchanged
     }, 0);
   },
 );

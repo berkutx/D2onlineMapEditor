@@ -88,14 +88,29 @@ const DIAG: ReadonlyArray<readonly [number, number, number]> = [
   [-1, -1, 17], [1, -1, 18], [1, 1, 20], [-1, 1, 24],
 ];
 
+/** Cells per chunk side. A brush stroke re-tiles only the touched chunks (16×16 cells =
+ *  ≤256 base tiles + borders) instead of the whole map (144×144 = 20736). */
+const CHUNK = 16;
+
 export class TerrainTilemapLayer {
   readonly view: Container;
-  private readonly baseTM = new CompositeTilemap();
-  private readonly borderTM = new CompositeTilemap();
+  // base/border are CompositeTilemaps CHUNKED by cell region: @pixi/tilemap has no
+  // per-tile removal, so incremental updates clear + re-tile only the dirty chunks.
+  // Chunking is safe for z-order because base diamonds tessellate and every border/foam
+  // stays inside its own cell diamond (see the header comment).
+  private readonly baseLayer = new Container();
+  private readonly borderLayer = new Container();
+  private readonly baseChunks = new Map<number, CompositeTilemap>();
+  private readonly borderChunks = new Map<number, CompositeTilemap>();
   // roads/trees are large, TRIMMED iso-terrn sprites — drawn as Sprites (anchor 0.5
   // applies the trim offset correctly; the tilemap ignores trim and mis-places them).
+  // One sprite per cell, indexed for point updates; zIndex = x*n+y reproduces the
+  // editor's x-outer/y-inner paint order globally (crown overlaps stay correct even
+  // though update insertion order is arbitrary).
   private readonly roadLayer = new Container();
   private readonly treeLayer = new Container();
+  private readonly roadSprites = new Map<number, Sprite>();
+  private readonly treeSprites = new Map<number, Sprite>();
   private readonly missing = new Set<string>();
   /** cached variant counts per mask key ("E<mt>" / "W<type>"), discovered from the atlas. */
   private readonly varCount = new Map<string, number>();
@@ -103,22 +118,47 @@ export class TerrainTilemapLayer {
   private readonly baseVar = new Map<number, number>();
 
   private assets!: AssetStore;
+  private terrainCodes?: TerrainCodes;
   private n = 0;
   private val: Int32Array = new Int32Array(0);
+  private built = false;
 
   constructor() {
     this.view = new Container();
     this.view.label = "terrain";
     // z-order: base < border < road < tree (editor reloadGrid order)
-    this.view.addChild(this.baseTM, this.borderTM, this.roadLayer, this.treeLayer);
+    this.roadLayer.sortableChildren = true;
+    this.treeLayer.sortableChildren = true;
+    this.view.addChild(this.baseLayer, this.borderLayer, this.roadLayer, this.treeLayer);
+  }
+
+  private chunkIdx(x: number, y: number): number {
+    return Math.floor(y / CHUNK) * Math.ceil(this.n / CHUNK) + Math.floor(x / CHUNK);
+  }
+  private tmFor(map: Map<number, CompositeTilemap>, layer: Container, x: number, y: number): CompositeTilemap {
+    const ci = this.chunkIdx(x, y);
+    let tm = map.get(ci);
+    if (!tm) {
+      tm = new CompositeTilemap();
+      map.set(ci, tm);
+      layer.addChild(tm);
+    }
+    return tm;
   }
 
   build(doc: MapDocument, assets: AssetStore, terrainCodes?: TerrainCodes): void {
     this.assets = assets;
-    this.baseTM.clear();
-    this.borderTM.clear();
+    this.terrainCodes = terrainCodes;
+    for (const tm of this.baseChunks.values()) tm.destroy();
+    for (const tm of this.borderChunks.values()) tm.destroy();
+    this.baseChunks.clear();
+    this.borderChunks.clear();
+    this.baseLayer.removeChildren();
+    this.borderLayer.removeChildren();
     this.roadLayer.removeChildren().forEach((c) => c.destroy());
     this.treeLayer.removeChildren().forEach((c) => c.destroy());
+    this.roadSprites.clear();
+    this.treeSprites.clear();
     this.missing.clear();
     this.varCount.clear();
     this.baseVar.clear();
@@ -134,20 +174,82 @@ export class TerrainTilemapLayer {
     }
     // 3) roads (centred on the cell), 4) trees (x-outer/y-inner like the editor)
     for (const c of cells) {
-      if (c.roadType !== -1) this.placeCentered(this.roadLayer, `ROAD${pad(c.roadType, 2)}00`, c.x, c.y);
+      this.placeRoad(c.x, c.y, c.roadType);
+      if (c.ground === 1) this.placeTree(c.x, c.y, c.value);
     }
-    const forest = cells.filter((c) => c.ground === 1).sort((a, b) => a.x - b.x || a.y - b.y);
-    for (const c of forest) {
-      const code = terrainCodes?.[c.value & 7] ?? "";
-      const f = (c.value >>> 26) & 0x3f;
-      this.placeCentered(this.treeLayer, `${code}F${pad(f, 4)}`, c.x, c.y);
-    }
+    this.built = true;
 
     if (this.missing.size > 0) {
       console.warn(
         `TerrainTilemapLayer: ${this.missing.size} tile(s) unresolved: ` +
           [...this.missing].slice(0, 20).join(", "),
       );
+    }
+  }
+
+  /** Can updateCells patch in place? (built once, same map size — else callers full-build). */
+  canUpdate(doc: MapDocument): boolean {
+    return this.built && this.n === doc.size;
+  }
+
+  /**
+   * Incremental re-tile: refresh ONLY the given cells (+ their border halo). Base and
+   * borders rebuild per touched CHUNK (a cell's value changes its neighbours' borders,
+   * hence the 1-cell halo when collecting chunks); the cell's own road/tree sprite is
+   * swapped point-wise. Neighbour reads go through the freshly refreshed `val`, so a
+   * chunk re-tile is self-contained.
+   */
+  updateCells(doc: MapDocument, dirty: readonly { x: number; y: number }[]): void {
+    if (!this.canUpdate(doc) || dirty.length === 0) return;
+    const n = this.n;
+    const dirtyIdx = new Set<number>();
+    for (const c of dirty) if (c.x >= 0 && c.y >= 0 && c.x < n && c.y < n) dirtyIdx.add(c.y * n + c.x);
+    // refresh the value grid + capture the dirty cells' full state in one pass
+    const dirtyCells = new Map<number, { x: number; y: number; value: number; ground: number; roadType: number }>();
+    for (const c of doc.terrain.cells) {
+      const k = c.y * n + c.x;
+      this.val[k] = c.value;
+      if (dirtyIdx.has(k)) dirtyCells.set(k, c);
+    }
+    // chunks touched by the dirty cells + their 1-cell halo (neighbour borders)
+    const chunks = new Set<number>();
+    for (const c of dirty) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const x = c.x + dx;
+          const y = c.y + dy;
+          if (x >= 0 && y >= 0 && x < n && y < n) chunks.add(this.chunkIdx(x, y));
+        }
+      }
+    }
+    for (const ci of chunks) this.retileChunk(ci);
+    // roads/trees: only the dirty cells themselves (autotiling already delivers
+    // neighbour road changes as their own setCell ops)
+    for (const c of dirtyCells.values()) {
+      this.roadSprites.get(c.y * n + c.x)?.destroy();
+      this.roadSprites.delete(c.y * n + c.x);
+      this.treeSprites.get(c.y * n + c.x)?.destroy();
+      this.treeSprites.delete(c.y * n + c.x);
+      this.placeRoad(c.x, c.y, c.roadType);
+      if (c.ground === 1) this.placeTree(c.x, c.y, c.value);
+    }
+  }
+
+  /** Clear + re-tile one chunk's base/border tilemaps from the current value grid. */
+  private retileChunk(ci: number): void {
+    const perRow = Math.ceil(this.n / CHUNK);
+    const cx = (ci % perRow) * CHUNK;
+    const cy = Math.floor(ci / perRow) * CHUNK;
+    this.baseChunks.get(ci)?.clear();
+    this.borderChunks.get(ci)?.clear();
+    const xEnd = Math.min(this.n, cx + CHUNK);
+    const yEnd = Math.min(this.n, cy + CHUNK);
+    for (let y = cy; y < yEnd; y++) {
+      for (let x = cx; x < xEnd; x++) {
+        const v = this.val[y * this.n + x]!;
+        this.placeBase(x, y, v);
+        this.placeBorders(x, y, v);
+      }
     }
   }
 
@@ -228,7 +330,7 @@ export class TerrainTilemapLayer {
     // cellToWorld(x,y) is the cell's TOP vertex (editor origin convention, matching
     // objects/overlays). The 64×32 ground diamond's top vertex sits there, so its
     // top-left corner is one half-height BELOW — i.e. py = w.y (not w.y - HALF_H).
-    this.baseTM.tile(tex, w.x - HALF_W, w.y);
+    this.tmFor(this.baseChunks, this.baseLayer, x, y).tile(tex, w.x - HALF_W, w.y);
   }
 
   private placeBorders(x: number, y: number, v: number): void {
@@ -240,24 +342,25 @@ export class TerrainTilemapLayer {
     const py = w.y; // origin convention — aligns the border diamond with the base tile
     const wtr = this.isWater(v);
     const seed = x * y + x + y;
+    const tm = this.tmFor(this.borderChunks, this.borderLayer, x, y);
 
     if (border) {
-      if (wtr) this.placeFoam(border, seed, px, py);
+      if (wtr) this.placeFoam(tm, border, seed, px, py);
       for (const [dx, dy, mt] of ORTHO) {
         const nv = this.at(x + dx, y + dy);
-        if (nv !== null && this.test(v, nv)) this.placeBorder(x + dx, y + dy, nv, mt, seed, px, py);
+        if (nv !== null && this.test(v, nv)) this.placeBorder(tm, x + dx, y + dy, nv, mt, seed, px, py);
       }
     }
     if (extra) {
-      if (wtr) this.placeFoam(extra + 16, seed, px, py);
+      if (wtr) this.placeFoam(tm, extra + 16, seed, px, py);
       for (const [dx, dy, mt] of DIAG) {
         const nv = this.at(x + dx, y + dy);
-        if (nv !== null && this.test(v, nv)) this.placeBorder(x + dx, y + dy, nv, mt, seed, px, py);
+        if (nv !== null && this.test(v, nv)) this.placeBorder(tm, x + dx, y + dy, nv, mt, seed, px, py);
       }
     }
   }
 
-  private placeFoam(type: number, seed: number, px: number, py: number): void {
+  private placeFoam(tm: CompositeTilemap, type: number, seed: number, px: number, py: number): void {
     const cnt = this.waCount(type);
     if (cnt <= 0) return;
     const key = `WF_${type}_${seed % cnt}`;
@@ -266,10 +369,11 @@ export class TerrainTilemapLayer {
       this.missing.add(key);
       return;
     }
-    this.borderTM.tile(tex, px, py);
+    tm.tile(tex, px, py);
   }
 
   private placeBorder(
+    tm: CompositeTilemap,
     nx: number, ny: number, nv: number, mt: number, seed: number, px: number, py: number,
   ): void {
     const ntid = nv & 7;
@@ -283,7 +387,7 @@ export class TerrainTilemapLayer {
       this.missing.add(key);
       return;
     }
-    this.borderTM.tile(tex, px, py);
+    tm.tile(tex, px, py);
   }
 
   private evalBorder(x: number, y: number, v: number): number {
@@ -306,8 +410,12 @@ export class TerrainTilemapLayer {
 
   /** Place a road/tree as a Sprite centred on the cell centre (= cellToWorld(x,y)).
    *  A Sprite (anchor 0.5) applies the texture's trim offset, so the small tree art
-   *  inside its large 320x320 frame lands on the cell — unlike a raw tilemap quad. */
-  private placeCentered(layer: Container, key: string, x: number, y: number): void {
+   *  inside its large 320x320 frame lands on the cell — unlike a raw tilemap quad.
+   *  zIndex = x*n+y keeps the editor's x-outer/y-inner paint order under sortable
+   *  layers regardless of insertion order (incremental updates insert out of order). */
+  private placeCentered(
+    layer: Container, index: Map<number, Sprite>, key: string, x: number, y: number,
+  ): void {
     const tex = this.assets.resolveTexture(key);
     if (tex.label === "EMPTY") {
       this.missing.add(key);
@@ -315,10 +423,23 @@ export class TerrainTilemapLayer {
     }
     const sprite = new Sprite(tex);
     sprite.anchor.set(0.5, 0.5);
+    sprite.zIndex = x * this.n + y;
     const w = cellToWorld(x, y);
     // cell visual centre = top vertex + half-height (origin convention)
     sprite.position.set(w.x, w.y + HALF_H);
     layer.addChild(sprite);
+    index.set(y * this.n + x, sprite);
+  }
+
+  private placeRoad(x: number, y: number, roadType: number): void {
+    if (roadType === -1) return;
+    this.placeCentered(this.roadLayer, this.roadSprites, `ROAD${pad(roadType, 2)}00`, x, y);
+  }
+
+  private placeTree(x: number, y: number, v: number): void {
+    const code = this.terrainCodes?.[v & 7] ?? "";
+    const f = (v >>> 26) & 0x3f;
+    this.placeCentered(this.treeLayer, this.treeSprites, `${code}F${pad(f, 4)}`, x, y);
   }
 
   /** Distinct unresolved tile keys from the last build (for the HUD/debug). */
