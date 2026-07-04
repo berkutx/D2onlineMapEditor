@@ -196,28 +196,48 @@ export const useEditStore = defineStore("edit", () => {
     scheduleRemoteSave();
   }
 
+  /** Mutate editor-only project METADATA (zones/captions/anchors/roadAnchors/autoVars):
+   *  one write path so every change bumps metaRev — the cross-tab reconciliation key. */
+  function patchMeta(
+    fields: Partial<
+      Pick<EditorProject, "zones" | "captions" | "anchors" | "roadAnchors" | "autoVars">
+    >,
+  ): void {
+    if (!project.value) return;
+    project.value = { ...project.value, ...fields, metaRev: (project.value.metaRev ?? 0) + 1 };
+    persist();
+  }
+
   // --- cross-tab metadata sync -----------------------------------------------
   // Two tabs of one browser share the localStorage project key. The op JOURNAL converges
   // through the room op-log (broadcast + uid dedup), but editor-only METADATA (zones,
   // captions, anchors…) is not op-carried: a tab persisting its older view silently
   // clobbered the other tab's freshly created zone (prod-smoke finding). The `storage`
-  // event fires in every OTHER tab on each write — adopt the incoming metadata there
-  // (each tab keeps its own journal). No persist() on adopt: the writer already holds
-  // this state, re-writing would ping-pong storage events between tabs.
+  // event fires in every OTHER tab on each write; metaRev orders the views:
+  //  - theirs NEWER → adopt their metadata (keep our journal);
+  //  - theirs OLDER → they clobbered us in localStorage — re-persist ours (their tab then
+  //    adopts; no ping-pong: adoption itself does not write).
   if (typeof window !== "undefined") {
     window.addEventListener("storage", (e) => {
       const p = project.value;
       if (!p || !e.newValue || e.key !== keyFor(p.baseScenarioId)) return;
       try {
         const stored = deserializeProject(e.newValue);
-        project.value = {
-          ...p,
-          zones: stored.zones,
-          captions: stored.captions,
-          anchors: stored.anchors,
-          roadAnchors: stored.roadAnchors,
-          autoVars: stored.autoVars,
-        };
+        const mine = p.metaRev ?? 0;
+        const theirs = stored.metaRev ?? 0;
+        if (theirs > mine) {
+          project.value = {
+            ...p,
+            zones: stored.zones,
+            captions: stored.captions,
+            anchors: stored.anchors,
+            roadAnchors: stored.roadAnchors,
+            autoVars: stored.autoVars,
+            metaRev: theirs,
+          };
+        } else if (theirs < mine) {
+          persist();
+        }
       } catch {
         /* malformed foreign write — keep our state */
       }
@@ -380,8 +400,7 @@ export const useEditStore = defineStore("edit", () => {
     const t = text.trim();
     if (t) next[id] = t;
     else delete next[id];
-    project.value = { ...project.value, captions: next };
-    persist(); // editor-only metadata: persist without touching the op journal
+    patchMeta({ captions: next }); // editor-only metadata: no op-journal entry
   }
 
   /** Editor-only ANCHORS (child id → parent id): moving the parent drags every transitively
@@ -397,16 +416,14 @@ export const useEditStore = defineStore("edit", () => {
       if (p === childId) return false;
       p = cur[p];
     }
-    project.value = { ...project.value, anchors: { ...cur, [childId]: parentId } };
-    persist();
+    patchMeta({ anchors: { ...cur, [childId]: parentId } });
     return true;
   }
   function clearAnchor(childId: string): void {
     if (!project.value) return;
     const next = { ...(project.value.anchors ?? {}) };
     delete next[childId];
-    project.value = { ...project.value, anchors: next };
-    persist();
+    patchMeta({ anchors: next });
   }
   /** Free-form ZONES: mask → generated MidLocation tiles, tracked for regen. */
   const zones = computed<
@@ -437,15 +454,13 @@ export const useEditStore = defineStore("edit", () => {
       `ZN${String(
         Math.max(0, ...Object.keys(project.value.zones ?? {}).map((k) => parseInt(k.slice(2), 10) || 0)) + 1,
       ).padStart(4, "0")}`;
-    project.value = {
-      ...project.value,
+    patchMeta({
       zones: {
         ...(project.value.zones ?? {}),
         // regen keeps the zone's event-clone groups (events reference live locations anyway)
         [zid]: { name, cells, locIds: gen.locIds, eventGroups: old?.eventGroups ?? [] },
       },
-    };
-    persist();
+    });
     return zid;
   }
   /** Move the WHOLE zone by (dx,dy): every primitive location moves in ONE commit and the
@@ -465,8 +480,7 @@ export const useEditStore = defineStore("edit", () => {
       const [x, y] = k.split(",").map(Number);
       return `${x + dx},${y + dy}`;
     });
-    project.value = { ...project.value, zones: { ...project.value.zones, [zid]: { ...z, cells } } };
-    persist();
+    patchMeta({ zones: { ...project.value.zones, [zid]: { ...z, cells } } });
     return true;
   }
 
@@ -482,8 +496,7 @@ export const useEditStore = defineStore("edit", () => {
         ops.push({ kind: "patchObject", id, fields: { name: `${clean} · ${i + 1}` } });
     });
     if (ops.length) commit(ops);
-    project.value = { ...project.value, zones: { ...project.value.zones, [zid]: { ...z, name: clean } } };
-    persist();
+    patchMeta({ zones: { ...project.value.zones, [zid]: { ...z, name: clean } } });
   }
 
   /** Remember a zone-event clone group ([baseId, ...cloneIds]) — editor-only metadata for
@@ -491,14 +504,12 @@ export const useEditStore = defineStore("edit", () => {
   function recordZoneEventGroup(zid: string, group: string[]): void {
     const z = project.value?.zones?.[zid];
     if (!project.value || !z || group.length < 2) return;
-    project.value = {
-      ...project.value,
+    patchMeta({
       zones: {
         ...project.value.zones,
         [zid]: { ...z, eventGroups: [...(z.eventGroups ?? []), group] },
       },
-    };
-    persist();
+    });
   }
 
   /** Drop a base's clone group everywhere (base deleted / unbound from the zone). */
@@ -514,8 +525,7 @@ export const useEditStore = defineStore("edit", () => {
       }
     }
     if (!changed) return;
-    project.value = { ...project.value, zones };
-    persist();
+    patchMeta({ zones });
   }
 
   /** A clone was deleted by hand — remove it from its group (base stays derived for the rest). */
@@ -533,8 +543,7 @@ export const useEditStore = defineStore("edit", () => {
       }
     }
     if (!changed) return;
-    project.value = { ...project.value, zones };
-    persist();
+    patchMeta({ zones });
   }
 
   function removeZone(zid: string, deleteLocations: boolean): void {
@@ -550,8 +559,7 @@ export const useEditStore = defineStore("edit", () => {
     }
     const next = { ...(project.value.zones ?? {}) };
     delete next[zid];
-    project.value = { ...project.value, zones: next };
-    persist();
+    patchMeta({ zones: next });
   }
 
   /** «Дорога следует за входом»: fort ids whose road re-routes on move (project-persisted). */
@@ -564,8 +572,7 @@ export const useEditStore = defineStore("edit", () => {
     const on = !cur[fortId];
     if (on) cur[fortId] = { mode: "reroute" };
     else delete cur[fortId];
-    project.value = { ...project.value, roadAnchors: cur };
-    persist();
+    patchMeta({ roadAnchors: cur });
     return on;
   }
 
@@ -576,15 +583,13 @@ export const useEditStore = defineStore("edit", () => {
     if (!project.value) return;
     const cur = project.value.autoVars ?? [];
     if (cur.includes(id)) return;
-    project.value = { ...project.value, autoVars: [...cur, id] };
-    persist(); // editor-only metadata: persist without touching the op journal
+    patchMeta({ autoVars: [...cur, id] }); // editor-only metadata: no op-journal entry
   }
   function unmarkAutoVar(id: number): void {
     if (!project.value) return;
     const cur = project.value.autoVars ?? [];
     if (!cur.includes(id)) return;
-    project.value = { ...project.value, autoVars: cur.filter((x) => x !== id) };
-    persist();
+    patchMeta({ autoVars: cur.filter((x) => x !== id) });
   }
 
   /** The move-group for `id`: itself + every TRANSITIVE anchored child (parents stay put). */

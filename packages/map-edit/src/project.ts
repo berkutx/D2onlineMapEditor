@@ -37,6 +37,14 @@ export const EditorProject = z.object({
   opUids: z.array(z.array(z.string())).default([]),
   /** How many commits are currently applied (undo decrements, redo increments). */
   cursor: z.number().int().nonnegative().default(0),
+  /**
+   * Monotonic revision of the editor-only METADATA below (zones/captions/anchors/
+   * roadAnchors/autoVars), bumped on every local metadata mutation. Two tabs of one
+   * browser share the localStorage project key: the op journal converges via the collab
+   * room-log, but metadata is not op-carried — tabs reconcile it by metaRev (adopt a
+   * NEWER foreign write, re-persist over an OLDER one; see editStore's storage handler).
+   */
+  metaRev: z.number().int().nonnegative().default(0),
   /** Editor-only, optional per-location display captions (object id → text). NOT written to the
    *  .sg (the game has no such field); shown as a label on the world map. */
   captions: z.record(z.string(), z.string()).default({}),
@@ -99,6 +107,7 @@ export function emptyProject(
     journal: [],
     opUids: [],
     cursor: 0,
+    metaRev: 0,
     captions: {},
     anchors: {},
     autoVars: [],
