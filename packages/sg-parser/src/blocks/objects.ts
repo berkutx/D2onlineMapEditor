@@ -271,6 +271,7 @@ export function readSite(type: SiteType) {
   return (buf: ByteBuffer, obj: FramedObject): MapObject => {
     const { fieldsFrom: f, fieldsEnd: e } = obj;
     const name = readDefaultString(buf, "TXT_TITLE", f, e) ?? "";
+    const desc = readDefaultString(buf, "TXT_DESC", f, e);
     const image = readDefaultInt(buf, "IMG_ISO", f, e);
     // stock list (global template ids) — merchant items, mage spells, mercenary units.
     const stock =
@@ -283,6 +284,7 @@ export function readSite(type: SiteType) {
       id: obj.id,
       pos: pos(buf, obj),
       name,
+      ...(desc ? { desc } : {}),
       ...(image !== null ? { image } : {}),
       ...stock,
     };

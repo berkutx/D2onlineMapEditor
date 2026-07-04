@@ -322,6 +322,75 @@ export function ruinFrame(
   });
 }
 
+/**
+ * A MidSite* block frame — merchant/mage/trainer/mercenary camp. Layout byte-verified on
+ * every Riders site (14 blocks): SITE_ID · IMG_ISO · IMG_INTF(len-prefixed string, empty
+ * on all shipped sites) · TXT_TITLE · TXT_DESC · POS_X · POS_Y · VISITER(G000000000) ·
+ * AIPRIORITY · <stock section per type> · <ownId> int(0) trailer (the visiter-count idiom,
+ * same as ruins). Merchant extras: 8 × BUY_* one-byte flags BEFORE the stock (all = 01 on
+ * every shipped merchant) and a MISSION byte AFTER it (= 00 everywhere). Stock lists are
+ * GLOBAL template ids (no MidItem/MidUnit instances → no delete cascade).
+ */
+export type SiteKind = "merchant" | "mage" | "trainer" | "mercenary";
+const SITE_BLOCK: Record<SiteKind, { typeName: string; code: number }> = {
+  merchant: { typeName: "MidSiteMerchant", code: 0x17 },
+  mage: { typeName: "MidSiteMage", code: 0x13 },
+  trainer: { typeName: "MidSiteTrainer", code: 0x16 },
+  mercenary: { typeName: "MidSiteMercs", code: 0x14 },
+};
+export function siteFrame(
+  version: string,
+  second: number,
+  kind: SiteKind,
+  o: {
+    posX: number;
+    posY: number;
+    name?: string;
+    desc?: string;
+    image?: number;
+    items?: readonly { id: string; count: number }[];
+    spells?: readonly string[];
+    units?: readonly { id: string; level: number; unique: boolean }[];
+  },
+): Uint8Array {
+  const { typeName, code } = SITE_BLOCK[kind];
+  return emitBlock(version, typeName, code, "SI", second, (w, full) => {
+    w.refField("SITE_ID", full);
+    w.defaultInt("IMG_ISO", o.image ?? 0);
+    w.stringField("IMG_INTF", ""); // empty on every shipped site
+    w.stringField("TXT_TITLE", o.name ?? "");
+    w.stringField("TXT_DESC", o.desc ?? "");
+    w.defaultInt("POS_X", o.posX);
+    w.defaultInt("POS_Y", o.posY);
+    w.refField("VISITER", "G000000000");
+    w.defaultInt("AIPRIORITY", 0);
+    if (kind === "merchant") {
+      for (const f of ["BUY_ARMOR", "BUY_JEWEL", "BUY_WEAPON", "BUY_BANNER", "BUY_POTION", "BUY_SCROLL", "BUY_WAND", "BUY_VALUE"])
+        w.bool(f, true); // uniform 01 on every shipped merchant
+      const items = o.items ?? [];
+      w.defaultInt("QTY_ITEM", items.length);
+      for (const it of items) {
+        w.refField("ITEM_ID", it.id);
+        w.defaultInt("ITEM_COUNT", it.count);
+      }
+      w.bool("MISSION", false); // 00 on every shipped merchant
+    } else if (kind === "mage") {
+      const spells = o.spells ?? [];
+      w.defaultInt("QTY_SPELL", spells.length);
+      for (const sp of spells) w.refField("SPELL_ID", sp);
+    } else if (kind === "mercenary") {
+      const units = o.units ?? [];
+      w.defaultInt("QTY_UNIT", units.length);
+      for (const u of units) {
+        w.refField("UNIT_ID", u.id);
+        w.defaultInt("UNIT_LEVEL", u.level);
+        w.bool("UNIT_UNIQ", u.unique);
+      }
+    }
+    w.defaultInt(full, 0); // visiter count (tag = the site's own compound id)
+  });
+}
+
 /** One mountain entry written into the MidMountains body. */
 export interface MountainEntry {
   x: number;

@@ -634,15 +634,11 @@ describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
     expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: capital.id }])).toThrow(
       /refused/,
     );
-    // sites still lack a re-add frame for undo — unsupported, fail loud
-    const site = doc.objects.find(
-      (o) => o.type === "merchant" || o.type === "mage" || o.type === "trainer" || o.type === "mercenary",
+    // sites ARE deletable now (siteFrame) — but the referential guard still refuses one
+    // that an event points at (S143SI0000 carries a visitingSite condition on Riders)
+    expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: "S143SI0000" }])).toThrow(
+      /still referenced/,
     );
-    if (site) {
-      expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: site.id }])).toThrow(
-        /not supported yet/,
-      );
-    }
     expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: "S143XX9999" }])).toThrow(
       /unknown object/,
     );
@@ -918,6 +914,50 @@ describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
     expect(restored!.garrison.filter(Boolean).length).toBe(guards);
     expect(planCount(outUndo)).toBe(planCount(bytes)); // survivor keeps ONE set of entries
     const resU = roundTripSemantic(doc, outUndo, journal);
+    expect(resU.reason).toBeUndefined();
+    expect(resU.ok).toBe(true);
+  });
+
+  it("deletes a merchant SITE (no cascade — stock is global ids) + undo re-adds stock/desc", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    // own frame carries 2 [0B]-prefixed refs (OBJ_ID/SITE_ID) + 9 plan entries = 11;
+    // MORE means an event references the site (the guard would correctly refuse).
+    const refCount = (id: string): number => {
+      const hay = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const needle = Buffer.concat([Buffer.from([0x0b, 0, 0, 0]), Buffer.from(id, "latin1")]);
+      let n = 0;
+      for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + 1)) n++;
+      return n;
+    };
+    const site = doc.objects.find(
+      (o) =>
+        o.type === "merchant" &&
+        ((o as { items?: unknown[] }).items?.length ?? 0) > 0 &&
+        refCount(o.id) === 11,
+    ) as { id: string; items: { id: string; count: number }[]; desc?: string } | undefined;
+    expect(site, "Riders has an event-free merchant with stock").toBeTruthy();
+
+    // plain delete: block + its 9 plan entries gone, nothing else (stock ids are global)
+    const del: EditOp = { kind: "deleteObject", id: site!.id };
+    const out = applyEditsToBytes(raw, [del]);
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === site!.id)).toBeUndefined();
+    expect(planCount(out)).toBe(planCount(bytes) - 9);
+    const res = roundTripSemantic(doc, out, [del]);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+
+    // delete + UNDO: the site returns with its stock and dialog text verbatim
+    const journal = [del, ...invertOps(doc, [del])];
+    const outU = applyEditsToBytes(raw, journal);
+    const reU = parseScenario(outU);
+    const restored = reU.objects.find((o) => o.id === site!.id) as typeof site | undefined;
+    expect(restored).toBeTruthy();
+    expect(restored!.items).toEqual(site!.items);
+    expect(restored!.desc).toBe(site!.desc);
+    expect(planCount(outU)).toBe(planCount(bytes)); // survivor keeps ONE set of entries
+    const resU = roundTripSemantic(doc, outU, journal);
     expect(resU.reason).toBeUndefined();
     expect(resU.ok).toBe(true);
   });

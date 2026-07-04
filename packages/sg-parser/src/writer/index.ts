@@ -34,6 +34,8 @@ export {
   bagFrame,
   villageFrame,
   ruinFrame,
+  siteFrame,
+  type SiteKind,
   replaceBlock,
   deleteBlocks,
   addPlanEntries,

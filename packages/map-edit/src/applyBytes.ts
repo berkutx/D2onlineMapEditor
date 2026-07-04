@@ -21,6 +21,7 @@ import {
   bagFrame,
   villageFrame,
   ruinFrame,
+  siteFrame,
   replaceBlock,
   deleteBlocks,
   stackDeleteCascade,
@@ -72,6 +73,7 @@ export function applyEditsToBytes(
   let nextBG = 0;
   let nextFT = 0;
   let nextRU = 0;
+  let nextSI = 0;
   for (const o of raw.objects) {
     if (o.typeName === "MidRoad") {
       const m = /RA([0-9a-fA-F]{4})$/.exec(o.id);
@@ -97,6 +99,9 @@ export function applyEditsToBytes(
     } else if (o.typeName === "MidRuin") {
       const m = /RU([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextRU = Math.max(nextRU, parseInt(m[1]!, 16) + 1);
+    } else if (o.typeName.startsWith("MidSite")) {
+      const m = /SI([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) nextSI = Math.max(nextSI, parseInt(m[1]!, 16) + 1);
     }
     // the FT prefix is SHARED by MidVillage/MidFort/Capital — seed from every FT id
     // regardless of TypeName so a fresh village never collides with a capital/fort.
@@ -403,6 +408,16 @@ export function applyEditsToBytes(
           // template (no instance). Undo re-adds via ruinFrame (garrison from the doc).
           deletedIds.push(op.id);
           dependentDeleteIds.push(...ruinDeleteCascade(raw, op.id));
+        } else if (
+          rec.typeName === "MidSiteMerchant" ||
+          rec.typeName === "MidSiteMage" ||
+          rec.typeName === "MidSiteTrainer" ||
+          rec.typeName === "MidSiteMercs"
+        ) {
+          // a site: stock lists are GLOBAL template ids (no MidItem/MidUnit instances),
+          // so no cascade — just the block + its 9 plan entries (3×3, byte-verified).
+          // The ref guard in deleteBlocks still refuses if events reference the site.
+          deletedIds.push(op.id);
         } else if (rec.typeName === "Capital") {
           // capitals are load-bearing: every race must keep one (the game refuses/crashes
           // without it) — deletion stays refused, not just unimplemented.
@@ -410,7 +425,7 @@ export function applyEditsToBytes(
         } else {
           throw new Error(
             `applyEditsToBytes: deleteObject for ${rec.typeName} not supported yet ` +
-              `(MidLandmark, MidStack, MidMountains, MidBag, MidVillage)`,
+              `(MidLandmark, MidStack, MidMountains, MidBag, MidVillage, MidSite*)`,
           );
         }
         break;
@@ -659,6 +674,30 @@ export function applyEditsToBytes(
         posOfCell: g.posOfCell,
       }));
       // ruin footprint = 3×3 (byte-verified: every Riders MidRuin id has 9 plan entries)
+      for (let dy = 0; dy < 3; dy++) {
+        for (let dx = 0; dx < 3; dx++) {
+          planAdds.push({ x: o.pos.x + dx, y: o.pos.y + dy, element: full });
+        }
+      }
+    } else if (
+      o.type === "merchant" || o.type === "mage" || o.type === "trainer" || o.type === "mercenary"
+    ) {
+      // a site (MidSite*) — realistically only the UNDO re-add of a delete (there is no
+      // site place tool). Stock lists are global template ids, written verbatim.
+      const m = /SI([0-9a-fA-F]{4})$/.exec(o.id);
+      const second = m ? parseInt(m[1]!, 16) : nextSI++;
+      const full = `${raw.version}SI${hex4(second)}`;
+      appends.push(siteFrame(raw.version, second, o.type, {
+        posX: o.pos.x,
+        posY: o.pos.y,
+        name: o.name ?? "",
+        desc: (o as { desc?: string }).desc ?? "",
+        image: o.image ?? 0,
+        items: (o as { items?: { id: string; count: number }[] }).items,
+        spells: (o as { spells?: string[] }).spells,
+        units: (o as { units?: { id: string; level: number; unique: boolean }[] }).units,
+      }));
+      // site footprint = 3×3 (byte-verified: every Riders SI id has exactly 9 plan entries)
       for (let dy = 0; dy < 3; dy++) {
         for (let dx = 0; dx < 3; dx++) {
           planAdds.push({ x: o.pos.x + dx, y: o.pos.y + dy, element: full });

@@ -150,6 +150,8 @@ const SiteCommon = {
   ...base,
   name: z.string().default(""),
   image: z.number().int().optional(),
+  /** TXT_DESC — the visit-dialog text; read so a delete's undo re-adds it verbatim. */
+  desc: z.string().optional(),
 };
 // Site STOCK lists carry GLOBAL template ids (NOT MidItem/MidUnit instances), count-prefixed
 // by a literal QTY_* tag. Merchant sells items (+qty), mage sells spells, mercs hire units

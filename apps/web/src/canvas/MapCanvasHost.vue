@@ -1818,7 +1818,7 @@ watch(
         <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
         <div class="ctx-sep" />
         <button class="ctx-item" @click="ctxAction('copyId')">Скопировать id</button>
-        <button v-if="['landmark', 'stack', 'mountains', 'village', 'treasure', 'ruin'].includes(ctxMenu.obj.type)" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
+        <button v-if="['landmark', 'stack', 'mountains', 'village', 'treasure', 'ruin', 'merchant', 'mage', 'trainer', 'mercenary'].includes(ctxMenu.obj.type)" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
       </template>
       <template v-else>
         <div class="ctx-title">Поставить здесь <code>{{ ctxMenu.cell.x }}, {{ ctxMenu.cell.y }}</code></div>
