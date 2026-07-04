@@ -119,8 +119,9 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   delete cascades the MidUnit guards AND undo restores them; plan footprint 3×3 (9 entries,
   byte-verified). Riders fact: some ruins are event/quest-referenced — their delete is refused by
   the referential guard (correct fail-closed).
-- **sites** (REMAINING): no instance dependents (stocks are global ids) — only siteFrame ports
-  (merchant/mage/trainer/mercs write layouts) are missing for the undo re-add path.
+- ~~sites~~ — DONE (3ba0779): siteFrame все 4 типа (byte-verified раскладка + WHAT-коды +
+  BUY_*/MISSION байты торговца + хвост ownId+int(0)); delete без каскада (стоки — глобальные id),
+  план 3×3 (9/9 у каждого SI на Riders), reader читает TXT_DESC для точного undo; сайты в 🗑 меню.
 - **pre-flight delete check (idea, from review)**: a doc-side mirror of the referential guard so a
   delete refused at export (e.g. an event still targets the landmark) is rejected AT COMMIT with a
   named referencer, instead of poisoning the whole journal until undo.
@@ -132,7 +133,10 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
 - ~~Дороги: move/extend~~ — DONE: `translateRoadCells`/`extendRoadPath`/`lPath` в roadSelect.ts;
   roadsel: драг внутри выделения = перенос, за конец (≤1 соседа в выделении) = продление
   L-путём; live-превью через setRoadSelection, клик без движения = прежний level-bump.
-  Рефактор-долг: overlay-хелпер (over/cur/updateRoad) скопирован 5-й раз — вынести.
+  ~~Рефактор-долг: overlay-хелпер~~ — DONE (7c41182): roadOverlay.ts (cur/set/roadAt/
+  updateRoad/updateAround/diff), 5 копий заменены, roadTypeFromMask переехал туда
+  (brush.js ре-экспортирует; barrel экспортирует селективно — двойной star дропнул бы символ).
+  План-записи добавленных дорог — DONE (e670219): 516/516 RA на Riders byte-verified.
 - ~~Дорога→здание~~ — DONE: entrance = pos+(size,size) (byte-derived, memory
   building-entrance-rule); project.roadAnchors {fortId→{mode:'reroute'}}; ctx-меню города
   «🛣 Дорога следует за входом»; при переносе форта: обход графа дорог от старого входа до
@@ -186,10 +190,10 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   черновиком — диалог «Отправить черновик в комнату?» (отправка = обычные ops через sendOps, журнал
   их сохраняет — он остаётся полным оп-логом для экспорта; отказ = черновик поверх только у меня;
   раз за сессию на комнату; на реконнектах не спрашивает — doJoin в обход join()).
-- **Collab: reconnect resync double-apply (pre-existing gap)** — на реконнекте snapshot:request →
-  setBaseDoc(серверный док С МОИМИ опами) + recompute поверх журнала (в котором те же опы) →
-  повторное применение: setCell/patch идемпотентны, а addObject/deleteObject КИДАЮТ. Правильный
-  фикс: реплей только пропущенных ops (seq>lastSeq) вместо полного снапшота — трогает Contract C.
+- ~~Collab: reconnect resync double-apply~~ — DONE (1ed5f94): Contract C v0.3 `ops:since`
+  (аддитивно) — реконнект реплеит ТОЛЬКО пропущенный хвост лога (свои опы отфильтровываются
+  по clientOpId через mySentOpIds), журнал не трогается; сервер потерял лог (рестарт) →
+  принимается новый отсчёт seq. Свежий join — прежний снапшот-путь.
 - ~~Locations: on-canvas drag-resize handles~~ — DONE (64247b0): золотая ◆-ручка на SE-вершине
   выбранной локации в режиме «Локации»; драг = радиус (чебышёв до клетки, кламп в границы, живое
   превью, один patchObject-undo); Esc бросает без коммита.
