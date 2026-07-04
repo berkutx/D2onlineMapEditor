@@ -48,6 +48,38 @@ interface PlacedObject {
   animated: AnimatedSprite[];
 }
 
+/**
+ * Every sprite key (incl. fallbacks) the given document's objects resolve to — the
+ * EXACT set {@link ObjectLayer.build} will ask the AssetStore for. Used to pre-pull
+ * lazy sheets (unit chunks; animation atlases when playback is on) before building.
+ * Mirrors build()'s iteration: same water-cell derivation, same objectSprites ctx.
+ */
+export function collectSpriteKeys(
+  doc: MapDocument,
+  tables: ObjectTables,
+  allowedTypes?: ReadonlySet<string>,
+): string[] {
+  const water = new Set<string>();
+  for (const c of doc.terrain.cells) {
+    if (((c.value >> 3) & 7) === 3) water.add(`${c.x},${c.y}`);
+  }
+  const keys = new Set<string>();
+  for (const obj of doc.objects) {
+    if (allowedTypes && !allowedTypes.has(obj.type)) continue;
+    const ctx: SpriteKeyContext = {
+      graceFortCodes: tables.graceFortCodes,
+      graceRaceType: tables.graceRaceType,
+      unitBoat: tables.unitBoat,
+      water: water.has(`${obj.pos.x},${obj.pos.y}`),
+    };
+    for (const sub of objectSprites(obj, ctx)) {
+      keys.add(sub.key);
+      if (sub.fallback) keys.add(sub.fallback);
+    }
+  }
+  return [...keys];
+}
+
 export class ObjectLayer {
   /** The display object to add to the world container. */
   readonly view: Container;

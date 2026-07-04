@@ -25,7 +25,7 @@ import type { AssetManifest } from "@d2/asset-manifest";
 import { AssetStore } from "./AssetStore.js";
 import { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
 import { GridLayer } from "./GridLayer.js";
-import { ObjectLayer, type ObjectTables } from "./ObjectLayer.js";
+import { ObjectLayer, collectSpriteKeys, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
 import { EventOverlayLayer } from "./EventOverlayLayer.js";
 import { AnchorLayer } from "./AnchorLayer.js";
@@ -148,6 +148,9 @@ export class Scene {
   /** kept so the object layer can be rebuilt in place after a placement/move edit. */
   private objectTypes?: ReadonlySet<string>;
   private objectTables?: ObjectTables;
+  /** Host-requested animation playback state (persists across scene rebuilds; when true,
+   *  buildScene pre-pulls the lazy animation atlases via ensureAnimations). */
+  private animWanted = false;
   /** translucent placement preview (the decor tool) — one reused sprite. */
   private ghost?: Container;
   private ghostSprite?: Sprite;
@@ -264,17 +267,12 @@ export class Scene {
     this.grid.build(map.size);
     this.world.addChild(this.grid.view);
 
-    // Lazily pull in just THIS map's unit (leader) sprites before placing objects —
-    // unit atlases are per-impl chunks not loaded upfront (AssetStore.ensureLoaded).
-    const unitKeys: string[] = [];
-    for (const o of map.objects) {
-      if (o.type === "stack" && o.garrisoned !== true && o.leaderImage) {
-        unitKeys.push(`${o.leaderImage}STOP${o.facing ?? 0}`);
-      }
-    }
-    await assets.ensureLoaded(unitKeys);
-
-    this.objects = new ObjectLayer();
+    // Lazily pull in just THIS map's sprites before placing objects. collectSpriteKeys
+    // yields the EXACT key set ObjectLayer.build will resolve (leaders/banners/boats/
+    // forts/…); ensureLoaded fetches the lazy unit chunks those keys live in. When
+    // animation playback is ON, the same keys drive ensureAnimations — loading only the
+    // needed iso-anim atlases (82 MB of them stay untouched in the default static mode,
+    // where every object renders its eager iso-still/iso-cmon first-frame instead).
     this.objectTypes = objectTypes;
     this.objectTables = {
       landmarks: objectData?.landmarkFootprints,
@@ -282,6 +280,11 @@ export class Scene {
       graceRaceType: objectData?.graceRaceType,
       unitBoat: objectData?.unitBoat,
     };
+    const spriteKeys = collectSpriteKeys(map, this.objectTables, objectTypes);
+    await assets.ensureLoaded(spriteKeys);
+    if (this.animWanted) await assets.ensureAnimations(spriteKeys);
+
+    this.objects = new ObjectLayer();
     this.objects.build(map, assets, this.anim, objectTypes, this.objectTables);
     this.world.addChild(this.objects.view);
 
@@ -362,6 +365,26 @@ export class Scene {
     this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
     this.updateRenderMode();
     this.renderNow(); // paint immediately — rAF is throttled when the pointer is off-canvas
+    // Self-heal: a freshly ADDED object can reference a LAZY sheet not pulled yet (a new
+    // stack's unit chunk; an animated object when playback is on). Fetch just the missing
+    // keys and rebuild ONCE when any of them became resolvable — invisible-until-hover
+    // sprites otherwise (the build itself already warned about them).
+    const missing = this.objects.missingKeys.flatMap((k) => k.split("|"));
+    if (missing.length === 0) return;
+    const assets = this.assets;
+    const layer = this.objects;
+    void assets
+      .ensureLoaded(missing)
+      .then(() => (this.animWanted ? assets.ensureAnimations(missing) : undefined))
+      .then(() => {
+        if (this.objects !== layer || !this.anim) return; // scene rebuilt meanwhile
+        const healed = missing.some(
+          (k) => assets.resolveAnimation(k).length > 0 || assets.resolveTexture(k).label !== "EMPTY",
+        );
+        if (!healed) return; // genuinely absent art (the editor draws nothing) — no loop
+        layer.build(map, assets, this.anim, this.objectTypes, this.objectTables);
+        this.renderNow();
+      });
   }
 
   /**
@@ -621,10 +644,24 @@ export class Scene {
     this.locVeil = undefined;
   }
 
-  /** Start/stop all sprite animation (single shared ticker). */
+  /** Start/stop all sprite animation (single shared ticker). NOTE: enabling for the
+   *  first time also needs the lazy animation atlases + an object rebuild — hosts call
+   *  {@link ensureAnimationsFor} + {@link updateObjects} before this (see MapCanvasHost). */
   setAnimationEnabled(on: boolean): void {
+    this.animWanted = on;
     this.anim?.setEnabled(on);
     this.updateRenderMode();
+  }
+
+  /**
+   * Load + build the animations this document's objects can play (lazy iso-anim
+   * atlases). Resolves when `resolveAnimation` returns frames for them; the caller
+   * then rebuilds the object layer (updateObjects) so AnimatedSprites materialize.
+   */
+  async ensureAnimationsFor(map: MapDocument): Promise<void> {
+    if (!this.assets) return;
+    const keys = collectSpriteKeys(map, this.objectTables ?? {}, this.objectTypes);
+    await this.assets.ensureAnimations(keys);
   }
 
   /** Programmatic camera access for hosts (minimap clicks, etc.). */

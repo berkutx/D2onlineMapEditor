@@ -43,11 +43,15 @@ export class AssetStore {
   private readonly textures = new Map<string, Texture>();
   /** animation id -> ordered Texture[] */
   private readonly animations = new Map<string, Texture[]>();
+  /** every manifest AnimationDef by id (incl. ones whose lazy atlas isn't loaded yet). */
+  private readonly animDefs = new Map<string, AnimationDef>();
 
   /** every sheet id -> its ref (incl. lazy unit chunks not loaded upfront). */
   private readonly refById = new Map<string, SpritesheetRef>();
   /** in-flight lazy sheet loads, deduped by sheet id. */
   private readonly loadingSheets = new Map<string, Promise<void>>();
+  /** per atlas-GROUP frame->concrete-sheet maps (built from page metas on demand). */
+  private readonly frameLocCache = new Map<string, Promise<Map<string, string>>>();
 
   private loaded = false;
 
@@ -55,10 +59,19 @@ export class AssetStore {
     this.opts = options;
   }
 
-  /** Per-unit chunks ("unit-<impl>") are loaded ON DEMAND via {@link ensureLoaded},
-   *  not in the initial {@link load}, so opening a map only pulls that map's units. */
+  /** Sheets loaded ON DEMAND (not in the initial {@link load}):
+   *  - "unit-<impl>" per-unit chunks — a map only pulls its own leaders;
+   *  - "iso-anim-*" animation frame atlases (82 MB!) — needed only to PLAY animations
+   *    (every object's STATIC frame lives in the eager iso-still/iso-cmon sheets, and
+   *    ObjectLayer falls back to it when an animation isn't built) — {@link ensureAnimations};
+   *  - "capital-*" city-screen backgrounds (66 MB) — not referenced by the map renderer
+   *    at all today, reachable via ensureLoaded if a future feature needs them. */
   private static isLazy(ref: SpritesheetRef): boolean {
-    return ref.id.startsWith("unit-");
+    return (
+      ref.id.startsWith("unit-") ||
+      ref.id.startsWith("iso-anim-") ||
+      ref.id.startsWith("capital-")
+    );
   }
 
   /** True once {@link load} has completed. */
@@ -93,21 +106,95 @@ export class AssetStore {
     this.animations.clear();
     this.loadingSheets.clear();
     this.refById.clear();
+    this.animDefs.clear();
+    this.frameLocCache.clear();
     for (const ref of manifest.spritesheets) this.refById.set(ref.id, ref);
+    for (const anim of manifest.animations) this.animDefs.set(anim.id, anim);
 
-    // Load everything EXCEPT the lazy per-unit chunks (those load on demand).
+    // Load everything EXCEPT the lazy sheets (units / animation atlases / capitals).
     await Promise.all(
       manifest.spritesheets
         .filter((ref) => !AssetStore.isLazy(ref))
         .map((ref) => this.loadSheet(ref)),
     );
 
-    // Build named animation lists from the manifest (cross-sheet aware).
+    // Build named animation lists from the manifest. An animation whose atlas is a LAZY,
+    // not-yet-loaded sheet finds no frame textures and is simply skipped here (the
+    // frames.length guard) — it materializes later via {@link ensureAnimations}.
     for (const anim of manifest.animations) {
       this.buildAnimation(anim);
     }
 
     this.loaded = true;
+  }
+
+  /**
+   * Materialize the manifest ANIMATIONS among `keys` (ids that name an AnimationDef):
+   * load each definition's lazy frame atlas (iso-anim / capital sheets) and build its
+   * Texture[] list, so `resolveAnimation(id)` starts returning frames. Keys that are
+   * plain frame names or already-built animations are skipped. This is the play-time
+   * counterpart of {@link ensureLoaded} — call it only when animations must actually
+   * PLAY (the static render uses the eager iso-still/iso-cmon first-frames instead).
+   */
+  async ensureAnimations(keys: Iterable<string>): Promise<void> {
+    // NOTE: an AnimationDef's atlas — and its frames' index entries — name the LOGICAL
+    // atlas GROUP ("iso-anim"), not a concrete sheet ("iso-anim-18"): one animation's
+    // frames are packed across several pages. The concrete page per frame is only known
+    // from the pages' own metas, so we scan the group's (tiny) meta JSONs once, then
+    // load just the pages that carry the needed frames.
+    const index = this.manifest?.index;
+    if (!index) return;
+    const defs: AnimationDef[] = [];
+    const frames = new Set<string>();
+    for (const key of keys) {
+      if (this.animations.has(key)) continue; // already built (eager atlas or prior call)
+      const def = this.animDefs.get(key);
+      if (!def) continue;
+      defs.push(def);
+      for (const f of def.frames) frames.add(f);
+    }
+    if (defs.length === 0) return;
+
+    const sheetIds = new Set<string>();
+    const groups = new Set<string>();
+    for (const f of frames) {
+      const entry = index[f];
+      if (!entry) continue;
+      if (this.refById.has(entry.sheet)) {
+        if (!this.sheets.has(entry.sheet)) sheetIds.add(entry.sheet); // concrete id
+      } else {
+        groups.add(entry.sheet); // a group name — resolve via the page metas below
+      }
+    }
+    for (const group of groups) {
+      const loc = await this.frameLocations(group);
+      for (const f of frames) {
+        const sheetId = loc.get(f);
+        if (sheetId && !this.sheets.has(sheetId)) sheetIds.add(sheetId);
+      }
+    }
+    await Promise.all([...sheetIds].map((id) => this.loadSheetOnce(id)));
+    for (const def of defs) this.buildAnimation(def);
+  }
+
+  /** frame key -> concrete sheet id for one logical atlas group ("iso-anim"), built by
+   *  scanning every page's meta JSON once (small; images are NOT fetched). Cached. */
+  private frameLocations(group: string): Promise<Map<string, string>> {
+    const cached = this.frameLocCache.get(group);
+    if (cached) return cached;
+    const p = (async () => {
+      const loc = new Map<string, string>();
+      const refs = [...this.refById.values()].filter((r) => r.id.startsWith(`${group}-`));
+      await Promise.all(
+        refs.map(async (ref) => {
+          const json = (await this.fetchJson(this.url(ref.meta))) as SpritesheetData;
+          for (const key of Object.keys(json.frames ?? {})) loc.set(key, ref.id);
+        }),
+      );
+      return loc;
+    })();
+    this.frameLocCache.set(group, p);
+    return p;
   }
 
   /**
