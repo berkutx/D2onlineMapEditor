@@ -13,7 +13,7 @@ import type { LocFilter } from "../services/scenarioRoles";
  *  dimmed under a veil, clicks pick/drag ONLY locations). */
 export type EditTool =
   | "select" | "terrain" | "water" | "forest" | "road" | "erase"
-  | "decor" | "move" | "roadsel" | "region" | "locations";
+  | "decor" | "move" | "roadsel" | "region" | "locations" | "zone";
 
 /** How the "region" tool paints a generation zone: a rectangle, a freehand brush, a
  *  thick line, or just the rectangle's perimeter (frame). rect = the whole bbox; the

@@ -13,6 +13,7 @@ export * from "./bits.js";
 export * from "./ops.js";
 export * from "./brush.js";
 export * from "./roadSelect.js";
+export * from "./zones.js";
 export * from "./place.js";
 export * from "./generate.js";
 export * from "./applyBytes.js";

@@ -4,7 +4,7 @@
  * (label + hint) so the two never drift.
  */
 import type { Component } from "vue";
-import { Pointer, Brush, Scissor, Picture, Rank } from "@element-plus/icons-vue";
+import { Pointer, Brush, Scissor, Picture, Rank, Crop } from "@element-plus/icons-vue";
 import type { EditTool } from "../stores/toolStore";
 import { WaterIcon, ForestIcon, RoadIcon, EraseIcon, LocationsIcon } from "./toolIcons";
 
@@ -30,6 +30,7 @@ export const EDIT_TOOLS: ToolDef[] = [
   { value: "decor", label: "Декор", icon: Picture, hint: "клик — поставить · R — другой облик · [ ] — листать · Ctrl+тащить — двигать карту" },
   { value: "move", label: "Двигать", icon: Rank, hint: "клик — взять/поставить · ⇧+клик — слой ниже · R — облик · Ctrl+тащить — двигать карту · Esc — отмена" },
   { value: "locations", label: "Локации", icon: LocationsIcon, hint: "клик — выбрать локацию · ещё клик — следующая · тащить — переместить · Ctrl+тащить — двигать карту" },
+  { value: "zone", label: "Зона", icon: Crop, hint: "нарисуй территорию (прямоуг/кисть/линия/рамка) — редактор нарежет её в локации-примитивы" },
 ];
 
 const BY_VALUE = new Map(EDIT_TOOLS.map((t) => [t.value, t]));

@@ -22,6 +22,8 @@ import {
   activeOps,
   canUndo as canUndoFn,
   canRedo as canRedoFn,
+  tileZone,
+  zoneLocationOps,
   type EditorProject,
   type EditOp,
 } from "@d2/map-edit";
@@ -329,6 +331,54 @@ export const useEditStore = defineStore("edit", () => {
     project.value = { ...project.value, anchors: next };
     persist();
   }
+  /** Free-form ZONES: mask → generated MidLocation tiles, tracked for regen. */
+  const zones = computed<Record<string, { name: string; cells: string[]; locIds: string[] }>>(
+    () => project.value?.zones ?? {},
+  );
+  /** Compile a drawn mask into named locations (ONE undoable commit) + record the zone.
+   *  A zone id passed in `regenId` first deletes the previous generation's locations. */
+  function createZone(name: string, cells: string[], regenId?: string): string | null {
+    const doc = liveDoc.value;
+    if (!doc || !project.value || cells.length === 0) return null;
+    const ops: EditOp[] = [];
+    const old = regenId ? project.value.zones?.[regenId] : undefined;
+    if (old) {
+      for (const id of old.locIds) {
+        if (doc.objects.some((o) => o.id === id)) ops.push({ kind: "deleteObject", id });
+      }
+    }
+    // tile against the doc AFTER the deletes (id allocator must not reuse a deleted id
+    // in the same commit — apply the deletes to a working doc first)
+    const d2 = ops.length ? applyOps(doc, ops) : doc;
+    const tiles = tileZone(new Set(cells));
+    const gen = zoneLocationOps(d2, name, tiles);
+    ops.push(...gen.ops);
+    commit(ops);
+    const zid = regenId ?? `ZN${String(Object.keys(project.value.zones ?? {}).length + 1).padStart(4, "0")}`;
+    project.value = {
+      ...project.value,
+      zones: { ...(project.value.zones ?? {}), [zid]: { name, cells, locIds: gen.locIds } },
+    };
+    persist();
+    return zid;
+  }
+  function removeZone(zid: string, deleteLocations: boolean): void {
+    const doc = liveDoc.value;
+    if (!project.value) return;
+    const z = project.value.zones?.[zid];
+    if (!z) return;
+    if (deleteLocations && doc) {
+      const ops: EditOp[] = z.locIds
+        .filter((id) => doc.objects.some((o) => o.id === id))
+        .map((id) => ({ kind: "deleteObject", id }));
+      if (ops.length) commit(ops);
+    }
+    const next = { ...(project.value.zones ?? {}) };
+    delete next[zid];
+    project.value = { ...project.value, zones: next };
+    persist();
+  }
+
   /** «Дорога следует за входом»: fort ids whose road re-routes on move (project-persisted). */
   const roadAnchors = computed<Record<string, { mode: "reroute" }>>(
     () => project.value?.roadAnchors ?? {},
@@ -509,6 +559,9 @@ export const useEditStore = defineStore("edit", () => {
     anchorGroup,
     roadAnchors,
     toggleRoadAnchor,
+    zones,
+    createZone,
+    removeZone,
     autoVars,
     markAutoVar,
     unmarkAutoVar,

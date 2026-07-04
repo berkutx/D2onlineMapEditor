@@ -52,6 +52,17 @@ export const EditorProject = z.object({
    * CURRENT entrance, so it survives road edits with no stale cell lists. Editor-only.
    */
   roadAnchors: z.record(z.string(), z.object({ mode: z.literal("reroute") })).default({}),
+  /**
+   * Free-form ZONES (editor-only): a hand-drawn cell mask compiled into game MidLocation
+   * squares (5×5/3×3/1×1, overlap-legal, tiles ⊆ mask). `locIds` tracks the materialized
+   * locations of the current generation — regen deletes them and re-tiles. ZN ids never
+   * reach the .sg (only the generated LO locations do).
+   */
+  zones: z.record(z.string(), z.object({
+    name: z.string(),
+    cells: z.array(z.string()), // "x,y" mask keys
+    locIds: z.array(z.string()).default([]),
+  })).default({}),
   meta: z
     .object({
       name: z.string().optional(),
@@ -77,6 +88,7 @@ export function emptyProject(
     anchors: {},
     autoVars: [],
     roadAnchors: {},
+    zones: {},
     meta,
   };
 }

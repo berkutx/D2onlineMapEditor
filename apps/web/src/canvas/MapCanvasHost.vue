@@ -923,8 +923,9 @@ function onPointerDown(e: PointerEvent): void {
     return;
   }
   if (e.ctrlKey) return; // Ctrl+drag pans the camera (handled by Scene), not a tool action
-  // region tool: start drawing the Copilot generation zone (mode = rect/brush/line/frame).
-  if (toolStore.tool === "region") {
+  // region tool (Copilot generation zone) + zone tool («Зона» → локации-примитивы): both
+  // draw a cell mask with the same rect/brush/line/frame pipeline; only the ACCEPT differs.
+  if (toolStore.tool === "region" || toolStore.tool === "zone") {
     const cell = cellFromEvent(e);
     if (!cell) return;
     regionStart = cell;
@@ -1483,7 +1484,7 @@ watch(
       toolStore.setRoadSel([]); // leaving road-select clears the highlight (+anchor/level)
       roadDrag = null;
     }
-    if (prev === "region") regionDragging = false;
+    if (prev === "region" || prev === "zone") regionDragging = false;
     // «режим локаций»: veil the world; make sure the location layer is actually visible
     if (t === "locations") {
       s?.setLocationsMode(true);
@@ -1507,7 +1508,7 @@ watch(
 watch(
   () => [toolStore.region, toolStore.regionMask, toolStore.zoneHidden],
   () => {
-    if (toolStore.tool === "region") showZone();
+    if (toolStore.tool === "region" || toolStore.tool === "zone") showZone();
   },
   { deep: true },
 );
