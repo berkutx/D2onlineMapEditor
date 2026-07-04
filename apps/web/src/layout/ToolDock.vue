@@ -14,7 +14,7 @@
  */
 import { nextTick } from "vue";
 import { storeToRefs } from "pinia";
-import { View, MagicStick, Check } from "@element-plus/icons-vue";
+import { View, MagicStick, Check, EditPen } from "@element-plus/icons-vue";
 import { useViewStore } from "../stores/viewStore";
 import { useToolStore, type EditTool, type ZoneMode } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
@@ -26,7 +26,7 @@ const view = useViewStore();
 const toolStore = useToolStore();
 const editStore = useEditStore();
 const decorStore = useDecorStore();
-const { tool, size, terrainId, zoneMode, locFilter } = storeToRefs(toolStore);
+const { tool, size, terrainId, zoneMode, locFilter, drawGenRecipe } = storeToRefs(toolStore);
 const { undoable, redoable } = storeToRefs(editStore);
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
@@ -94,6 +94,25 @@ function decorFamily(family: string): void {
 function decorSearch(): void {
   toolStore.setTool("decor");
   void nextTick(() => decorStore.focusSearch());
+}
+
+/** «По рисунку»: draw a stroke → generation follows it (roads/rivers = the line, decor is
+ *  sprinkled along the brush). The flyout picks WHAT to generate; the button toggles. */
+const DRAW_GEN: { id: string; label: string }[] = [
+  { id: "road_path", label: "🛣 Дорога по линии" },
+  { id: "river", label: "🌊 Река по линии" },
+  { id: "decor_rocks", label: "🪨 Камни вдоль мазка" },
+  { id: "decor_bushes", label: "🌿 Кусты вдоль мазка" },
+  { id: "decor_ruins", label: "🏚 Руины вдоль мазка" },
+  { id: "decor_graves", label: "🪦 Могилы вдоль мазка" },
+];
+const drawGenLabel = (id: string | null): string =>
+  DRAW_GEN.find((d) => d.id === id)?.label ?? "";
+function toggleDrawGen(): void {
+  toolStore.setDrawGen(drawGenRecipe.value ? null : "road_path");
+}
+function pickDrawGen(id: string): void {
+  toolStore.setDrawGen(id);
 }
 </script>
 
@@ -204,6 +223,24 @@ function decorSearch(): void {
         </button>
       </el-tooltip>
     </template>
+
+    <el-popover :width="212" placement="right-start" trigger="hover" :show-after="350" :hide-after="120" popper-class="dock-pop">
+      <template #reference>
+        <button
+          class="d2-tool-btn has-fly"
+          :class="{ 'is-active': !!drawGenRecipe }"
+          :title="drawGenRecipe ? 'По рисунку: ' + drawGenLabel(drawGenRecipe) : 'По рисунку — генерация вдоль штриха'"
+          @click="toggleDrawGen()"
+        >
+          <el-icon><EditPen /></el-icon>
+        </button>
+      </template>
+      <div class="pop-head">По рисунку — нарисуй штрих, генерация пойдёт по нему</div>
+      <button v-for="d in DRAW_GEN" :key="d.id" class="pop-row" @click="pickDrawGen(d.id)">
+        <el-icon class="pop-ck" :style="{ visibility: drawGenRecipe === d.id ? 'visible' : 'hidden' }"><Check /></el-icon>
+        <span class="pop-lbl">{{ d.label }}</span>
+      </button>
+    </el-popover>
 
     <div class="dock-spring" />
     <div class="dock-div" />

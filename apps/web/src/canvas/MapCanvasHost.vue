@@ -1299,9 +1299,12 @@ function onPointerUp(e: PointerEvent): void {
         toolStore.setRegion(r);
         toolStore.setRegionMask(null);
       } else {
+        // line width: a generation ZONE needs a workable band (min 3); an armed «по
+        // рисунку» path (road/river) is the path itself — honour size 1 exactly.
+        const lineW = toolStore.drawGenRecipe ? Math.max(1, toolStore.size) : Math.max(3, toolStore.size);
         const set =
           mode === "brush" ? regionMaskAccum
-          : mode === "line" ? lineMask(regionStart, end, Math.max(3, toolStore.size))
+          : mode === "line" ? lineMask(regionStart, end, lineW)
           : frameMask(rectFrom(regionStart, end));
         const cells = maskRefs(set).map((c) => `${c.x},${c.y}`); // clamp to bounds
         if (cells.length) {
@@ -1311,6 +1314,23 @@ function onPointerUp(e: PointerEvent): void {
       }
       toolStore.setZoneHidden(false);
       showZone();
+      // «По рисунку»: an armed generator fires as soon as the stroke lands — the drawn
+      // mask IS the shape (roads/rivers follow the line, decor sprinkles along the brush).
+      // protect=true: a hand stroke must not carve through existing water/mountains.
+      const gen = toolStore.drawGenRecipe;
+      const genRegion = toolStore.region;
+      if (gen && genRegion) {
+        const cells = toolStore.regionMask
+          ? toolStore.regionMask.map((k) => k.split(",").map(Number) as [number, number])
+          : null;
+        void editStore
+          .generate(gen, genRegion, undefined, cells, true)
+          .then((rep) => {
+            if (rep && !rep.ok) ElMessage.warning("Генерация по рисунку не прошла валидацию — откачено");
+          })
+          .catch((err) => ElMessage.error("⚠ " + (err instanceof Error ? err.message : String(err))))
+          .finally(() => toolStore.clearZone()); // the veil clears; ready for the next stroke
+      }
     }
     try {
       getScene()?.canvas?.releasePointerCapture(e.pointerId);

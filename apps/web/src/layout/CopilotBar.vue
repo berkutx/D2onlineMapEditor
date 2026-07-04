@@ -59,8 +59,11 @@ const sending = ref(false);
 /** LLM mode (Phase-4 POC): route the command through the server's LLM file-bridge instead
  *  of the offline keyword router. Off by default (keyword router needs no agent watching). */
 const llmMode = ref(false);
+/** HARD OFF (владелец, 2026-07-04): LLM-режим временно отключён везде — кнопка остаётся
+ *  видимой, но disabled, чтобы фича не потерялась. Вернуть: true (+ VITE_COPILOT_LLM). */
+const LLM_ENABLED = false;
 /** Whether the LLM bridge is available on this deployment (disabled in prod: no agent). */
-const LLM_AVAILABLE = import.meta.env.VITE_COPILOT_LLM !== "off";
+const LLM_AVAILABLE = LLM_ENABLED && import.meta.env.VITE_COPILOT_LLM !== "off";
 /** Protect existing features: generation skips cells that already hold water/mountains. */
 const protect = ref(false);
 type Region = { x: number; y: number; w: number; h: number };
@@ -263,7 +266,7 @@ const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: bool
     { text: "руины", mj: true },
     { text: "кладбище 16x16", mj: true },
   ] },
-  { group: "✎ По рисунку — ⛶ → кисть/полоса, проведи, потом команду (идёт по штриху)", items: [
+  { group: "✎ По рисунку — проще инструментом ✎ в панели слева (или: ⛶ → кисть/полоса, проведи, потом команду)", items: [
     { text: "дорога" },
     { text: "река" },
     { text: "камни" },
@@ -588,8 +591,15 @@ watch(
         </div>
       </el-popover>
 
-      <el-tooltip v-if="LLM_AVAILABLE" content="LLM-режим — генерация через агента (иначе офлайн-роутер)" placement="top" :show-after="300">
-        <el-button class="cp-ico" text :type="llmMode ? 'primary' : 'default'" @click="llmMode = !llmMode">🧠</el-button>
+      <el-tooltip
+        :content="LLM_AVAILABLE ? 'LLM-режим — генерация через агента (иначе офлайн-роутер)' : 'LLM-режим временно отключён'"
+        placement="top"
+        :show-after="300"
+      >
+        <!-- span-обёртка: disabled кнопка не шлёт события, тултип вешаем на обёртку -->
+        <span>
+          <el-button class="cp-ico" text :disabled="!LLM_AVAILABLE" :type="llmMode ? 'primary' : 'default'" @click="llmMode = !llmMode">🧠</el-button>
+        </span>
       </el-tooltip>
       <el-tooltip content="Беречь рельеф — не перетирать воду и горы" placement="top" :show-after="300">
         <el-button class="cp-ico" text :type="protect ? 'primary' : 'default'" @click="protect = !protect">🛡</el-button>

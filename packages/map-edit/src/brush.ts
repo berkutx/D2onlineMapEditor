@@ -30,9 +30,11 @@ export type BrushKind =
 export function brushValue(old: number, kind: BrushKind, x: number, y: number): number {
   switch (kind.type) {
     case "terrain":
-      return setGround(setTerrain(old, kind.terrain), 0); // land (clears water)
+      // clears water AND stale forest-variant bits (a tree id under new land is junk)
+      return setForest(setGround(setTerrain(old, kind.terrain), 0), 0);
     case "water":
-      return setGround(old, GROUND_WATER);
+      // clears forest bits too — a tree variant under water is stale junk in the value
+      return setForest(setGround(old, GROUND_WATER), 0);
     case "forest":
       return setForest(setGround(old, GROUND_FOREST), forestIdFor(x, y));
     case "erase":

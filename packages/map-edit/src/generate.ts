@@ -52,17 +52,20 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   // Organic water (MJ growth): W = water, B = untouched land.
   water_lake: { W: { kind: "water" } },
   water_isles: { W: { kind: "water" } },
-  river: { W: { kind: "water" }, R: { kind: "water" } }, // R = the path head
+  // River = the U-marked border of a two-seed Voronoi (canonical mxgmn River): crosses the
+  // zone by construction. W/R are the competing growth colours — scaffolding, not water.
+  river: { U: { kind: "water" } },
   // Organic forest (MJ): F = forest, B = untouched land.
   decor_forest: { F: { kind: "forest" } },
   forest_scatter: { F: { kind: "forest" } },
   forest_clearings: { F: { kind: "forest" }, B: { kind: "skip" } }, // forest with grown glades
-  // Mountains / hills (MJ): M = a 1×1 mountain; R = ridge path head.
+  // Mountains / hills (MJ): M = a 1×1 mountain; ridge = Voronoi border (U), greedy-packed
+  // into 2×2/3×3 peaks by the decoder.
   mountain_fill: { M: { kind: "mountain" } },
-  relief_ridge: { M: { kind: "mountain" }, R: { kind: "mountain" } },
+  relief_ridge: { U: { kind: "mountain" } },
   relief_hills: { M: { kind: "mountain" } },
-  // Roads: P = path trail, R = path head (both become auto-tiled road cells).
-  road_path: { P: { kind: "road" }, R: { kind: "road" } },
+  // Road = the thin (one-sided) Voronoi border, auto-tiled by roadBrush.
+  road_path: { U: { kind: "road" } },
   // Scattered decorations (D = a placed object of the given catalog shape).
   decor_rocks: { D: { kind: "decor", shape: "rock" } },
   decor_bushes: { D: { kind: "decor", shape: "vegetation" } },
@@ -151,6 +154,51 @@ export function buildWallSet(
   return { styles };
 }
 
+/**
+ * Cells occupied by the document's OBJECTS (footprint-aware) — the game-mechanics guard
+ * the validator can't provide: generation must never flood a village, bury a stack under
+ * a mountain, or stack a landmark on a merchant. Footprints: byte-verified type sizes;
+ * mountains carry their own w/h; landmarks resolve through `landmarkSizes` (catalog cx/cy,
+ * UPPERCASE baseType keys) and default to 1×1. Locations are ZONES, not solids — skipped.
+ */
+const TYPE_FOOTPRINT: Record<string, [number, number]> = {
+  village: [4, 4],
+  fort: [4, 4],
+  capital: [5, 5],
+  merchant: [3, 3],
+  mage: [3, 3],
+  trainer: [3, 3],
+  mercenary: [3, 3],
+  ruin: [3, 3],
+};
+
+export function buildOccupiedSet(
+  doc: MapDocument,
+  landmarkSizes?: Record<string, readonly [number, number]>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const o of doc.objects) {
+    if (o.type === "location") continue; // a zone marker, not a solid
+    let w = 1;
+    let h = 1;
+    if (o.type === "mountains") {
+      const m = o as { w?: number; h?: number };
+      w = m.w ?? 1;
+      h = m.h ?? 1;
+    } else if (o.type === "landmark") {
+      const bt = ((o as { baseType?: string }).baseType ?? "").toUpperCase();
+      const sz = landmarkSizes?.[bt];
+      if (sz) [w, h] = sz;
+    } else {
+      const sz = TYPE_FOOTPRINT[o.type];
+      if (sz) [w, h] = sz;
+    }
+    for (let dy = 0; dy < h; dy++)
+      for (let dx = 0; dx < w; dx++) out.add(`${o.pos.x + dx},${o.pos.y + dy}`);
+  }
+  return out;
+}
+
 /** 1×1 decoration landmark ids grouped by catalog `shape` (rock / vegetation / …). */
 export type DecorSet = Record<string, string[]>;
 
@@ -216,12 +264,26 @@ export function decodeGrid(
    *  a scale×scale block (terrain fills the block; objects anchor at its corner + use a
    *  scale×scale sprite). Used by the wall maze (scale 2 → 2×2 stone wall pieces). */
   scale = 1,
+  /** Cells occupied by existing OBJECTS (buildOccupiedSet) — water/forest never write
+   *  there, and wall/mountain/decor placements must fit entirely outside (the prod audit
+   *  found every water recipe drowning villages and mazes burying stacks). Unconditional
+   *  (not gated by `protect`): overwriting objects is never a legitimate generation. */
+  occupied?: ReadonlySet<string>,
 ): EditOp[] {
   const n = doc.size;
   const inb = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < n && y < n;
   const isProtected = (v: number): boolean => ((v >> 3) & 7) === 3 || v === 37;
   const allowed = (x: number, y: number): boolean =>
     inb(x, y) && !(mask && !mask.has(`${x},${y}`)) && !(protect && isProtected(doc.terrain.cells[y * n + x]!.value));
+  const free = (x: number, y: number): boolean => !occupied?.has(`${x},${y}`);
+  /** An object footprint fits: every cell in-bounds, mask/protect-allowed AND unoccupied. */
+  const fits = (x0: number, y0: number, w: number, h: number): boolean => {
+    for (let dy = 0; dy < h; dy++)
+      for (let dx = 0; dx < w; dx++) {
+        if (!allowed(x0 + dx, y0 + dy) || !free(x0 + dx, y0 + dy)) return false;
+      }
+    return true;
+  };
   const ops: EditOp[] = [];
   const wallCells = new Set<string>();
   const mountainCells: { x: number; y: number }[] = [];
@@ -240,21 +302,40 @@ export function decodeGrid(
           for (let dx = 0; dx < scale; dx++) {
             const x = ax + dx, y = ay + dy;
             if (!allowed(x, y)) continue;
+            // water would drown an object, forest puts a tree on it — never write there.
+            // Plain terrain (snow/grass biome washes) stays legal UNDER objects.
+            if ((action.kind === "water" || action.kind === "forest") && !free(x, y)) continue;
             const cv = doc.terrain.cells[y * n + x]!.value;
             const v =
               action.kind === "terrain" ? brushValue(cv, { type: "terrain", terrain: action.terrain }, x, y)
               : action.kind === "water" ? brushValue(cv, { type: "water" }, x, y)
               : brushValue(cv, { type: "forest" }, x, y);
-            if (v !== cv) ops.push({ kind: "setCell", x, y, value: v });
+            if (v !== cv) {
+              // water also WASHES AWAY a road on the cell (a road under water is invalid
+              // in the game; applyOp would otherwise inherit prev.roadType). Only when a
+              // road actually exists — a bare roadType:-1 on a roadless cell would make
+              // the byte writer look for a MidRoad record that isn't there.
+              const hadRoad = doc.terrain.cells[y * n + x]!.roadType !== -1;
+              if (action.kind === "water" && hadRoad)
+                ops.push({ kind: "setCell", x, y, value: v, roadType: -1, roadVar: -1 }); // -1/-1 = the road-erase idiom
+              else ops.push({ kind: "setCell", x, y, value: v });
+            }
           }
         continue;
       }
-      // object actions: anchor at the block's corner
-      if (!allowed(ax, ay)) continue;
-      if (action.kind === "wall") wallCells.add(`${ax},${ay}`);
-      else if (action.kind === "mountain") mountainCells.push({ x: ax, y: ay });
-      else if (action.kind === "road") roadCells.push({ x: ax, y: ay });
-      else if (action.kind === "decor") decorCells.push({ x: ax, y: ay, shape: action.shape });
+      // object actions: the WHOLE scale×scale block must be allowed AND unoccupied (the
+      // old anchor-only check let 2×2 wall pieces overhang masks and existing objects)
+      if (action.kind === "wall") {
+        if (fits(ax, ay, scale, scale)) wallCells.add(`${ax},${ay}`);
+      } else if (action.kind === "mountain") {
+        if (fits(ax, ay, 1, 1)) mountainCells.push({ x: ax, y: ay });
+      } else if (action.kind === "road") {
+        if (allowed(ax, ay)) roadCells.push({ x: ax, y: ay });
+      } else if (action.kind === "decor") {
+        // decor never lands on water (a floating boulder) — regardless of `protect`
+        const wet = ((doc.terrain.cells[ay * n + ax]!.value >> 3) & 7) === 3;
+        if (fits(ax, ay, 1, 1) && !wet) decorCells.push({ x: ax, y: ay, shape: action.shape });
+      }
     }
   }
 

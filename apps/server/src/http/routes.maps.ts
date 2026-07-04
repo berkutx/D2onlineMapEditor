@@ -136,17 +136,29 @@ async function loadTalismanTemplates(): Promise<ReadonlySet<string>> {
 }
 
 /** Lazily load + cache the decoration catalog as a wall set (by iso orient) + a decor set
- *  (1×1 by shape), both from public/assets/decorCatalog.json (read once). */
+ *  (1×1 by shape) + landmark footprints (UPPERCASE id → [cx,cy], for the generation
+ *  occupancy guard), all from public/assets/decorCatalog.json (read once). */
 let wallSetCache: WallSet | null = null;
 let decorSetCache: DecorSet | null = null;
-async function loadCatalogSets(): Promise<{ walls: WallSet; decor: DecorSet }> {
-  if (!wallSetCache || !decorSetCache) {
+let landmarkSizesCache: Record<string, readonly [number, number]> | null = null;
+async function loadCatalogSets(): Promise<{
+  walls: WallSet;
+  decor: DecorSet;
+  landmarkSizes: Record<string, readonly [number, number]>;
+}> {
+  if (!wallSetCache || !decorSetCache || !landmarkSizesCache) {
     const path = join(config.ASSETS_DIR, "decorCatalog.json");
     const json = JSON.parse(await readFile(path, "utf-8")) as never;
     wallSetCache = buildWallSet(json);
     decorSetCache = buildDecorSet(json);
+    const sizes: Record<string, readonly [number, number]> = {};
+    const entries = Array.isArray(json)
+      ? (json as { id: string; cx?: number; cy?: number }[])
+      : Object.values(json as Record<string, { id: string; cx?: number; cy?: number }>);
+    for (const e of entries) sizes[e.id.toUpperCase()] = [e.cx ?? 1, e.cy ?? 1];
+    landmarkSizesCache = sizes;
   }
-  return { walls: wallSetCache, decor: decorSetCache };
+  return { walls: wallSetCache, decor: decorSetCache, landmarkSizes: landmarkSizesCache };
 }
 
 /** Parse a hand-drawn cell mask (body.cells = [[x,y],…]) into an "x,y" Set; undefined if empty. */
@@ -481,8 +493,8 @@ export async function registerMapRoutes(
     const t0 = Date.now();
     let ops;
     try {
-      const { walls, decor } = await loadCatalogSets();
-      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect, decor);
+      const { walls, decor, landmarkSizes } = await loadCatalogSets();
+      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect, decor, landmarkSizes);
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -587,14 +599,14 @@ export async function registerMapRoutes(
       }
       steps.push({ ...(s as object), region: reg.data } as PlanStep);
     }
-    const { walls, decor } = await loadCatalogSets();
+    const { walls, decor, landmarkSizes } = await loadCatalogSets();
     const seed = Date.now() & 0x7fffffff;
     const mask = parseMask(body.cells);
     const protect = body.protect === true;
     const t0 = Date.now();
     let ops;
     try {
-      ops = await runGenerationSteps(liveDoc, steps, walls, seed, mask, protect, decor);
+      ops = await runGenerationSteps(liveDoc, steps, walls, seed, mask, protect, decor, landmarkSizes);
     } catch (e) {
       return reply.code(400).send({ error: e instanceof Error ? e.message : String(e), requestId });
     }

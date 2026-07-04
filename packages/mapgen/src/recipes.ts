@@ -20,6 +20,18 @@ export interface Recipe {
   fillSymbol?: string;
   /** for growth recipes: fraction of the region area to grow (replaces `STEPS`). */
   fillFrac?: number;
+  /** for seeded recipes: fraction of the region area that becomes SEEDS — the executor
+   *  replaces the `SEEDS` token with max(2, round(w*h*seedsFrac)). Deterministic seed
+   *  count (a probabilistic prl p yields ZERO seeds on small zones → silent no-op). */
+  seedsFrac?: number;
+  /** maze recipes: after MJ, seal the grid perimeter with the barrier symbol and cut two
+   *  entrances (canonical MazeGrowth leaves the border open on every side — not a maze
+   *  a stack can meaningfully enter). Applied by the server executor. */
+  sealMaze?: boolean;
+  /** ribbon recipes (river/road/ridge): the result must touch ≥2 distinct grid edges with
+   *  this symbol; the executor re-rolls the seed a few times otherwise (a degenerate
+   *  Voronoi border can hug one edge). */
+  spanSymbol?: string;
   /** cell scale: run the program on a grid this much coarser; each cell → a scale×scale
    *  block (decode places scale-sized pieces). Used by wall_maze (2 → 2×2 stone walls). */
   cellScale?: number;
@@ -50,25 +62,31 @@ export const RECIPES: Record<string, Recipe> = {
     inputMode: "zone",
     notes: "An organic (non-square) lake grown from the centre.",
   },
-  // Archipelago: scatter a few seeds (one pass), then grow each into a blob.
+  // Archipelago: a FIXED number of seeds (SEEDS token — prl p=0.006 yielded zero seeds on
+  // small zones and merged blobs on big ones), then grow each into a blob.
   water_isles: {
     id: "water_isles",
     kind: "mj",
-    xml: `<sequence values="BW"><prl in="B" out="W" p="0.006" steps="1"/><one in="WB" out="WW" steps="STEPS"/></sequence>`,
+    xml: `<sequence values="BW"><one in="B" out="W" steps="SEEDS"/><one in="WB" out="WW" steps="STEPS"/></sequence>`,
     fillFrac: 0.32,
+    seedsFrac: 0.006,
     alphabet: "BW",
     inputMode: "zone",
     notes: "Several scattered organic lakes (an archipelago of water).",
   },
-  // Winding river: a self-avoiding growth path (head R lays a water trail W).
+  // River — canonical mxgmn River: two competing growths (W/R) fill the zone; their
+  // contact line becomes the river (U), widened by 1 and diagonally smoothed. Crosses
+  // the zone BY CONSTRUCTION (a Voronoi border always separates the two cells) — the old
+  // self-avoiding walk (RBB→WWR) died in a dead-end mid-zone and never flowed across.
   river: {
     id: "river",
     kind: "mj",
-    xml: `<one values="BRW" origin="True" in="RBB" out="WWR"/>`,
-    alphabet: "BRW",
-    maskSymbol: "W", // a hand-drawn river follows the stroke (W = water), every cell
+    xml: `<sequence values="BWRU"><one in="B" out="W" steps="1"/><one in="B" out="R" steps="1"/><one><rule in="RB" out="RR"/><rule in="WB" out="WW"/></one><all in="RW" out="UU"/><all><rule in="W" out="B"/><rule in="R" out="B"/></all><all in="BU/UB" out="U*/**"/></sequence>`,
+    alphabet: "BWRU",
+    maskSymbol: "U", // a hand-drawn river follows the stroke (U = water), every cell
+    spanSymbol: "U",
     inputMode: "zone",
-    notes: "A winding river / watercourse across the zone.",
+    notes: "A river flowing across the whole zone (two-seed Voronoi border).",
   },
 
   // --- organic forest (MarkovJunior) ----------------------------------------
@@ -110,16 +128,18 @@ export const RECIPES: Record<string, Recipe> = {
     kind: "mj",
     xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
     alphabet: "BWA",
+    sealMaze: true,
     inputMode: "zone",
-    notes: "A hedge maze — corridors between forest walls.",
+    notes: "A hedge maze — corridors between forest walls (sealed, two entrances).",
   },
   mountain_maze: {
     id: "mountain_maze",
     kind: "mj",
     xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
     alphabet: "BWA",
+    sealMaze: true,
     inputMode: "zone",
-    notes: "A stone labyrinth — corridors between mountain walls.",
+    notes: "A stone labyrinth — corridors between mountain walls (sealed, two entrances).",
   },
   wall_maze: {
     id: "wall_maze",
@@ -127,8 +147,9 @@ export const RECIPES: Record<string, Recipe> = {
     xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
     cellScale: 2, // coarse maze + 2×2 stone wall pieces (matches how the game faces castles)
     alphabet: "BWA",
+    sealMaze: true,
     inputMode: "zone",
-    notes: "Maze of stone walls (2×2 pieces, like castle walls).",
+    notes: "Maze of stone walls (2×2 pieces, like castle walls; sealed, two entrances).",
   },
 
   // --- mountains & hills (decoded to 1×1 mountain objects) -------------------
@@ -142,14 +163,17 @@ export const RECIPES: Record<string, Recipe> = {
     inputMode: "zone",
     notes: "Fill the zone with mountains (a massif / border).",
   },
-  // A winding mountain ridge (self-avoiding growth path, like the river).
+  // A continuous mountain ridge across the zone: the same Voronoi border as the river
+  // (the old walk snaked into a dense serpentine and died mid-zone), widened by 1 —
+  // the decoder greedy-packs the 2–3 wide band into 2×2/3×3 peaks.
   relief_ridge: {
     id: "relief_ridge",
     kind: "mj",
-    xml: `<one values="BRM" origin="True" in="RBB" out="MMR"/>`,
-    alphabet: "BRM",
+    xml: `<sequence values="BWRU"><one in="B" out="W" steps="1"/><one in="B" out="R" steps="1"/><one><rule in="RB" out="RR"/><rule in="WB" out="WW"/></one><all in="RW" out="UU"/><all><rule in="W" out="B"/><rule in="R" out="B"/></all><all in="UB" out="UU" steps="1"/><all in="BU/UB" out="U*/**"/></sequence>`,
+    alphabet: "BWRU",
+    spanSymbol: "U",
     inputMode: "zone",
-    notes: "A winding mountain ridge across the zone.",
+    notes: "A mountain ridge crossing the whole zone (Voronoi border, 2–3 wide).",
   },
   // Scattered hills (sparse single mountains).
   relief_hills: {
@@ -162,15 +186,18 @@ export const RECIPES: Record<string, Recipe> = {
   },
 
   // --- roads (decoded to auto-tiled road cells) -----------------------------
-  // A winding road (self-avoiding growth path); roadBrush auto-tiles the connectivity.
+  // A road across the zone: the THIN (one-sided) Voronoi border — a single-cell winding
+  // line from edge to edge, auto-tiled by roadBrush. The old self-avoiding walk filled a
+  // third of the zone with a road serpentine that connected nothing.
   road_path: {
     id: "road_path",
     kind: "mj",
-    xml: `<one values="BRP" origin="True" in="RBB" out="PPR"/>`,
-    alphabet: "BRP",
-    maskSymbol: "P", // a hand-drawn road follows the stroke (P = path, auto-tiled), every cell
+    xml: `<sequence values="BWRU"><one in="B" out="W" steps="1"/><one in="B" out="R" steps="1"/><one><rule in="RB" out="RR"/><rule in="WB" out="WW"/></one><all in="RW" out="UW"/><all><rule in="W" out="B"/><rule in="R" out="B"/></all><all in="BU/UB" out="U*/**"/></sequence>`,
+    alphabet: "BWRU",
+    maskSymbol: "U", // a hand-drawn road follows the stroke (U = road, auto-tiled), every cell
+    spanSymbol: "U",
     inputMode: "zone",
-    notes: "A winding road / path across the zone.",
+    notes: "A winding road crossing the whole zone (thin Voronoi border).",
   },
 
   // --- scattered decorations (decoded to catalog landmark objects by shape) --
@@ -236,14 +263,16 @@ export const RECIPES: Record<string, Recipe> = {
     inputMode: "zone",
     notes: "Patchy snow (organic clumps), not a solid sheet.",
   },
-  // Sparse snow dabs (one random pass).
+  // Sparse snow dabs: tiny grown blobs (2–4 cells) — single-cell dots each grew a full
+  // ring of snow/land transition tiles around themselves (visual noise, not a dusting).
   snow_scatter: {
     id: "snow_scatter",
     kind: "mj",
-    xml: `<prl values="BS" in="B" out="S" p="0.08" steps="1"/>`,
+    xml: `<sequence values="BS"><prl in="B" out="S" p="0.02" steps="1"/><one in="SB" out="SS" steps="STEPS"/></sequence>`,
+    fillFrac: 0.08,
     alphabet: "BS",
     inputMode: "zone",
-    notes: "Light dusting of snow (sparse cells).",
+    notes: "Light dusting of snow (small organic dabs).",
   },
   grass_fill: {
     id: "grass_fill",

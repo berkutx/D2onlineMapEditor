@@ -47,6 +47,10 @@ export const useToolStore = defineStore("tool", () => {
   const zoneHidden = ref(false);
   /** "👁 eye" mode: when on and no zone is drawn, the visible screen area IS the zone. */
   const eyeZone = ref(false);
+  /** «По рисунку»: a generator recipe armed on the region tool — finishing a stroke
+   *  IMMEDIATELY generates along it (road/river follow the line; decor sprinkles along
+   *  the brush). null = the region tool is a plain Copilot zone selector. */
+  const drawGenRecipe = ref<string | null>(null);
   /** PRIMARY selected object (drives ObjectInspector + pick-below cycling), null = none. */
   const selectedId = ref<string | null>(null);
   /** The FULL multi-selection (Shift+клик / Shift+рамка). Invariant: selectedId ∈ selectedIds
@@ -84,6 +88,25 @@ export const useToolStore = defineStore("tool", () => {
 
   function setTool(t: EditTool): void {
     tool.value = t;
+    if (t !== "region") drawGenRecipe.value = null; // switching tools disarms «по рисунку»
+  }
+
+  /** Arm/disarm the «по рисунку» generator: arming enters the region tool with a fitting
+   *  draw mode (paths → line, scatter → brush); disarming leaves the tool too. */
+  function setDrawGen(recipeId: string | null): void {
+    drawGenRecipe.value = recipeId;
+    if (recipeId) {
+      tool.value = "region";
+      const isPath = recipeId === "road_path" || recipeId === "river";
+      zoneMode.value = isPath ? "line" : "brush";
+      if (isPath) size.value = 1; // a path follows the stroke exactly (no 3-wide band)
+      region.value = null;
+      regionMask.value = null;
+      zoneHidden.value = false;
+    } else if (tool.value === "region") {
+      tool.value = "select";
+      clearZone();
+    }
   }
   function setSize(s: number): void {
     size.value = s;
@@ -174,7 +197,7 @@ export const useToolStore = defineStore("tool", () => {
   }
 
   return {
-    tool, size, terrainId, decorId, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, selectedId, selectedIds,
+    tool, size, terrainId, decorId, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, drawGenRecipe, setDrawGen, selectedId, selectedIds,
     selectedZoneId, setSelectedZone, regenZoneId,
     locFilter, setLocFilter,
     objectPickTypes, objectPickResult, startObjectPick, finishObjectPick,
