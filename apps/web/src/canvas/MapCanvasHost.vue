@@ -17,7 +17,7 @@ import { assetUrl } from "../services/api";
 import { storeToRefs } from "pinia";
 import { Scene } from "@d2/pixi-render";
 import type { CameraSnapshot, DebugStats, LandmarkFootprints } from "@d2/pixi-render";
-import { worldToCell, objectFootprint, objectZBase, objectSprites } from "@d2/pixi-render";
+import { worldToCell, cellToWorld, objectFootprint, objectZBase, objectSprites } from "@d2/pixi-render";
 import type { MapObject } from "@d2/map-schema";
 import {
   terrainBrush,
@@ -281,6 +281,21 @@ function cellFromEvent(e: PointerEvent): { x: number; y: number } | null {
   return x >= 0 && y >= 0 && x < doc.size && y < doc.size ? { x, y } : null;
 }
 
+/** Event point in WORLD units + how many world units `px` screen pixels span (zoom-aware) —
+ *  for pixel-tolerance hit tests against world-space anchors (the location resize handle). */
+function worldFromEvent(e: PointerEvent, px = 12): { x: number; y: number; tol: number } | null {
+  const scene = getScene();
+  const cam = scene?.getCamera();
+  const canvas = scene?.canvas;
+  if (!cam || !canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  const sx = e.clientX - rect.left;
+  const sy = e.clientY - rect.top;
+  const w = cam.screenToWorld(sx, sy);
+  const w2 = cam.screenToWorld(sx + px, sy);
+  return { x: w.x, y: w.y, tol: Math.abs(w2.x - w.x) };
+}
+
 // --- terrain painting --------------------------------------------------------
 let painting = false;
 let strokeOps: EditOp[] = [];
@@ -296,6 +311,8 @@ let lastCell: { x: number; y: number } | null = null;
 let locDown: { cell: { x: number; y: number }; locs: MapObject[] } | null = null;
 let locDragId: string | null = null;
 let locDragging = false;
+/** «Локации»: drag of the SELECTED location's corner handle = radius resize. */
+let locResize: { id: string; lastR: number } | null = null;
 /** Last hovered cell key for the location spotlight (avoid re-computing per pixel). */
 let hoverKey: string | null = null;
 
@@ -894,6 +911,10 @@ function onKeyDown(e: KeyboardEvent): void {
     toolStore.finishObjectPick(null);
     ElMessage.info("Выбор на карте отменён");
   }
+  if (locResize) {
+    locResize = null; // drop the radius drag without committing
+    clearPreview();
+  }
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -1047,8 +1068,24 @@ function onPointerDown(e: PointerEvent): void {
     return;
   }
   // locations tool («режим локаций»): pick ONLY locations — the world is veiled. A click
-  // selects (re-click cycles the overlapping locations, smaller-first); drag ≥1 cell moves.
+  // selects (re-click cycles the overlapping locations, smaller-first); drag ≥1 cell moves;
+  // a press on the SELECTED location's corner handle starts a radius RESIZE drag.
   if (toolStore.tool === "locations") {
+    const selLoc = editStore.liveDoc?.objects.find(
+      (o) => o.id === toolStore.selectedId && o.type === "location",
+    );
+    if (selLoc) {
+      const w = worldFromEvent(e);
+      if (w) {
+        const r = selLoc.radius ?? 0;
+        const h = cellToWorld(selLoc.pos.x + r + 1, selLoc.pos.y + r + 1); // SE vertex = handle
+        if (Math.hypot(w.x - h.x, w.y - h.y) <= w.tol) {
+          locResize = { id: selLoc.id, lastR: r };
+          getScene()?.canvas?.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+    }
     const cell = cellFromEvent(e);
     if (!cell) return;
     // the role filter constrains picking too: dimmed-out locations are not clickable
@@ -1176,6 +1213,18 @@ function onPointerUp(e: PointerEvent): void {
     }
     return;
   }
+  // locations tool: releasing the corner handle commits the radius change (one undo step)
+  if (locResize) {
+    const { id, lastR } = locResize;
+    locResize = null;
+    clearPreview();
+    try { getScene()?.canvas?.releasePointerCapture(e.pointerId); } catch { /* released */ }
+    const o = editStore.liveDoc?.objects.find((x) => x.id === id);
+    if (o && o.type === "location" && (o.radius ?? 0) !== lastR) {
+      editStore.commit([{ kind: "patchObject", id, fields: { radius: lastR } }]);
+    }
+    return;
+  }
   // locations tool: finish the press — a drag commits the move (locations skip occupancy,
   // only bounds are enforced), a click (no drag) selects / cycles the overlap.
   if (locDown) {
@@ -1296,6 +1345,19 @@ function onPointerMove(e: PointerEvent): void {
   }
   // hover spotlight for location overlays (all tools — this is what declutters the soup)
   updateLocationFocus(cell);
+  // locations tool: dragging the corner handle = radius resize (live footprint preview)
+  if (locResize && cell) {
+    const o = editStore.liveDoc?.objects.find((x) => x.id === locResize!.id);
+    const doc = editStore.liveDoc;
+    if (o && doc && o.type === "location") {
+      const cheb = Math.max(Math.abs(cell.x - o.pos.x), Math.abs(cell.y - o.pos.y));
+      const maxR = Math.min(o.pos.x, o.pos.y, doc.size - 1 - o.pos.x, doc.size - 1 - o.pos.y);
+      const nr = Math.max(0, Math.min(cheb, maxR));
+      locResize.lastR = nr;
+      getScene()?.setFootprint(footprintCells(o.pos.x - nr, o.pos.y - nr, 2 * nr + 1, 2 * nr + 1), true);
+    }
+    return;
+  }
   // locations tool: a drag ≥1 cell moves the location — live footprint preview at the target
   if (locDown && locDragId && cell) {
     if (!locDragging && (cell.x !== locDown.cell.x || cell.y !== locDown.cell.y)) locDragging = true;
@@ -1495,6 +1557,7 @@ watch(
       locDown = null;
       locDragId = null;
       locDragging = false;
+      locResize = null;
       updateLocationFocus(lastCell, true); // drop the filter spotlight with the mode
     }
     if (t === "decor" || t === "move") refreshGhost(lastCell);

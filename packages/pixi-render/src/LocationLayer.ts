@@ -74,6 +74,16 @@ export class LocationLayer {
       g.fill({ color: 0x33ddff, alpha: sel ? 0.22 : 0.14 });
       g.stroke({ color: sel ? 0xffd54a : 0x66e6ff, alpha: sel ? 0.95 : 0.7, width: sel ? 2 : 1 });
       root.addChild(g);
+      if (sel) {
+        // resize HANDLE at the bottom (SE) vertex — the host hit-tests the same world point
+        // (locations tool: drag = radius). Purely visual here (the layer never eats events).
+        const hs = 7;
+        const h = new Graphics();
+        h.poly([c.x, c.y - hs, c.x + hs, c.y, c.x, c.y + hs, c.x - hs, c.y]);
+        h.fill({ color: 0xffd54a, alpha: 0.95 });
+        h.stroke({ color: 0x000000, alpha: 0.6, width: 1 });
+        root.addChild(h);
+      }
 
       const caption = opts.captions?.[o.id];
       const text = caption || o.name || "";
