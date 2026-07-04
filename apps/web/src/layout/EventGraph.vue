@@ -225,6 +225,62 @@ function gateAfterN(): void {
     });
 }
 
+/** «⊻ или-ветка»: альтернатива — сработает только одна из веток (общий скрытый гейт). */
+function orBranch(): void {
+  if (store.selectedId) store.createOrBranch(store.selectedId);
+}
+
+/** «⏲ через N дней…»: скрытый дневной тикер + продолжение при счётчике ≥ N. */
+function timerAfter(): void {
+  const fromId = store.selectedId;
+  if (!fromId) return;
+  void ElMessageBox.prompt("Через сколько дней после этого события создать продолжение?", "Через N дней", {
+    confirmButtonText: "Создать",
+    cancelButtonText: "Отмена",
+    inputValue: "7",
+    inputPattern: /^[1-9]\d{0,2}$/,
+    inputErrorMessage: "Число от 1 до 999",
+  })
+    .then(({ value }) => {
+      store.createTimerAfter(fromId, Number(value));
+    })
+    .catch(() => { /* отмена */ });
+}
+
+/** «⚑ фаза K»: событие срабатывает только в фазе K (общая скрытая AUTO_фаза). */
+function bindPhase(): void {
+  const id = store.selectedId;
+  if (!id) return;
+  void ElMessageBox.prompt("В какой фазе сценария должно работать это событие? (фаза — общий скрытый счётчик, старт = 0)", "Привязать к фазе", {
+    confirmButtonText: "Привязать",
+    cancelButtonText: "Отмена",
+    inputValue: "1",
+    inputPattern: /^\d{1,3}$/,
+    inputErrorMessage: "Число 0..999",
+  })
+    .then(({ value }) => {
+      store.bindEventToPhase(id, Number(value));
+    })
+    .catch(() => { /* отмена */ });
+}
+
+/** «⚑➜ в фазу K»: эффект-переход — событие присваивает фазе значение K. */
+function gotoPhase(): void {
+  const id = store.selectedId;
+  if (!id) return;
+  void ElMessageBox.prompt("В какую фазу переводит сценарий это событие?", "Переход в фазу", {
+    confirmButtonText: "Добавить эффект",
+    cancelButtonText: "Отмена",
+    inputValue: "1",
+    inputPattern: /^\d{1,3}$/,
+    inputErrorMessage: "Число 0..999",
+  })
+    .then(({ value }) => {
+      store.addGotoPhaseEffect(id, Number(value));
+    })
+    .catch(() => { /* отмена */ });
+}
+
 /** Slightly curved edge path (cubic, horizontal tangents). */
 function edgePath(e: GEdge): string {
   const mx = (e.x1 + e.x2) / 2;
@@ -383,13 +439,25 @@ function onNodeClick(n: GNode): void {
         <button type="button" class="ev-nav-btn" title="Отдалить" @click="zoomStep(-1)">−</button>
         <button type="button" class="ev-nav-btn" title="Вписать граф" @click="fitToContent()">⤢</button>
       </div>
-      <!-- auto-wiring: one click = a disabled follow-up event + the enable-chain edge -->
+      <!-- auto-wiring: hidden-variable constructions (the E5 builders) — one click each -->
       <div class="ev-actions">
         <button type="button" class="ev-chain d2-float" title="Создать продолжение: новое (выключенное) событие + эффект «Вкл/выкл событие» на него" @click="chainNext()">
-          ➜ следующее в цепочке
+          ➜ цепочка
         </button>
         <button type="button" class="ev-chain d2-float" title="Счётчик: скрытая авто-переменная, «+1» на этом событии и новое событие, срабатывающее после N раз" @click="gateAfterN()">
           ⏱ после N раз…
+        </button>
+        <button type="button" class="ev-chain d2-float" title="Или-ветка: альтернативное событие — сработает ТОЛЬКО одна из веток (общая скрытая гейт-переменная; повторный клик добавляет ещё ветку)" @click="orBranch()">
+          ⊻ или-ветка
+        </button>
+        <button type="button" class="ev-chain d2-float" title="Таймер: скрытый дневной счётчик стартует с этим событием; продолжение сработает через N дней и остановит счётчик" @click="timerAfter()">
+          ⏲ через N дней…
+        </button>
+        <button type="button" class="ev-chain d2-float" title="Событие будет работать только в фазе K (общая скрытая переменная AUTO_фаза, старт = 0)" @click="bindPhase()">
+          ⚑ фаза…
+        </button>
+        <button type="button" class="ev-chain d2-float" title="Добавить эффект «перейти в фазу K» — событие переключает сценарий в другую фазу" @click="gotoPhase()">
+          ⚑➜ в фазу…
         </button>
       </div>
       <div class="ev-legend">
@@ -451,14 +519,16 @@ function onNodeClick(n: GNode): void {
   background: var(--el-fill-color-light);
   color: var(--el-text-color-primary);
 }
-/* chain-create actions (top-left cluster) */
+/* construction builders (top-left cluster; wraps on narrow graphs) */
 .ev-actions {
   position: absolute;
   top: 10px;
   left: 10px;
+  right: 52px; /* leave the zoom cluster free */
   z-index: 5;
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
 }
 .ev-chain {
   padding: 5px 10px;

@@ -291,6 +291,169 @@ export const useEventStore = defineStore("events", () => {
     return gate;
   }
 
+  /** Batch id allocator — newId() reads only COMMITTED events, so builders that create
+   *  several events in ONE commit must allocate the whole batch up front. */
+  function allocEventIds(n: number): string[] {
+    const version = edit.liveDoc?.header.version || "S143";
+    let next = 0;
+    for (const e of events.value) {
+      const m = /EV([0-9a-fA-F]{4})$/.exec(e.id);
+      if (m) next = Math.max(next, parseInt(m[1]!, 16) + 1);
+    }
+    return Array.from({ length: n }, (_, i) => `${version}EV${(next + i).toString(16).padStart(4, "0")}`);
+  }
+
+  /** Fresh auto-variable (id = max+1) with a slugged name; caller puts it in a setVariables op. */
+  function makeAutoVar(prefix: string, seed: string): ScenarioVariable {
+    const id = Math.max(0, ...variables.value.map((v) => v.id)) + 1;
+    const slug = seed.replace(/[^0-9A-Za-zА-Яа-яЁё]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || "x";
+    return { id, name: `${prefix}_${slug}`, value: 0 };
+  }
+  const gateCondFor = (varId: number): EventCondition =>
+    ({
+      ...makeCondition("varInRange"),
+      var1: varId, min1: 0, max1: 0, var2: 0, min2: 0, max2: 0, relation: 0,
+    }) as EventCondition;
+  const incEffFor = (varId: number, at: number): EventEffect => {
+    const inc = { ...makeEffect("modifyVariable"), lookup: 0, val1: 1, val2: varId } as EventEffect;
+    (inc as { num: number }).num = at;
+    return inc;
+  };
+
+  /** «⊻ или-ветка»: альтернатива текущему событию — сработает ТОЛЬКО одна из веток.
+   *  Общая гейт-переменная AUTO_или_*: условие «==0» + «+1»-эффект на каждой ветке;
+   *  повторный вызов на любой ветке добавляет ещё одну ветку в ту же группу. */
+  function createOrBranch(fromId: string): MapEvent | null {
+    const from = events.value.find((e) => e.id === fromId);
+    if (!from) return null;
+    // reuse the group's gate if this event already carries one (an AUTO_или_* auto-var)
+    const autoIds = new Set(edit.autoVars);
+    let gateId: number | null = null;
+    for (const c of from.conditions) {
+      if (c.kind !== "varInRange") continue;
+      const rc = c as unknown as Record<string, number>;
+      const v = variables.value.find((x) => x.id === rc.var1);
+      if (v && autoIds.has(v.id) && v.name.startsWith("AUTO_или_") && rc.min1 === 0 && rc.max1 === 0) {
+        gateId = v.id;
+        break;
+      }
+    }
+    const ops: EditOp[] = [];
+    let isNewVar = false;
+    if (gateId === null) {
+      const nv = makeAutoVar("AUTO_или", from.name || fromId);
+      ops.push({ kind: "setVariables", variables: [...variables.value, nv] } as EditOp);
+      gateId = nv.id;
+      isNewVar = true;
+      ops.push({
+        kind: "upsertEvent",
+        event: {
+          ...from,
+          conditions: [...from.conditions, gateCondFor(gateId)],
+          effects: [...from.effects, incEffFor(gateId, from.effects.length)],
+        },
+      } as EditOp);
+    }
+    const branch: MapEvent = {
+      ...blankEvent(),
+      name: `${from.name || "Событие"} — или…`,
+      conditions: [gateCondFor(gateId)],
+      effects: [incEffFor(gateId, 0)],
+    };
+    ops.push({ kind: "upsertEvent", event: branch } as EditOp);
+    edit.commit(ops);
+    if (isNewVar) edit.markAutoVar(gateId);
+    navigate({ tab: "events", eventId: branch.id });
+    return branch;
+  }
+
+  // --- phases: ONE shared AUTO_фаза variable; events bind to a phase (условие ==K),
+  // transitions are «присвоить K» effects. The builders keep the variable hidden.
+  function phaseVarId(): number | null {
+    const autoIds = new Set(edit.autoVars);
+    const v = variables.value.find((x) => autoIds.has(x.id) && x.name === "AUTO_фаза");
+    return v ? v.id : null;
+  }
+  /** Ensure the shared phase variable exists; returns [id, setup-op or null, isNew]. */
+  function ensurePhaseVar(): { id: number; op: EditOp | null; isNew: boolean } {
+    const existing = phaseVarId();
+    if (existing !== null) return { id: existing, op: null, isNew: false };
+    const nv: ScenarioVariable = { id: Math.max(0, ...variables.value.map((v) => v.id)) + 1, name: "AUTO_фаза", value: 0 };
+    return { id: nv.id, op: { kind: "setVariables", variables: [...variables.value, nv] } as EditOp, isNew: true };
+  }
+  /** «⚑ фаза K»: событие срабатывает только в фазе K (условие ==K; повторный вызов меняет K). */
+  function bindEventToPhase(eventId: string, phase: number): boolean {
+    const from = events.value.find((e) => e.id === eventId);
+    if (!from) return false;
+    const { id: varId, op, isNew } = ensurePhaseVar();
+    const ops: EditOp[] = op ? [op] : [];
+    const existing = from.conditions.findIndex(
+      (c) => c.kind === "varInRange" && (c as unknown as Record<string, number>).var1 === varId,
+    );
+    const cond = { ...gateCondFor(varId), min1: phase, max1: phase } as EventCondition;
+    const conditions =
+      existing >= 0
+        ? from.conditions.map((c, i) => (i === existing ? cond : c))
+        : [...from.conditions, cond];
+    ops.push({ kind: "upsertEvent", event: { ...from, conditions } } as EditOp);
+    edit.commit(ops);
+    if (isNew) edit.markAutoVar(varId);
+    return true;
+  }
+  /** «⚑➜ в фазу K»: эффект «присвоить фазе K» в конец списка эффектов события. */
+  function addGotoPhaseEffect(eventId: string, phase: number): boolean {
+    const from = events.value.find((e) => e.id === eventId);
+    if (!from) return false;
+    const { id: varId, op, isNew } = ensurePhaseVar();
+    const ops: EditOp[] = op ? [op] : [];
+    const set = { ...makeEffect("modifyVariable"), lookup: 4, val1: phase, val2: varId } as EventEffect;
+    (set as { num: number }).num = from.effects.length;
+    ops.push({ kind: "upsertEvent", event: { ...from, effects: [...from.effects, set] } } as EditOp);
+    edit.commit(ops);
+    if (isNew) edit.markAutoVar(varId);
+    return true;
+  }
+
+  /** «⏲ через N дней после X»: X включает скрытый тикер (раз в день «+1» в AUTO_таймер_*),
+   *  продолжение срабатывает при счётчике ≥N и выключает тикер. Один commit. */
+  function createTimerAfter(fromId: string, days: number): MapEvent | null {
+    const from = events.value.find((e) => e.id === fromId);
+    if (!from || days < 1) return null;
+    const counter = makeAutoVar("AUTO_таймер", from.name || fromId);
+    const [tickerId, gateId] = allocEventIds(2) as [string, string];
+    const ticker: MapEvent = {
+      ...blankEvent(),
+      id: tickerId,
+      name: `${from.name || "Событие"} — счёт дней`,
+      enabled: false, // X включает
+      occurOnce: false, // тикает каждый день
+      conditions: [{ ...makeCondition("frequency"), days: 1 } as EventCondition],
+      effects: [incEffFor(counter.id, 0)],
+    };
+    const stopTicker = { ...makeEffect("enableEvent"), eventId: tickerId, enable: false } as EventEffect;
+    (stopTicker as { num: number }).num = 0;
+    const gate: MapEvent = {
+      ...blankEvent(),
+      id: gateId,
+      name: `${from.name || "Событие"} — через ${days} дн.`,
+      conditions: [
+        { ...makeCondition("varInRange"), var1: counter.id, min1: days, max1: 9999, var2: 0, min2: 0, max2: 0, relation: 0 } as EventCondition,
+      ],
+      effects: [stopTicker],
+    };
+    const startTicker = { ...makeEffect("enableEvent"), eventId: tickerId, enable: true } as EventEffect;
+    (startTicker as { num: number }).num = from.effects.length;
+    edit.commit([
+      { kind: "setVariables", variables: [...variables.value, counter] } as EditOp,
+      { kind: "upsertEvent", event: ticker } as EditOp,
+      { kind: "upsertEvent", event: gate } as EditOp,
+      { kind: "upsertEvent", event: { ...from, effects: [...from.effects, startTicker] } } as EditOp,
+    ]);
+    edit.markAutoVar(counter.id);
+    navigate({ tab: "events", eventId: gate.id });
+    return gate;
+  }
+
   /** Condition kinds that reference ONE location — the game allows a single zone condition
    *  per event (AND-only), so «событие на зону» = per-location clones of the event. */
   const ZONE_COND_KINDS = new Set(["enterZone", "stackInLocation", "itemToLocation"]);
@@ -466,6 +629,7 @@ export const useEventStore = defineStore("events", () => {
     breadcrumbs, canGoBack, navigate, goBack, goToCrumb, cardReveal, revealCard,
     createForObject, createChainedEvent, createCounterGate, createSpawnAt,
     cloneEventForZone, zoneCondIndex,
+    createOrBranch, bindEventToPhase, addGotoPhaseEffect, createTimerAfter, phaseVarId,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,
     upsertTemplate, removeTemplate, createTemplate, cloneTemplate,
