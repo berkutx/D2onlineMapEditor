@@ -98,12 +98,16 @@ export const useEventStore = defineStore("events", () => {
     return trail.map((e, i) => ({ ...e, label: navLabel(e), current: i === trail.length - 1 }));
   });
   const canGoBack = computed(() => navStack.value.length > 0);
+  /** Forward stack (undone goBacks) — a NEW navigate clears it, browser-style. */
+  const fwdStack = ref<NavEntry[]>([]);
+  const canGoForward = computed(() => fwdStack.value.length > 0);
   /** Jump somewhere, remembering where we were (skips no-op jumps). */
   function navigate(to: { tab?: PanelTab; eventId?: string | null }): void {
     const tab = to.tab ?? panelTab.value;
     const eventId = to.eventId !== undefined ? to.eventId : selectedId.value;
     if (tab === panelTab.value && eventId === selectedId.value) return;
     navStack.value = [...navStack.value.slice(-29), { tab: panelTab.value, eventId: selectedId.value }];
+    fwdStack.value = []; // a fresh jump invalidates the forward history
     panelTab.value = tab;
     if (to.eventId !== undefined) selectedId.value = to.eventId;
   }
@@ -111,8 +115,17 @@ export const useEventStore = defineStore("events", () => {
     const prev = navStack.value[navStack.value.length - 1];
     if (!prev) return;
     navStack.value = navStack.value.slice(0, -1);
+    fwdStack.value = [...fwdStack.value, { tab: panelTab.value, eventId: selectedId.value }];
     panelTab.value = prev.tab;
     selectedId.value = prev.eventId;
+  }
+  function goForward(): void {
+    const next = fwdStack.value[fwdStack.value.length - 1];
+    if (!next) return;
+    fwdStack.value = fwdStack.value.slice(0, -1);
+    navStack.value = [...navStack.value.slice(-29), { tab: panelTab.value, eventId: selectedId.value }];
+    panelTab.value = next.tab;
+    selectedId.value = next.eventId;
   }
   /** Breadcrumb click: index into breadcrumbs (last = current, no-op). */
   function goToCrumb(i: number): void {
@@ -120,6 +133,7 @@ export const useEventStore = defineStore("events", () => {
     const target = navStack.value[trailStart + i];
     if (!target) return; // clicked the current crumb
     navStack.value = navStack.value.slice(0, trailStart + i);
+    fwdStack.value = [];
     panelTab.value = target.tab;
     selectedId.value = target.eventId;
   }
@@ -743,7 +757,7 @@ export const useEventStore = defineStore("events", () => {
   return {
     selectedId, filter, objectFilter, panelTab, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
-    breadcrumbs, canGoBack, navigate, goBack, goToCrumb, cardReveal, revealCard,
+    breadcrumbs, canGoBack, canGoForward, navigate, goBack, goForward, goToCrumb, cardReveal, revealCard,
     createForObject, createChainedEvent, createCounterGate, createSpawnAt,
     cloneEventForZone, zoneCondIndex, resyncZoneEventsAfterRegen,
     createOrBranch, bindEventToPhase, addGotoPhaseEffect, createTimerAfter, phaseVarId,

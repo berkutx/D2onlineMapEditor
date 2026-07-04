@@ -17,6 +17,7 @@ import { CONDITION_SPECS, EFFECT_SPECS, CONDITION_BY_KIND, EFFECT_BY_KIND } from
 import { useEventStore, makeCondition, makeEffect } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
 import { useViewStore } from "../stores/viewStore";
+import { useUnitStore } from "../stores/unitStore";
 import { eventBadges } from "../services/scenarioRoles";
 import EventFieldInput from "./EventFieldInput.vue";
 import EventGraph from "./EventGraph.vue";
@@ -28,6 +29,9 @@ import DiplomacyEditor from "./DiplomacyEditor.vue";
 const store = useEventStore();
 const editStore = useEditStore();
 const view = useViewStore();
+// unit catalog powers every «имя вместо id» label in the window (template leaders, stack
+// labels, unit refs) — kick the lazy load as soon as the window mounts, not on first picker
+void useUnitStore().load();
 
 const visible = computed({
   get: () => view.eventPanelVisible,
@@ -44,11 +48,14 @@ const gridColumns = computed(() => {
     : `${list} minmax(360px, 1fr)`; //                список | редактор (граф скрыт)
 });
 
-/** Alt+← = назад по истории переходов (пока окно открыто). */
+/** Alt+← / Alt+→ = назад/вперёд по истории переходов (пока окно открыто). */
 function onNavKey(e: KeyboardEvent): void {
   if (!view.eventPanelVisible) return;
   if (e.altKey && e.key === "ArrowLeft") {
     store.goBack();
+    e.preventDefault();
+  } else if (e.altKey && e.key === "ArrowRight") {
+    store.goForward();
     e.preventDefault();
   }
 }
@@ -248,11 +255,21 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
       <el-tab-pane label="Шаблоны" name="templates" />
     </el-tabs>
 
-    <!-- navigation trail: back + breadcrumbs (graph/variable jumps are recorded) -->
-    <div v-if="store.canGoBack" class="sc-nav">
+    <!-- navigation bar: ALWAYS visible (disabled buttons teach that history exists) —
+         back/forward + «+ событие» + breadcrumbs. Critical in deep event webs. -->
+    <div class="sc-nav">
       <el-tooltip content="Назад (Alt+←)" :show-after="300">
-        <el-button size="small" text class="sc-back" @click="store.goBack()">←</el-button>
+        <el-button class="sc-navbtn" :disabled="!store.canGoBack" @click="store.goBack()">← Назад</el-button>
       </el-tooltip>
+      <el-tooltip content="Вперёд (Alt+→)" :show-after="300">
+        <el-button class="sc-navbtn" :disabled="!store.canGoForward" @click="store.goForward()">Вперёд →</el-button>
+      </el-tooltip>
+      <el-button
+        v-if="store.panelTab === 'events'"
+        class="sc-navbtn"
+        type="primary"
+        @click="store.create()"
+      >＋ Событие</el-button>
       <span
         v-for="(c, i) in store.breadcrumbs"
         :key="i"
@@ -296,7 +313,6 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
               <el-button size="small" text class="icon-btn" @click="listCollapsed = true">◂</el-button>
             </el-tooltip>
             <span class="ev-count">{{ store.events.length }} событий</span>
-            <el-button size="small" type="primary" @click="store.create()">+ Новое</el-button>
           </div>
           <el-input
             v-model="store.filter"
@@ -450,14 +466,15 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 .sc-nav {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 0 6px;
+  gap: 6px;
+  padding: 0 0 8px;
   font-size: 11px;
   color: var(--el-text-color-secondary);
   overflow: hidden;
   white-space: nowrap;
 }
-.sc-back { padding: 2px 8px; font-size: 13px; }
+.sc-navbtn { font-size: 12px; padding: 5px 12px; }
+.sc-navbtn + .sc-crumb { margin-left: 8px; }
 .sc-crumb { cursor: pointer; }
 .sc-crumb:hover:not(.current) { color: var(--el-color-primary); text-decoration: underline; }
 .sc-crumb.current { color: var(--el-text-color-primary); font-weight: 600; cursor: default; }

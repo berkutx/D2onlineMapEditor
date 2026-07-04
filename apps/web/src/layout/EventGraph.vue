@@ -13,7 +13,7 @@
  * cluster top-right; selecting another event re-fits to the content bbox.
  */
 import { computed, ref, watch } from "vue";
-import { ElEmpty, ElMessageBox } from "element-plus";
+import { ElEmpty, ElMessageBox, ElTooltip } from "element-plus";
 import type { EventCondition, EventEffect } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
@@ -195,7 +195,11 @@ const hotNodes = computed<Set<number>>(() => {
 function satClick(r: ResolvedRef): (() => void) | undefined {
   if (r.kind === "event") return () => store.navigate({ tab: "events", eventId: String(r.value) });
   if (r.kind === "var") return () => store.navigate({ tab: "vars" });
-  if (r.kind === "template") return () => store.navigate({ tab: "templates" });
+  if (r.kind === "template")
+    return () => {
+      store.selectTemplate(String(r.value)); // open the tab WITH the template selected
+      store.navigate({ tab: "templates" });
+    };
   if (r.kind === "object") return () => toolStore.setSelectedId(String(r.value));
   return undefined;
 }
@@ -439,26 +443,32 @@ function onNodeClick(n: GNode): void {
         <button type="button" class="ev-nav-btn" title="Отдалить" @click="zoomStep(-1)">−</button>
         <button type="button" class="ev-nav-btn" title="Вписать граф" @click="fitToContent()">⤢</button>
       </div>
-      <!-- auto-wiring: hidden-variable constructions (the E5 builders) — one click each -->
+      <!-- auto-wiring: hidden-variable constructions (the E5 builders) — one click each.
+           The caption names the ANCHOR event: without it users can't tell what these
+           chips are or what they attach to (prod feedback). -->
       <div class="ev-actions">
-        <button type="button" class="ev-chain d2-float" title="Создать продолжение: новое (выключенное) событие + эффект «Вкл/выкл событие» на него" @click="chainNext()">
-          ➜ цепочка
-        </button>
-        <button type="button" class="ev-chain d2-float" title="Счётчик: скрытая авто-переменная, «+1» на этом событии и новое событие, срабатывающее после N раз" @click="gateAfterN()">
-          ⏱ после N раз…
-        </button>
-        <button type="button" class="ev-chain d2-float" title="Или-ветка: альтернативное событие — сработает ТОЛЬКО одна из веток (общая скрытая гейт-переменная; повторный клик добавляет ещё ветку)" @click="orBranch()">
-          ⊻ или-ветка
-        </button>
-        <button type="button" class="ev-chain d2-float" title="Таймер: скрытый дневной счётчик стартует с этим событием; продолжение сработает через N дней и остановит счётчик" @click="timerAfter()">
-          ⏲ через N дней…
-        </button>
-        <button type="button" class="ev-chain d2-float" title="Событие будет работать только в фазе K (общая скрытая переменная AUTO_фаза, старт = 0)" @click="bindPhase()">
-          ⚑ фаза…
-        </button>
-        <button type="button" class="ev-chain d2-float" title="Добавить эффект «перейти в фазу K» — событие переключает сценарий в другую фазу" @click="gotoPhase()">
-          ⚑➜ в фазу…
-        </button>
+        <span class="ev-actions-lbl">
+          Пристроить к «{{ (store.selected?.name || store.selected?.id || "").slice(0, 24) }}»:
+        </span>
+        <el-tooltip content="Создать ПРОДОЛЖЕНИЕ: новое (выключенное) событие + эффект «Вкл/выкл событие» на него" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="chainNext()">➜ цепочка</button>
+        </el-tooltip>
+        <el-tooltip content="Счётчик: «+1» на этом событии, продолжение сработает ПОСЛЕ N срабатываний (переменная скрыта)" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="gateAfterN()">⏱ после N раз…</button>
+        </el-tooltip>
+        <el-tooltip content="ИЛИ-ветка: альтернативное событие — сработает только ОДНА из веток; повторный клик добавляет ещё ветку" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="orBranch()">⊻ или-ветка</button>
+        </el-tooltip>
+        <el-tooltip content="Таймер: продолжение сработает ЧЕРЕЗ N дней после этого события (скрытый дневной счётчик)" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="timerAfter()">⏲ через N дней…</button>
+        </el-tooltip>
+        <span class="ev-actions-div" />
+        <el-tooltip content="Событие будет работать ТОЛЬКО в фазе K сценария (общая скрытая переменная фазы)" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="bindPhase()">⚑ только в фазе…</button>
+        </el-tooltip>
+        <el-tooltip content="Добавить эффект «перейти в фазу K» — это событие переключит сценарий в другую фазу" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="gotoPhase()">⚑➜ переключить фазу…</button>
+        </el-tooltip>
       </div>
       <div class="ev-legend">
         <span><i class="lg lg-cond" />условия</span>
@@ -520,6 +530,19 @@ function onNodeClick(n: GNode): void {
   color: var(--el-text-color-primary);
 }
 /* construction builders (top-left cluster; wraps on narrow graphs) */
+.ev-actions-lbl {
+  flex: 0 0 100%;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  text-shadow: 0 0 4px var(--el-bg-color);
+}
+.ev-actions-div {
+  width: 1px;
+  align-self: stretch;
+  background: var(--el-border-color);
+  margin: 0 2px;
+}
 .ev-actions {
   position: absolute;
   top: 10px;

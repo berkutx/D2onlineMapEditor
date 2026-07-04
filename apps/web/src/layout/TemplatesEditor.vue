@@ -3,16 +3,35 @@
  *  (CREATE_NEW_STACK / MOVE_STACK). List + editor: name, order, leader, 6 unit cells (global
  *  Gunit ids via UnitPicker + level). Modifiers / facing are preserved on round-trip. Edits
  *  commit as upsertTemplate/deleteTemplate ops (undoable + collab). */
-import { computed } from "vue";
+import { computed, nextTick, watch } from "vue";
 import { ElInput, ElInputNumber, ElButton, ElScrollbar, ElEmpty, ElSelect, ElOption, ElTooltip } from "element-plus";
 import type { StackTemplate, TemplateUnit } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
+import { useUnitStore } from "../stores/unitStore";
 import UnitPicker from "./UnitPicker.vue";
 
 const store = useEventStore();
 const edit = useEditStore();
+const unitStore = useUnitStore();
+// имена юнитов (лидер в списке, ячейки) должны быть готовы сразу, не после первого пикера
+void unitStore.load();
 const sel = computed(() => store.selectedTemplate);
+
+/** Прыжок из поля «Шаблон отряда» / графа: доскроллить список к выбранному шаблону. */
+watch(
+  () => store.selectedTemplateId,
+  () => {
+    void nextTick(() =>
+      document.querySelector(".tpl-row.active")?.scrollIntoView({ block: "center" }),
+    );
+  },
+  { immediate: true },
+);
+
+/** Подпись строки списка: лидер по имени (id — только в title). */
+const leaderName = (t: StackTemplate): string =>
+  t.leader ? unitStore.nameOf(t.leader) : "";
 
 const ORDERS = [
   { value: 1, label: "Обычный" }, { value: 2, label: "Стоять" }, { value: 3, label: "Охрана" },
@@ -57,7 +76,7 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
         @click="store.selectTemplate(t.id)"
       >
         <span class="tpl-name">{{ t.name || "(без имени)" }}</span>
-        <span class="tpl-meta">{{ unitCount(t) }}⚔ <code>{{ t.id }}</code></span>
+        <span class="tpl-meta" :title="t.id">{{ unitCount(t) }}⚔ {{ leaderName(t) || "—" }}</span>
         <span class="tpl-actions">
           <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.cloneTemplate(t)">⧉</el-button></el-tooltip>
           <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.removeTemplate(t.id)">🗑</el-button></el-tooltip>

@@ -10,6 +10,7 @@ import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
 import { useUnitStore } from "../stores/unitStore";
+import { useDecorStore } from "../stores/decorStore";
 
 /** Entity category of a resolved ref (drives graph icon + click behavior). */
 export type RefKind = "object" | "player" | "event" | "var" | "spell" | "item" | "template";
@@ -41,10 +42,12 @@ export function useRefNames() {
   const items = useItemStore();
   const spells = useSpellStore();
   const units = useUnitStore();
+  const decor = useDecorStore();
   // catalogs are tiny JSONs; kick their lazy load so names resolve on first paint
   void items.load();
   void spells.load();
   void units.load();
+  void decor.load();
 
   function objOf(id: string) {
     return edit.liveDoc?.objects.find((o) => o.id === id);
@@ -63,10 +66,21 @@ export function useRefNames() {
   }
   function objName(id: string): string {
     const o = objOf(id);
-    if (!o) return id;
+    if (!o) {
+      // stack fields legitimately hold TEMPLATE ids (SRCTMPL_ID matching) — resolve the
+      // template's name instead of surfacing a raw S143TM#### id
+      const t = edit.liveDoc?.templates?.find((x) => x.id === id);
+      return t ? `Шаблон: ${t.name || id}` : id;
+    }
     const named = (o as { name?: string }).name;
     if (named) return named;
     if (o.type === "stack") return stackLabel(o as Parameters<typeof stackLabel>[0]);
+    if (o.type === "landmark") {
+      // decorations are never named on maps — the catalog knows what they look like
+      const bt = ((o as { baseType?: string }).baseType ?? "").toUpperCase();
+      const d = bt ? decor.get(bt) : undefined;
+      if (d?.name_ru) return d.name_ru;
+    }
     return o.type;
   }
   function playerName(id: string): string {

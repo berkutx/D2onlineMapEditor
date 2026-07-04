@@ -17,9 +17,12 @@ import { useToolStore } from "../stores/toolStore";
 import { useViewStore } from "../stores/viewStore";
 import { useItemStore, ITEM_CAT_LABELS } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
+import { useDecorStore } from "../stores/decorStore";
+import { useEventStore } from "../stores/eventStore";
 import { useRefNames } from "../services/refNames";
 import { locationRoleCounts, ROLE_META, type RoleClass, type RoleCounts } from "../services/scenarioRoles";
 import CodeInput from "./CodeInput.vue";
+import DecorThumb from "./DecorThumb.vue";
 import MiniMap from "./MiniMap.vue";
 
 const props = defineProps<{
@@ -40,10 +43,33 @@ const toolStore = useToolStore();
 const viewStore = useViewStore();
 const itemStore = useItemStore();
 const spellStore = useSpellStore();
+const decorStore = useDecorStore();
+const eventStore = useEventStore();
 const names = useRefNames();
 // lazy catalog loads (tiny JSONs, cached across all field inputs)
 void itemStore.load();
 void spellStore.load();
+void decorStore.load();
+
+/** «Новый тип» декорации (changeLandmark.lmarkType): options over the decor catalog,
+ *  name first — the raw G000MG… id stays the stored value, never the face. */
+const decorOptions = computed<{ value: string; label: string; thumb: import("../stores/decorStore").DecorEntry["thumb"] }[]>(() =>
+  decorStore.all
+    .map((e) => ({
+      value: e.id,
+      label: `${e.name_ru || e.desc_en || e.id} · ${e.cx}×${e.cy}`,
+      thumb: e.thumb,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ru")),
+);
+
+/** «Шаблон отряда» → open the Шаблоны tab with this template selected (breadcrumbed). */
+function openTemplate(): void {
+  const id = typeof props.modelValue === "string" ? props.modelValue : "";
+  if (!id) return;
+  eventStore.selectTemplate(id);
+  eventStore.navigate({ tab: "templates" });
+}
 
 /** Which object types back each ref picker. */
 const REF_TYPES: Record<string, string[]> = {
@@ -446,7 +472,29 @@ watch(
         <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
       </el-tooltip>
     </template>
+    <el-tooltip v-if="field.type === 'template'" content="Открыть во вкладке «Шаблоны»" :show-after="300">
+      <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="openTemplate()">✎</el-button>
+    </el-tooltip>
   </div>
+
+  <!-- «Новый тип» декорации: выбор по имени из каталога, с тумбнейлом -->
+  <el-select
+    v-else-if="field.key === 'lmarkType'"
+    :model-value="(modelValue as string) || ''"
+    size="small"
+    filterable
+    clearable
+    placeholder="— декорация —"
+    style="width: 100%"
+    @update:model-value="set($event || '')"
+  >
+    <el-option v-for="o in decorOptions" :key="o.value" :value="o.value" :label="o.label">
+      <span class="ev-decor-opt">
+        <DecorThumb :thumb="o.thumb" :size="22" />
+        <span>{{ o.label }}</span>
+      </span>
+    </el-option>
+  </el-select>
 
   <!-- item / spell: name-based catalog dropdowns (id stays the stored value) -->
   <el-select
@@ -495,4 +543,5 @@ watch(
 .ev-loc-btn { padding: 4px 6px; opacity: 0.65; transition: opacity 0.12s; }
 .ev-loc-btn:hover { opacity: 1; }
 .ev-loc-map { align-self: flex-start; }
+.ev-decor-opt { display: flex; align-items: center; gap: 8px; }
 </style>
