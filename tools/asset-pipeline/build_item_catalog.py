@@ -15,7 +15,7 @@ Phase A: names + category + gold (stdlib only, no Pillow). Phase B will add icon
 extracted from IconItem.ff.
 
     python tools/asset-pipeline/build_item_catalog.py \
-        --game "C:/GOG Games/last_version/Game" --out public/assets
+        --game "<D2_GAME_DIR>/Game" --out public/assets
 
 GOTCHA: Tglobal.dbf is CP866 (like the decoration names), NOT CP1251 like .sg strings.
 """

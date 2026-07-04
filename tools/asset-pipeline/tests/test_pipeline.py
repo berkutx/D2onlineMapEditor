@@ -22,7 +22,7 @@ import extract_ff
 import manifest as manifest_mod
 from fflib import mqdb, optindex, packer, shaders
 
-GAME_DIR = os.environ.get("D2_GAME_DIR", r"C:/GOG Games/last_version/Game")
+GAME_DIR = os.environ.get("D2_GAME_DIR_GAME", os.path.join(os.environ.get("D2_GAME_DIR", "."), "Game"))
 OUT_DIR = os.path.join(REPO, "public", "assets")
 
 

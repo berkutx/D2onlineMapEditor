@@ -9,7 +9,7 @@ Produces one composited terrain PNG + a meta JSON (so the renderer shows it as a
 single sprite and aligns objects). Run:
 
     python tools/asset-pipeline/compose_terrain.py --map-id <id> \
-        --game "C:/GOG Games/last_version/Game" --out public/assets/terrain
+        --game "<D2_GAME_DIR>/Game" --out public/assets/terrain
 """
 import argparse
 import json

@@ -4,13 +4,32 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
+import { readFileSync } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /** apps/server/src -> repo root is three levels up. */
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
+
+/** The local Disciples 2 install root (dev convenience): D2_GAME_DIR env or the one-line
+ *  gitignored `game-dir.local` at the repo root (see game-dir.local.example). Null when
+ *  neither is set — production containers mount scenarios explicitly instead. */
+function localGameDir(): string | null {
+  const env = process.env.D2_GAME_DIR?.trim();
+  if (env) return env;
+  try {
+    const line = readFileSync(join(REPO_ROOT, "game-dir.local"), "utf8")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l && !l.startsWith("#"));
+    if (line) return line;
+  } catch {
+    /* no local file */
+  }
+  return null;
+}
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -57,12 +76,14 @@ export const config = {
   repoRoot: REPO_ROOT,
 
   /**
-   * Directories scanned (recursively) for `.sg` scenarios. Cyrillic dirs +
-   * spaces are expected. Override with SCENARIO_ROOTS (";"-separated).
+   * Directories scanned (recursively) for `.sg` scenarios. Cyrillic dirs + spaces are
+   * expected. Override with SCENARIO_ROOTS (";"-separated). Dev default = the local game
+   * install's Game/Campaign (via D2_GAME_DIR / game-dir.local); otherwise var/scenarios.
    */
-  SCENARIO_ROOTS: envList("SCENARIO_ROOTS", [
-    String.raw`C:\GOG Games\last_version\Game\Campaign`,
-  ]),
+  SCENARIO_ROOTS: envList("SCENARIO_ROOTS", (() => {
+    const game = localGameDir();
+    return [game ? join(game, "Game", "Campaign") : resolve(REPO_ROOT, "var", "scenarios")];
+  })()),
 
   /** Absolute path to the generated atlases + manifest. */
   ASSETS_DIR:

@@ -44,8 +44,10 @@ import {
   type EditOp,
 } from "../src/index";
 
-const RIDERS = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Riders.sg`;
-const DRAGON = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Dragon_s teeth.sg`;
+import { campaignMap } from "../../../test-helpers/gameDir";
+
+const RIDERS = campaignMap(join("The Power of Eldunari-v1-2 maps", "Riders.sg"));
+const DRAGON = campaignMap(join("The Power of Eldunari-v1-2 maps", "Dragon_s teeth.sg"));
 const bytes = new Uint8Array(readFileSync(RIDERS));
 
 /** Walk the MidgardPlan block of `b` and return its entry count. Layout byte-verified:

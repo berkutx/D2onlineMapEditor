@@ -1,7 +1,8 @@
 // Pin down field-decoding details for A2: framing markers, MAP_SIZE bytes,
 // the scenario-info type name, and POS_X value encoding within an object.
 import { readFileSync } from "node:fs";
-const SG = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Riders.sg`;
+// point at any campaign .sg (env D2_SG or the first CLI arg)
+const SG = process.env.D2_SG ?? process.argv[2] ?? "Riders.sg";
 const buf = readFileSync(SG);
 const hex = (b) => [...b].map((x) => x.toString(16).padStart(2, "0")).join(" ");
 const asc = (b) => [...b].map((x) => (x >= 32 && x < 127 ? String.fromCharCode(x) : ".")).join("");

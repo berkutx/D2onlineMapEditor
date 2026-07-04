@@ -8,7 +8,7 @@ Catalogs every spell for the editor's mage-shop picker. Each entry:
   - damage/heal/area <- DAMAGE_QTY / HEAL_QTY / AREA (when set)
   - summon    <- Gunits[UNIT_ID].name when CATEGORY is L_SUMMON
 
-    python tools/asset-pipeline/build_spell_catalog.py --game "C:/GOG Games/last_version/Game" --out public/assets
+    python tools/asset-pipeline/build_spell_catalog.py --game "<D2_GAME_DIR>/Game" --out public/assets
 """
 import argparse
 import json

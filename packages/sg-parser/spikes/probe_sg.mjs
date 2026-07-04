@@ -3,7 +3,8 @@
 // per-type object counts via ".?AVC <TypeName>@@" framing. Node 24 ESM.
 import { readFileSync } from "node:fs";
 
-const SG = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Riders.sg`;
+// point at any campaign .sg (env D2_SG or the first CLI arg)
+const SG = process.env.D2_SG ?? process.argv[2] ?? "Riders.sg";
 const buf = readFileSync(SG);
 const cp1251 = new TextDecoder("windows-1251");
 const ascii = (b) => b.toString("latin1");

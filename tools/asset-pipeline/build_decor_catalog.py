@@ -12,7 +12,7 @@ copilot agent. Each entry carries:
 Run AFTER pipeline.py (atlases) — it reads the atlas pages + page jsons under --out.
 
     python tools/asset-pipeline/build_decor_catalog.py \
-        --game "C:/GOG Games/last_version/Game" --out public/assets
+        --game "<D2_GAME_DIR>/Game" --out public/assets
 
 GOTCHA: Tglobal.dbf (the name text table) is CP866 (DOS Cyrillic), NOT CP1251 like the
 .sg strings. Decoding it as CP1251 yields mojibake.

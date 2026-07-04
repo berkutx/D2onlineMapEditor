@@ -4,7 +4,7 @@ IconSpel.ff records are named DIRECTLY by SPELL_ID ("<id>.PNG"), the clean analo
 IconItem.ff. Colour-keys the magenta background and writes public/assets/spellicons/<id>.png
 (lowercased). 220/224 spells have an icon; the rest fall back to a placeholder.
 
-    python tools/asset-pipeline/build_spell_icons.py --game "C:/GOG Games/last_version/Game" --out public/assets
+    python tools/asset-pipeline/build_spell_icons.py --game "<D2_GAME_DIR>/Game" --out public/assets
 
 Needs the 3.7 interpreter (Pillow + numpy). Run AFTER build_spell_catalog.py.
 """

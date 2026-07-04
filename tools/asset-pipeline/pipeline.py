@@ -5,7 +5,7 @@ Decodes the Stage-1 .ff archives into PixiJS-v8 spritesheet atlases and a top-le
 
 Usage:
     python tools/asset-pipeline/pipeline.py \
-        --game "C:/GOG Games/last_version/Game" --out public/assets --stage 1
+        --game "<D2_GAME_DIR>/Game" --out public/assets --stage 1
 """
 import argparse
 import os
@@ -96,7 +96,7 @@ def _add_units(game_dir, out_dir, server, builder, stats):
 
 
 def run_stage1(game_dir, out_dir, server="http://localhost:3000"):
-    builder = manifest_mod.ManifestBuilder(source_game_version="GOG/last_version")
+    builder = manifest_mod.ManifestBuilder(source_game_version="GOG Gold")
     stats = {"archives": 0, "frames": 0, "sheets": 0, "animations": 0, "missing": []}
 
     for bundle_id, archive in STAGE1_OBJECT_ARCHIVES:

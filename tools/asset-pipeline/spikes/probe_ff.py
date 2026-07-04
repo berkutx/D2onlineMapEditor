@@ -15,7 +15,7 @@ import re
 import struct
 import sys
 
-GAME_IMGS = r"C:\GOG Games\last_version\Game\Imgs"
+GAME_IMGS = os.path.join(os.environ.get("D2_GAME_DIR", "."), "Game", "Imgs")
 OUT = os.path.join(os.path.dirname(__file__), "out")
 os.makedirs(OUT, exist_ok=True)
 

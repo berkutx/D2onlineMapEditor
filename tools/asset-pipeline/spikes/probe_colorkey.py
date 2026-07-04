@@ -4,7 +4,7 @@ import io, os, re, struct
 import numpy as np
 from PIL import Image
 
-GAME_IMGS = r"C:\GOG Games\last_version\Game\Imgs"
+GAME_IMGS = os.path.join(os.environ.get("D2_GAME_DIR", "."), "Game", "Imgs")
 OUT = os.path.join(os.path.dirname(__file__), "out")
 
 

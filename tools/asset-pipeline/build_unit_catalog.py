@@ -9,7 +9,7 @@ Catalogs every unit for the editor's garrison + mercenary pickers. Each entry:
   - race      <- Grace[RACE_ID].NAME_TXT (coarse, 6 races); subrace <- GSubRace[RACE_TYPE==SUBRACE].NAME_TXT
   - hp/armor/leadership <- HIT_POINT / ARMOR / LEADERSHIP
 
-    python tools/asset-pipeline/build_unit_catalog.py --game "C:/GOG Games/last_version/Game" --out public/assets
+    python tools/asset-pipeline/build_unit_catalog.py --game "<D2_GAME_DIR>/Game" --out public/assets
 
 Reuses read_dbf/ascii_/cp866_/clean_desc from build_item_catalog (deleted DBF rows skipped).
 """

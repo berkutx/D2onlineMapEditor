@@ -3,9 +3,10 @@ import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { MapDocument } from "@d2/map-schema";
 import { parseScenario, parseHeaderOnly } from "../src/index";
+import { campaignDir, campaignMap } from "../../../test-helpers/gameDir";
 
-const CAMPAIGN = String.raw`C:\GOG Games\last_version\Game\Campaign`;
-const RIDERS = join(CAMPAIGN, "The Power of Eldunari-v1-2 maps", "Riders.sg");
+const CAMPAIGN = campaignDir();
+const RIDERS = campaignMap(join("The Power of Eldunari-v1-2 maps", "Riders.sg"));
 
 function read(path: string): Uint8Array {
   return new Uint8Array(readFileSync(path));

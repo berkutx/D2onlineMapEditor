@@ -27,7 +27,7 @@ degrade gracefully:
 
 ```
 python tools/asset-pipeline/pipeline.py \
-    --game "C:/GOG Games/last_version/Game" \
+    --game "<D2_GAME_DIR>/Game" \
     --out public/assets \
     --stage 1
 ```

@@ -7,7 +7,7 @@ CustomMapObject centres the sprite on that footprint, so we need them to place
 landmarks correctly. Keyed UPPERCASE to match objectSpriteKey (lmarkId.toUpper()).
 
     python tools/asset-pipeline/extract_gamedata.py \
-        --game "C:/GOG Games/last_version/Game" --out public/assets
+        --game "<D2_GAME_DIR>/Game" --out public/assets
 """
 import argparse
 import json

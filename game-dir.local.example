@@ -1,0 +1,6 @@
+# Copy this file to `game-dir.local` (gitignored) and put YOUR Disciples 2 install
+# root on the first non-comment line — the folder that contains `Game/`.
+# Tests and the asset pipeline use the game's own files (campaign .sg maps,
+# Globals/*.dbf, Imgs/*.ff) as fixtures/sources.
+# Alternatively set the D2_GAME_DIR environment variable (it wins over this file).
+D:\Games\Disciples 2 Gold

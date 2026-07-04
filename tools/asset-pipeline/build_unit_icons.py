@@ -9,7 +9,7 @@ unit's portrait. Gunits.dbf BASE_UNIT chains every such unit to a base that DOES
 we resolve through BASE_UNIT and write the base's portrait under the variant's id -> 856/856
 coverage (no UI placeholders). Verified: the chain resolves for all 377.
 
-    python tools/asset-pipeline/build_unit_icons.py --game "C:/GOG Games/last_version/Game" --out public/assets
+    python tools/asset-pipeline/build_unit_icons.py --game "<D2_GAME_DIR>/Game" --out public/assets
 
 Needs the 3.7 interpreter (Pillow + numpy). Run AFTER build_unit_catalog.py.
 """

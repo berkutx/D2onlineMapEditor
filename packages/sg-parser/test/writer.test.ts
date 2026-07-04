@@ -10,9 +10,10 @@ import {
   validateMap,
   verifyBlockIntegrity,
 } from "../src/index";
+import { campaignDir, campaignMap } from "../../../test-helpers/gameDir";
 
-const CAMPAIGN = String.raw`C:\GOG Games\last_version\Game\Campaign`;
-const RIDERS = join(CAMPAIGN, "The Power of Eldunari-v1-2 maps", "Riders.sg");
+const CAMPAIGN = campaignDir();
+const RIDERS = campaignMap(join("The Power of Eldunari-v1-2 maps", "Riders.sg"));
 
 function read(path: string): Uint8Array {
   return new Uint8Array(readFileSync(path));

@@ -5,6 +5,11 @@ dist/
 coverage/
 *.log
 
+# local machine specifics — never in the repo
+CLAUDE.md
+.claude/settings.local.json
+game-dir.local
+
 # runtime data (server uploads / temp maps)
 var/
 

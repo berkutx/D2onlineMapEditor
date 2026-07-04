@@ -6,7 +6,7 @@ and writes each needed icon to public/assets/itemicons/<id>.png (lowercased) so 
 ItemPicker can render <img src="/assets/itemicons/<id>.png">. Only catalog items are kept.
 
     python tools/asset-pipeline/build_item_icons.py \
-        --game "C:/GOG Games/last_version/Game" --out public/assets
+        --game "<D2_GAME_DIR>/Game" --out public/assets
 
 Needs the 3.7 interpreter (Pillow + numpy). Run AFTER build_item_catalog.py.
 """
