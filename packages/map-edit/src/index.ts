@@ -12,6 +12,9 @@
 export * from "./bits.js";
 export * from "./ops.js";
 export * from "./brush.js";
+// selective (not *): brush.js already re-exports roadTypeFromMask — a second star export
+// would make the symbol ambiguous and ESM would silently DROP it from the barrel
+export { roadOverlay, type RoadOverlay, type CellPatch } from "./roadOverlay.js";
 export * from "./roadSelect.js";
 export * from "./zones.js";
 export * from "./place.js";

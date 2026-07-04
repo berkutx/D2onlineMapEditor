@@ -15,7 +15,7 @@
 import type { MapDocument } from "@d2/map-schema";
 import type { EditOp } from "./ops.js";
 import { applyOps } from "./ops.js";
-import { roadTypeFromMask } from "./brush.js";
+import { roadOverlay } from "./roadOverlay.js";
 
 export interface Cell {
   x: number;
@@ -102,17 +102,11 @@ export function translateRoadCells(
   if (newCells.some((c) => c.x < 0 || c.y < 0 || c.x >= n || c.y >= n)) return [];
   const newSet = new Set(newCells.map((c) => key(c.x, c.y)));
 
-  const over = new Map<string, { value: number; roadType: number; roadVar: number }>();
-  const cur = (x: number, y: number) => {
-    const o = over.get(key(x, y));
-    if (o) return o;
-    const c = cellAt(x, y)!;
-    return { value: c.value, roadType: c.roadType, roadVar: c.roadVar };
-  };
+  const ov = roadOverlay(doc);
   // old cells that are NOT re-covered lose the road (terrain value kept)
   for (const c of cells) {
     if (newSet.has(key(c.x, c.y))) continue;
-    over.set(key(c.x, c.y), { value: cellAt(c.x, c.y)!.value, roadType: -1, roadVar: -1 });
+    ov.set(c.x, c.y, { value: cellAt(c.x, c.y)!.value, roadType: -1, roadVar: -1 });
   }
   // target cells gain the road: bare terrain (roadBrush semantics), roadVar CARRIED from
   // the source cell (preserves the segment's look at the new place)
@@ -121,48 +115,15 @@ export function translateRoadCells(
     const wasRoad = oldSet.has(key(t.x, t.y));
     const src = cellAt(c.x, c.y)!;
     const tgt = cellAt(t.x, t.y)!;
-    over.set(key(t.x, t.y), {
+    ov.set(t.x, t.y, {
       value: wasRoad ? tgt.value : tgt.value & 7,
       roadType: 0, // placeholder — the mask pass below recomputes the piece
       roadVar: src.roadVar >= 0 ? src.roadVar : 0,
     });
   }
-  const roadAt = (x: number, y: number): boolean =>
-    x >= 0 && y >= 0 && x < n && y < n && cur(x, y).roadType !== -1;
-  const updateRoad = (x: number, y: number): void => {
-    if (x < 0 || y < 0 || x >= n || y >= n) return;
-    const c = cur(x, y);
-    if (c.roadType < 0) return;
-    let m = 0;
-    if (roadAt(x, y - 1)) m |= 1;
-    if (roadAt(x, y + 1)) m |= 2;
-    if (roadAt(x - 1, y)) m |= 4;
-    if (roadAt(x + 1, y)) m |= 8;
-    over.set(key(x, y), { value: c.value, roadType: roadTypeFromMask(m), roadVar: c.roadVar });
-  };
-  for (const c of newCells) {
-    updateRoad(c.x, c.y);
-    updateRoad(c.x + 1, c.y);
-    updateRoad(c.x - 1, c.y);
-    updateRoad(c.x, c.y + 1);
-    updateRoad(c.x, c.y - 1);
-  }
-  for (const c of cells) {
-    updateRoad(c.x + 1, c.y);
-    updateRoad(c.x - 1, c.y);
-    updateRoad(c.x, c.y + 1);
-    updateRoad(c.x, c.y - 1);
-  }
-
-  const ops: EditOp[] = [];
-  for (const [k, v] of over) {
-    const [x, y] = k.split(",").map(Number) as [number, number];
-    const c = cellAt(x, y)!;
-    if (v.value !== c.value || v.roadType !== c.roadType || v.roadVar !== c.roadVar) {
-      ops.push({ kind: "setCell", x, y, value: v.value, roadType: v.roadType, roadVar: v.roadVar });
-    }
-  }
-  return ops;
+  for (const c of newCells) ov.updateAround(c.x, c.y, true);
+  for (const c of cells) ov.updateAround(c.x, c.y);
+  return ov.diff();
 }
 
 /** The axis-first L-path from→to (inclusive): horizontal run, then vertical. */
@@ -188,48 +149,13 @@ export function extendRoadPath(doc: MapDocument, from: Cell, to: Cell): EditOp[]
   if (from.x < 0 || from.y < 0 || from.x >= n || from.y >= n) return [];
   const path = lPath(from, to);
   const cellAt = (x: number, y: number) => doc.terrain.cells[y * n + x];
-  const key = (x: number, y: number) => `${x},${y}`;
-  const over = new Map<string, { value: number; roadType: number; roadVar: number }>();
-  const cur = (x: number, y: number) => {
-    const o = over.get(key(x, y));
-    if (o) return o;
-    const c = cellAt(x, y)!;
-    return { value: c.value, roadType: c.roadType, roadVar: c.roadVar };
-  };
+  const ov = roadOverlay(doc);
   for (const c of path) {
-    if (cur(c.x, c.y).roadType !== -1) continue; // already road — keep as-is
-    over.set(key(c.x, c.y), { value: cellAt(c.x, c.y)!.value & 7, roadType: 0, roadVar: 0 });
+    if (ov.cur(c.x, c.y).roadType !== -1) continue; // already road — keep as-is
+    ov.set(c.x, c.y, { value: cellAt(c.x, c.y)!.value & 7, roadType: 0, roadVar: 0 });
   }
-  const roadAt = (x: number, y: number): boolean =>
-    x >= 0 && y >= 0 && x < n && y < n && cur(x, y).roadType !== -1;
-  const updateRoad = (x: number, y: number): void => {
-    if (x < 0 || y < 0 || x >= n || y >= n) return;
-    const c = cur(x, y);
-    if (c.roadType < 0) return;
-    let m = 0;
-    if (roadAt(x, y - 1)) m |= 1;
-    if (roadAt(x, y + 1)) m |= 2;
-    if (roadAt(x - 1, y)) m |= 4;
-    if (roadAt(x + 1, y)) m |= 8;
-    over.set(key(x, y), { value: c.value, roadType: roadTypeFromMask(m), roadVar: c.roadVar });
-  };
-  for (const c of path) {
-    updateRoad(c.x, c.y);
-    updateRoad(c.x + 1, c.y);
-    updateRoad(c.x - 1, c.y);
-    updateRoad(c.x, c.y + 1);
-    updateRoad(c.x, c.y - 1);
-  }
-
-  const ops: EditOp[] = [];
-  for (const [k, v] of over) {
-    const [x, y] = k.split(",").map(Number) as [number, number];
-    const c = cellAt(x, y)!;
-    if (v.value !== c.value || v.roadType !== c.roadType || v.roadVar !== c.roadVar) {
-      ops.push({ kind: "setCell", x, y, value: v.value, roadType: v.roadType, roadVar: v.roadVar });
-    }
-  }
-  return ops;
+  for (const c of path) ov.updateAround(c.x, c.y, true);
+  return ov.diff();
 }
 
 /**
@@ -320,50 +246,16 @@ export function rerouteRoadOps(
 export function eraseRoadCells(doc: MapDocument, cells: readonly Cell[]): EditOp[] {
   const n = doc.size;
   const cellAt = (x: number, y: number) => doc.terrain.cells[y * n + x];
-  const key = (x: number, y: number) => `${x},${y}`;
-  const removed = new Set(cells.map((c) => key(c.x, c.y)));
-  const over = new Map<string, { value: number; roadType: number; roadVar: number }>();
-  const cur = (x: number, y: number) => {
-    const o = over.get(key(x, y));
-    if (o) return o;
-    const c = cellAt(x, y)!;
-    return { value: c.value, roadType: c.roadType, roadVar: c.roadVar };
-  };
-  const roadAt = (x: number, y: number): boolean =>
-    x >= 0 && y >= 0 && x < n && y < n && !removed.has(key(x, y)) && cur(x, y).roadType !== -1;
+  const ov = roadOverlay(doc);
 
-  // erase the selected road cells (keep terrain value)
+  // erase the selected road cells (keep terrain value) — overlaid -1 also makes them
+  // read as "no road" for the ring recompute below (no separate excluded-set needed)
   for (const c of cells) {
     if (c.x < 0 || c.y < 0 || c.x >= n || c.y >= n) continue;
     const cell = cellAt(c.x, c.y)!;
-    over.set(key(c.x, c.y), { value: cell.value, roadType: -1, roadVar: -1 });
+    ov.set(c.x, c.y, { value: cell.value, roadType: -1, roadVar: -1 });
   }
   // recompute the ring of road cells around the erased set
-  const updateRoad = (x: number, y: number): void => {
-    if (x < 0 || y < 0 || x >= n || y >= n || removed.has(key(x, y))) return;
-    const c = cur(x, y);
-    if (c.roadType < 0) return;
-    let m = 0;
-    if (roadAt(x, y - 1)) m |= 1;
-    if (roadAt(x, y + 1)) m |= 2;
-    if (roadAt(x - 1, y)) m |= 4;
-    if (roadAt(x + 1, y)) m |= 8;
-    over.set(key(x, y), { value: c.value, roadType: roadTypeFromMask(m), roadVar: c.roadVar });
-  };
-  for (const c of cells) {
-    updateRoad(c.x + 1, c.y);
-    updateRoad(c.x - 1, c.y);
-    updateRoad(c.x, c.y + 1);
-    updateRoad(c.x, c.y - 1);
-  }
-
-  const ops: EditOp[] = [];
-  for (const [k, v] of over) {
-    const [x, y] = k.split(",").map(Number) as [number, number];
-    const c = cellAt(x, y)!;
-    if (v.value !== c.value || v.roadType !== c.roadType || v.roadVar !== c.roadVar) {
-      ops.push({ kind: "setCell", x, y, value: v.value, roadType: v.roadType, roadVar: v.roadVar });
-    }
-  }
-  return ops;
+  for (const c of cells) ov.updateAround(c.x, c.y);
+  return ov.diff();
 }
