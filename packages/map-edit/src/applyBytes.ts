@@ -542,7 +542,8 @@ export function applyEditsToBytes(
   //   stack    = 1 cell (garrisoned visitors included — all 119 KC ids are in the plan);
   //   chest    = 1 cell; village = 4×4 (16 entries per FT village id; capitals are 5×5);
   //   mountains = NONE (zero ML refs in the plan — passability comes from the 37-stamped
-  //               cells), and new roads are likewise left to a later refinement.
+  //               cells); roads = ONE entry per MidRoad block cell (516/516 on Riders) —
+  //               added below, after the pendingRoad frames settle.
   const planAdds: PlanEntry[] = [];
 
   // Emit added objects at their FINAL state (place + later moves/patches coalesced).
@@ -666,6 +667,15 @@ export function applyEditsToBytes(
     } else {
       throw new Error(`applyEditsToBytes: addObject type '${o.type}' not supported yet (M4)`);
     }
+  }
+
+  // roads: every SURVIVING same-session road frame gets its plan entry — byte-verified:
+  // all 516 Riders MidRoad blocks have exactly one RA plan entry on their cell (a road
+  // added-then-erased in one session has a nulled frame and gets none).
+  for (const [key, pr] of pendingRoad) {
+    if (appends[pr.idx] === null) continue;
+    const [rx, ry] = key.split(",").map(Number);
+    planAdds.push({ x: rx!, y: ry!, element: `${raw.version}RA${hex4(pr.ra)}` });
   }
 
   // Scenario settings: ints are fixed-width (SgWriter), texts are growable string splices on

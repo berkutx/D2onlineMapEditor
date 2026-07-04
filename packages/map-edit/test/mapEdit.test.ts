@@ -190,6 +190,34 @@ describe("@d2/map-edit road brush + append export", () => {
     expect(res.ok).toBe(true);
   });
 
+  it("a new road gets its MidgardPlan entry (byte-verified: 516/516 RA ids on Riders)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const cx = 15, cy = 15;
+    const ops = roadBrush(doc, cx, cy);
+    const out = applyEditsToBytes(raw, ops);
+    // the freshly appended MidRoad id must appear as a plan ELEMENT; find it by scanning
+    // the new bytes for the RA id the allocator minted (max existing + 1)
+    const outBuf = Buffer.from(out);
+    let nextRA = 0;
+    for (const o of raw.objects) {
+      const m = /RA([0-9a-fA-F]{4})$/.exec(o.id);
+      if (o.typeName === "MidRoad" && m) nextRA = Math.max(nextRA, parseInt(m[1]!, 16) + 1);
+    }
+    const newId = `${raw.version}RA${nextRA.toString(16).padStart(4, "0")}`;
+    // id occurs in its own frame (twice: OBJ_ID + ROAD_ID) AND once in the plan ELEMENT
+    let hits = 0;
+    for (let p = outBuf.indexOf(newId); p >= 0; p = outBuf.indexOf(newId, p + 1)) hits++;
+    expect(hits).toBeGreaterThanOrEqual(3);
+    const planAvc = outBuf.indexOf(".?AVCMidgardPlan@@");
+    const planEnd = outBuf.indexOf("ENDOBJECT\0", planAvc);
+    const inPlan = outBuf.indexOf(newId, planAvc);
+    expect(inPlan).toBeGreaterThan(planAvc);
+    expect(inPlan).toBeLessThan(planEnd);
+    // and the reparse + semantic tier stay green with the plan entry present
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.ok).toBe(true);
+  });
+
   it("erasing an existing road removes it and round-trips", () => {
     const { doc, raw } = parseScenarioRaw(bytes);
     const roadCell = doc.terrain.cells.find((c) => c.roadType >= 0)!;
