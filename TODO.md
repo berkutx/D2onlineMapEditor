@@ -193,8 +193,9 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   setBaseDoc(серверный док С МОИМИ опами) + recompute поверх журнала (в котором те же опы) →
   повторное применение: setCell/patch идемпотентны, а addObject/deleteObject КИДАЮТ. Правильный
   фикс: реплей только пропущенных ops (seq>lastSeq) вместо полного снапшота — трогает Contract C.
-- **Locations: on-canvas drag-resize handles** — radius field already resizes "relative to center"; canvas
-  handles are polish.
+- ~~Locations: on-canvas drag-resize handles~~ — DONE (64247b0): золотая ◆-ручка на SE-вершине
+  выбранной локации в режиме «Локации»; драг = радиус (чебышёв до клетки, кламп в границы, живое
+  превью, один patchObject-undo); Esc бросает без коммита.
 
 ## Animation (by need, with a size optimization to consider first)
 - Sprite animation is off by default (`viewStore.animate`). Turning it on must drive
