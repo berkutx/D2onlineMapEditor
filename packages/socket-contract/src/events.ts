@@ -40,6 +40,22 @@ export interface ClientToServerEvents {
     p: { mapId: string },
     ack: (r: { seq: number; doc: MapDocument }) => void,
   ) => void;
+
+  /**
+   * Reconnect catch-up (additive, v0.3): the room-log entries STRICTLY AFTER `afterSeq`.
+   * A reconnecting client must NOT take a full snapshot — its journal already holds every
+   * op it saw, so rebasing on a snapshot double-applies them (addObject/deleteObject throw).
+   * Replaying only the missed tail (the client skips its own ops by clientOpId) is exact.
+   */
+  "ops:since": (
+    p: { mapId: string; afterSeq: number },
+    ack: (r: {
+      ok: boolean;
+      /** current log head (authoritative seq to resume from) */
+      seq: number;
+      entries: { seq: number; by: string; clientOpId: string; op: EditOp }[];
+    }) => void,
+  ) => void;
 }
 
 export interface ServerToClientEvents {
@@ -77,6 +93,7 @@ export const EVENTS = {
   presenceSelect: "presence:select",
   editOp: "edit:op",
   snapshotRequest: "snapshot:request",
+  opsSince: "ops:since",
   roomPeers: "room:peers",
   presenceUpdate: "presence:update",
   presenceLeft: "presence:left",

@@ -179,6 +179,25 @@ export function registerRoomHandlers(
     })();
   });
 
+  // Reconnect catch-up: entries STRICTLY AFTER afterSeq. A reconnecting client keeps its
+  // journal (it already holds every op it saw) and replays only this missed tail — a full
+  // snapshot would double-apply those ops client-side (addObject/deleteObject throw).
+  socket.on("ops:since", (p, ack) => {
+    if (!p || typeof p.mapId !== "string" || typeof p.afterSeq !== "number") {
+      ack({ ok: false, seq: 0, entries: [] });
+      return;
+    }
+    const key = keyFor(p.mapId);
+    if (!key) {
+      ack({ ok: false, seq: 0, entries: [] });
+      return;
+    }
+    const entries = log
+      .since(key, p.afterSeq)
+      .map((e) => ({ seq: e.seq, by: e.by, clientOpId: e.clientOpId, op: e.op }));
+    ack({ ok: true, seq: log.head(key), entries });
+  });
+
   socket.on("disconnect", () => {
     for (const key of rooms.roomsForSocket(socket.id)) {
       handleLeave(io, socket, rooms, key);

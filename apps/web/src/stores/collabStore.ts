@@ -230,11 +230,16 @@ export const useCollabStore = defineStore("collab", () => {
       // eslint-disable-next-line no-console
       console.warn("[collab] server error", e);
     });
-    // a reconnect re-joins the same room and resyncs from the snapshot
+    // a reconnect re-joins the same room and replays only the MISSED ops (not a snapshot —
+    // the journal already holds everything we saw; a snapshot would double-apply it)
     socket.io.on("reconnect", () => {
-      if (mapId.value) void doJoin(mapId.value);
+      if (mapId.value) void doJoin(mapId.value, true);
     });
   }
+
+  /** clientOpIds this browser has emitted — a reconnect replay skips them (those ops are
+   *  already applied optimistically AND sit in the journal; replaying = double-apply). */
+  const mySentOpIds = new Set<string>();
 
   /** The outgoing hook editStore calls on every local commit / undo / redo.
    *  `inverses[i]` (captured at apply time) rides into the history entry of ops[i]. */
@@ -244,6 +249,7 @@ export const useCollabStore = defineStore("collab", () => {
     if (!id || !me.value) return;
     ops.forEach((op, i) => {
       const clientOpId = `${me.value!.socketId}:${opCounter++}`;
+      mySentOpIds.add(clientOpId);
       const inverse = inverses?.[i];
       socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
         if (ack.ok && typeof ack.seq === "number") {
@@ -300,7 +306,7 @@ export const useCollabStore = defineStore("collab", () => {
     pendingShare = { mapId: forMapId, channel: chan };
   }
 
-  async function doJoin(id: string): Promise<void> {
+  async function doJoin(id: string, reconnect = false): Promise<void> {
     const socket = getSocket();
     bindListeners();
     // a share link's channel wins (joining the sharer's room); a reconnect reuses the
@@ -320,14 +326,38 @@ export const useCollabStore = defineStore("collab", () => {
         me.value = r.you;
         peers.clear();
         for (const p of r.peers) peers.set(p.socketId, p);
-        lastSeq = r.snapshotSeq;
         edit.setCollab(true, sendOps);
-        // catch up to the authoritative state if peers edited before we arrived
-        if (r.snapshotSeq > 0) {
-          socket.emit("snapshot:request", { mapId: id }, ({ seq, doc }) => {
-            edit.setBaseDoc(doc);
-            lastSeq = Math.max(lastSeq, seq);
-          });
+        const serverHead = r.snapshotSeq;
+        if (reconnect && lastSeq > 0) {
+          // RECONNECT: the journal already holds every op we saw — a snapshot would
+          // double-apply them (addObject/deleteObject throw). Replay only the missed
+          // tail, skipping our own ops (identified by clientOpId).
+          if (serverHead > lastSeq) {
+            socket.emit("ops:since", { mapId: id, afterSeq: lastSeq }, (res) => {
+              if (!res.ok) return;
+              for (const en of res.entries) {
+                lastSeq = Math.max(lastSeq, en.seq);
+                if (mySentOpIds.has(en.clientOpId)) continue; // мой — уже применён и в журнале
+                const inv = edit.applyIncoming([en.op]);
+                record(en.seq, en.by, en.op, false, inv);
+              }
+            });
+          } else if (serverHead < lastSeq) {
+            // сервер перезапустился и потерял лог — локальный журнал полнее; просто
+            // принимаем новый отсчёт seq (экспорт от серверного лога не зависит)
+            lastSeq = serverHead;
+          }
+          // serverHead === lastSeq → ничего не пропущено
+        } else {
+          // FRESH join: full snapshot catch-up (local drafts stay on top — see the
+          // pre-join draft offer in join())
+          lastSeq = serverHead;
+          if (serverHead > 0) {
+            socket.emit("snapshot:request", { mapId: id }, ({ seq, doc }) => {
+              edit.setBaseDoc(doc);
+              lastSeq = Math.max(lastSeq, seq);
+            });
+          }
         }
         resolve();
       });
