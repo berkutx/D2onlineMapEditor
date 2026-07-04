@@ -4,22 +4,34 @@
  * quick "view layers" popover (the rapid multi-toggle surface that mirrors the
  * View menu) and the Copilot toggle. Tools live here ONLY — their options live
  * in ToolOptionsPanel — so the dock width is constant and nothing ever reflows.
+ *
+ * FLYOUTS: tools with parameters get a hover flyout (350ms, right of the button)
+ * with 2–4 quick presets — land swatches + brush for «Рельеф», brush size for
+ * water/forest/erase, decor family shortcuts, anchors toggle for «Двигать»,
+ * role filter for «Локации», draw mode for «Зона». Clicking a preset ACTIVATES
+ * the tool with that preset (enter-tool-with-preset), so the flyout is a faster
+ * path than click-tool-then-tune-options. A corner caret marks flyout buttons.
  */
+import { nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import { View, MagicStick, Check } from "@element-plus/icons-vue";
 import { useViewStore } from "../stores/viewStore";
-import { useToolStore } from "../stores/toolStore";
+import { useToolStore, type EditTool, type ZoneMode } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
+import { useDecorStore } from "../stores/decorStore";
+import { LOC_FILTERS, type LocFilter } from "../services/scenarioRoles";
 import { EDIT_TOOLS } from "./tools";
 
 const view = useViewStore();
 const toolStore = useToolStore();
 const editStore = useEditStore();
-const { tool } = storeToRefs(toolStore);
+const decorStore = useDecorStore();
+const { tool, size, terrainId, zoneMode, locFilter } = storeToRefs(toolStore);
 const { undoable, redoable } = storeToRefs(editStore);
 const {
   terrainVisible, objectsVisible, gridVisible, locationsVisible,
   animate, objectPanelVisible, debugOverlay, copilotVisible,
+  anchorsVisible, rolesVisible,
 } = storeToRefs(view);
 
 /** View-layer checklist shown in the eye popover (single source of truth = viewStore). */
@@ -32,6 +44,57 @@ const layers = [
   { label: "Панель объектов", key: "P", on: objectPanelVisible, toggle: () => view.toggleObjectPanel() },
   { label: "Отладка", key: "D", on: debugOverlay, toggle: () => view.toggleDebugOverlay() },
 ];
+
+/** Tools that get a hover flyout; the rest keep the plain name tooltip. */
+const FLY = new Set<EditTool>(["terrain", "water", "forest", "erase", "decor", "move", "locations", "zone"]);
+const FLY_WIDTH: Partial<Record<EditTool, number>> = { terrain: 236, locations: 284, decor: 190 };
+
+/** Land swatches (same set/order as ToolOptionsBar's dropdown, as color chips). */
+const TERRAINS = [
+  { value: 5, label: "Нейтральная", color: "#9aa763" },
+  { value: 1, label: "Империя", color: "#6da45e" },
+  { value: 4, label: "Нежить", color: "#7f6f8f" },
+  { value: 3, label: "Легионы", color: "#a06a4e" },
+  { value: 6, label: "Эльфы", color: "#58b06f" },
+  { value: 2, label: "Горы (снег)", color: "#e8eef4" },
+];
+const sizeOptions = [
+  { label: "1×1", value: 1 },
+  { label: "3×3", value: 3 },
+  { label: "5×5", value: 5 },
+];
+const ZONE_MODES: { label: string; value: ZoneMode }[] = [
+  { label: "▭", value: "rect" }, { label: "🖌", value: "brush" },
+  { label: "╱", value: "line" }, { label: "▢", value: "frame" },
+];
+const locFilterOptions = LOC_FILTERS.map((f) => ({ label: f.icon, value: f.value }));
+
+// Flyout actions — every preset click also ACTIVATES the tool.
+function pickTerrain(id: number): void {
+  toolStore.setTool("terrain");
+  toolStore.setTerrainId(id);
+}
+function onFlySize(t: EditTool, v: string | number | boolean): void {
+  toolStore.setTool(t);
+  toolStore.setSize(v as number);
+}
+function onFlyZoneMode(v: string | number | boolean): void {
+  toolStore.setTool("zone");
+  toolStore.setZoneMode(v as ZoneMode);
+}
+function onFlyLocFilter(v: string | number | boolean): void {
+  toolStore.setTool("locations");
+  toolStore.setLocFilter(v as LocFilter);
+}
+function decorFamily(family: string): void {
+  toolStore.setTool("decor");
+  // nextTick: the palette mounts on tool switch; preset lands either way (store state)
+  void nextTick(() => decorStore.presetFamily(family));
+}
+function decorSearch(): void {
+  toolStore.setTool("decor");
+  void nextTick(() => decorStore.focusSearch());
+}
 </script>
 
 <template>
@@ -52,21 +115,95 @@ const layers = [
 
     <div class="dock-div" />
 
-    <el-tooltip
-      v-for="t in EDIT_TOOLS"
-      :key="t.value"
-      :content="t.label"
-      placement="right"
-      :show-after="200"
-    >
-      <button
-        class="d2-tool-btn"
-        :class="{ 'is-active': tool === t.value }"
-        @click="toolStore.setTool(t.value)"
+    <template v-for="t in EDIT_TOOLS" :key="t.value">
+      <el-popover
+        v-if="FLY.has(t.value)"
+        :width="FLY_WIDTH[t.value] ?? 200"
+        placement="right-start"
+        trigger="hover"
+        :show-after="350"
+        :hide-after="120"
+        popper-class="dock-pop"
       >
-        <el-icon><component :is="t.icon" /></el-icon>
-      </button>
-    </el-tooltip>
+        <template #reference>
+          <button
+            class="d2-tool-btn has-fly"
+            :class="{ 'is-active': tool === t.value }"
+            @click="toolStore.setTool(t.value)"
+          >
+            <el-icon><component :is="t.icon" /></el-icon>
+          </button>
+        </template>
+        <div class="pop-head">{{ t.label }}</div>
+
+        <template v-if="t.value === 'terrain'">
+          <div class="fly-row">
+            <button
+              v-for="tr in TERRAINS"
+              :key="tr.value"
+              type="button"
+              class="fly-swatch"
+              :class="{ on: terrainId === tr.value && tool === 'terrain' }"
+              :style="{ background: tr.color }"
+              :title="tr.label"
+              @click="pickTerrain(tr.value)"
+            />
+          </div>
+          <div class="fly-row">
+            <span class="fly-lbl">Кисть</span>
+            <el-segmented :model-value="size" :options="sizeOptions" size="small" @change="onFlySize('terrain', $event)" />
+          </div>
+        </template>
+
+        <template v-else-if="t.value === 'water' || t.value === 'forest' || t.value === 'erase'">
+          <div class="fly-row">
+            <span class="fly-lbl">Кисть</span>
+            <el-segmented :model-value="size" :options="sizeOptions" size="small" @change="onFlySize(t.value, $event)" />
+          </div>
+        </template>
+
+        <template v-else-if="t.value === 'decor'">
+          <button class="pop-row" @click="decorFamily('nature')"><span class="pop-lbl">🌿 Природа</span></button>
+          <button class="pop-row" @click="decorFamily('structures')"><span class="pop-lbl">🏛 Постройки</span></button>
+          <button class="pop-row" @click="decorFamily('terrain')"><span class="pop-lbl">⛰ Рельеф</span></button>
+          <button class="pop-row" @click="decorSearch()"><span class="pop-lbl">🔍 Поиск…</span></button>
+        </template>
+
+        <template v-else-if="t.value === 'move'">
+          <button class="pop-row" @click="view.toggleAnchors()">
+            <el-icon class="pop-ck" :style="{ visibility: anchorsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>
+            <span class="pop-lbl">Якоря (связи зданий)</span>
+          </button>
+        </template>
+
+        <template v-else-if="t.value === 'locations'">
+          <div class="fly-row">
+            <el-segmented :model-value="locFilter" :options="locFilterOptions" size="small" @change="onFlyLocFilter($event)" />
+          </div>
+          <button class="pop-row" @click="view.toggleRoles()">
+            <el-icon class="pop-ck" :style="{ visibility: rolesVisible ? 'visible' : 'hidden' }"><Check /></el-icon>
+            <span class="pop-lbl">Роли на карте</span>
+          </button>
+        </template>
+
+        <template v-else-if="t.value === 'zone'">
+          <div class="fly-row">
+            <span class="fly-lbl">Рисовать</span>
+            <el-segmented :model-value="zoneMode" :options="ZONE_MODES" size="small" @change="onFlyZoneMode($event)" />
+          </div>
+        </template>
+      </el-popover>
+
+      <el-tooltip v-else :content="t.label" placement="right" :show-after="200">
+        <button
+          class="d2-tool-btn"
+          :class="{ 'is-active': tool === t.value }"
+          @click="toolStore.setTool(t.value)"
+        >
+          <el-icon><component :is="t.icon" /></el-icon>
+        </button>
+      </el-tooltip>
+    </template>
 
     <div class="dock-spring" />
     <div class="dock-div" />
@@ -132,6 +269,22 @@ const layers = [
   background: transparent;
   color: var(--el-text-color-regular);
 }
+/* corner caret — "this button has a flyout" (Photoshop idiom) */
+.d2-tool-btn.has-fly {
+  position: relative;
+}
+.d2-tool-btn.has-fly::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 0 5px 5px;
+  border-color: transparent transparent var(--el-text-color-placeholder) transparent;
+  opacity: 0.9;
+}
 .dock-glyph {
   font-size: 18px;
   line-height: 1;
@@ -190,5 +343,30 @@ const layers = [
   flex: 0 0 auto;
   font-size: 11px;
   color: var(--el-text-color-secondary);
+}
+/* flyout preset rows (swatches / segmented controls) */
+.dock-pop .fly-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 6px;
+}
+.dock-pop .fly-lbl {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.dock-pop .fly-swatch {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+}
+.dock-pop .fly-swatch.on {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 1px;
 }
 </style>

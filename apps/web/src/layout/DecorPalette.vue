@@ -9,7 +9,7 @@
  *
  * Picking writes toolStore.decorId (a specific variant); MapCanvasHost ghosts + places it.
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { Refresh } from "@element-plus/icons-vue";
 import {
@@ -30,10 +30,13 @@ const { decorId } = storeToRefs(toolStore);
 
 onMounted(() => void decorStore.load());
 
-const activeFamily = ref<string>("all");
-const search = ref("");
-const faction = ref<string>("");
-const tone = ref<string>("");
+// Filters live in decorStore (the dock flyout presets family / focuses search).
+const { activeFamily, search, faction, tone, focusSearchTick } = storeToRefs(decorStore);
+
+const searchInput = ref<HTMLElement | { focus(): void } | null>(null);
+watch(focusSearchTick, () => {
+  void nextTick(() => (searchInput.value as { focus(): void } | null)?.focus());
+});
 
 function matchesSearch(g: DecorGroup, q: string): boolean {
   if (!q) return true;
@@ -99,6 +102,7 @@ const variantIndex = computed(() => {
     </div>
 
     <el-input
+      ref="searchInput"
       v-model="search"
       size="small"
       class="dp-search"

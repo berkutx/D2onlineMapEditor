@@ -251,9 +251,26 @@ export const useDecorStore = defineStore("decor", () => {
     return null;
   }
 
+  // Palette FILTER state — lives in the store (not DecorPalette-local) so the dock
+  // flyout can preset a family / focus the search, and filters survive tool switches.
+  const activeFamily = ref<string>("all");
+  const search = ref("");
+  const faction = ref<string>("");
+  const tone = ref<string>("");
+  /** Bumped to ask the palette's search input to take focus (dock 🔍 action). */
+  const focusSearchTick = ref(0);
+  function presetFamily(family: string): void {
+    activeFamily.value = family;
+  }
+  function focusSearch(): void {
+    activeFamily.value = "all";
+    focusSearchTick.value++;
+  }
+
   return {
     catalog, loaded, loading, error, load, all,
     familyOf, get, groups, groupOf, neighbor, randomVariant,
     catalogIdOf, variantPatch,
+    activeFamily, search, faction, tone, focusSearchTick, presetFamily, focusSearch,
   };
 });
