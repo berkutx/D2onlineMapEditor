@@ -196,6 +196,34 @@ export const useEditStore = defineStore("edit", () => {
     scheduleRemoteSave();
   }
 
+  // --- cross-tab metadata sync -----------------------------------------------
+  // Two tabs of one browser share the localStorage project key. The op JOURNAL converges
+  // through the room op-log (broadcast + uid dedup), but editor-only METADATA (zones,
+  // captions, anchors…) is not op-carried: a tab persisting its older view silently
+  // clobbered the other tab's freshly created zone (prod-smoke finding). The `storage`
+  // event fires in every OTHER tab on each write — adopt the incoming metadata there
+  // (each tab keeps its own journal). No persist() on adopt: the writer already holds
+  // this state, re-writing would ping-pong storage events between tabs.
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (e) => {
+      const p = project.value;
+      if (!p || !e.newValue || e.key !== keyFor(p.baseScenarioId)) return;
+      try {
+        const stored = deserializeProject(e.newValue);
+        project.value = {
+          ...p,
+          zones: stored.zones,
+          captions: stored.captions,
+          anchors: stored.anchors,
+          roadAnchors: stored.roadAnchors,
+          autoVars: stored.autoVars,
+        };
+      } catch {
+        /* malformed foreign write — keep our state */
+      }
+    });
+  }
+
   /** Low-level: apply ops to the live doc, bumping rev/objectsRev. Returns the exact inverse
    *  ops (in undo order) so callers can capture them for undo without re-deriving. */
   function applyToLive(ops: readonly EditOp[]): EditOp[] {
