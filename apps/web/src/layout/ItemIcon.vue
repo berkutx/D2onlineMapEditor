@@ -25,11 +25,11 @@ const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px
   <span class="item-icon" :style="box">
     <img
       v-if="src && !failed"
+      :key="src"
       class="icon-img"
       :src="src"
       :width="size"
       :height="size"
-      loading="lazy"
       decoding="async"
       alt=""
       @error="failed = true"

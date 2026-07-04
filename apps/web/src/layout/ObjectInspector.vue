@@ -154,10 +154,15 @@ const CRYSTAL_LABELS = ["Золото", "Инферно", "Жизнь", "Сме�
 const CRYSTAL_SUFFIX = ["GL", "RD", "YE", "RG", "WH", "GR"];
 const crystalKey = (r: number): string => `G000CR0000${CRYSTAL_SUFFIX[r] ?? "GL"}`;
 
-/** Players for the owner dropdown (id is the full compound uid = the stored OWNER value). */
+/** Players for the owner dropdown (id is the full compound uid = the stored OWNER value).
+ *  Always suffix the player number: two players can share the same NAME_TXT lord name
+ *  (both default to "Орда Нежити"), and only playerNo makes them distinguishable. */
 const NEUTRAL = "G000000000";
 const players = computed(() =>
-  (editStore.liveDoc?.players ?? []).map((p) => ({ id: p.id, label: p.name || `Игрок ${p.playerNo}` })),
+  (editStore.liveDoc?.players ?? []).map((p) => ({
+    id: p.id,
+    label: p.name ? `${p.name} · игрок ${p.playerNo}` : `Игрок ${p.playerNo}`,
+  })),
 );
 
 /** Commit one undoable patch (int / string / derived-bool / list / structured fields).
@@ -313,7 +318,7 @@ const ORDER_OPTIONS = [
 const ARTIFACT_CATS = ["L_ARMOR", "L_WEAPON", "L_JEWEL"];
 const BATTLE_CATS = ["L_POTION_BOOST", "L_POTION_HEAL", "L_POTION_REVIVE", "L_SCROLL", "L_WAND", "L_ORB", "L_TALISMAN"];
 const EQUIP_SLOTS = [
-  { key: "tome", label: "Книга", cats: ["L_SPECIAL"] },
+  { key: "tome", label: "Книга", cats: ["L_SCROLL"] }, // спелбук = свитки (L_SCROLL); L_SPECIAL — квестовые, не экипируются
   { key: "battle1", label: "Боевой 1", cats: BATTLE_CATS },
   { key: "battle2", label: "Боевой 2", cats: BATTLE_CATS },
   { key: "artifact1", label: "Артефакт 1", cats: ARTIFACT_CATS },

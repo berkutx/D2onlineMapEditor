@@ -636,6 +636,9 @@ function objectsAtCell(cx: number, cy: number): MapObject[] {
       continue;
     }
     if (!VISIBLE_OBJECT_TYPES.has(o.type)) continue;
+    // A garrisoned stack (a hero stationed INSIDE a fort/capital) is not drawn and sits on the
+    // fort's origin cell — never hit-test it, or a click on the fort grabs the invisible stack.
+    if (o.type === "stack" && o.garrisoned) continue;
     const { w, h } = objectFootprint(o, landmarkFootprints);
     if (cx >= o.pos.x && cx < o.pos.x + w && cy >= o.pos.y && cy < o.pos.y + h) {
       concrete.push({ o, z: objectZBase(o) + o.pos.x + o.pos.y + h });
@@ -687,8 +690,10 @@ function occupancy(): Map<string, Set<string>> {
   const n = doc.size;
   for (const o of doc.objects) {
     // editor occupancy (objBinging) excludes locations (separate locationsBinging) and
-    // units (leaders inside stacks, not independently grid-placed).
+    // units (leaders inside stacks, not independently grid-placed). A garrisoned stack lives
+    // on its fort's origin cell (not independently placed) — it must not block the fort's move.
     if (o.type === "location" || o.type === "unit") continue;
+    if (o.type === "stack" && o.garrisoned) continue;
     const { w, h } = objectFootprint(o, landmarkFootprints);
     for (let y = o.pos.y; y < o.pos.y + h; y++)
       for (let x = o.pos.x; x < o.pos.x + w; x++) {
@@ -1180,7 +1185,20 @@ function onPointerDown(e: PointerEvent): void {
               planDoc = applyOps(planDoc, ops);
             }
           }
-          editStore.commit([...moveOps, ...reroutes]); // one stroke = one undo for everything
+          // «Гость следует за городом»: a fort/capital's garrisoned visitor stack sits on the
+          // fort's origin — carry it along by the same delta so the hero stays stationed inside.
+          const moved = new Set(moveOps.map((op) => (op.kind === "moveObject" ? op.id : "")));
+          const visitorMoves: EditOp[] = [];
+          for (const op of moveOps) {
+            if (op.kind !== "moveObject") continue;
+            const o = doc.objects.find((x) => x.id === op.id);
+            const ref = o && (o.type === "village" || o.type === "capital") ? o.stackRef : undefined;
+            if (!o || !ref || moved.has(ref)) continue;
+            const st = doc.objects.find((x) => x.id === ref);
+            if (!st) continue;
+            visitorMoves.push({ kind: "moveObject", id: st.id, x: st.pos.x + (op.x - o.pos.x), y: st.pos.y + (op.y - o.pos.y) });
+          }
+          editStore.commit([...moveOps, ...visitorMoves, ...reroutes]); // one stroke = one undo for everything
         }
       }
       toolStore.setMoveId(null);
