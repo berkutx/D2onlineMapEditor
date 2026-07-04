@@ -28,6 +28,7 @@ const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px
       :src="src"
       :width="size"
       :height="size"
+      loading="lazy"
       decoding="async"
       alt=""
       @error="failed = true"
