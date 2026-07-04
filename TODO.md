@@ -81,43 +81,52 @@ Things intentionally postponed (decided 2026-06-26). Order is rough priority.
 - **`apps/web` has no vitest tests** -> `pnpm -r run test` exits non-zero on web ("no test files").
   Pre-existing; consider `vitest run --passWithNoTests` for the web test script.
 
-## M4 deleteObject — LANDMARKS DONE (62eaac1); remaining types below
-Landed: `deleteBlocks` (frame splice + OB0000 decrement + referential guard + MidgardPlan
-entry purge), MidgardPlan parser stub (stable pos), eraser deletes decor, delete+undo
-round-trips. REMAINING (per-type unlocks):
-- **stacks**: cascade delete of dependent MidUnit (UNIT_0..5/LEADER_ID) + MidItem (inventory)
-  instance blocks derived from RAW bytes; clear a linked city's STACK ref (or refuse for
-  garrisoned visitors); undo needs the addObject path to also emit garrison/inventory
-  (today stackFrame adds an EMPTY stack — re-add would lose the army -> semantic fail).
-- **mountains**: N-per-block — deleting entry #n renumbers later `${blockId}#${i}` ids, which
-  breaks the BY-ID semantic compare; needs either doc-side renumber ops or an order-stable id.
-- **add-path plan entries (latent, pre-existing)**: added objects never get MidgardPlan
-  entries (and a delete+re-add loses the original's) — semantically invisible (plan is a
-  generic stub) but the GAME uses the plan for passability; emit entries in appendBlocks-time.
-
-## (superseded by the above) M4 deleteObject in the byte writer (researched 2026-07-02, ready to implement)
-The reference CAN'T be copied directly — it never patches: save = FULL re-serialization from
-the block list (`D2MapModel::save`, D2MapModel.cpp:155-167), the OB0000 count is just
-`m_blocks.count()` at save time (DataBlock.h:395-397), deletion = drop the block from the list
-(`D2MapModel::remove`, D2MapModel.h:77-85) and simply not re-export orphans. For OUR
-patch-in-place writer the equivalent is a **block-range splice**, and we already have every
-mechanism: parseScenarioRaw's per-object byte ranges (framing), spliceVariableFields
-(highest-offset-first mid-stream splices), the OB0000 count bump (appendBlocks — need the
-decrement twin). Plan:
-- `deleteBlocksSplice(ids)`: remove `[WHAT..ENDOBJECT]` ranges of the object + its DEPENDENT
-  instance blocks (garrison/eq MidUnit + inventory MidItem — same id lists the readers use),
-  decrement the OB0000 count by the number of removed blocks. Header `offset` is unaffected
-  (all object blocks sit after it).
-- Cascades (ported from the reference): item that is a talisman → drop its entry from
-  D2TalismanCharges (D2MapEditor.cpp:234-246); deleting a visiting stack → clear the city's
-  STACK ref to G000000000 (we have the growable string splice); deleting mountains → the
-  delete op must come WITH setCell ops restoring terrain (MapStateHolder.cpp:62-81 restores
-  value 5) — our place/erase flows already pair the stamp, undo pairs the inverse setCells.
-- Referential guard: before deleting, scan other blocks for `0B 00 00 00 + <id>` refs; clear
-  known ones, REJECT loudly on unknown (no-guess).
-- Undo of a base-object delete = addObject of a parsed object — only allowed for types our
-  frames can rebuild (stack/landmark/mountains/road/unit/item); gate the delete UI to those
-  first.
+## M4 deleteObject — LANDMARKS + STACKS + MOUNTAINS DONE; remaining types below
+Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + referential guard
++ MidgardPlan entry purge), MidgardPlan parser stub (stable pos), eraser deletes decor, ctx-menu
+🗑 for landmark/stack/mountains (`deleteObjectSafely`), delete+undo round-trips.
+- **stacks** (DONE): `stackDeleteCascade(raw, id)` enumerates dependent MidUnit (UNIT_0..5) +
+  MidItem (inventory) instances from RAW bytes → `deleteBlocks` dependentIds (cascade-safe, skip
+  the guard). Inverse addObject carries the FULL stack from the doc (garrison/leader/inventory),
+  which the stack add-path re-emits → undo round-trips. A city's VISITING hero is REFUSED
+  (fail-loud: the doc-side STACK-clear can't survive the JSON journal as an omitted-key edit —
+  manage visitors via the city inspector; sanctioned by the reference).
+- **mountains** (DONE): `deleteMountainOps(doc, id)` — mountains carry positional ids, so it
+  deletes the target + tail and re-adds the tail shifted down one index (fungible objects; keeps
+  the doc aligned with the byte-side block rebuild's renumber), and reverts the footprint to the
+  bare mountain-terrain value 5 (MapStateHolder), skipping cells shared with a surviving mountain.
+- **talisman charges** (DONE 2026-07-04, reference-verified): `MidTalismanCharges` (WHAT 0x1a, "TC",
+  singleton) = `blockId + i32 count` + 34-byte entries `ID_TALIS ref(MidItem INSTANCE) · CHARGES i32`
+  (layout byte-verified: toolsqt D2TalismanCharges.h == Riders hexdump, 14 entries, all charges=5).
+  Delete side = `purgeTalismanCharges` inside deleteBlocks (the reference's D2MapEditor::removeItem);
+  add side = `addTalismanCharges` per minted talisman MidItem (the reference's addItem; charges =
+  GVars.talis_chrg default 5; talisman-ness via itemCatalog L_TALISMAN set, loaded lazily by the server
+  and passed as `applyEditsToBytes(..., {talismanTemplates})`).
+- **villages + chests** (DONE 2026-07-04): MidVillage delete cascades garrison MidUnit (refuses while a
+  visiting hero is linked); MidBag delete cascades its MidItem instances (+ their charges entries).
+  Capital delete REFUSED (race integrity). Reference cross-check: the live Qt editor does NO cascade at
+  all (save = full re-export, orphans just aren't written; it even exports a DANGLING visiter stackId) —
+  our cascade + fail-loud guard is the patch-in-place equivalent with stricter integrity.
+- **review fixes (2026-07-04)**: delete+same-id-re-add (collab undo of a delete) now KEEPS one set of
+  MidgardPlan/TC entries (purge skips survivors, add-path skips duplicates); deleteBlocks dedups ids
+  (peer-race double delete); the referential guard now covers dependent ids too; the visitor-holder
+  scan is fort-scoped + readRefField rejects suffix tag matches (event ID_STACK ≠ STACK).
+- **ruins** (DONE 2026-07-04): `ruinFrame` byte-verified (reproduces a real Riders ruin frame
+  bit-for-bit in the test); layout RUIN_ID·TITLE·DESC·IMAGE·POS·CASH·ITEM·LOOTER·AIPRIORITY·
+  visiterCount(0)·GROUP_ID·UNIT_0..5·POS_0..5. Ruin ITEM = GLOBAL GItem template (byte-verified,
+  reviewer's open question closed — the inspector's template edit path was right). Ruins carry
+  GUARDIANS: readRuin now reads the garrison (schema += RuinObject.garrison, assemble resolves) so
+  delete cascades the MidUnit guards AND undo restores them; plan footprint 3×3 (9 entries,
+  byte-verified). Riders fact: some ruins are event/quest-referenced — their delete is refused by
+  the referential guard (correct fail-closed).
+- **sites** (REMAINING): no instance dependents (stocks are global ids) — only siteFrame ports
+  (merchant/mage/trainer/mercs write layouts) are missing for the undo re-add path.
+- **pre-flight delete check (idea, from review)**: a doc-side mirror of the referential guard so a
+  delete refused at export (e.g. an event still targets the landmark) is rejected AT COMMIT with a
+  named referencer, instead of poisoning the whole journal until undo.
+- **plan entries for ADDED roads (latent)**: addPlanEntries covers landmark/location/stack/chest/
+  village adds (byte-verified footprints); freshly appended MidRoad blocks get no plan entry yet —
+  verify road membership in shipped plans first, then emit alongside roadFrame.
 
 ## Anchors / scenario-window follow-ups (deferred 2026-07-02)
 - **Road follows anchored building** — when a building anchored to a road moves, re-route the road

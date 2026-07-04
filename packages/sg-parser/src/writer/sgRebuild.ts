@@ -279,6 +279,49 @@ export function stackFrame(
   });
 }
 
+/**
+ * A MidRuin block frame (code 0x0f, short RU). Field order byte-verified against every
+ * Riders ruin (and toolsqt D2Ruin::data()): RUIN_ID · TITLE · DESC · IMAGE · POS_X ·
+ * POS_Y · CASH · ITEM(ref: a GLOBAL GItem template, NOT a MidItem instance) · LOOTER ·
+ * AIPRIORITY · <ownId> int visiterCount (0 — visiters unmodeled; 0 on every shipped map)
+ * · GROUP_ID(=own id) · UNIT_0..5(guard MidUnit instances) · POS_0..5.
+ */
+export function ruinFrame(
+  version: string,
+  second: number,
+  o: {
+    posX: number;
+    posY: number;
+    name?: string;
+    desc?: string;
+    image?: number;
+    reward?: string;
+    item?: string;
+    looter?: string;
+    priority?: number;
+    unitSlots?: readonly string[];
+    posOfCell?: readonly number[];
+  },
+): Uint8Array {
+  const NIL = "G000000000";
+  return emitBlock(version, "MidRuin", 0x0f, "RU", second, (w, full) => {
+    w.refField("RUIN_ID", full);
+    w.stringField("TITLE", o.name ?? "");
+    w.stringField("DESC", o.desc ?? "");
+    w.defaultInt("IMAGE", o.image ?? 0);
+    w.defaultInt("POS_X", o.posX);
+    w.defaultInt("POS_Y", o.posY);
+    w.stringField("CASH", o.reward ?? "");
+    w.refField("ITEM", o.item || NIL);
+    w.refField("LOOTER", o.looter || NIL);
+    w.defaultInt("AIPRIORITY", o.priority ?? 0);
+    w.defaultInt(full, 0); // visiter count (tag = the ruin's own compound id)
+    w.refField("GROUP_ID", full);
+    for (let i = 0; i < 6; i++) w.refField(`UNIT_${i}`, o.unitSlots?.[i] ?? NIL);
+    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, o.posOfCell?.[i] ?? -1);
+  });
+}
+
 /** One mountain entry written into the MidMountains body. */
 export interface MountainEntry {
   x: number;
@@ -355,16 +398,44 @@ export function replaceBlock(bytes: Uint8Array, objId: string, newFrame: Uint8Ar
  * it. Fails loud on an unknown id — a delete that cannot be applied must not be silently
  * dropped (the validator's semantic tier would then reject the export anyway).
  */
-export function deleteBlocks(bytes: Uint8Array, objIds: readonly string[]): Uint8Array {
-  if (objIds.length === 0) return bytes;
+export function deleteBlocks(
+  bytes: Uint8Array,
+  objIds: readonly string[],
+  dependentIds: readonly string[] = [],
+): Uint8Array {
+  if (objIds.length === 0 && dependentIds.length === 0) return bytes;
+  // `dependentIds` = instance blocks owned by a primary object (a stack's/bag's MidItem
+  // inventory + a stack's/fort's garrison MidUnit) — removed alongside it. They pass the
+  // SAME referential guard below: their expected refs (the owner's UNIT_x/ITEM_ID/LEADER_ID)
+  // sit INSIDE the deleted frames (allowed zone), and their side-table entries (talisman
+  // charges) are purged first — so anything left pointing at them is a REAL dangling ref.
+  // Dedup: a repeated id (two peers racing to delete the same object) must splice ONE frame,
+  // not shift-and-cut an innocent byte range on the second pass — delete is idempotent.
+  const allIds = [...new Set([...objIds, ...dependentIds])];
+
+  // SURVIVORS: an id that also has a re-added frame in these bytes (a delete + re-add in one
+  // journal — the collab append-inverse UNDO of a delete). The original frame is spliced but
+  // the id stays resolvable, so its side-table entries must SURVIVE: purging the plan/charges
+  // here would kill the re-added object's entries too (both carry the same id). The survivor
+  // keeps the ORIGINAL entries; the add-path skips emitting duplicates for these ids.
+  const preFrames = frameRanges(new ByteBuffer(bytes));
+  const survivors = new Set(
+    allIds.filter((id) => preFrames.filter((f) => f.objId === id).length > 1),
+  );
+  const purgeIds = new Set(allIds.filter((id) => !survivors.has(id)));
   // the placement plan (MidgardPlan) holds one {POS_X,POS_Y,ELEMENT->id} entry per occupied
   // cell — purge the deleted objects' entries first (the reference rebuilds the whole plan
   // on save via commitGrid; entry removal is the patch-in-place equivalent)
-  bytes = purgePlanEntries(bytes, new Set(objIds));
+  bytes = purgePlanEntries(bytes, purgeIds);
+  // talisman charges: MidTalismanCharges maps each placed TALISMAN MidItem instance to its
+  // remaining charge count — drop the deleted items' entries (the reference does exactly
+  // this in D2MapEditor::removeItem before m_map.remove).
+  bytes = purgeTalismanCharges(bytes, purgeIds);
   const buf = new ByteBuffer(bytes);
   const frames = frameRanges(buf);
   const ranges: { start: number; end: number }[] = [];
-  for (const id of objIds) {
+  for (const id of allIds) {
+    // the FIRST frame with the id = the pre-existing block (a same-id re-add was APPENDED)
     const f = frames.find((r) => r.objId === id);
     if (!f) throw new Error(`deleteBlocks: block ${id} not found`);
     ranges.push({ start: f.start, end: f.end });
@@ -377,7 +448,7 @@ export function deleteBlocks(bytes: Uint8Array, objIds: readonly string[]): Uint
   // same objId (a delete + re-add in one journal leaves a same-id survivor — not dangling).
   const insideDeleted = (at: number): boolean =>
     ranges.some((r) => at >= r.start && at < r.end);
-  for (const id of objIds) {
+  for (const id of allIds) {
     const sameId = frames.filter((f) => f.objId === id);
     if (sameId.length > 1) continue; // a same-id block survives — the id stays resolvable
     const pat = new Uint8Array(4 + id.length);
@@ -528,6 +599,120 @@ function purgePlanEntries(bytes: Uint8Array, ids: ReadonlySet<string>): Uint8Arr
   }
   // countAt precedes every entry, so the splices above never moved it
   new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(countAt, count - ranges.length, true);
+  return out;
+}
+
+/** Default talisman charge count (GVars.dbf TALIS_CHRG; byte-verified: every entry in every
+ *  shipped campaign map carries 5). The reference addItem uses this when no explicit count. */
+export const DEFAULT_TALISMAN_CHARGES = 5;
+
+/**
+ * Locate the MidTalismanCharges entry table. Verified layout (Riders bytes + toolsqt
+ * D2TalismanCharges.h, they agree): after `BEGOBJECT\0` — `<blockId(10)> int32 entryCount`,
+ * then entryCount 34-byte entries `ID_TALIS [0B 00 00 00] <MidItem-instance-id(10)> NUL ·
+ * CHARGES int32`. Walks with tag validation and FAILS LOUD on any layout surprise.
+ * Returns null when the map has no block (all 54 shipped maps have one, but stay lenient
+ * like the plan locator — absence just skips the side-table maintenance).
+ */
+function locateTalismanCharges(
+  buf: ByteBuffer,
+): { countAt: number; count: number; entries: { start: number; end: number; ref: string }[] } | null {
+  const avc = buf.indexOf(".?AVCMidTalismanCharges@@");
+  if (avc < 0) return null;
+  const beg = buf.indexOf("BEGOBJECT", avc);
+  if (beg < 0) throw new Error("MidTalismanCharges: BEGOBJECT not found after decl");
+  let p = beg + 9;
+  if (buf.bytes[p] === 0) p++;
+  p += 10; // the block's own compound id doubles as the count-field tag
+  const countAt = p;
+  const count = buf.readInt32LE(countAt);
+  let q = countAt + 4;
+  const entries: { start: number; end: number; ref: string }[] = [];
+  for (let i = 0; i < count; i++) {
+    const start = q;
+    if (buf.asciiSlice(q, q + 8) !== "ID_TALIS") {
+      throw new Error(`MidTalismanCharges: entry ${i}: ID_TALIS expected at ${q}`);
+    }
+    q += 8;
+    if (buf.readInt32LE(q) !== 11) {
+      throw new Error(`MidTalismanCharges: entry ${i}: ref length != 11 at ${q}`);
+    }
+    q += 4;
+    const ref = buf.asciiSlice(q, q + 10);
+    q += 10 + 1; // + NUL
+    if (buf.asciiSlice(q, q + 7) !== "CHARGES") {
+      throw new Error(`MidTalismanCharges: entry ${i}: CHARGES expected at ${q}`);
+    }
+    q += 7 + 4;
+    entries.push({ start, end: q, ref });
+  }
+  return { countAt, count, entries };
+}
+
+/**
+ * Remove every MidTalismanCharges entry whose ID_TALIS references one of `ids` (deleted
+ * MidItem instances), decrementing the entry count — the reference's D2MapEditor::removeItem
+ * cascade. No block / no matching entry = no-op (non-talisman items have no entry).
+ */
+function purgeTalismanCharges(bytes: Uint8Array, ids: ReadonlySet<string>): Uint8Array {
+  const buf = new ByteBuffer(bytes);
+  const tc = locateTalismanCharges(buf);
+  if (!tc) return bytes;
+  const ranges = tc.entries.filter((e) => ids.has(e.ref));
+  if (ranges.length === 0) return bytes;
+  ranges.sort((a, b) => b.start - a.start);
+  let out = bytes;
+  for (const r of ranges) {
+    const next = new Uint8Array(out.length - (r.end - r.start));
+    next.set(out.subarray(0, r.start), 0);
+    next.set(out.subarray(r.end), r.start);
+    out = next;
+  }
+  // countAt precedes every entry, so the splices above never moved it
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(
+    tc.countAt,
+    tc.count - ranges.length,
+    true,
+  );
+  return out;
+}
+
+/** One talisman-charges entry to add: a freshly minted talisman MidItem instance. */
+export interface TalismanEntry {
+  /** the MidItem INSTANCE compound id (e.g. "S143IM002f") — NOT the GItem template. */
+  itemId: string;
+  charges: number;
+}
+
+/**
+ * ADD MidTalismanCharges entries — the add-side counterpart of the purge, mirroring the
+ * reference's D2MapEditor::addItem (a talisman item gets `{talismanId, count}` appended).
+ * Inserted after the existing entries, bumping the count. No block = no-op (lenient, like
+ * addPlanEntries — createBlankMap always emits an empty one).
+ */
+export function addTalismanCharges(bytes: Uint8Array, entries: readonly TalismanEntry[]): Uint8Array {
+  if (entries.length === 0) return bytes;
+  const buf = new ByteBuffer(bytes);
+  const tc = locateTalismanCharges(buf);
+  if (!tc) return bytes;
+  const w = new ByteWriter();
+  for (const e of entries) {
+    w.refField("ID_TALIS", e.itemId);
+    w.defaultInt("CHARGES", e.charges);
+  }
+  const region = w.toBytes();
+  const insertAt = tc.entries.length
+    ? tc.entries[tc.entries.length - 1]!.end
+    : tc.countAt + 4;
+  const out = new Uint8Array(bytes.length + region.length);
+  out.set(bytes.subarray(0, insertAt), 0);
+  out.set(region, insertAt);
+  out.set(bytes.subarray(insertAt), insertAt + region.length);
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(
+    tc.countAt,
+    tc.count + entries.length,
+    true,
+  );
   return out;
 }
 

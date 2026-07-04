@@ -621,6 +621,45 @@
                     },
                     "priority": {
                       "type": "integer"
+                    },
+                    "garrison": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "unit": {
+                                "type": "string"
+                              },
+                              "level": {
+                                "type": "integer",
+                                "default": 1
+                              },
+                              "hp": {
+                                "type": "integer",
+                                "default": 0
+                              }
+                            },
+                            "required": [
+                              "unit"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "garrisonRaw": {
+                      "type": "array",
+                      "items": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -1702,12 +1741,12 @@
                             "const": "frequency"
                           },
                           "days": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           }
                         },
                         "required": [
-                          "kind",
-                          "days"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1719,12 +1758,12 @@
                             "const": "enterZone"
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "locId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1736,12 +1775,12 @@
                             "const": "enterCity"
                           },
                           "cityId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "cityId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1753,12 +1792,12 @@
                             "const": "owningCity"
                           },
                           "cityId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "cityId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1770,12 +1809,12 @@
                             "const": "destroyStack"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1787,12 +1826,12 @@
                             "const": "owningItem"
                           },
                           "itemType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "itemType"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1804,16 +1843,16 @@
                             "const": "leaderOwningItem"
                           },
                           "itemType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "itemType",
-                          "stackId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1825,20 +1864,20 @@
                             "const": "diplomacy"
                           },
                           "player1": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "player2": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "relation": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           }
                         },
                         "required": [
-                          "kind",
-                          "player1",
-                          "player2",
-                          "relation"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1850,16 +1889,16 @@
                             "const": "alliance"
                           },
                           "player1": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "player2": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "player1",
-                          "player2"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1871,12 +1910,12 @@
                             "const": "lootingRuin"
                           },
                           "ruinId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "ruinId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1888,12 +1927,12 @@
                             "const": "transformLand"
                           },
                           "pct": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           }
                         },
                         "required": [
-                          "kind",
-                          "pct"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1905,12 +1944,12 @@
                             "const": "visitingSite"
                           },
                           "siteId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "siteId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1922,16 +1961,16 @@
                             "const": "stackInLocation"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId",
-                          "locId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1943,16 +1982,16 @@
                             "const": "stackInCity"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "cityId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId",
-                          "cityId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1964,16 +2003,16 @@
                             "const": "itemToLocation"
                           },
                           "itemType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "itemType",
-                          "locId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -1985,16 +2024,16 @@
                             "const": "stackExists"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "mustExist": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId",
-                          "mustExist"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2006,36 +2045,36 @@
                             "const": "varInRange"
                           },
                           "var1": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "min1": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "max1": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "var2": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "min2": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "max2": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "relation": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           }
                         },
                         "required": [
-                          "kind",
-                          "var1",
-                          "min1",
-                          "max1",
-                          "var2",
-                          "min2",
-                          "max2",
-                          "relation"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2047,16 +2086,16 @@
                             "const": "resourceAmount"
                           },
                           "bank": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "greaterOrEqual": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           }
                         },
                         "required": [
-                          "kind",
-                          "bank",
-                          "greaterOrEqual"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2068,12 +2107,12 @@
                             "const": "gameMode"
                           },
                           "mode": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           }
                         },
                         "required": [
-                          "kind",
-                          "mode"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2085,12 +2124,12 @@
                             "const": "checkForHuman"
                           },
                           "isAI": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           }
                         },
                         "required": [
-                          "kind",
-                          "isAI"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2102,20 +2141,20 @@
                             "const": "compareVar"
                           },
                           "var1": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "var2": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "cmp": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           }
                         },
                         "required": [
-                          "kind",
-                          "var1",
-                          "var2",
-                          "cmp"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2127,16 +2166,16 @@
                             "const": "customScript"
                           },
                           "code": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "desc": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           }
                         },
                         "required": [
-                          "kind",
-                          "code",
-                          "desc"
+                          "kind"
                         ],
                         "additionalProperties": false
                       }
@@ -2156,10 +2195,12 @@
                             "const": "winLose"
                           },
                           "win": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "player": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2167,9 +2208,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "win",
-                          "player"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2181,10 +2220,12 @@
                             "const": "createStack"
                           },
                           "templateId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2192,9 +2233,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "templateId",
-                          "locId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2206,10 +2245,12 @@
                             "const": "castSpellTriggerer"
                           },
                           "spellType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "player": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2217,9 +2258,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "spellType",
-                          "player"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2231,13 +2270,16 @@
                             "const": "castSpellLocation"
                           },
                           "spellType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "player": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2245,10 +2287,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "spellType",
-                          "locId",
-                          "player"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2260,16 +2299,20 @@
                             "const": "changeStackOwner"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "player": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "firstOnly": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "playAnim": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2277,11 +2320,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId",
-                          "player",
-                          "firstOnly",
-                          "playAnim"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2293,7 +2332,8 @@
                             "const": "moveStackToTriggerer"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2301,8 +2341,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2314,10 +2353,12 @@
                             "const": "goIntoBattle"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "firstOnly": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2325,9 +2366,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId",
-                          "firstOnly"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2339,10 +2378,12 @@
                             "const": "enableEvent"
                           },
                           "eventId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "enable": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2350,9 +2391,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "eventId",
-                          "enable"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2364,7 +2403,8 @@
                             "const": "giveSpell"
                           },
                           "spellType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2372,8 +2412,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "spellType"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2385,10 +2424,12 @@
                             "const": "giveItem"
                           },
                           "giveTo": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "itemType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2396,9 +2437,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "giveTo",
-                          "itemType"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2410,13 +2449,16 @@
                             "const": "moveStackToLocation"
                           },
                           "stackTmpId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "boolVal": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2424,10 +2466,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackTmpId",
-                          "locId",
-                          "boolVal"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2439,13 +2478,16 @@
                             "const": "allyPlayers"
                           },
                           "player1": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "player2": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "permAlly": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2453,10 +2495,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "player1",
-                          "player2",
-                          "permAlly"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2468,16 +2507,20 @@
                             "const": "changeDiplomacy"
                           },
                           "player1": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "player2": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "relation": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "enabled": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2485,11 +2528,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "player1",
-                          "player2",
-                          "relation",
-                          "enabled"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2501,13 +2540,16 @@
                             "const": "changeFog"
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "enable": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "value": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "num": {
                             "type": "integer",
@@ -2535,10 +2577,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "locId",
-                          "enable",
-                          "value"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2550,7 +2589,8 @@
                             "const": "removeMountains"
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2558,8 +2598,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "locId"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2571,10 +2610,12 @@
                             "const": "removeLandmark"
                           },
                           "lmarkId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "boolVal": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2582,9 +2623,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "lmarkId",
-                          "boolVal"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2596,7 +2635,8 @@
                             "const": "changeObjective"
                           },
                           "text": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2604,8 +2644,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "text"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2617,25 +2656,36 @@
                             "const": "popup"
                           },
                           "text": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "image": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "image2": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "sound": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "music": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "leftSide": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "popupShow": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
+                          },
+                          "boolValue": {
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2643,14 +2693,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "text",
-                          "image",
-                          "image2",
-                          "sound",
-                          "music",
-                          "leftSide",
-                          "popupShow"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2662,16 +2705,20 @@
                             "const": "changeStackOrder"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "orderTarget": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "firstOnly": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "order": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "num": {
                             "type": "integer",
@@ -2679,11 +2726,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId",
-                          "orderTarget",
-                          "firstOnly",
-                          "order"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2695,10 +2738,12 @@
                             "const": "destroyItem"
                           },
                           "itemType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "triggerOnly": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2706,9 +2751,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "itemType",
-                          "triggerOnly"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2720,10 +2763,12 @@
                             "const": "removeStack"
                           },
                           "stackId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "firstOnly": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "default": false
                           },
                           "num": {
                             "type": "integer",
@@ -2731,9 +2776,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "stackId",
-                          "firstOnly"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2745,10 +2788,12 @@
                             "const": "changeLandmark"
                           },
                           "lmarkId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "lmarkType": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "num": {
                             "type": "integer",
@@ -2756,9 +2801,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "lmarkId",
-                          "lmarkType"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2770,13 +2813,16 @@
                             "const": "changeTerrain"
                           },
                           "locId": {
-                            "type": "string"
+                            "type": "string",
+                            "default": ""
                           },
                           "lookup": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "value": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "num": {
                             "type": "integer",
@@ -2784,10 +2830,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "locId",
-                          "lookup",
-                          "value"
+                          "kind"
                         ],
                         "additionalProperties": false
                       },
@@ -2799,13 +2842,16 @@
                             "const": "modifyVariable"
                           },
                           "lookup": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "val1": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "val2": {
-                            "type": "number"
+                            "type": "number",
+                            "default": 0
                           },
                           "num": {
                             "type": "integer",
@@ -2813,10 +2859,7 @@
                           }
                         },
                         "required": [
-                          "kind",
-                          "lookup",
-                          "val1",
-                          "val2"
+                          "kind"
                         ],
                         "additionalProperties": false
                       }

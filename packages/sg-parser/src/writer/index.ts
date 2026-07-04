@@ -8,12 +8,18 @@
 
 export {
   parseScenarioRaw,
+  stackDeleteCascade,
+  villageDeleteCascade,
+  bagDeleteCascade,
+  ruinDeleteCascade,
   originKey,
   cellKey,
   type SgRaw,
   type SgObjectRaw,
   type SgBlockRaw,
   type SgRoadRaw,
+  type StackDeleteCascade,
+  type FortDeleteCascade,
 } from "./sgRaw.js";
 export { SgWriter } from "./patch.js";
 export {
@@ -27,9 +33,12 @@ export {
   stackFrame,
   bagFrame,
   villageFrame,
+  ruinFrame,
   replaceBlock,
   deleteBlocks,
   addPlanEntries,
+  addTalismanCharges,
+  DEFAULT_TALISMAN_CHARGES,
   spliceStringFields,
   spliceVariableFields,
   emitBlock,
@@ -38,6 +47,7 @@ export {
   type ItemListEdit,
   type QtyListEdit,
   type PlanEntry,
+  type TalismanEntry,
 } from "./sgRebuild.js";
 export {
   eventFrame,

@@ -20,9 +20,16 @@ import {
   stackFrame,
   bagFrame,
   villageFrame,
+  ruinFrame,
   replaceBlock,
   deleteBlocks,
+  stackDeleteCascade,
+  villageDeleteCascade,
+  bagDeleteCascade,
+  ruinDeleteCascade,
   addPlanEntries,
+  addTalismanCharges,
+  DEFAULT_TALISMAN_CHARGES,
   eventFrame,
   scenVariablesFrame,
   stackTemplateFrame,
@@ -41,7 +48,19 @@ import type { MapObject, MapEvent, ScenarioVariable, StackTemplate, DiplomacyEnt
 import type { ScenarioInfoPatch } from "@d2/socket-contract";
 import type { EditOp } from "./ops.js";
 
-export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Array {
+export interface ApplyBytesOptions {
+  /** GItem TEMPLATE ids whose category is talisman (itemCatalog catKey L_TALISMAN). When
+   *  present, every MidItem instance minted from one of these gets a MidTalismanCharges
+   *  entry (the reference's D2MapEditor::addItem behavior). Omitted = entries not added
+   *  (callers without catalog access — the delete-side purge still always runs). */
+  talismanTemplates?: ReadonlySet<string>;
+}
+
+export function applyEditsToBytes(
+  raw: SgRaw,
+  ops: readonly EditOp[],
+  opts: ApplyBytesOptions = {},
+): Uint8Array {
   const w = new SgWriter(raw);
 
   let nextRA = 0;
@@ -52,6 +71,7 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   let nextKC = 0;
   let nextBG = 0;
   let nextFT = 0;
+  let nextRU = 0;
   for (const o of raw.objects) {
     if (o.typeName === "MidRoad") {
       const m = /RA([0-9a-fA-F]{4})$/.exec(o.id);
@@ -74,6 +94,9 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     } else if (o.typeName === "MidBag") {
       const m = /BG([0-9a-fA-F]{4})$/.exec(o.id);
       if (m) nextBG = Math.max(nextBG, parseInt(m[1]!, 16) + 1);
+    } else if (o.typeName === "MidRuin") {
+      const m = /RU([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) nextRU = Math.max(nextRU, parseInt(m[1]!, 16) + 1);
     }
     // the FT prefix is SHARED by MidVillage/MidFort/Capital — seed from every FT id
     // regardless of TypeName so a fresh village never collides with a capital/fort.
@@ -106,6 +129,12 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   const garrisonOps = new Map<string, { cells: GarrCell[]; leaderCell?: number }>();
   /** M4 mid-stream deletes: PRE-EXISTING blocks to splice out at the very end. */
   const deletedIds: string[] = [];
+  /** Cascade-only deletes (a deleted stack's garrison MidUnit + inventory MidItem instance
+   *  blocks): removed with their owner but SKIP the referential guard (owner-referenced only). */
+  const dependentDeleteIds: string[] = [];
+  /** Deleted MidMountains ENTRIES (by raw.mountains index) — mountains live N-per-block, so a
+   *  delete filters the entry out of the single-block rebuild rather than splicing a frame. */
+  const deletedMountainIndices = new Set<number>();
   /** Event ops, resolved to the FINAL state per event id (last write wins): a MapEvent to
    *  upsert, or null to delete. Applied at the very end as append/replace/delete of a frame. */
   const eventOps = new Map<string, MapEvent | null>();
@@ -313,21 +342,77 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
       }
       case "deleteObject": {
         // M4 mid-stream delete (block-range splice + OB0000 decrement via deleteBlocks).
-        // v1 scope: MidLandmark only (decor — the eraser's use case; its inverse addObject
-        // is fully reconstructible via landmarkFrame, so collab undo round-trips). Other
-        // types stay fail-loud: stacks need dependent MidUnit/MidItem cascade + a garrison
-        // re-add path for undo; mountains live N-per-block (deleting renumbers ids).
+        // A MOUNTAIN id is "<mountainsBlockId>#<index>" — a synthetic per-entry id NOT in
+        // objectById (mountains live N-per-block). Route it to the block rebuild BEFORE the
+        // objectById lookup (which would otherwise throw "unknown object").
+        const hash = op.id.indexOf("#");
+        if (hash >= 0 && raw.mountainsBlockId && op.id.slice(0, hash) === raw.mountainsBlockId) {
+          const idx = parseInt(op.id.slice(hash + 1), 10);
+          if (!Number.isInteger(idx) || idx < 0 || idx >= raw.mountains.length) {
+            // an added-this-session mountain should have been folded out (foldOps); a bad
+            // index means a delete with no matching raw entry — fail loud, don't guess.
+            throw new Error(`applyEditsToBytes: deleteObject mountain ${op.id} has no raw entry`);
+          }
+          deletedMountainIndices.add(idx);
+          break;
+        }
         const rec = raw.objectById.get(op.id);
         if (!rec) {
           // a delete of a CLIENT-added object should have been folded out (foldOps)
           throw new Error(`applyEditsToBytes: deleteObject of unknown object ${op.id}`);
         }
-        if (rec.typeName !== "MidLandmark") {
+        if (rec.typeName === "MidLandmark") {
+          // decor — inverse addObject is fully reconstructible via landmarkFrame.
+          deletedIds.push(op.id);
+        } else if (rec.typeName === "MidStack") {
+          // an army/hero stack: cascade-delete its garrison MidUnit + inventory MidItem
+          // instance blocks (referenced ONLY by this stack, so they skip the referential guard).
+          // The inverse addObject carries the FULL stack (garrison/leader/inventory from the doc),
+          // which the stack add-path re-emits — so collab/undo round-trips semantically.
+          const casc = stackDeleteCascade(raw, op.id);
+          if (casc.holder) {
+            // a city's VISITING hero: the city's STACK ref would dangle. Clearing it on the DOC
+            // side can't survive the JSON journal (an omitted-key edit), so the semantic tier
+            // would fail — refuse here (sanctioned by the reference) and manage visitors via the
+            // city inspector instead. Free-standing stacks delete cleanly.
+            throw new Error(
+              `applyEditsToBytes: ${op.id} is a city's visiting hero — remove it via the city, not a map delete`,
+            );
+          }
+          deletedIds.push(op.id);
+          dependentDeleteIds.push(...casc.dependentIds);
+        } else if (rec.typeName === "MidBag") {
+          // a chest: cascade its MidItem instances (ITEM_ID list); a talisman's charges
+          // entry is purged inside deleteBlocks. Undo re-adds via bagFrame (items are
+          // global templates in the doc — fresh instances are minted on re-add).
+          deletedIds.push(op.id);
+          dependentDeleteIds.push(...bagDeleteCascade(raw, op.id));
+        } else if (rec.typeName === "MidVillage") {
+          // a village: cascade its garrison MidUnit instances. A village hosting a
+          // VISITING hero is refused (same journal/undo constraint as the visitor itself).
+          const casc = villageDeleteCascade(raw, op.id);
+          if (casc.hasVisitor) {
+            throw new Error(
+              `applyEditsToBytes: ${op.id} hosts a visiting hero — remove the visitor first`,
+            );
+          }
+          deletedIds.push(op.id);
+          dependentDeleteIds.push(...casc.dependentIds);
+        } else if (rec.typeName === "MidRuin") {
+          // a ruin: cascade its guardian MidUnit instances; the loot ITEM is a global
+          // template (no instance). Undo re-adds via ruinFrame (garrison from the doc).
+          deletedIds.push(op.id);
+          dependentDeleteIds.push(...ruinDeleteCascade(raw, op.id));
+        } else if (rec.typeName === "Capital") {
+          // capitals are load-bearing: every race must keep one (the game refuses/crashes
+          // without it) — deletion stays refused, not just unimplemented.
+          throw new Error(`applyEditsToBytes: deleteObject refused for Capital (race integrity)`);
+        } else {
           throw new Error(
-            `applyEditsToBytes: deleteObject for ${rec.typeName} not supported yet (only MidLandmark)`,
+            `applyEditsToBytes: deleteObject for ${rec.typeName} not supported yet ` +
+              `(MidLandmark, MidStack, MidMountains, MidBag, MidVillage)`,
           );
         }
-        deletedIds.push(op.id);
         break;
       }
 
@@ -355,13 +440,21 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
     }
   }
 
+  /** Freshly minted MidItem instances whose template is a TALISMAN — each needs a
+   *  MidTalismanCharges entry (the reference's addItem behavior; charges = GVars default). */
+  const mintedTalismans: { itemId: string; charges: number }[] = [];
+
   /** Mint one appended MidItem instance per global GItem template id, returning the new
    *  instance ids (shared by chest lists, stack inventories and added-object frames). */
   const mintItems = (templates: readonly string[] | undefined): string[] =>
     (templates ?? []).map((template) => {
       const second = nextIM++;
       appends.push(itemFrame(raw.version, second, String(template)));
-      return `${raw.version}IM${hex4(second)}`;
+      const id = `${raw.version}IM${hex4(second)}`;
+      if (opts.talismanTemplates?.has(String(template))) {
+        mintedTalismans.push({ itemId: id, charges: DEFAULT_TALISMAN_CHARGES });
+      }
+      return id;
     });
 
   // Resolve each edited chest's FINAL item list (last write won): the list holds global
@@ -543,6 +636,33 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
           planAdds.push({ x: o.pos.x + dx, y: o.pos.y + dy, element: full });
         }
       }
+    } else if (o.type === "ruin") {
+      // A ruin (MidRuin) — realistically only the UNDO re-add of a delete (there is no
+      // ruin place tool): guardians re-mint like a fort garrison, ITEM is a global
+      // template written verbatim. Mirrors readRuin exactly for the semantic tier.
+      const m = /RU([0-9a-fA-F]{4})$/.exec(o.id);
+      const second = m ? parseInt(m[1]!, 16) : nextRU++;
+      const full = `${raw.version}RU${hex4(second)}`;
+      const g = packFormation(o.garrison);
+      appends.push(ruinFrame(raw.version, second, {
+        posX: o.pos.x,
+        posY: o.pos.y,
+        name: o.name ?? "",
+        desc: o.desc,
+        image: o.image ?? 0,
+        reward: o.reward,
+        item: o.item,
+        looter: o.looter,
+        priority: o.priority ?? 0,
+        unitSlots: g.unitSlots,
+        posOfCell: g.posOfCell,
+      }));
+      // ruin footprint = 3×3 (byte-verified: every Riders MidRuin id has 9 plan entries)
+      for (let dy = 0; dy < 3; dy++) {
+        for (let dx = 0; dx < 3; dx++) {
+          planAdds.push({ x: o.pos.x + dx, y: o.pos.y + dy, element: full });
+        }
+      }
     } else {
       throw new Error(`applyEditsToBytes: addObject type '${o.type}' not supported yet (M4)`);
     }
@@ -616,12 +736,23 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   if (frames.length) bytes = appendBlocks(bytes, frames);
   // placement plan: one entry per footprint cell of every ADDED object (the add-side
   // counterpart of deleteBlocks' purge; addPlanEntries re-locates the block by marker,
-  // so the earlier splices/appends are safe).
-  if (planAdds.length) bytes = addPlanEntries(bytes, planAdds);
-  if (addedMountains.length || mountainPatches.size) {
-    const base = raw.mountains.map((m, i) =>
-      mountainPatches.has(i) ? { ...m, ...mountainPatches.get(i) } : m,
-    );
+  // so the earlier splices/appends are safe). A delete + same-id re-add in one journal
+  // (collab undo of a delete) KEEPS the original plan entries instead — deleteBlocks
+  // skips the purge for such survivors, so emitting fresh entries here would duplicate.
+  const reAdded = new Set(deletedIds.filter((id) => addedObjects.has(id)));
+  const planAddsFinal = reAdded.size ? planAdds.filter((e) => !reAdded.has(e.element)) : planAdds;
+  if (planAddsFinal.length) bytes = addPlanEntries(bytes, planAddsFinal);
+  // talisman charges: one entry per freshly minted TALISMAN MidItem instance (the
+  // reference's addItem cascade; the block is located by marker, so ordering is safe).
+  if (mintedTalismans.length) bytes = addTalismanCharges(bytes, mintedTalismans);
+  if (addedMountains.length || mountainPatches.size || deletedMountainIndices.size) {
+    // rebuild the single MidMountains block: pre-existing entries (re-roll patches applied,
+    // deleted entries dropped) followed by this session's additions. Dropping an entry renumbers
+    // the survivors' positional ids on reparse — deleteMountainOps pairs the matching doc-side
+    // renumber (delete + re-add the tail) so the semantic round-trip stays aligned.
+    const base = raw.mountains
+      .map((m, i) => (mountainPatches.has(i) ? { ...m, ...mountainPatches.get(i) } : m))
+      .filter((_, i) => !deletedMountainIndices.has(i));
     const all = [...base, ...addedMountains];
     const second = raw.mountainsBlockId ? parseInt(raw.mountainsBlockId.slice(6), 16) || 0 : 0;
     const frame = mountainsFrame(raw.version, second, all);
@@ -705,8 +836,8 @@ export function applyEditsToBytes(raw: SgRaw, ops: readonly EditOp[]): Uint8Arra
   // M4 mid-stream deletes — LAST, on the final buffer (deleteBlocks re-locates frames by
   // OBJ_ID, so earlier resizes/appends are safe; it also runs the referential guard and
   // decrements the OB0000 count).
-  if (deletedIds.length) {
-    bytes = deleteBlocks(bytes, deletedIds);
+  if (deletedIds.length || dependentDeleteIds.length) {
+    bytes = deleteBlocks(bytes, deletedIds, dependentDeleteIds);
   }
   return bytes;
 }

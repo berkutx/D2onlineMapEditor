@@ -254,7 +254,7 @@ export function assembleDocument(
       if (o.leaderCell !== undefined) o.leaderImage = o.garrison[o.leaderCell]?.unit;
       delete o.garrisonRaw;
       delete o.leaderUnitId;
-    } else if (o.type === "village" || o.type === "capital") {
+    } else if (o.type === "village" || o.type === "capital" || o.type === "ruin") {
       o.garrison = resolveCells(o.garrisonRaw);
       delete o.garrisonRaw;
     }

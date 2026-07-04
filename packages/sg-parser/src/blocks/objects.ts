@@ -258,6 +258,9 @@ export function readRuin(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(reward ? { reward } : {}),
     ...(item ? { item } : {}),
     ...(priority !== null ? { priority } : {}),
+    // the ruin's guardians (GROUP_ID + UNIT_0..5/POS_0..5 — same embedded-group layout as
+    // a fort's defense); resolved instance→impl in the assemble post-pass
+    garrisonRaw: readGarrison(buf, f, e),
   };
 }
 

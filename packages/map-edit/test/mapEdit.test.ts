@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { parseScenarioRaw, parseScenario, validateMap, ByteBuffer, iterateObjects } from "@d2/sg-parser";
+import { parseScenarioRaw, parseScenario, validateMap, ByteBuffer, iterateObjects, ruinFrame } from "@d2/sg-parser";
 import {
   setTerrain,
   setGround,
@@ -21,6 +21,7 @@ import {
   selectRoadSegment,
   eraseRoadCells,
   placeMountainOps,
+  deleteMountainOps,
   placeLandmarkOps,
   placeLocationOps,
   placeVisitorOps,
@@ -42,6 +43,34 @@ import {
 const RIDERS = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Riders.sg`;
 const DRAGON = String.raw`C:\GOG Games\last_version\Game\Campaign\The Power of Eldunari-v1-2 maps\Dragon_s teeth.sg`;
 const bytes = new Uint8Array(readFileSync(RIDERS));
+
+/** Walk the MidgardPlan block of `b` and return its entry count. Layout byte-verified:
+ *  BEGOBJECT\0 · <blockId(10)> i32 mapSize · <blockId(10)> i32 count · 40-byte entries. */
+const planCount = (b: Uint8Array): number => {
+  const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+  const avc = buf.indexOf(".?AVCMidgardPlan@@");
+  expect(avc).toBeGreaterThan(0);
+  const beg = buf.indexOf("BEGOBJECT", avc);
+  return buf.readInt32LE(beg + 10 + 10 + 4 + 10);
+};
+/** All plan cells whose ELEMENT ref equals `id` (entry = POS_X i32 POS_Y i32 ELEMENT ref). */
+const planCellsOf = (b: Uint8Array, id: string): { x: number; y: number }[] => {
+  const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+  const avc = buf.indexOf(".?AVCMidgardPlan@@");
+  const beg = buf.indexOf("BEGOBJECT", avc);
+  let p = beg + 10 + 10 + 4 + 10;
+  const count = buf.readInt32LE(p);
+  p += 4;
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const x = buf.readInt32LE(p + 5);
+    const y = buf.readInt32LE(p + 14);
+    const ref = buf.toString("latin1", p + 29, p + 39);
+    if (ref === id) out.push({ x, y });
+    p += 40;
+  }
+  return out;
+};
 
 describe("@d2/map-edit bits", () => {
   it("setters change only their field and preserve the other bits", () => {
@@ -565,15 +594,344 @@ describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
     expect(res.ok).toBe(true);
   });
 
-  it("fails loud on unsupported types and unknown ids", () => {
+  it("fails loud on refused/unsupported types and unknown ids", () => {
     const { doc, raw } = parseScenarioRaw(bytes);
-    const stack = doc.objects.find((o) => o.type === "stack")!;
-    expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: stack.id }])).toThrow(
-      /not supported yet/,
+    // capitals are load-bearing (race integrity) — deletion is REFUSED, not just unsupported
+    const capital = doc.objects.find((o) => o.type === "capital")!;
+    expect(capital, "Riders has a capital").toBeTruthy();
+    expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: capital.id }])).toThrow(
+      /refused/,
     );
+    // sites still lack a re-add frame for undo — unsupported, fail loud
+    const site = doc.objects.find(
+      (o) => o.type === "merchant" || o.type === "mage" || o.type === "trainer" || o.type === "mercenary",
+    );
+    if (site) {
+      expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: site.id }])).toThrow(
+        /not supported yet/,
+      );
+    }
     expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: "S143XX9999" }])).toThrow(
       /unknown object/,
     );
+  });
+
+  it("deletes a FREE stack: cascades garrison MidUnit + inventory MidItem, round-trips", () => {
+    // seed a fresh army (leader + a unit + an inventory item), export + reparse so it becomes a
+    // PRE-EXISTING block, then delete it — exercises the dependent-block cascade + OB0000 decrement.
+    const { doc: d0, raw: r0 } = parseScenarioRaw(bytes);
+    const owner = d0.players[0]!.id;
+    const units: ({ unit: string; level?: number; hp?: number } | null)[] =
+      [{ unit: "G000UU0001", level: 1, hp: 110 }, null, { unit: "G000UU0001", level: 3, hp: 50 }, null, null, null];
+    const place = placeStackOps(d0, 24, 25, { owner, units, leaderCell: 2 });
+    const stackId = (place.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
+    // give it an inventory item so a MidItem instance is also cascaded
+    const seedOps: EditOp[] = [...place, { kind: "patchObject", id: stackId, fields: { inventory: ["G000IG0001"] } }];
+    const seeded = applyEditsToBytes(r0, seedOps);
+
+    const { doc, raw } = parseScenarioRaw(seeded);
+    const stack = doc.objects.find((o) => o.id === stackId)!;
+    expect(stack, "seeded stack is now pre-existing").toBeTruthy();
+    const midUnits = (b: Uint8Array): number =>
+      [...iterateObjects(new ByteBuffer(b))].filter((o) => o.typeName === "MidUnit").length;
+    const midItems = (b: Uint8Array): number =>
+      [...iterateObjects(new ByteBuffer(b))].filter((o) => o.typeName === "MidItem").length;
+
+    const ops: EditOp[] = [{ kind: "deleteObject", id: stackId }];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === stackId)).toBeUndefined();
+    // the 2 garrison MidUnit instances + the 1 inventory MidItem are gone with the stack
+    expect(midUnits(out)).toBe(midUnits(seeded) - 2);
+    expect(midItems(out)).toBe(midItems(seeded) - 1);
+
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("delete-a-free-stack then UNDO (inverse addObject) restores its army and round-trips", () => {
+    const { doc: d0, raw: r0 } = parseScenarioRaw(bytes);
+    const owner = d0.players[0]!.id;
+    const units: ({ unit: string; level?: number; hp?: number } | null)[] =
+      [{ unit: "G000UU0001", level: 2, hp: 90 }, null, null, null, null, null];
+    const place = placeStackOps(d0, 26, 27, { owner, units, leaderCell: 0 });
+    const stackId = (place.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
+    const seeded = applyEditsToBytes(r0, [...place]);
+    const { doc, raw } = parseScenarioRaw(seeded);
+
+    const del: EditOp = { kind: "deleteObject", id: stackId };
+    const inverse = invertOps(doc, [del]); // = addObject(the full stack, garrison intact)
+    const journal = [del, ...inverse];
+    const out = applyEditsToBytes(raw, journal);
+    const re = parseScenario(out);
+    const restored = re.objects.find(
+      (o) => o.type === "stack" && o.pos.x === 26 && o.pos.y === 27,
+    ) as { garrison?: ({ unit: string } | null)[] } | undefined;
+    expect(restored).toBeTruthy();
+    expect(restored!.garrison?.[0]?.unit).toBe("G000UU0001"); // army survived the delete+re-add
+    const res = roundTripSemantic(doc, out, journal);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+
+  it("refuses to delete a city's VISITING hero stack (manage it via the city)", () => {
+    // seed a city visitor (empty stack linked via INSIDE + city.STACK), reparse, then try to delete
+    const { doc: d0, raw: r0 } = parseScenarioRaw(bytes);
+    const city = d0.objects.find((o) => o.type === "capital" || o.type === "village")!;
+    const place = placeVisitorOps(d0, { id: city.id, pos: city.pos, owner: (city as { owner?: string }).owner });
+    const visitorId = (place.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
+    const seeded = applyEditsToBytes(r0, place);
+    const { raw } = parseScenarioRaw(seeded);
+    expect(() => applyEditsToBytes(raw, [{ kind: "deleteObject", id: visitorId }])).toThrow(
+      /visiting hero/,
+    );
+  });
+
+  // MidTalismanCharges entry count: <blockId(10)> int32 count right after BEGOBJECT\0
+  // (byte-verified layout: toolsqt D2TalismanCharges.h == Riders.sg hexdump).
+  const talismanCount = (b: Uint8Array): number => {
+    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+    const avc = buf.indexOf(".?AVCMidTalismanCharges@@");
+    expect(avc, "map has a MidTalismanCharges block").toBeGreaterThan(0);
+    let p = buf.indexOf("BEGOBJECT", avc) + 9;
+    if (buf[p] === 0) p++;
+    return buf.readInt32LE(p + 10);
+  };
+  // a real GItem talisman template (itemCatalog catKey L_TALISMAN — "Амулет Орд Нежити")
+  const TALISMAN = "G000IG9126";
+  const TALIS_OPTS = { talismanTemplates: new Set([TALISMAN]) };
+
+  it("chest with a TALISMAN: minted MidItem gets a charges entry; chest delete purges it", () => {
+    const { doc: d0, raw: r0 } = parseScenarioRaw(bytes);
+    const tc0 = talismanCount(bytes);
+    const place = placeChestOps(d0, 30, 31, 1, [TALISMAN, "G000IG0001"]);
+    const chestId = (place.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
+    const seeded = applyEditsToBytes(r0, place, TALIS_OPTS);
+    // exactly ONE charges entry added (the potion G000IG0001 gets none), Riders' 14 intact
+    expect(talismanCount(seeded)).toBe(tc0 + 1);
+    const resAdd = roundTripSemantic(d0, seeded, place);
+    expect(resAdd.reason).toBeUndefined();
+    expect(resAdd.ok).toBe(true);
+
+    // delete the chest -> its 2 MidItem instances cascade, the talisman's TC entry purged
+    const { doc, raw } = parseScenarioRaw(seeded);
+    const ops: EditOp[] = [{ kind: "deleteObject", id: chestId }];
+    const out = applyEditsToBytes(raw, ops);
+    expect(talismanCount(out)).toBe(tc0);
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === chestId)).toBeUndefined();
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("stack with a TALISMAN in inventory: delete cascades the item AND its charges entry", () => {
+    const { doc: d0, raw: r0 } = parseScenarioRaw(bytes);
+    const tc0 = talismanCount(bytes);
+    const owner = d0.players[0]!.id;
+    const place = placeStackOps(d0, 32, 33, {
+      owner, units: [{ unit: "G000UU0001", level: 1, hp: 100 }, null, null, null, null, null], leaderCell: 0,
+    });
+    const stackId = (place.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
+    const seeded = applyEditsToBytes(
+      r0,
+      [...place, { kind: "patchObject", id: stackId, fields: { inventory: [TALISMAN] } }],
+      TALIS_OPTS,
+    );
+    expect(talismanCount(seeded)).toBe(tc0 + 1);
+
+    const { doc, raw } = parseScenarioRaw(seeded);
+    const ops: EditOp[] = [{ kind: "deleteObject", id: stackId }];
+    const out = applyEditsToBytes(raw, ops);
+    expect(talismanCount(out)).toBe(tc0); // removeItem cascade: entry gone with the instance
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(parseScenario(out)).ok).toBe(true);
+  });
+
+  it("deletes a VILLAGE: garrison MidUnit cascade, plan -16; delete+UNDO keeps ONE plan set", () => {
+    const { doc: d0, raw: r0 } = parseScenarioRaw(bytes);
+    const place = placeVillageOps(d0, 40, 41, "Сносимск");
+    const vilId = (place.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
+    const g = [null, { unit: "G000UU0001", level: 2, hp: 80 }, null, null, null, null];
+    const seeded = applyEditsToBytes(r0, [...place, { kind: "patchObject", id: vilId, fields: { garrison: g } }]);
+    const { doc, raw } = parseScenarioRaw(seeded);
+    const midUnits = (b: Uint8Array): number =>
+      [...iterateObjects(new ByteBuffer(b))].filter((o) => o.typeName === "MidUnit").length;
+
+    // plain delete: village + its garrison unit gone, its 16 plan entries purged
+    const del: EditOp = { kind: "deleteObject", id: vilId };
+    const out = applyEditsToBytes(raw, [del]);
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === vilId)).toBeUndefined();
+    expect(midUnits(out)).toBe(midUnits(seeded) - 1);
+    expect(planCount(out)).toBe(planCount(seeded) - 16);
+    const res = roundTripSemantic(doc, out, [del]);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+
+    // delete + UNDO (same-id re-add): the survivor keeps EXACTLY ONE set of plan entries
+    // (the reviewer's regression: purge used to kill both the original AND the re-added set)
+    const inverse = invertOps(doc, [del]);
+    const journal = [del, ...inverse];
+    const outUndo = applyEditsToBytes(raw, journal);
+    expect(planCount(outUndo)).toBe(planCount(seeded)); // not -16, not +16
+    expect(planCellsOf(outUndo, vilId).length).toBe(16);
+    const resU = roundTripSemantic(doc, outUndo, journal);
+    expect(resU.reason).toBeUndefined();
+    expect(resU.ok).toBe(true);
+  });
+
+  it("duplicate deleteObject of the same id (peer race) splices ONE frame, not two", () => {
+    const { raw, doc } = parseScenarioRaw(bytes);
+    const victim = doc.objects.find((o) => o.type === "landmark" && o.baseType)!;
+    const twice: EditOp[] = [
+      { kind: "deleteObject", id: victim.id },
+      { kind: "deleteObject", id: victim.id },
+    ];
+    const out = applyEditsToBytes(raw, twice); // must not shift-cut an innocent range
+    const countAt = (b: Uint8Array): number => {
+      const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
+      const obAt = buf.lastIndexOf("OB0000", buf.indexOf("WHAT"));
+      return buf.readInt32LE(obAt + 6);
+    };
+    expect(countAt(out)).toBe(countAt(bytes) - 1); // decremented ONCE
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === victim.id)).toBeUndefined();
+    expect(validateMap(re).ok).toBe(true);
+  });
+
+  it("ruinFrame reproduces a REAL Riders ruin frame byte-for-byte (layout gold check)", () => {
+    const { raw } = parseScenarioRaw(bytes);
+    const buf = new ByteBuffer(bytes);
+    const ruin = raw.objects.find((o) => o.typeName === "MidRuin")!;
+    // original frame slice: [WHAT .. ENDOBJECT+NUL)
+    const start = buf.lastIndexOf("WHAT", ruin.fieldsFrom);
+    const end = buf.indexOf("ENDOBJECT", ruin.fieldsFrom) + 10;
+    const original = bytes.subarray(start, end);
+    // rebuild the frame from RAW field reads (same instance ids -> must be byte-identical)
+    const rd = (tag: string): string | null => {
+      const i = buf.indexOf(tag, ruin.fieldsFrom);
+      if (i < 0 || i >= ruin.fieldsEnd) return null;
+      let at = i + tag.length;
+      const len = buf.readInt32LE(at);
+      at += 4;
+      return buf.cp1251Slice(at, at + len).replace(/\0+$/, "");
+    };
+    const ri = (tag: string): number => {
+      const i = buf.indexOf(tag, ruin.fieldsFrom);
+      return buf.readInt32LE(i + tag.length);
+    };
+    const unitSlots = Array.from({ length: 6 }, (_, s) => rd(`UNIT_${s}`) ?? "G000000000");
+    const posOfCell = Array.from({ length: 6 }, (_, s) => ri(`POS_${s}`));
+    const second = parseInt(ruin.id.slice(6), 16);
+    const rebuilt = ruinFrame("S143", second, {
+      posX: ri("POS_X"), posY: ri("POS_Y"),
+      name: rd("TITLE") ?? "", desc: rd("DESC") ?? "",
+      image: ri("IMAGE"), reward: rd("CASH") ?? "",
+      item: rd("ITEM") ?? undefined, looter: rd("LOOTER") ?? undefined,
+      priority: ri("AIPRIORITY"),
+      unitSlots, posOfCell,
+    });
+    expect(Buffer.from(rebuilt).toString("hex")).toBe(Buffer.from(original).toString("hex"));
+  });
+
+  it("deletes a RUIN: guardian MidUnit cascade, plan -9; delete+UNDO restores the guards", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    // count [0B 00 00 00]+id refs in the whole file: own frame carries 3 (OBJ_ID/RUIN_ID/
+    // GROUP_ID) + 9 plan entries = 12; MORE means an event/quest still points at the ruin
+    // (the referential guard would — correctly — refuse that delete; pick a clean one).
+    const refCount = (id: string): number => {
+      const hay = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const needle = Buffer.concat([Buffer.from([0x0b, 0, 0, 0]), Buffer.from(id, "latin1")]);
+      let n = 0;
+      for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + 1)) n++;
+      return n;
+    };
+    const ruin = doc.objects.find(
+      (o) =>
+        o.type === "ruin" &&
+        (o as { garrison?: unknown[] }).garrison?.some(Boolean) &&
+        refCount(o.id) === 12,
+    ) as { id: string; garrison: ({ unit: string } | null)[] };
+    expect(ruin, "Riders has an event-free guarded ruin").toBeTruthy();
+    const guards = ruin.garrison.filter(Boolean).length;
+    expect(guards).toBeGreaterThan(0);
+    const midUnits = (b: Uint8Array): number =>
+      [...iterateObjects(new ByteBuffer(b))].filter((o) => o.typeName === "MidUnit").length;
+
+    // plain delete: ruin + its guards gone, its 9 plan entries purged
+    const del: EditOp = { kind: "deleteObject", id: ruin.id };
+    const out = applyEditsToBytes(raw, [del]);
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === ruin.id)).toBeUndefined();
+    expect(midUnits(out)).toBe(midUnits(bytes) - guards);
+    expect(planCount(out)).toBe(planCount(bytes) - 9);
+    const res = roundTripSemantic(doc, out, [del]);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
+
+    // delete + UNDO: the guards come back (fresh MidUnit instances, same units/levels/hp)
+    const journal = [del, ...invertOps(doc, [del])];
+    const outUndo = applyEditsToBytes(raw, journal);
+    const reU = parseScenario(outUndo);
+    const restored = reU.objects.find((o) => o.id === ruin.id) as typeof ruin | undefined;
+    expect(restored).toBeTruthy();
+    expect(restored!.garrison.filter(Boolean).length).toBe(guards);
+    expect(planCount(outUndo)).toBe(planCount(bytes)); // survivor keeps ONE set of entries
+    const resU = roundTripSemantic(doc, outUndo, journal);
+    expect(resU.reason).toBeUndefined();
+    expect(resU.ok).toBe(true);
+  });
+
+  it("deletes a mountain entry: block rebuilt, survivors renumber, terrain restored, round-trips", () => {
+    // seed 3 mountains on EMPTY cells (Riders already has 168 mountains — placing on one would
+    // share its footprint and correctly skip the restore), reparse so they're pre-existing
+    // entries, then delete the 2nd-to-last so exactly one survivor renumbers.
+    const { doc: d0, raw: r0 } = parseScenarioRaw(bytes);
+    const mtnCells = new Set(
+      d0.objects.filter((o) => o.type === "mountains").flatMap((m) => {
+        const w = (m as { w?: number }).w ?? 1, h = (m as { h?: number }).h ?? 1, out: string[] = [];
+        for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) out.push(`${m.pos.x + dx},${m.pos.y + dy}`);
+        return out;
+      }),
+    );
+    const spots: [number, number, number][] = [];
+    for (let y = 2; y < d0.size - 1 && spots.length < 3; y += 5)
+      for (let x = 2; x < d0.size - 1 && spots.length < 3; x += 5)
+        if (!mtnCells.has(`${x},${y}`) && d0.terrain.cells[y * d0.size + x]!.value !== 5)
+          spots.push([x, y, 3]);
+    expect(spots.length).toBe(3);
+    let d = d0;
+    const seedOps: EditOp[] = [];
+    for (const [x, y, img] of spots) {
+      const ops = placeMountainOps(d, x, y, 1, 1, img);
+      seedOps.push(...ops);
+      d = applyOps(d, ops);
+    }
+    const seeded = applyEditsToBytes(r0, seedOps);
+    const { doc, raw } = parseScenarioRaw(seeded);
+    const mnts = doc.objects.filter((o) => o.type === "mountains");
+    expect(mnts.length).toBeGreaterThanOrEqual(3);
+    const target = mnts[mnts.length - 2]!; // one entry follows it -> renumbers
+    const tx = target.pos.x, ty = target.pos.y;
+
+    const ops = deleteMountainOps(doc, target.id);
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect(re.objects.filter((o) => o.type === "mountains").length).toBe(mnts.length - 1);
+    // the target's footprint reverted to the bare mountain-terrain value (5)
+    expect(re.terrain.cells[ty * re.size + tx]!.value).toBe(5);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(re).ok).toBe(true);
   });
 });
 
@@ -1158,33 +1516,6 @@ describe("@d2/map-edit location editor", () => {
 });
 
 describe("@d2/map-edit addObject writers (chest / village / stack) + MidgardPlan", () => {
-  /** Walk the MidgardPlan block of `b` and return its entry count. Layout byte-verified:
-   *  BEGOBJECT\0 · <blockId(10)> i32 mapSize · <blockId(10)> i32 count · 40-byte entries. */
-  const planCount = (b: Uint8Array): number => {
-    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
-    const avc = buf.indexOf(".?AVCMidgardPlan@@");
-    expect(avc).toBeGreaterThan(0);
-    const beg = buf.indexOf("BEGOBJECT", avc);
-    return buf.readInt32LE(beg + 10 + 10 + 4 + 10);
-  };
-  /** All plan cells whose ELEMENT ref equals `id` (entry = POS_X i32 POS_Y i32 ELEMENT ref). */
-  const planCellsOf = (b: Uint8Array, id: string): { x: number; y: number }[] => {
-    const buf = Buffer.from(b.buffer, b.byteOffset, b.byteLength);
-    const avc = buf.indexOf(".?AVCMidgardPlan@@");
-    const beg = buf.indexOf("BEGOBJECT", avc);
-    let p = beg + 10 + 10 + 4 + 10;
-    const count = buf.readInt32LE(p);
-    p += 4;
-    const out: { x: number; y: number }[] = [];
-    for (let i = 0; i < count; i++) {
-      const x = buf.readInt32LE(p + 5);
-      const y = buf.readInt32LE(p + 14);
-      const ref = buf.toString("latin1", p + 29, p + 39);
-      if (ref === id) out.push({ x, y });
-      p += 40;
-    }
-    return out;
-  };
   const addedId = (ops: EditOp[]): string =>
     (ops.find((o) => o.kind === "addObject") as Extract<EditOp, { kind: "addObject" }>).object.id;
 

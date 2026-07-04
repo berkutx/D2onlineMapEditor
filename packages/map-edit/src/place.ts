@@ -16,6 +16,10 @@ import type { EditOp } from "./ops.js";
 /** Mountain-ground cell value (terrain 5 | ground 4), as the editor stamps. */
 export const MOUNTAIN_CELL = 37;
 
+/** Cell value a removed mountain's footprint reverts to (terrain 5 | ground 0) — the reference's
+ *  mountain-removal restore value (MapStateHolder), i.e. bare mountain terrain, now passable. */
+export const MOUNTAIN_RESTORE = 5;
+
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
 
 /** True iff a w×h footprint anchored at (cx,cy) fits on the map (no overlap check yet). */
@@ -51,6 +55,60 @@ export function placeMountainOps(
         ops.push({ kind: "setCell", x, y, value: MOUNTAIN_CELL });
       }
     }
+  }
+  return ops;
+}
+
+/**
+ * Ops to DELETE a mountain (one entry of the single MidMountains block). Mountains carry
+ * POSITIONAL ids (`<blockId>#<index>`), so removing entry n renumbers every later entry on the
+ * byte-side block rebuild. To keep the in-memory doc aligned with that reparse, we delete the
+ * target AND every mountain after it, then RE-ADD the tail shifted down one index — the objects
+ * are fungible (nothing references a mountain id), so this is a safe reindex. The target's
+ * footprint is reverted to the bare mountain-terrain value (5); cells shared with a surviving
+ * mountain keep their 37 stamp. Emit order: restore setCells, deletes, then the re-adds.
+ */
+export function deleteMountainOps(doc: MapDocument, id: string): EditOp[] {
+  const hash = id.indexOf("#");
+  if (hash < 0) throw new Error(`deleteMountainOps: ${id} is not a mountain entry id`);
+  const blockPrefix = id.slice(0, hash); // e.g. "S143ML0000" — every entry shares it (one block)
+  // mountains in positional-index order (readMountains emits #0,#1,… — sort to be safe)
+  const mountains = doc.objects
+    .filter((o): o is Extract<MapObject, { type: "mountains" }> => o.type === "mountains")
+    .map((o) => ({ o, idx: parseInt(o.id.slice(o.id.indexOf("#") + 1), 10) }))
+    .sort((a, b) => a.idx - b.idx);
+  const n = mountains.findIndex((m) => m.o.id === id);
+  if (n < 0) throw new Error(`deleteMountainOps: mountain ${id} not in document`);
+  const target = mountains[n]!.o;
+
+  // cells covered by any SURVIVING mountain — keep their 37 stamp when restoring the target
+  const survivorCells = new Set<string>();
+  for (let i = 0; i < mountains.length; i++) {
+    if (i === n) continue;
+    const m = mountains[i]!.o;
+    const mw = m.w ?? 1, mh = m.h ?? 1;
+    for (let dx = 0; dx < mw; dx++) for (let dy = 0; dy < mh; dy++)
+      survivorCells.add(`${m.pos.x + dx},${m.pos.y + dy}`);
+  }
+
+  const ops: EditOp[] = [];
+  const size = doc.size;
+  const tw = target.w ?? 1, th = target.h ?? 1;
+  for (let dx = 0; dx < tw; dx++) {
+    for (let dy = 0; dy < th; dy++) {
+      const x = target.pos.x + dx, y = target.pos.y + dy;
+      if (x < 0 || y < 0 || x >= size || y >= size) continue;
+      if (survivorCells.has(`${x},${y}`)) continue;
+      const cell = doc.terrain.cells[y * size + x];
+      if (cell && cell.value !== MOUNTAIN_RESTORE) {
+        ops.push({ kind: "setCell", x, y, value: MOUNTAIN_RESTORE });
+      }
+    }
+  }
+  // delete the target + tail, then re-add the tail (old i -> new id #(i-1))
+  for (let i = n; i < mountains.length; i++) ops.push({ kind: "deleteObject", id: mountains[i]!.o.id });
+  for (let i = n + 1; i < mountains.length; i++) {
+    ops.push({ kind: "addObject", object: { ...mountains[i]!.o, id: `${blockPrefix}#${i - 1}` } });
   }
   return ops;
 }

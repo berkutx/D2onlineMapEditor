@@ -125,7 +125,7 @@ describe("POST /api/maps/:id/clone", () => {
 });
 
 describe("GET/PUT /api/maps/:id/project (server-saved EditorProject)", () => {
-  it("round-trips a project per (mapId, clientId); other clients see 404; validates shape", async () => {
+  it("round-trips a project per (mapId, clientId); other clients see 204; validates shape", async () => {
     const mapId = await createMap(OWNER);
     const project = {
       version: 2,
@@ -153,13 +153,14 @@ describe("GET/PUT /api/maps/:id/project (server-saved EditorProject)", () => {
     // the server zod-normalizes on PUT: editor-only fields get their schema defaults
     expect(got.json()).toEqual({ ...project, anchors: {}, autoVars: [] });
 
-    // another visitor has no saved project for this map
+    // another visitor has no saved project for this map — 204 "nothing yet" (a success,
+    // so the browser console stays clean on every first visit), NOT a 404 error
     const other = await app.inject({
       method: "GET",
       url: REST.mapProject(mapId),
       headers: { "x-client-id": STRANGER },
     });
-    expect(other.statusCode).toBe(404);
+    expect(other.statusCode).toBe(204);
 
     // no identity -> 400; wrong base id -> 400; garbage -> 400
     expect((await app.inject({ method: "GET", url: REST.mapProject(mapId) })).statusCode).toBe(400);

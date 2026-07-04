@@ -57,6 +57,7 @@ const sanitize = (s: string): string => s.replace(/[^\w.-]+/g, "_").slice(0, 40)
 function buildAndValidate(
   baseBytes: Uint8Array,
   project: EditorProject,
+  talismanTemplates?: ReadonlySet<string>,
 ): { report: ValidationReport; bytes?: Uint8Array } {
   const { doc, raw } = parseScenarioRaw(baseBytes);
   // Fold add→delete pairs (a collab undo of a placement) BEFORE the byte writer: it cannot
@@ -70,7 +71,7 @@ function buildAndValidate(
   let bytes: Uint8Array | undefined;
   let buildError: string | undefined;
   try {
-    bytes = applyEditsToBytes(raw, ops);
+    bytes = applyEditsToBytes(raw, ops, { talismanTemplates });
   } catch (e) {
     buildError = e instanceof Error ? e.message : String(e);
   }
@@ -112,6 +113,26 @@ function buildAndValidate(
     );
   }
   return { report, bytes };
+}
+
+/** Lazily load + cache the TALISMAN template-id set from public/assets/itemCatalog.json
+ *  (catKey L_TALISMAN) — the byte writer adds a MidTalismanCharges entry per minted talisman
+ *  instance (the reference's addItem cascade). A missing catalog degrades to an empty set
+ *  (entries simply not added) with one warning — asset volumes without the catalog stay usable. */
+let talismanSetCache: ReadonlySet<string> | null = null;
+async function loadTalismanTemplates(): Promise<ReadonlySet<string>> {
+  if (!talismanSetCache) {
+    try {
+      const path = join(config.ASSETS_DIR, "itemCatalog.json");
+      const items = JSON.parse(await readFile(path, "utf-8")) as { id: string; catKey?: string }[];
+      talismanSetCache = new Set(items.filter((i) => i.catKey === "L_TALISMAN").map((i) => i.id));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[maps] itemCatalog.json unavailable — talisman charges entries disabled (${String(e)})`);
+      talismanSetCache = new Set();
+    }
+  }
+  return talismanSetCache;
 }
 
 /** Lazily load + cache the decoration catalog as a wall set (by iso orient) + a decor set
@@ -355,7 +376,9 @@ export async function registerMapRoutes(
       const text = await readFile(projectPath(req.params.id, clientId), "utf-8");
       return reply.header("cache-control", "no-store").type("application/json").send(text);
     } catch {
-      return reply.code(404).send({ error: "no saved project" });
+      // "no saved project yet" is the NORMAL first-visit answer, not an error — 204 keeps the
+      // browser console clean (it logs every 4xx fetch as an error even when the client handles it)
+      return reply.code(204).send();
     }
   });
 
@@ -400,7 +423,7 @@ export async function registerMapRoutes(
         return reply.code(404).send({ error: "map not found" });
       }
 
-      const { report, bytes } = buildAndValidate(base.bytes, project);
+      const { report, bytes } = buildAndValidate(base.bytes, project, await loadTalismanTemplates());
 
       if (action === "validate") {
         return reply.send(report);
@@ -466,7 +489,7 @@ export async function registerMapRoutes(
 
     // validate the generated ops as one more commit on top of the project
     const augmented = ops.length ? pushCommit(project, ops) : project;
-    const { report } = buildAndValidate(base.bytes, augmented);
+    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates());
     const debug = {
       serverMs: Date.now() - t0,
       opCount: ops.length,
@@ -577,7 +600,7 @@ export async function registerMapRoutes(
     }
 
     const augmented = ops.length ? pushCommit(project, ops) : project;
-    const { report } = buildAndValidate(base.bytes, augmented);
+    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates());
     const debug = {
       serverMs: Date.now() - t0,
       opCount: ops.length,

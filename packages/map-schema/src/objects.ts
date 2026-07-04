@@ -138,8 +138,12 @@ export const RuinObject = z.object({
   looted: z.boolean().default(false), // derived: LOOTER != none
   looter: z.string().optional(), // raw LOOTER id (player uid / "000000")
   reward: z.string().optional(), // CASH reward string "G####:R####:Y####:E####:W####:B####"
-  item: z.string().optional(), // ITEM single artifact reward id ("000000" = none)
+  item: z.string().optional(), // ITEM single artifact reward — a GLOBAL GItem template id
   priority: z.number().int().optional(), // AIPRIORITY 0..6
+  // the ruin's GUARDIANS (embedded GROUP_ID + UNIT_0..5/POS_0..5, like a fort's defense) —
+  // byte-verified: every Riders ruin carries 2-5 MidUnit guards
+  garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit
+  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
 });
 
 const SiteCommon = {
