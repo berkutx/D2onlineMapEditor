@@ -100,6 +100,14 @@ export const useUnitStore = defineStore("unit", () => {
     return catalog.value[id]?.name || id;
   }
 
+  /** May this unit LEAD a stack (LEADER_ID)? Only L_LEADER + L_NOBLE — the reference
+   *  editor's filter, byte-verified: 14459 stack + 3333 template leaders across 134
+   *  shipped maps are 100% these two categories. Unknown ids → false (fail closed). */
+  function isLeaderCategory(id: string | null | undefined): boolean {
+    const e = get(id);
+    return !!e && (e.catKey === "L_LEADER" || e.catKey === "L_NOBLE");
+  }
+
   /** Units grouped by subrace (ascending subraceId) — the main way to find a faction's roster. */
   const bySubrace = computed<UnitGroup[]>(() => {
     const by = new Map<number, UnitEntry[]>();
@@ -149,5 +157,5 @@ export const useUnitStore = defineStore("unit", () => {
     return out;
   });
 
-  return { catalog, loaded, loading, error, load, all, get, nameOf, bySubrace, byCat, byLevel };
+  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, bySubrace, byCat, byLevel };
 });

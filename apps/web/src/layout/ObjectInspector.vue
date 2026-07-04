@@ -8,6 +8,7 @@
  */
 import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
+import { ElMessage } from "element-plus";
 import { Close, Delete } from "@element-plus/icons-vue";
 import { placeVisitorOps } from "@d2/map-edit";
 import { useToolStore } from "../stores/toolStore";
@@ -326,8 +327,17 @@ const stackLeaderCell = computed(() => (obj.value?.type === "stack" ? obj.value.
 function commitStackFormation(st: StackLike, g: (GarrUnit | null)[], leaderCell: number): void {
   if (!st) return;
   let lc = leaderCell;
-  if (lc < 0 || !g[lc]) lc = g.findIndex(Boolean); // keep the leader on a filled cell
+  if (lc < 0 || !g[lc]) {
+    // re-crown: PREFER a leader-category unit (герой/вор) — the import validator's rule;
+    // fall back to any filled cell only when the formation has no leader-category unit
+    // (transient state while assembling — the UI warns below).
+    const leaderIdx = g.findIndex((c) => c && unitStore.isLeaderCategory(c.unit));
+    lc = leaderIdx >= 0 ? leaderIdx : g.findIndex(Boolean);
+  }
   const leaderImage = lc >= 0 ? g[lc]?.unit : undefined;
+  if (lc >= 0 && g[lc] && !unitStore.isLeaderCategory(g[lc]!.unit)) {
+    ElMessage.warning("В отряде нет героя/вора — игра требует юнита-лидера во главе");
+  }
   editStore.commit([{ kind: "patchObject", id: st.id, fields: { garrison: g, leaderCell: lc, leaderImage } }]);
 }
 function stackSetUnit(st: StackLike, cell: number, unitId: string): void {
@@ -352,7 +362,13 @@ function stackSetStat(st: StackLike, cell: number, key: "level" | "hp", v: numbe
 }
 function stackSetLeader(st: StackLike, cell: number): void {
   if (!st) return;
-  commitStackFormation(st, garr6(st).map((c) => (c ? { ...c } : null)), cell);
+  const g = garr6(st);
+  // the star button is already disabled for non-leaders — this is the belt to its braces
+  if (!unitStore.isLeaderCategory(g[cell]?.unit)) {
+    ElMessage.warning("Вести отряд может только герой или вор (категория лидера)");
+    return;
+  }
+  commitStackFormation(st, g.map((c) => (c ? { ...c } : null)), cell);
 }
 /** Jump the inspector to the city's visiting hero stack for full editing (order/equip/inventory). */
 function openVisitor(): void {
@@ -820,9 +836,12 @@ function close(): void {
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
       <template v-if="obj.type === 'village' || obj.type === 'capital'">
         <div class="d2-sec">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
+        <!-- roster=soldiers: в эталоне гарнизонные пикеры городов никогда не предлагают
+             героев (Village.qml leader:false) — герой в городе живёт ГОСТЕМ ниже -->
         <GarrisonEditor
           :garrison="defenseGarrison"
           :count="defenseCount"
+          roster="soldiers"
           @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
           @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
           @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"

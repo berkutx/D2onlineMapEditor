@@ -6,20 +6,25 @@
  * (even cell = front, cell/2 = column). DOM order for the 2-col row-major grid = [1,0,3,2,5,4].
  * Presentational only: emits intent; the parent (ObjectInspector) owns the undoable patchObject.
  */
+import { computed } from "vue";
 import UnitPicker from "./UnitPicker.vue";
 import UnitIcon from "./UnitIcon.vue";
 import { useUnitStore } from "../stores/unitStore";
 
 type GarrUnit = { unit: string; level: number; hp: number };
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     garrison: (GarrUnit | null)[]; // length 6, by formation cell
     count: number;
     readonly?: boolean; // visitor garrison is shown read-only until the full Отряд editor lands
     leaderCell?: number; // when set (stack mode), shows a ★ leader toggle on filled cells
+    /** Roster for NON-leader cells in stack mode / all cells otherwise: city/ruin garrisons
+     *  pass "soldiers" (the reference editor never offers heroes there). Default keeps the
+     *  old unfiltered behavior for surfaces not yet audited. */
+    roster?: "soldiers" | "all";
   }>(),
-  { readonly: false, leaderCell: undefined },
+  { readonly: false, leaderCell: undefined, roster: "all" },
 );
 const emit = defineEmits<{
   setUnit: [cell: number, unitId: string];
@@ -33,6 +38,25 @@ const unitStore = useUnitStore();
 // Row-major order for a 2-col grid: each row = one formation column (cell/2); left=back (odd),
 // right=front (even). Row0=[1,0], row1=[3,2], row2=[5,4].
 const CELLS = [1, 0, 3, 2, 5, 4];
+
+/** Stack mode: does the formation already have a LEADER-category unit in the leader cell?
+ *  Mirrors the reference Stack.qml binding `unitsView.leader: !garrison.hasLeader`. */
+const hasLeader = computed(
+  () =>
+    props.leaderCell !== undefined &&
+    props.leaderCell >= 0 &&
+    unitStore.isLeaderCategory(props.garrison[props.leaderCell]?.unit),
+);
+/** Per-cell picker roster: while the stack lacks a leader, EVERY pick offers leaders
+ *  (первый юнит = герой/вор); once led, the leader cell re-picks leaders, others soldiers. */
+function rosterFor(cell: number): "leaders" | "soldiers" | "all" {
+  if (props.leaderCell === undefined) return props.roster; // not a stack (city/ruin garrison)
+  if (!hasLeader.value) return "leaders";
+  return cell === props.leaderCell ? "leaders" : "soldiers";
+}
+/** Only a leader-category unit may wear the star (import validator's rule). */
+const starAllowed = (cell: number): boolean =>
+  unitStore.isLeaderCategory(props.garrison[cell]?.unit);
 
 function onPick(cell: number, v: string | null): void {
   if (v) emit("setUnit", cell, v);
@@ -62,16 +86,22 @@ function onPick(cell: number, v: string | null): void {
             <UnitPicker
               :model-value="garrison[cell]?.unit ?? null"
               nullable
-              :title="`Юнит — ${cell % 2 === 0 ? 'передняя' : 'задняя'} линия`"
+              :roster="rosterFor(cell)"
+              :title="rosterFor(cell) === 'leaders' ? 'Лидер отряда — герой или вор' : `Юнит — ${cell % 2 === 0 ? 'передняя' : 'задняя'} линия`"
               @update:model-value="(v) => onPick(cell, v)"
             />
             <button
               v-if="leaderCell !== undefined && garrison[cell]"
               type="button"
               class="garr-leader"
-              :class="{ active: leaderCell === cell }"
-              :title="leaderCell === cell ? 'Лидер отряда' : 'Сделать лидером'"
-              @click="emit('setLeader', cell)"
+              :class="{ active: leaderCell === cell, blocked: !starAllowed(cell) }"
+              :disabled="!starAllowed(cell)"
+              :title="
+                leaderCell === cell ? 'Лидер отряда'
+                : starAllowed(cell) ? 'Сделать лидером'
+                : 'Вести отряд может только герой или вор (категория лидера)'
+              "
+              @click="starAllowed(cell) && emit('setLeader', cell)"
             >★</button>
           </div>
           <div v-if="garrison[cell]" class="garr-stats">
@@ -183,6 +213,8 @@ function onPick(cell: number, v: string | null): void {
 }
 .garr-leader:hover { color: var(--el-color-warning); }
 .garr-leader.active { color: var(--el-color-warning); }
+.garr-leader.blocked { opacity: 0.3; cursor: not-allowed; }
+.garr-leader.blocked:hover { color: var(--el-text-color-placeholder); }
 /* stat rows STACK vertically inside a (narrow, half-width) cell so HP always fits */
 .garr-stats {
   display: flex;

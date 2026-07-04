@@ -79,7 +79,10 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
       </div>
       <div class="tpl-leader">
         <label>Лидер</label>
-        <UnitPicker :model-value="sel.leader || null" nullable @update:model-value="patch({ leader: $event || '' })" />
+        <!-- вести отряд может только герой/вор — правило эталона (byte-verified: 3333
+             лидеров шаблонов на отгруженных картах = 100% L_LEADER/L_NOBLE) -->
+        <UnitPicker :model-value="sel.leader || null" nullable roster="leaders"
+          title="Лидер отряда — герой или вор" @update:model-value="patch({ leader: $event || '' })" />
         <el-input-number :model-value="sel.leaderLevel" :min="1" :max="10" size="small" controls-position="right"
           style="width: 92px" @update:model-value="patch({ leaderLevel: ($event as number) ?? 1 })" />
       </div>
@@ -87,7 +90,7 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
         <div class="tpl-units-lbl d2-sec">Состав (6 ячеек):</div>
         <div v-for="i in 6" :key="i" class="tpl-cell">
           <span class="tpl-cell-n">{{ i - 1 }}</span>
-          <UnitPicker :model-value="cell(i - 1)?.unit ?? null" nullable
+          <UnitPicker :model-value="cell(i - 1)?.unit ?? null" nullable roster="soldiers"
             @update:model-value="setCell(i - 1, $event)" />
           <el-input-number v-if="cell(i - 1)" :model-value="cell(i - 1)!.level" :min="1" :max="10"
             size="small" controls-position="right" style="width: 84px"

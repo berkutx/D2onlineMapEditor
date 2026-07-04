@@ -30,8 +30,18 @@ const props = withDefaults(
     nullable?: boolean;
     title?: string;
     triggerLabel?: string;
+    /**
+     * Category roster (mirrors the reference editor's UnitSelectModel.leader filter):
+     *   leaders  — ONLY L_LEADER + L_NOBLE (герои и воры) — the stack-leader pick;
+     *   soldiers — everything EXCEPT leaders and summons/illusions (the Qt default
+     *              showSummons=false; guardians pass, matching shipped maps);
+     *   all      — unfiltered (city/ruin stocks, mercenaries).
+     * Byte-verified: 14459 stack + 3333 template leaders across 134 shipped maps are
+     * 100% L_LEADER/L_NOBLE — nothing else ever leads.
+     */
+    roster?: "leaders" | "soldiers" | "all";
   }>(),
-  { modelValue: null, nullable: false, title: "Выбор юнита", triggerLabel: "" },
+  { modelValue: null, nullable: false, title: "Выбор юнита", triggerLabel: "", roster: "all" },
 );
 const emit = defineEmits<{
   "update:modelValue": [string | null];
@@ -76,14 +86,26 @@ watch(mode, () => { subFilter.value = "all"; });
 
 interface DisplayGroup { key: string; label: string; units: UnitEntry[] }
 
+/** Может ли юнит ВЕСТИ отряд (LEADER_ID): только герои и воры — правило эталона. */
+const isLeaderUnit = (u: UnitEntry): boolean => u.catKey === "L_LEADER" || u.catKey === "L_NOBLE";
+const inRoster = (u: UnitEntry): boolean => {
+  if (props.roster === "leaders") return isLeaderUnit(u);
+  if (props.roster === "soldiers")
+    return !isLeaderUnit(u) && u.catKey !== "L_SUMMON" && u.catKey !== "L_ILLUSION";
+  return true;
+};
+
 const baseGroups = computed<DisplayGroup[]>(() => {
   let g: UnitGroup[];
   if (mode.value === "cat") g = unitStore.byCat;
   else if (mode.value === "level") g = unitStore.byLevel;
-  else if (mode.value === "alpha")
-    return [{ key: "all", label: "Все юниты", units: [...unitStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
-  else g = unitStore.bySubrace;
-  return g.map((x) => ({ key: x.key, label: x.label, units: x.units }));
+  else if (mode.value === "alpha") {
+    const units = unitStore.all.filter(inRoster).sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    return [{ key: "all", label: "Все юниты", units }];
+  } else g = unitStore.bySubrace;
+  return g
+    .map((x) => ({ key: x.key, label: x.label, units: x.units.filter(inRoster) }))
+    .filter((x) => x.units.length);
 });
 
 const subOptions = computed(() => baseGroups.value.map((g) => ({ value: g.key, label: `${g.label} (${g.units.length})` })));
