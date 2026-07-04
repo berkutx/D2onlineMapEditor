@@ -21,6 +21,7 @@ export * from "./place.js";
 export * from "./generate.js";
 export * from "./applyBytes.js";
 export * from "./verifySemantic.js";
+export * from "./mechanics.js";
 export * from "./relations.js";
 export * from "./cascade.js";
 export * from "./project.js";

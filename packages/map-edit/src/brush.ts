@@ -54,6 +54,8 @@ export { roadTypeFromMask } from "./roadOverlay.js";
 export function roadBrush(doc: MapDocument, cx: number, cy: number): EditOp[] {
   const n = doc.size;
   if (cx < 0 || cy < 0 || cx >= n || cy >= n) return [];
+  // no roads on water — the game has no bridges; painting the shore stays fine
+  if (((doc.terrain.cells[cy * n + cx]!.value >> 3) & 7) === GROUND_WATER) return [];
   const ov = roadOverlay(doc);
   // place the road on the painted cell: bare terrain, road piece recomputed below
   ov.set(cx, cy, { value: doc.terrain.cells[cy * n + cx]!.value & 7, roadType: 0, roadVar: 0 });
@@ -66,7 +68,15 @@ export function roadBrush(doc: MapDocument, cx: number, cy: number): EditOp[] {
  * recompute the road pieces of the surrounding cells (a severed straight becomes an
  * end, a T becomes a corner, …). Returns setCell ops with value + roadType/roadVar.
  */
-export function eraseBrush(doc: MapDocument, cx: number, cy: number, size: number): EditOp[] {
+export function eraseBrush(
+  doc: MapDocument,
+  cx: number,
+  cy: number,
+  size: number,
+  /** Occupied cells (buildOccupiedSet): erasing WATER under an object would strand a
+   *  boat-stack / an underwater treasure on land — those cells are skipped. */
+  occupied?: ReadonlySet<string>,
+): EditOp[] {
   const n = doc.size;
   const r = Math.floor((Math.max(1, size) - 1) / 2);
   const cellAt = (x: number, y: number) => doc.terrain.cells[y * n + x]!;
@@ -77,6 +87,8 @@ export function eraseBrush(doc: MapDocument, cx: number, cy: number, size: numbe
   for (let y = cy - r; y <= cy + r; y++) {
     for (let x = cx - r; x <= cx + r; x++) {
       if (x < 0 || y < 0 || x >= n || y >= n) continue;
+      const isWater = ((cellAt(x, y).value >> 3) & 7) === GROUND_WATER;
+      if (occupied?.has(`${x},${y}`) && isWater) continue;
       ov.set(x, y, { value: brushValue(cellAt(x, y).value, { type: "erase" }, x, y), roadType: -1, roadVar: -1 });
       footprint.push([x, y]);
     }
@@ -96,6 +108,11 @@ export function terrainBrush(
   cy: number,
   size: number,
   kind: BrushKind,
+  /** Cells occupied by objects (buildOccupiedSet) — the game-mechanics guard: water/forest
+   *  never paint under an object (drowning a village / a tree on a stack), and land paints
+   *  (terrain/erase) skip occupied WATER cells (draining under a boat-stack). Plain biome
+   *  recolors on occupied LAND stay legal (snow under a village is fine). */
+  occupied?: ReadonlySet<string>,
 ): EditOp[] {
   const r = Math.floor((Math.max(1, size) - 1) / 2);
   const n = doc.size;
@@ -106,8 +123,18 @@ export function terrainBrush(
       if (x < 0 || x >= n) continue;
       const cell = doc.terrain.cells[y * n + x];
       if (!cell) continue;
+      if (occupied?.has(`${x},${y}`)) {
+        const isWater = ((cell.value >> 3) & 7) === GROUND_WATER;
+        if (kind.type === "water" || kind.type === "forest") continue;
+        if (isWater) continue; // terrain/erase would drain the water under a boat-stack
+      }
       const value = brushValue(cell.value, kind, x, y);
-      if (value !== cell.value) ops.push({ kind: "setCell", x, y, value });
+      // water washes away a road on the cell (a road under water is invalid in the game);
+      // -1/-1 is the road-erase idiom — only where a road exists (the writer needs a real
+      // MidRoad record to patch)
+      const washRoad = kind.type === "water" && cell.roadType !== -1;
+      if (washRoad) ops.push({ kind: "setCell", x, y, value, roadType: -1, roadVar: -1 });
+      else if (value !== cell.value) ops.push({ kind: "setCell", x, y, value });
     }
   }
   return ops;

@@ -23,6 +23,7 @@ import {
   terrainBrush,
   roadBrush,
   eraseBrush,
+  buildOccupiedSet,
   placeMountainOps,
   deleteMountainOps,
   placeLandmarkOps,
@@ -779,15 +780,28 @@ function brushKind(): BrushKind | null {
   }
 }
 
+// Occupied-cells cache for the brush mechanics guard (water/forest never paint under an
+// object; land paints skip occupied water). Rebuilt only when the OBJECT set changes.
+let occupiedCache: { rev: number; set: Set<string> } | null = null;
+function occupiedCells(doc: MapDocument): Set<string> {
+  if (!occupiedCache || occupiedCache.rev !== editStore.objectsRev) {
+    occupiedCache = {
+      rev: editStore.objectsRev,
+      set: buildOccupiedSet(doc, landmarkFootprints as Record<string, readonly [number, number]>),
+    };
+  }
+  return occupiedCache.set;
+}
+
 /** Apply the brush at a cell against the LIVE doc (preview); accumulate stroke ops. */
 function paintAt(cx: number, cy: number): void {
   const doc = editStore.liveDoc;
   if (!doc) return;
   let ops: EditOp[];
   if (toolStore.tool === "road") {
-    ops = roadBrush(doc, cx, cy); // connectivity-based, ignores brush size
+    ops = roadBrush(doc, cx, cy); // connectivity-based, ignores brush size; skips water
   } else if (toolStore.tool === "erase") {
-    ops = eraseBrush(doc, cx, cy, toolStore.size); // clears terrain + roads (+ neighbour recompute)
+    ops = eraseBrush(doc, cx, cy, toolStore.size, occupiedCells(doc)); // clears terrain + roads (+ neighbour recompute)
     // the eraser also removes DECOR (landmarks) under the brush — an honest deleteObject
     // (M4 block splice on export). Other object types stay (writer support is per-type).
     const half = Math.floor(toolStore.size / 2);
@@ -802,7 +816,7 @@ function paintAt(cx: number, cy: number): void {
   } else {
     const kind = brushKind();
     if (!kind) return;
-    ops = terrainBrush(doc, cx, cy, toolStore.size, kind);
+    ops = terrainBrush(doc, cx, cy, toolStore.size, kind, occupiedCells(doc));
   }
   if (ops.length) {
     editStore.applyPreview(ops);

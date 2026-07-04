@@ -36,6 +36,7 @@ import {
   roundTripSemantic,
   buildWallSet,
   buildDecorSet,
+  validateMechanics,
   DECODE_TABLES,
   type WallSet,
   type DecorSet,
@@ -84,12 +85,17 @@ function buildAndValidate(
   // refs — the defect classes only the GAME editor used to catch; see the ScenEdit gold check).
   let structural: { ok: boolean; errors: string[]; warnings: string[] };
   if (bytes) {
-    const doc3 = validateMap(parseScenario(bytes));
+    const built = parseScenario(bytes);
+    const doc3 = validateMap(built);
     const integ = verifyBlockIntegrity(bytes);
+    // game-MECHANICS warnings (our addition — the reference validator checks only db
+    // refs): cities on water / roads under water. Calibrated to be SILENT on all 52
+    // shipped campaign maps, so any hit is a real editing accident.
+    const mech = validateMechanics(built);
     structural = {
       ok: doc3.ok && integ.ok,
       errors: [...doc3.errors, ...integ.errors],
-      warnings: [...doc3.warnings, ...integ.warnings],
+      warnings: [...doc3.warnings, ...integ.warnings, ...mech],
     };
   } else {
     structural = { ok: false, errors: [buildError ?? "build failed"], warnings: [] };
