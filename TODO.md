@@ -163,18 +163,15 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   re-tiling handles the joints. Ship as an OPT-IN per-anchor flag (anchor value could become
   `{parent, mode: "move"|"reroute-road"}` — today it's a plain child→parent string map in
   `EditorProject.anchors`).
-- **E5 auto-generated (hidden) variables** — the scenario window could hide raw variables entirely:
-  the user draws chains/state-machines (graph edges «событие A ➜ включает ➜ B», counters on events),
-  and a compiler emits the MidScenVariables ids + varInRange/compareVar/modifyVariable plumbing at
-  export. Groundwork already in place: per-variable usage map (VariablesEditor), star graph
-  (EventGraph), panelTab jumps. Needs: a stable var-id allocator keyed by the drawn edge (so
-  re-export doesn't renumber). **SCOPE DECISION (user, 2026-07-02): design for maps authored FROM
-  SCRATCH in this editor — the compiler owns ALL variables on such maps, no reverse-importer.
-  Uploaded/foreign maps get only the minimal path that already exists (raw variables list + the
-  usage/readers-writers view); do NOT build a decompiler that folds foreign var plumbing back into
-  visual chains.** Practical split: EditorProject carries the visual scenario model (chains,
-  counters) as the source of truth; export compiles model→vars; a map is "editor-native" when its
-  project has that model, otherwise the vars tab stays in raw mode.
+- ~~E5 auto-generated (hidden) variables~~ — **ПЕРЕОСМЫСЛЕНО И ЗАКРЫТО БИЛДЕРАМИ** (4946258 +
+  ранее): вместо экспорт-компилятора (который стал бы регрессом — журнал/undo/collab уже работают
+  с материализованными ops) конструкции строятся билдерами НЕМЕДЛЕННО, переменные скрыты в группе
+  «Автоматические», id стабильны (max+1 по живому доку, без перенумерации). Набор (выбор юзера
+  2026-07-04, все три): «➜ цепочка», «⏱ после N раз» (были), «⊻ или-ветка» (общий гейт, повторный
+  клик добавляет ветку в ту же группу), «⚑ фаза…»/«⚑➜ в фазу…» (одна AUTO_фаза; ре-байнд обновляет
+  условие на месте), «⏲ через N дней…» (скрытый дневной тикер + гейт ≥N, глушится по срабатыванию),
+  плюс зонный гейт «один раз на зону» (f3f79c7). SCOPE-решение юзера 2026-07-02 остаётся:
+  реверс-импортёр чужих карт НЕ строить (вкладка переменных для них — raw).
 - ~~Graph polish~~ — DONE (4837b85): edge hover highlight (наведение гасит несвязанное),
   drag-to-pan/zoom (были ранее), клик по условию/эффекту скроллит редактор к карточке + вспышка.
 
