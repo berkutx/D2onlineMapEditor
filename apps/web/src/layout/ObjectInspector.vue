@@ -154,15 +154,22 @@ const CRYSTAL_LABELS = ["Золото", "Инферно", "Жизнь", "Сме�
 const CRYSTAL_SUFFIX = ["GL", "RD", "YE", "RG", "WH", "GR"];
 const crystalKey = (r: number): string => `G000CR0000${CRYSTAL_SUFFIX[r] ?? "GL"}`;
 
+/** Grace.dbf RACE_ID index → race name (base-game constant, read from Grace.dbf).
+ *  A player IS its race (1:1, unique per scenario) — the owner must read as the race,
+ *  not the author's free-form NAME_TXT lord name (which can be anything, e.g. "Разведчик"
+ *  on an undead player). */
+const GRACE_RACE_NAMES: Record<number, string> = {
+  0: "Империя", 1: "Кланы Гор", 2: "Легионы Проклятых", 3: "Орды Нежити", 4: "Нейтрал", 5: "Эльфийский Союз",
+};
+
 /** Players for the owner dropdown (id is the full compound uid = the stored OWNER value).
- *  Always suffix the player number: two players can share the same NAME_TXT lord name
- *  (both default to "Орда Нежити"), and only playerNo makes them distinguishable. */
+ *  Label leads with the unique RACE; the custom lord name follows only as context. */
 const NEUTRAL = "G000000000";
 const players = computed(() =>
-  (editStore.liveDoc?.players ?? []).map((p) => ({
-    id: p.id,
-    label: p.name ? `${p.name} · игрок ${p.playerNo}` : `Игрок ${p.playerNo}`,
-  })),
+  (editStore.liveDoc?.players ?? []).map((p) => {
+    const race = GRACE_RACE_NAMES[p.race] ?? `Раса ${p.race}`;
+    return { id: p.id, label: p.name && p.name !== race ? `${race} — ${p.name}` : race };
+  }),
 );
 
 /** Commit one undoable patch (int / string / derived-bool / list / structured fields).
