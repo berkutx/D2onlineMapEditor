@@ -56,8 +56,17 @@ export const useViewStore = defineStore("view", () => {
   /** «Связи»: the editor-only anchors overlay (⚓ + child→parent arrows). */
   const anchorsVisible = ref(bool(p.anchorsVisible, false));
   /** «Роли локаций»: rings + role badges (⚡✨➜☁) on event-wired locations. OFF by default
-   *  (part of the clean-map default); turn on from Вид or via the «Локации» tool. */
-  const rolesVisible = ref(cleanMigrated ? bool(p.rolesVisible, false) : false);
+   *  (part of the clean-map default), but they RIDE ALONG with the locations layer: turning
+   *  «Локации» on shows the roles too (they live on the location rings — locations without
+   *  them are anonymous circles). The menu toggle still overrides per direction afterwards.
+   *  One-off migration: earlier builds persisted rolesVisible=false independently — re-couple
+   *  it to the persisted locations state once, then respect the user's explicit choice. */
+  const rolesFollowMigrated = p.rolesFollowMigrated === true;
+  const rolesVisible = ref(
+    rolesFollowMigrated
+      ? bool(p.rolesVisible, false)
+      : (cleanMigrated ? bool(p.locationsVisible, false) : false),
+  );
   /** Floating minimap dock. COLLAPSED by default (a small 🗺 button, bottom-right); click to
    *  expand. true = expanded card, false = collapsed FAB. */
   const minimapVisible = ref(cleanMigrated ? bool(p.minimapVisible, false) : false);
@@ -103,11 +112,15 @@ export const useViewStore = defineStore("view", () => {
     if (layer === "terrain") terrainVisible.value = visible;
     else if (layer === "objects") objectsVisible.value = visible;
     else if (layer === "grid") gridVisible.value = visible;
-    else if (layer === "locations") locationsVisible.value = visible;
+    else if (layer === "locations") {
+      locationsVisible.value = visible;
+      rolesVisible.value = visible; // roles ride along; «Роли локаций» re-toggles individually
+    }
   }
 
   function toggleLocations(): void {
     locationsVisible.value = !locationsVisible.value;
+    rolesVisible.value = locationsVisible.value; // roles ride along by default
   }
 
   function toggleGrid(): void {
@@ -198,6 +211,7 @@ export const useViewStore = defineStore("view", () => {
           debugOverlay: debugOverlay.value,
           debugOffMigrated: true,
           cleanDefaultsMigrated: true,
+          rolesFollowMigrated: true,
           dark: dark.value,
           overlayTints: overlayTints.value,
         }));

@@ -240,7 +240,8 @@ export async function fetchProjectRemote(id: string): Promise<EditorProject | nu
   const res = await fetch(u(REST.mapProject(id)), {
     headers: { accept: "application/json", ...idHeaders() },
   });
-  if (res.status === 404) return null;
+  // 204 = "no saved project yet" (normal first visit); 404 kept for older servers
+  if (res.status === 204 || res.status === 404) return null;
   if (!res.ok) throw new Error(`project fetch failed: ${res.status}`);
   return (await res.json()) as EditorProject;
 }

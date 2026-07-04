@@ -24,6 +24,7 @@ import {
   roadBrush,
   eraseBrush,
   placeMountainOps,
+  deleteMountainOps,
   placeLandmarkOps,
   placeVillageOps,
   placeChestOps,
@@ -124,6 +125,9 @@ async function rebuild(): Promise<void> {
     ).json();
     landmarkFootprints = objectData?.landmarkFootprints;
     spriteTables = objectData;
+    // the animate flag must be known BEFORE the build: with playback persisted ON,
+    // buildScene pre-pulls the lazy animation atlases (otherwise statics render).
+    scene.setAnimationEnabled(animate.value);
     await scene.buildScene(doc, man, getAssetStore(), VISIBLE_OBJECT_TYPES, objectData);
     // editor: this map's project + base doc (liveDoc = base + persisted edits, which
     // the rev watcher re-tiles onto the freshly-built terrain).
@@ -143,6 +147,14 @@ async function rebuild(): Promise<void> {
       captions: editStore.captions,
       selectedId: toolStore.selectedId,
     });
+    // seed the «Роли локаций» overlay too — a fresh Scene starts with an empty roles state,
+    // and the objectsRev watcher only fires on the NEXT edit; without this the rings/badges
+    // stay invisible after a reload until something bumps the doc.
+    scene.updateScenarioRoles(
+      editStore.liveDoc ?? doc,
+      locationRoleCounts(editStore.liveDoc ?? doc),
+      viewStore.rolesVisible,
+    );
     for (const cat of OVERLAY_TINTS) scene.setOverlayTint(cat, overlayTints.value[cat]);
     scene.setAnimationEnabled(animate.value);
     // seed the status bar with the initial camera zoom + visible-cell box
@@ -798,9 +810,31 @@ function ctxAction(action: string): void {
       viewStore.toggleAnchors();
       break;
     case "delete":
-      editStore.commit([{ kind: "deleteObject", id: obj.id }]);
+      deleteObjectSafely(obj);
       break;
   }
+}
+
+/** Delete an object, routing by type: mountains need the renumber batch (deleteMountainOps),
+ *  a city's visiting hero can't be map-deleted (edit it via the city), a village hosting a
+ *  visitor must part with the hero first, the rest are a plain block splice (garrison/item
+ *  cascades happen in the byte writer). Export runs the 3-tier validator — fail-closed. */
+function deleteObjectSafely(obj: MapObject): void {
+  const doc = editStore.liveDoc;
+  if (!doc) return;
+  if (obj.type === "mountains") {
+    editStore.commit(deleteMountainOps(doc, obj.id));
+    return;
+  }
+  if (obj.type === "stack" && ((obj as { inside?: string }).inside || (obj as { garrisoned?: boolean }).garrisoned)) {
+    ElMessage.warning("Это гость города — удалите/замените героя через свойства города");
+    return;
+  }
+  if (obj.type === "village" && (obj as { stackRef?: string }).stackRef) {
+    ElMessage.warning("В городе герой-гость — сначала уберите его (свойства города)");
+    return;
+  }
+  editStore.commit([{ kind: "deleteObject", id: obj.id }]);
 }
 
 /** Complete the anchor-pick: `parent` = the clicked object. */
@@ -1334,7 +1368,26 @@ watch(terrainVisible, (v) => getScene()?.setLayerVisibility("terrain", v));
 watch(objectsVisible, (v) => getScene()?.setLayerVisibility("objects", v));
 watch(gridVisible, (v) => getScene()?.setLayerVisibility("grid", v));
 watch(locationsVisible, (v) => getScene()?.setLayerVisibility("locations", v));
-watch(animate, (v) => getScene()?.setAnimationEnabled(v));
+// Animation toggle. The animation-frame atlases (iso-anim-*, 82 MB) are LAZY: turning
+// playback on first pulls just the atlases this map's objects animate with, then rebuilds
+// the object layer so AnimatedSprites materialize (statics keep rendering meanwhile).
+watch(animate, (v) => {
+  const s = getScene();
+  if (!s) return;
+  if (!v) {
+    s.setAnimationEnabled(false);
+    return;
+  }
+  const doc = editStore.liveDoc;
+  if (!doc) {
+    s.setAnimationEnabled(true);
+    return;
+  }
+  void s.ensureAnimationsFor(doc).then(() => {
+    s.updateObjects(doc);
+    s.setAnimationEnabled(true);
+  });
+});
 watch(
   overlayTints,
   (t) => {
@@ -1369,7 +1422,7 @@ watch(
         <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
         <div class="ctx-sep" />
         <button class="ctx-item" @click="ctxAction('copyId')">Скопировать id</button>
-        <button v-if="ctxMenu.obj.type === 'landmark'" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
+        <button v-if="['landmark', 'stack', 'mountains', 'village', 'treasure', 'ruin'].includes(ctxMenu.obj.type)" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
       </template>
       <template v-else>
         <div class="ctx-title">Поставить здесь <code>{{ ctxMenu.cell.x }}, {{ ctxMenu.cell.y }}</code></div>

@@ -25,11 +25,11 @@ export const EDIT_TOOLS: ToolDef[] = [
   { value: "water", label: "Вода", icon: WaterIcon, hint: "рисуй водой · Ctrl+тащить — двигать карту" },
   { value: "forest", label: "Лес", icon: ForestIcon, hint: "сажай лес · Ctrl+тащить — двигать карту" },
   { value: "road", label: "Дорога", icon: RoadIcon, hint: "веди дорогу · авто-стыковка · Ctrl+тащить — двигать карту" },
-  { value: "roadsel", label: "Дорога ✂", icon: Scissor, hint: "клик — выделить · ещё раз — расширить · Del — стереть · Esc — снять" },
+  { value: "roadsel", label: "Дорога ✂", icon: Scissor, hint: "клик — выделить · ещё раз — расширить · Del — стереть · Esc — снять · Ctrl+тащить — двигать карту" },
   { value: "erase", label: "Ластик", icon: EraseIcon, hint: "стирай рельеф/дороги/декор · Ctrl+тащить — двигать карту" },
-  { value: "decor", label: "Декор", icon: Picture, hint: "клик — поставить · R — другой облик · [ ] — листать" },
-  { value: "move", label: "Двигать", icon: Rank, hint: "клик — взять · ⇧+клик — слой ниже · клик — поставить · R — облик · Esc — отмена" },
-  { value: "locations", label: "Локации", icon: LocationsIcon, hint: "мир затемнён · клик — выбрать локацию · ещё клик — следующая под курсором · тащить — переместить" },
+  { value: "decor", label: "Декор", icon: Picture, hint: "клик — поставить · R — другой облик · [ ] — листать · Ctrl+тащить — двигать карту" },
+  { value: "move", label: "Двигать", icon: Rank, hint: "клик — взять/поставить · ⇧+клик — слой ниже · R — облик · Ctrl+тащить — двигать карту · Esc — отмена" },
+  { value: "locations", label: "Локации", icon: LocationsIcon, hint: "клик — выбрать локацию · ещё клик — следующая · тащить — переместить · Ctrl+тащить — двигать карту" },
 ];
 
 const BY_VALUE = new Map(EDIT_TOOLS.map((t) => [t.value, t]));
