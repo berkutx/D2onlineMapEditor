@@ -110,11 +110,24 @@ const locGroups = computed<{ label: string; options: Opt[] }[]>(() => {
   const doc = edit.liveDoc;
   if (!doc) return [];
   const counts = locationRoleCounts(doc);
+  // zone-generated locations get their OWN groups («▦ Зона „X“») instead of drowning the
+  // role buckets — a zone's primitives are picked via the zone, not one by one
+  const zoneOf = new Map<string, string>();
+  for (const z of Object.values(edit.zones)) for (const id of z.locIds) zoneOf.set(id, z.name);
+  const zoneBuckets = new Map<string, Opt[]>();
   const buckets: Record<string, Opt[]> = { free: [], trigger: [], spawn: [], destination: [], env: [] };
   for (const o of doc.objects) {
     if (o.type !== "location") continue;
     const c = counts[o.id];
     const name = (o as { name?: string }).name || o.id;
+    const zone = zoneOf.get(o.id);
+    if (zone !== undefined) {
+      const label = `${name} · ${o.pos.x},${o.pos.y}${c ? ` · ${badgesOf(c)}` : ""}`;
+      const list = zoneBuckets.get(zone) ?? [];
+      list.push({ value: o.id, label });
+      zoneBuckets.set(zone, list);
+      continue;
+    }
     if (!c) {
       buckets.free!.push({ value: o.id, label: `${name} · ${o.pos.x},${o.pos.y}` });
       continue;
@@ -124,6 +137,10 @@ const locGroups = computed<{ label: string; options: Opt[] }[]>(() => {
   }
   for (const list of Object.values(buckets)) list.sort((a, b) => a.label.localeCompare(b.label, "ru"));
   const out: { label: string; options: Opt[] }[] = [];
+  for (const [zn, list] of [...zoneBuckets.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"))) {
+    list.sort((a, b) => a.label.localeCompare(b.label, "ru"));
+    out.push({ label: `▦ Зона «${zn}» (${list.length})`, options: list });
+  }
   if (buckets.free!.length) out.push({ label: `Свободные — не в сценарии (${buckets.free!.length})`, options: buckets.free! });
   for (const k of ROLE_ORDER) {
     if (buckets[k]!.length)

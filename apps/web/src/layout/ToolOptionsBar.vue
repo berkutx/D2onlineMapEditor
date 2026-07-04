@@ -7,9 +7,9 @@
  * there's no empty panel. It floats (absolute), so appearing/disappearing never
  * reflows the canvas.
  */
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { ElSegmented, ElSelect, ElOption, ElTooltip, ElInput, ElButton, ElMessage } from "element-plus";
+import { ElSegmented, ElSelect, ElOption, ElTooltip, ElInput, ElButton, ElMessage, ElMessageBox } from "element-plus";
 import { estimateTileCount } from "@d2/map-edit";
 import { useToolStore, type ZoneMode } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
@@ -62,15 +62,47 @@ const zoneCells = computed<string[]>(() => {
 const zoneEstimate = computed(() =>
   zoneCells.value.length ? estimateTileCount(new Set(zoneCells.value)) : 0,
 );
+/** Existing zones — pick one to REGENERATE (new mask replaces its locations) or delete. */
+const regenZoneId = ref<string>("");
+const zoneOptions = computed(() =>
+  Object.entries(editStore.zones).map(([id, z]) => ({ value: id, label: `${z.name} (${z.locIds.length})` })),
+);
+watch(regenZoneId, (zid) => {
+  const z = zid ? editStore.zones[zid] : undefined;
+  if (z) zoneName.value = z.name; // prefill; можно переименовать при перегенерации
+});
 function makeZone(): void {
   const name = zoneName.value.trim() || "Зона";
-  const zid = editStore.createZone(name, zoneCells.value);
+  const regen = regenZoneId.value || undefined;
+  const zid = editStore.createZone(name, zoneCells.value, regen);
   if (!zid) return;
-  ElMessage.success(`«${name}»: создано локаций — ${zoneEstimate.value}; правятся как обычные локации`);
+  ElMessage.success(
+    regen
+      ? `«${name}»: перегенерировано — локаций ${zoneEstimate.value} (старые удалены)`
+      : `«${name}»: создано локаций — ${zoneEstimate.value}; правятся как обычные локации`,
+  );
   zoneName.value = "";
+  regenZoneId.value = "";
   toolStore.clearZone(); // сбросить маску (рисуй следующую)
   // показать результат сразу: слой локаций (+роли едут следом)
   if (!viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
+}
+function deleteZone(): void {
+  const zid = regenZoneId.value;
+  const z = editStore.zones[zid];
+  if (!z) return;
+  void ElMessageBox.confirm(
+    `Удалить зону «${z.name}» вместе с её ${z.locIds.length} локациями? (события, повешенные на них, останутся и будут ссылаться в пустоту)`,
+    "Удалить зону",
+    { confirmButtonText: "Удалить", cancelButtonText: "Отмена", type: "warning" },
+  )
+    .then(() => {
+      editStore.removeZone(zid, true);
+      regenZoneId.value = "";
+      zoneName.value = "";
+      ElMessage.success(`Зона «${z.name}» удалена`);
+    })
+    .catch(() => { /* отмена */ });
 }
 function onZoneMode(v: string | number | boolean): void {
   toolStore.setZoneMode(v as ZoneMode);
@@ -91,9 +123,21 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
       </el-tooltip>
       <el-segmented v-if="zoneMode === 'brush' || zoneMode === 'line'" v-model="size" :options="sizeOptions" size="small" />
       <el-input v-model="zoneName" size="small" placeholder="имя зоны" style="width: 130px" @keyup.enter="makeZone()" />
+      <el-select
+        v-if="zoneOptions.length"
+        v-model="regenZoneId"
+        size="small"
+        clearable
+        placeholder="перегенерир.…"
+        title="Выбрать существующую зону: новая маска заменит её локации; 🗑 удаляет зону"
+        style="width: 132px"
+      >
+        <el-option v-for="z in zoneOptions" :key="z.value" :value="z.value" :label="z.label" />
+      </el-select>
       <el-button size="small" type="primary" plain :disabled="!zoneCells.length" @click="makeZone()">
-        Нарезать → {{ zoneEstimate }} лок.
+        {{ regenZoneId ? "Перегенерировать" : "Нарезать" }} → {{ zoneEstimate }} лок.
       </el-button>
+      <el-button v-if="regenZoneId" size="small" text title="Удалить зону вместе с её локациями" @click="deleteZone()">🗑</el-button>
       <el-button v-if="zoneCells.length" size="small" text title="Сбросить нарисованное" @click="toolStore.clearZone()">✕</el-button>
     </template>
     <template v-else-if="showLocFilter">

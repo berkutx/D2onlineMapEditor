@@ -62,6 +62,11 @@ export const EditorProject = z.object({
     name: z.string(),
     cells: z.array(z.string()), // "x,y" mask keys
     locIds: z.array(z.string()).default([]),
+    /** Zone-event CLONE groups: each entry = [baseEventId, ...cloneEventIds]. The game
+     *  allows ONE zone condition per event (conditions are AND-only), so a zone trigger is
+     *  a set of per-location clones; the events panel collapses them behind the base row.
+     *  Entries are validated against live events at render (stale ids are harmless). */
+    eventGroups: z.array(z.array(z.string())).default([]),
   })).default({}),
   meta: z
     .object({

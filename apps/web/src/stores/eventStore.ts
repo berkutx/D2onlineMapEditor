@@ -291,6 +291,93 @@ export const useEventStore = defineStore("events", () => {
     return gate;
   }
 
+  /** Condition kinds that reference ONE location — the game allows a single zone condition
+   *  per event (AND-only), so «событие на зону» = per-location clones of the event. */
+  const ZONE_COND_KINDS = new Set(["enterZone", "stackInLocation", "itemToLocation"]);
+  function zoneCondIndex(ev: MapEvent): number {
+    return ev.conditions.findIndex((c) => ZONE_COND_KINDS.has(c.kind));
+  }
+
+  /** «⧉ на зону»: разложить событие с зонным условием (вход/отряд/предмет в зоне) на клоны —
+   *  по одному на каждую локацию-примитив зоны. `oncePerZone` добавляет счётчик-гейт по
+   *  паттерну createCounterGate: скрытая авто-переменная, условие «==0» и «+1»-эффект на
+   *  каждом клоне — сработает только первый вошедший. ОДИН commit (undo одним шагом);
+   *  группа [base, ...clones] пишется в project.zones для сворачивания в списке. */
+  function cloneEventForZone(eventId: string, zoneId: string, oncePerZone: boolean): number {
+    const from = events.value.find((e) => e.id === eventId);
+    const zone = edit.zones[zoneId];
+    if (!from || !zone || zone.locIds.length < 2) return 0;
+    const ci = zoneCondIndex(from);
+    if (ci < 0) return 0;
+    const curLoc = (from.conditions[ci] as unknown as Record<string, unknown>).locId as string;
+
+    // id allocator: newId() reads only COMMITTED events — allocate the batch by hand
+    const version = edit.liveDoc?.header.version || "S143";
+    let nextHex = 0;
+    for (const e of events.value) {
+      const m = /EV([0-9a-fA-F]{4})$/.exec(e.id);
+      if (m) nextHex = Math.max(nextHex, parseInt(m[1]!, 16) + 1);
+    }
+
+    // one event per zone location: the base covers its own (or the first) location
+    const locs = zone.locIds.filter((id) => edit.liveDoc?.objects.some((o) => o.id === id));
+    if (locs.length < 2) return 0;
+    const baseLoc = locs.includes(curLoc) ? curLoc : locs[0]!;
+    const cloneLocs = locs.filter((id) => id !== baseLoc);
+
+    const ops: EditOp[] = [];
+    let gateCond: EventCondition | null = null;
+    let gateEff: ((ev: MapEvent) => EventEffect) | null = null;
+    if (oncePerZone) {
+      const newVarId = Math.max(0, ...variables.value.map((v) => v.id)) + 1;
+      const slug = (zone.name || zoneId).replace(/[^0-9A-Za-zА-Яа-яЁё]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || zoneId;
+      const newVar: ScenarioVariable = { id: newVarId, name: `AUTO_зона_${slug}`, value: 0 };
+      ops.push({ kind: "setVariables", variables: [...variables.value, newVar] } as EditOp);
+      gateCond = {
+        ...makeCondition("varInRange"),
+        var1: newVarId, min1: 0, max1: 0,
+        var2: 0, min2: 0, max2: 0,
+        relation: 0, // Игнор. 2-ю
+      } as EventCondition;
+      gateEff = (ev) => {
+        const inc = { ...makeEffect("modifyVariable"), lookup: 0, val1: 1, val2: newVarId } as EventEffect;
+        (inc as { num: number }).num = ev.effects.length;
+        return inc;
+      };
+      edit.markAutoVar(newVarId);
+    }
+
+    const withGate = (ev: MapEvent): MapEvent =>
+      gateCond && gateEff
+        ? { ...ev, conditions: [...ev.conditions, gateCond], effects: [...ev.effects, gateEff(ev)] }
+        : ev;
+
+    const base: MapEvent = withGate({
+      ...from,
+      conditions: from.conditions.map((c, i) =>
+        i === ci ? ({ ...c, locId: baseLoc } as EventCondition) : c),
+    });
+    ops.push({ kind: "upsertEvent", event: base } as EditOp);
+
+    const cloneIds: string[] = [];
+    cloneLocs.forEach((locId, k) => {
+      const id = `${version}EV${(nextHex + k).toString(16).padStart(4, "0")}`;
+      cloneIds.push(id);
+      const clone: MapEvent = withGate({
+        ...from,
+        id,
+        name: `${from.name || "Событие"} · ${k + 2}`,
+        conditions: from.conditions.map((c, i) =>
+          i === ci ? ({ ...c, locId } as EventCondition) : c),
+      });
+      ops.push({ kind: "upsertEvent", event: clone } as EditOp);
+    });
+
+    edit.commit(ops);
+    edit.recordZoneEventGroup(zoneId, [from.id, ...cloneIds]);
+    return cloneIds.length;
+  }
+
   // --- scenario variables (one MidScenVariables block; edited as a whole list) ---
   const variables = computed<ScenarioVariable[]>(() => edit.liveDoc?.variables ?? []);
   function setVariables(vars: ScenarioVariable[]): void {
@@ -378,6 +465,7 @@ export const useEventStore = defineStore("events", () => {
     select, upsert, remove, create, clone, referencesObject,
     breadcrumbs, canGoBack, navigate, goBack, goToCrumb, cardReveal, revealCard,
     createForObject, createChainedEvent, createCounterGate, createSpawnAt,
+    cloneEventForZone, zoneCondIndex,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,
     upsertTemplate, removeTemplate, createTemplate, cloneTemplate,

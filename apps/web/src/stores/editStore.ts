@@ -355,9 +355,9 @@ export const useEditStore = defineStore("edit", () => {
     persist();
   }
   /** Free-form ZONES: mask → generated MidLocation tiles, tracked for regen. */
-  const zones = computed<Record<string, { name: string; cells: string[]; locIds: string[] }>>(
-    () => project.value?.zones ?? {},
-  );
+  const zones = computed<
+    Record<string, { name: string; cells: string[]; locIds: string[]; eventGroups: string[][] }>
+  >(() => project.value?.zones ?? {});
   /** Compile a drawn mask into named locations (ONE undoable commit) + record the zone.
    *  A zone id passed in `regenId` first deletes the previous generation's locations. */
   function createZone(name: string, cells: string[], regenId?: string): string | null {
@@ -380,11 +380,30 @@ export const useEditStore = defineStore("edit", () => {
     const zid = regenId ?? `ZN${String(Object.keys(project.value.zones ?? {}).length + 1).padStart(4, "0")}`;
     project.value = {
       ...project.value,
-      zones: { ...(project.value.zones ?? {}), [zid]: { name, cells, locIds: gen.locIds } },
+      zones: {
+        ...(project.value.zones ?? {}),
+        // regen keeps the zone's event-clone groups (events reference live locations anyway)
+        [zid]: { name, cells, locIds: gen.locIds, eventGroups: old?.eventGroups ?? [] },
+      },
     };
     persist();
     return zid;
   }
+  /** Remember a zone-event clone group ([baseId, ...cloneIds]) — editor-only metadata for
+   *  collapsing the clones behind the base row in the events list. */
+  function recordZoneEventGroup(zid: string, group: string[]): void {
+    const z = project.value?.zones?.[zid];
+    if (!project.value || !z || group.length < 2) return;
+    project.value = {
+      ...project.value,
+      zones: {
+        ...project.value.zones,
+        [zid]: { ...z, eventGroups: [...(z.eventGroups ?? []), group] },
+      },
+    };
+    persist();
+  }
+
   function removeZone(zid: string, deleteLocations: boolean): void {
     const doc = liveDoc.value;
     if (!project.value) return;
@@ -585,6 +604,7 @@ export const useEditStore = defineStore("edit", () => {
     zones,
     createZone,
     removeZone,
+    recordZoneEventGroup,
     autoVars,
     markAutoVar,
     unmarkAutoVar,

@@ -144,16 +144,16 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   линия=1×1, кольцо, L-blob точное покрытие), live-оценка «Нарезать → N лок.» в панели
   опций, editStore.createZone = ОДИН commit (undo/collab бесплатно), project.zones
   {name,cells,locIds} (+regenId-путь удаляет прошлую генерацию), removeZone. Валидатор
-  3-уровневый зелёный. **ЭТАП 2 (осталось)**: зоны-события — юзер пишет ОДНО событие с
-  ZN-ссылкой → N клонов (условия только AND, byte-факт TAppEdit; >1 enterZone запрещён);
-  сворачивание клонов в EventsPanel; occur-once через guard-переменную (autoVars); группа
-  «Зоны» в ref-loc пикере; скрыть ⟐-генерённые локации из пикеров; UI перегенерации
-  (redraw seeded зоны) + список зон.
-- **Флайауты дока** (решение юзера: hover с задержкой ~350мс, тултип переезжает в шапку) —
-  data-driven из tools.ts (flyout-фабрика, max 4 ряда): Рельеф=свотчи 6 земель+кисть;
-  Декор=Природа/Постройки/Рельеф/🔍 (требует lift фильтров DecorPalette в стор — activeFamily/
-  search/faction/tone сейчас component-local); Локации=фильтр ролей+2 тумблера; Вода/Лес/
-  Ластик=кисть; Двигать=якоря. Обзор/Дорога/Дорога✂ — без флайаута.
+  3-уровневый зелёный. **ЭТАП 2 DONE**: eventStore.cloneEventForZone — событие с зонным
+  условием (enterZone/stackInLocation/itemToLocation) → клоны по локациям зоны (блок
+  «⧉ на зону» в редакторе события); «один раз на зону» = счётчик-гейт (авто-переменная
+  AUTO_зона_*, varInRange==0 + modifyVariable+1 на каждом клоне — паттерн createCounterGate);
+  группы [base,...clones] в project.zones[].eventGroups → список СВОРАЧИВАЕТ клоны за базой
+  (⧉N-бейдж кликом раскрывает); ref-loc пикер группирует зонные локации «▦ Зона „X“» первыми;
+  UI перегенерации/удаления зоны в панели опций (select существующей зоны + 🗑). Правки базы
+  в клоны НЕ тянутся (честный v1 — в тултипе бейджа).
+- ~~Флайауты дока~~ — DONE (40a9a92): hover 350мс, 2-4 пресета на инструмент, клик пресета
+  включает инструмент; фильтры DecorPalette подняты в decorStore (+focusSearchTick).
 
 ## Anchors / scenario-window follow-ups (deferred 2026-07-02)
 - **Road follows anchored building** — when a building anchored to a road moves, re-route the road

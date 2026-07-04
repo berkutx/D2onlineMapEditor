@@ -10,11 +10,12 @@
 import { computed, nextTick, ref, onMounted, onBeforeUnmount, watch } from "vue";
 import {
   ElDialog, ElInput, ElButton, ElScrollbar, ElInputNumber, ElSwitch, ElCheckbox, ElSelect,
-  ElOption, ElTag, ElTooltip, ElEmpty, ElTabs, ElTabPane,
+  ElOption, ElTag, ElTooltip, ElEmpty, ElTabs, ElTabPane, ElMessage,
 } from "element-plus";
 import type { MapEvent, EventCondition, EventEffect } from "@d2/map-schema";
 import { CONDITION_SPECS, EFFECT_SPECS, CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore, makeCondition, makeEffect } from "../stores/eventStore";
+import { useEditStore } from "../stores/editStore";
 import { useViewStore } from "../stores/viewStore";
 import { eventBadges } from "../services/scenarioRoles";
 import EventFieldInput from "./EventFieldInput.vue";
@@ -25,6 +26,7 @@ import ScenarioSettingsEditor from "./ScenarioSettingsEditor.vue";
 import DiplomacyEditor from "./DiplomacyEditor.vue";
 
 const store = useEventStore();
+const editStore = useEditStore();
 const view = useViewStore();
 
 const visible = computed({
@@ -129,6 +131,73 @@ function moveEffect(i: number, dir: -1 | 1): void {
   patch({ effects });
 }
 
+// --- zone-event clone groups (project.zones[].eventGroups) --------------------------------
+// The game allows ONE zone condition per event → «событие на зону» = per-location clones.
+// The list COLLAPSES clones behind their base row (⧉N badge toggles them); the editor column
+// offers «⧉ на зону» for events with a zone condition.
+const zoneGroups = computed(() => {
+  const live = new Set(store.events.map((e) => e.id));
+  const cloneOf = new Map<string, string>(); // cloneId -> baseId
+  const groupOf = new Map<string, { zoneName: string; cloneIds: string[] }>(); // baseId -> group
+  for (const [, z] of Object.entries(editStore.zones)) {
+    for (const g of z.eventGroups ?? []) {
+      const [base, ...clones] = g;
+      if (!base || !live.has(base)) continue;
+      const alive = clones.filter((id) => live.has(id));
+      if (!alive.length) continue;
+      for (const id of alive) cloneOf.set(id, base);
+      const prev = groupOf.get(base);
+      groupOf.set(base, { zoneName: z.name, cloneIds: [...(prev?.cloneIds ?? []), ...alive] });
+    }
+  }
+  return { cloneOf, groupOf };
+});
+const expandedGroups = ref<Set<string>>(new Set());
+function toggleGroup(baseId: string): void {
+  const s = new Set(expandedGroups.value);
+  s.has(baseId) ? s.delete(baseId) : s.add(baseId);
+  expandedGroups.value = s;
+}
+/** Filtered rows with zone clones folded behind their base (expanded groups inline). */
+const listRows = computed<MapEvent[]>(() => {
+  const { cloneOf, groupOf } = zoneGroups.value;
+  if (!cloneOf.size) return store.filtered;
+  const byId = new Map(store.filtered.map((e) => [e.id, e]));
+  const out: MapEvent[] = [];
+  for (const e of store.filtered) {
+    if (cloneOf.has(e.id)) continue; // rides with its base
+    out.push(e);
+    const g = groupOf.get(e.id);
+    if (g && expandedGroups.value.has(e.id)) {
+      for (const cid of g.cloneIds) {
+        const c = byId.get(cid) ?? store.events.find((x) => x.id === cid);
+        if (c) out.push(c);
+      }
+    }
+  }
+  return out;
+});
+
+// «⧉ на зону»: clone the selected event across a zone's locations (editor column control)
+const cloneZoneId = ref<string>("");
+const cloneOnce = ref(true);
+const zoneCloneTargets = computed(() => {
+  const doc = editStore.liveDoc;
+  return Object.entries(editStore.zones)
+    .map(([id, z]) => ({ id, name: z.name, n: z.locIds.filter((l) => doc?.objects.some((o) => o.id === l)).length }))
+    .filter((z) => z.n >= 2);
+});
+const canCloneToZone = computed(() => !!sel.value && store.zoneCondIndex(sel.value) >= 0 && zoneCloneTargets.value.length > 0);
+function doCloneZone(): void {
+  if (!sel.value || !cloneZoneId.value) return;
+  const n = store.cloneEventForZone(sel.value.id, cloneZoneId.value, cloneOnce.value);
+  if (n > 0) {
+    ElMessage.success(`Клонировано на зону: +${n} ${n === 1 ? "событие" : n < 5 ? "события" : "событий"}${cloneOnce.value ? " · сработает один раз" : ""}`);
+  } else {
+    ElMessage.warning("Не вышло: у зоны меньше двух живых локаций или в событии нет зонного условия");
+  }
+}
+
 const condFields = (c: EventCondition) =>
   (CONDITION_BY_KIND[c.kind]?.fields ?? []).filter((f) => !f.hidden);
 const effFields = (e: EventEffect) =>
@@ -226,10 +295,10 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
           </div>
           <el-scrollbar class="ev-list">
             <div
-              v-for="e in store.filtered"
+              v-for="e in listRows"
               :key="e.id"
               class="ev-row d2-row"
-              :class="{ active: e.id === store.selectedId }"
+              :class="{ active: e.id === store.selectedId, 'is-clone': zoneGroups.cloneOf.has(e.id) }"
               @click="store.navigate({ tab: 'events', eventId: e.id })"
             >
               <div class="ev-row-main">
@@ -237,6 +306,13 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <span class="ev-id">{{ e.id }}</span>
               </div>
               <div class="ev-badges">
+                <el-tooltip
+                  v-if="zoneGroups.groupOf.has(e.id)"
+                  :content="`Размножено на зону «${zoneGroups.groupOf.get(e.id)!.zoneName}»: +${zoneGroups.groupOf.get(e.id)!.cloneIds.length} клонов (клик — раскрыть). Правки базы в клоны не тянутся.`"
+                >
+                  <el-tag size="small" type="success" disable-transitions class="ev-zone-badge"
+                    @click.stop="toggleGroup(e.id)">⧉{{ zoneGroups.groupOf.get(e.id)!.cloneIds.length }}</el-tag>
+                </el-tooltip>
                 <el-tag v-if="!e.enabled" size="small" type="info" disable-transitions>выкл</el-tag>
                 <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
                 <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
@@ -246,7 +322,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
               </div>
             </div>
-            <el-empty v-if="!store.filtered.length" description="Нет событий" :image-size="60" />
+            <el-empty v-if="!listRows.length" description="Нет событий" :image-size="60" />
           </el-scrollbar>
         </div>
 
@@ -301,6 +377,18 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <EventFieldInput :field="f" :model-value="(c as Record<string, unknown>)[f.key]"
                   @update:model-value="setCondField(i, f.key, $event)" />
               </div>
+            </div>
+
+            <!-- zone clone: expand a zone-condition event into per-location clones -->
+            <div v-if="canCloneToZone" class="ev-zone-clone">
+              <el-tooltip content="Игра допускает одно зонное условие на событие — событие «на зону» = клоны по локациям-примитивам зоны. «Один раз» = скрытая переменная-гейт: сработает только первый вход." :show-after="300">
+                <span class="ev-zone-lbl">⧉ на зону</span>
+              </el-tooltip>
+              <el-select v-model="cloneZoneId" size="small" placeholder="зона" style="width: 130px">
+                <el-option v-for="z in zoneCloneTargets" :key="z.id" :value="z.id" :label="`${z.name} (${z.n} лок.)`" />
+              </el-select>
+              <el-checkbox v-model="cloneOnce" size="small">один раз</el-checkbox>
+              <el-button size="small" plain :disabled="!cloneZoneId" @click="doCloneZone()">Клонировать</el-button>
             </div>
 
             <!-- effects -->
@@ -420,6 +508,16 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin: var(--d2-sp-4) 0 6px;
 }
+/* zone-event group: badge toggles the folded clones; clone rows indent under the base */
+.ev-zone-badge { cursor: pointer; }
+.ev-row.is-clone { padding-left: 22px; opacity: 0.85; }
+.ev-zone-clone {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 8px 8px 0 0; padding: 6px 8px;
+  background: var(--el-fill-color-lighter); border-radius: var(--d2-radius);
+  font-size: 12px;
+}
+.ev-zone-lbl { color: var(--el-text-color-secondary); cursor: help; }
 .ev-sec-head .d2-sec { margin: 0; }
 .ev-item { margin-bottom: 8px; margin-right: 8px; }
 /* graph-click reveal: a fading ring pulls the eye to the card just scrolled to */
