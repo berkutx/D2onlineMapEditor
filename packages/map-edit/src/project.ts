@@ -45,6 +45,13 @@ export const EditorProject = z.object({
    * An id that no longer exists in the document is simply ignored (orphaned marks are harmless).
    */
   autoVars: z.array(z.number().int()).default([]),
+  /**
+   * «Дорога следует за входом»: fort object ids whose attached road re-routes when the fort
+   * moves (erase old-entrance..first-bend, extend bend → new entrance; entrance = pos +
+   * (size,size), byte-derived). The road "child" is IMPLICIT — located at move time from the
+   * CURRENT entrance, so it survives road edits with no stale cell lists. Editor-only.
+   */
+  roadAnchors: z.record(z.string(), z.object({ mode: z.literal("reroute") })).default({}),
   meta: z
     .object({
       name: z.string().optional(),
@@ -69,6 +76,7 @@ export function emptyProject(
     captions: {},
     anchors: {},
     autoVars: [],
+    roadAnchors: {},
     meta,
   };
 }

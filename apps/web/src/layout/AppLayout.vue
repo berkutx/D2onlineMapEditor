@@ -8,7 +8,8 @@
  */
 import { computed, onMounted, onBeforeUnmount } from "vue";
 import { storeToRefs } from "pinia";
-import { eraseRoadCells } from "@d2/map-edit";
+import { useRoadActions } from "../composables/roadActions";
+import { useSelectionActions } from "../composables/selectionActions";
 import { useViewStore } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
 import { useDecorStore } from "../stores/decorStore";
@@ -25,6 +26,8 @@ import CopilotBar from "./CopilotBar.vue";
 import DecorPalette from "./DecorPalette.vue";
 import EventsPanel from "./EventsPanel.vue";
 import ObjectActionBar from "./ObjectActionBar.vue";
+import RoadActionBar from "./RoadActionBar.vue";
+import SelectionActionBar from "./SelectionActionBar.vue";
 import HistoryPanel from "./HistoryPanel.vue";
 import MinimapDock from "./MinimapDock.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
@@ -35,6 +38,8 @@ const decorStore = useDecorStore();
 const editStore = useEditStore();
 const mapStore = useMapStore();
 const { currentScenarioId } = storeToRefs(mapStore);
+const roadActions = useRoadActions();
+const selActions = useSelectionActions();
 
 /** Cities/capitals show a double garrison (2 vertical formations) — give them a wider rail.
  *  Widths are clamp()'d so rails SHRINK on narrow windows instead of pushing off-screen. */
@@ -61,20 +66,29 @@ function onKey(e: KeyboardEvent): void {
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (typing) return;
-  // road-select tool: Delete erases the selected segment, Escape clears it.
+  // road-select tool: Delete erases the selected segment, Escape clears it
+  // (same actions as the floating RoadActionBar — shared via useRoadActions).
   if (toolStore.tool === "roadsel" && toolStore.roadSel.length) {
     if (e.key === "Delete" || e.key === "Backspace") {
-      const doc = editStore.liveDoc;
-      if (doc) editStore.commit(eraseRoadCells(doc, toolStore.roadSel));
-      toolStore.setRoadSel([]);
+      roadActions.eraseSelected();
       e.preventDefault();
       return;
     }
     if (e.key === "Escape") {
-      toolStore.setRoadSel([]);
+      roadActions.clearSelection();
       e.preventDefault();
       return;
     }
+  }
+  // select tool, multi-selection: Delete removes the whole set (one undo stroke).
+  if (
+    (e.key === "Delete" || e.key === "Backspace") &&
+    toolStore.tool === "select" &&
+    toolStore.selectedIds.length > 1
+  ) {
+    selActions.deleteSelected();
+    e.preventDefault();
+    return;
   }
   // move tool: Escape drops the carried object without moving it.
   if (e.key === "Escape" && toolStore.tool === "move" && toolStore.moveId) {
@@ -155,6 +169,8 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <MapCanvasHost />
         <ToolOptionsBar v-if="currentScenarioId" />
         <ObjectActionBar v-if="toolStore.tool === 'move'" />
+        <RoadActionBar v-if="toolStore.tool === 'roadsel'" />
+        <SelectionActionBar v-if="toolStore.tool === 'select'" />
         <CopilotBar v-show="view.copilotVisible" />
         <HistoryPanel />
         <MinimapDock v-if="currentScenarioId" />

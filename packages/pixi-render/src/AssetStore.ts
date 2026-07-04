@@ -52,6 +52,11 @@ export class AssetStore {
   private readonly loadingSheets = new Map<string, Promise<void>>();
   /** per atlas-GROUP frame->concrete-sheet maps (built from page metas on demand). */
   private readonly frameLocCache = new Map<string, Promise<Map<string, string>>>();
+  /** Sum of manifest-declared sizes (png+json) of LOADED sheets — the honest download
+   *  counter (worker image fetches never reach main-thread resource timing). */
+  private bytesLoaded = 0;
+  /** Sheets loaded whose ref lacks `bytes` (old manifest) — makes the counter honest. */
+  private bytesUnknown = 0;
 
   private loaded = false;
 
@@ -108,6 +113,8 @@ export class AssetStore {
     this.refById.clear();
     this.animDefs.clear();
     this.frameLocCache.clear();
+    this.bytesLoaded = 0;
+    this.bytesUnknown = 0;
     for (const ref of manifest.spritesheets) this.refById.set(ref.id, ref);
     for (const anim of manifest.animations) this.animDefs.set(anim.id, anim);
 
@@ -245,6 +252,9 @@ export class AssetStore {
     await sheet.parse();
 
     this.sheets.set(ref.id, { ref, sheet });
+    // download accounting: manifest-declared file sizes (see bytesLoaded docstring)
+    if (typeof ref.bytes === "number") this.bytesLoaded += ref.bytes;
+    else this.bytesUnknown++;
 
     // Merge this sheet's frame textures into the global lookup. Frame keys are
     // assumed unique across sheets (the pipeline namespaces them); on collision,
@@ -314,6 +324,29 @@ export class AssetStore {
   /** A raw loaded `Spritesheet` by its manifest id (for tilemap tileset wiring). */
   getSheet(id: string): Spritesheet | undefined {
     return this.sheets.get(id)?.sheet;
+  }
+
+  /** Bytes downloaded for loaded sheets per the manifest's declared sizes, or null when
+   *  the manifest predates the `bytes` field entirely (nothing to sum honestly). */
+  get downloadedBytes(): number | null {
+    if (this.bytesLoaded === 0 && this.bytesUnknown > 0) return null;
+    return this.bytesLoaded;
+  }
+
+  /** Number of sheets currently loaded (for the HUD's "sheets X" companion stat). */
+  get loadedSheetCount(): number {
+    return this.sheets.size;
+  }
+
+  /** Estimated GPU memory of ALL resident atlas textures (width*height*4), regardless of
+   *  what is on screen — complements the Scene's visible-only estimate. */
+  textureBytes(): number {
+    let b = 0;
+    for (const { sheet } of this.sheets.values()) {
+      const s = sheet.textureSource as { pixelWidth?: number; pixelHeight?: number; width: number; height: number };
+      b += (s.pixelWidth ?? s.width) * (s.pixelHeight ?? s.height) * 4;
+    }
+    return b;
   }
 
   /** All resolved frame-key -> Texture pairs (used by the terrain tilemap). */

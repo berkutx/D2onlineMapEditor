@@ -22,6 +22,10 @@ import {
   eraseRoadCells,
   placeMountainOps,
   deleteMountainOps,
+  translateRoadCells,
+  extendRoadPath,
+  rerouteRoadOps,
+  roadBrush,
   placeLandmarkOps,
   placeLocationOps,
   placeVisitorOps,
@@ -932,6 +936,91 @@ describe("@d2/map-edit deleteObject (M4 mid-stream block splice)", () => {
     expect(res.reason).toBeUndefined();
     expect(res.ok).toBe(true);
     expect(validateMap(re).ok).toBe(true);
+  });
+});
+
+describe("@d2/map-edit road move/extend/reroute", () => {
+  const roadAt = (doc: ReturnType<typeof parseScenarioRaw>["doc"], x: number, y: number): number =>
+    doc.terrain.cells[y * doc.size + x]!.roadType;
+
+  /** Seed an L-shaped road (50,50)→(54,50)→(54,54) on Riders via the real brush. */
+  function seedL(doc: ReturnType<typeof parseScenarioRaw>["doc"]) {
+    let d = doc;
+    const all: EditOp[] = [];
+    const cells: { x: number; y: number }[] = [];
+    for (let x = 50; x <= 54; x++) cells.push({ x, y: 50 });
+    for (let y = 51; y <= 54; y++) cells.push({ x: 54, y });
+    for (const c of cells) {
+      const ops = roadBrush(d, c.x, c.y);
+      all.push(...ops);
+      d = applyOps(d, ops);
+    }
+    return { doc: d, cells, ops: all };
+  }
+
+  it("translateRoadCells moves an L-segment: old cells cleared, shape survives the shift", () => {
+    const { doc: d0 } = parseScenarioRaw(bytes);
+    const { doc, cells } = seedL(d0);
+    const cornerBefore = roadAt(doc, 54, 50); // the corner piece of the L
+    const ops = translateRoadCells(doc, cells, 3, 2);
+    expect(ops.length).toBeGreaterThan(0);
+    const d2 = applyOps(doc, ops);
+    // old cells NOT re-covered by the shifted segment lose the road; overlapped ones keep it
+    const newSet = new Set(cells.map((c) => `${c.x + 3},${c.y + 2}`));
+    for (const c of cells) {
+      if (!newSet.has(`${c.x},${c.y}`)) expect(roadAt(d2, c.x, c.y)).toBe(-1);
+    }
+    for (const c of cells) expect(roadAt(d2, c.x + 3, c.y + 2)).toBeGreaterThanOrEqual(0);
+    expect(roadAt(d2, 57, 52)).toBe(cornerBefore); // same shape -> same corner piece
+    // off-map translation aborts cleanly
+    expect(translateRoadCells(doc, cells, 100, 0)).toEqual([]);
+  });
+
+  it("extendRoadPath grows from an endpoint; the joint retunes from END to a through piece", () => {
+    const { doc: d0 } = parseScenarioRaw(bytes);
+    const { doc } = seedL(d0);
+    const endBefore = roadAt(doc, 54, 54); // south end of the L
+    const ops = extendRoadPath(doc, { x: 54, y: 54 }, { x: 57, y: 57 });
+    expect(ops.length).toBeGreaterThan(0);
+    const d2 = applyOps(doc, ops);
+    expect(roadAt(d2, 57, 57)).toBeGreaterThanOrEqual(0); // target reached
+    expect(roadAt(d2, 54, 54)).not.toBe(endBefore); // the grabbed end is an end no more
+    // path cells exist along the L (axis-first: x to 57, then y down)
+    expect(roadAt(d2, 56, 54)).toBeGreaterThanOrEqual(0);
+    expect(roadAt(d2, 57, 56)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("rerouteRoadOps re-routes the byte-verified Riders village@(25,1) road to a new entrance", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const village = doc.objects.find(
+      (o) => o.type === "village" && o.pos.x === 25 && o.pos.y === 1,
+    )!;
+    expect(village, "the probe's clean-attachment village exists").toBeTruthy();
+    expect(roadAt(doc, 29, 5), "road at its entrance pos+(4,4)").toBeGreaterThanOrEqual(0);
+
+    const newPos = { x: 28, y: 4 };
+    const ops = rerouteRoadOps(doc, village.pos, newPos, 4);
+    expect(ops.length).toBeGreaterThan(0);
+    const d2 = applyOps(doc, ops);
+    expect(roadAt(d2, 32, 8), "road reaches the NEW entrance").toBeGreaterThanOrEqual(0);
+    expect(roadAt(d2, 29, 5), "old entrance tail erased").toBe(-1);
+
+    // the whole journal (move + reroute) exports + round-trips
+    const journal: EditOp[] = [
+      { kind: "moveObject", id: village.id, x: newPos.x, y: newPos.y },
+      ...ops,
+    ];
+    const out = applyEditsToBytes(raw, journal);
+    const res = roundTripSemantic(doc, out, journal);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(validateMap(parseScenario(out)).ok).toBe(true);
+  });
+
+  it("rerouteRoadOps is a no-op for a fort with NO road at its entrance", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    // a spot guaranteed road-free: the seedL area before seeding
+    expect(rerouteRoadOps(doc, { x: 60, y: 60 }, { x: 62, y: 62 }, 4)).toEqual([]);
   });
 });
 

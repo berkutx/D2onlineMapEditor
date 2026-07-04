@@ -329,6 +329,21 @@ export const useEditStore = defineStore("edit", () => {
     project.value = { ...project.value, anchors: next };
     persist();
   }
+  /** «Дорога следует за входом»: fort ids whose road re-routes on move (project-persisted). */
+  const roadAnchors = computed<Record<string, { mode: "reroute" }>>(
+    () => project.value?.roadAnchors ?? {},
+  );
+  function toggleRoadAnchor(fortId: string): boolean {
+    if (!project.value) return false;
+    const cur = { ...(project.value.roadAnchors ?? {}) };
+    const on = !cur[fortId];
+    if (on) cur[fortId] = { mode: "reroute" };
+    else delete cur[fortId];
+    project.value = { ...project.value, roadAnchors: cur };
+    persist();
+    return on;
+  }
+
   /** Editor-GENERATED variable ids (counter gates etc.); persisted with the project, NOT in
    *  the .sg beyond the variables themselves. Drives the collapsed «Автоматические» group. */
   const autoVars = computed<number[]>(() => project.value?.autoVars ?? []);
@@ -492,6 +507,8 @@ export const useEditStore = defineStore("edit", () => {
     setAnchor,
     clearAnchor,
     anchorGroup,
+    roadAnchors,
+    toggleRoadAnchor,
     autoVars,
     markAutoVar,
     unmarkAutoVar,

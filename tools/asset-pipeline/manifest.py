@@ -64,6 +64,17 @@ class ManifestBuilder(object):
 
     def write(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        # Inject per-sheet download sizes (atlas PNG + meta JSON). Done here, not in
+        # add_spritesheet: only write() knows out_dir, and both files already exist on
+        # disk by now. Graceful: a missing file simply leaves the field absent (the HUD
+        # then shows an em-dash instead of a wrong number).
+        out_dir = os.path.dirname(path)
+        for ref in self.spritesheets:
+            try:
+                ref["bytes"] = (os.path.getsize(os.path.join(out_dir, ref["image"]))
+                                + os.path.getsize(os.path.join(out_dir, ref["meta"])))
+            except OSError:
+                pass
         data = self.to_dict()
         with open(path, "w") as fp:
             json.dump(data, fp, indent=1)

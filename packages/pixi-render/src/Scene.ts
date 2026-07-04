@@ -86,9 +86,14 @@ export interface DebugStats {
   /** JS heap (Chrome `performance.memory`; null elsewhere) — used / limit, MB. */
   jsHeapMB: number | null;
   jsHeapLimitMB: number | null;
-  /** Bytes pulled this session: over-the-wire vs decoded (resource timing), MB. */
-  netMB: number;
-  assetsMB: number;
+  /** Asset bytes DOWNLOADED for loaded atlas sheets (manifest-declared png+json sizes,
+   *  summed by the AssetStore — worker image fetches are invisible to main-thread
+   *  resource timing, so this is the only honest counter). null = old manifest without
+   *  the `bytes` field. */
+  netMB: number | null;
+  /** Loaded sheet count + estimated VRAM of ALL resident atlases (not just on-screen). */
+  sheets: number;
+  atlasVramMB: number;
 }
 
 /** Which logical layers can be toggled by the host. */
@@ -761,12 +766,11 @@ export class Scene {
     let texBytes = 0;
     sources.forEach((s) => (texBytes += s.width * s.height * 4));
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } }).memory;
-    let net = 0;
-    let assets = 0;
-    for (const e of performance.getEntriesByType("resource") as PerformanceResourceTiming[]) {
-      net += e.transferSize || 0;
-      assets += e.decodedBodySize || 0;
-    }
+    // Downloaded-asset accounting comes from the AssetStore (manifest-declared sizes of
+    // loaded sheets) — main-thread resource timing is architecturally blind here: atlas
+    // PNGs are fetched inside Pixi's image-bitmap workers, and the main-thread timing
+    // buffer caps at 250 entries anyway (both undercounted the old counter to ~11 MB).
+    const dl = this.assets?.downloadedBytes ?? null;
     const MB = 1048576;
     return {
       fps: this.renderTimes.length,
@@ -790,8 +794,9 @@ export class Scene {
       texCount: sources.size,
       jsHeapMB: mem ? mem.usedJSHeapSize / MB : null,
       jsHeapLimitMB: mem ? mem.jsHeapSizeLimit / MB : null,
-      netMB: net / MB,
-      assetsMB: assets / MB,
+      netMB: dl == null ? null : dl / MB,
+      sheets: this.assets?.loadedSheetCount ?? 0,
+      atlasVramMB: (this.assets?.textureBytes() ?? 0) / MB,
     };
   }
 

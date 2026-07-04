@@ -31,6 +31,10 @@ export const useToolStore = defineStore("tool", () => {
   const moveId = ref<string | null>(null);
   /** Cells of the road segment currently selected by the "roadsel" tool. */
   const roadSel = ref<{ x: number; y: number }[]>([]);
+  /** The roadsel anchor cell + expansion level (0=прямая, 1=нить, 2=вся сеть). Lifted here
+   *  so BOTH the canvas re-click and the floating RoadActionBar's «Больше» share them. */
+  const roadAnchor = ref<{ x: number; y: number } | null>(null);
+  const roadLevel = ref(0);
   /** The rectangle selected by the "region" tool (for Copilot generation); null = none.
    *  For mask modes this is the bounding box of the painted cells (display + LLM + bbox-size). */
   const region = ref<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -42,9 +46,12 @@ export const useToolStore = defineStore("tool", () => {
   const zoneHidden = ref(false);
   /** "👁 eye" mode: when on and no zone is drawn, the visible screen area IS the zone. */
   const eyeZone = ref(false);
-  /** Object selected for the property inspector (id of a doc object), null = none.
-   *  Set by a click in the "select" tool; drives ObjectInspector + the selection outline. */
+  /** PRIMARY selected object (drives ObjectInspector + pick-below cycling), null = none. */
   const selectedId = ref<string | null>(null);
+  /** The FULL multi-selection (Shift+клик / Shift+рамка). Invariant: selectedId ∈ selectedIds
+   *  (or both empty). Single-click selection is the degenerate case [id]. Drives the outline,
+   *  group move and the SelectionActionBar. */
+  const selectedIds = ref<string[]>([]);
 
   /** «Локации»-tool role filter: which locations stay bright + pickable in the mode.
    *  free = не используется ни одним событием; the rest = dominant scenario role. */
@@ -91,9 +98,13 @@ export const useToolStore = defineStore("tool", () => {
   function setMoveId(id: string | null): void {
     moveId.value = id;
   }
-  /** Set/clear the selected road-segment cells. */
+  /** Set/clear the selected road-segment cells. Clearing also drops the anchor/level. */
   function setRoadSel(cells: { x: number; y: number }[]): void {
     roadSel.value = cells;
+    if (cells.length === 0) {
+      roadAnchor.value = null;
+      roadLevel.value = 0;
+    }
   }
   /** Set/clear the Copilot generation region (bbox). */
   function setRegion(r: { x: number; y: number; w: number; h: number } | null): void {
@@ -114,6 +125,29 @@ export const useToolStore = defineStore("tool", () => {
   }
   function setSelectedId(id: string | null): void {
     selectedId.value = id;
+    selectedIds.value = id ? [id] : [];
+  }
+  /** Shift+клик: toggle an object in/out of the multi-selection (primary follows). */
+  function toggleSelected(id: string): void {
+    const list = selectedIds.value.slice();
+    const i = list.indexOf(id);
+    if (i >= 0) {
+      list.splice(i, 1);
+      selectedIds.value = list;
+      if (selectedId.value === id) selectedId.value = list[list.length - 1] ?? null;
+    } else {
+      list.push(id);
+      selectedIds.value = list;
+      selectedId.value = id;
+    }
+  }
+  /** Shift+рамка: union `ids` into the selection (primary = last of the batch). */
+  function addSelected(ids: readonly string[]): void {
+    if (ids.length === 0) return;
+    const set = new Set(selectedIds.value);
+    for (const id of ids) set.add(id);
+    selectedIds.value = [...set];
+    selectedId.value = ids[ids.length - 1]!;
   }
   /** Clear the whole zone selection (region bbox + mask) — the "accept"/done action. */
   function clearZone(): void {
@@ -123,10 +157,10 @@ export const useToolStore = defineStore("tool", () => {
   }
 
   return {
-    tool, size, terrainId, decorId, moveId, roadSel, region, zoneMode, regionMask, zoneHidden, eyeZone, selectedId,
+    tool, size, terrainId, decorId, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, selectedId, selectedIds,
     locFilter, setLocFilter,
     objectPickTypes, objectPickResult, startObjectPick, finishObjectPick,
     painting, setTool, setSize, setTerrainId, setDecor, setMoveId, setRoadSel,
-    setRegion, setZoneMode, setRegionMask, setZoneHidden, setEyeZone, setSelectedId, clearZone,
+    setRegion, setZoneMode, setRegionMask, setZoneHidden, setEyeZone, setSelectedId, toggleSelected, addSelected, clearZone,
   };
 });

@@ -30,6 +30,11 @@ import {
   placeChestOps,
   placeStackOps,
   selectRoadSegment,
+  translateRoadCells,
+  extendRoadPath,
+  rerouteRoadOps,
+  lPath,
+  applyOps,
   type BrushKind,
   type EditOp,
 } from "@d2/map-edit";
@@ -275,6 +280,8 @@ let painting = false;
 let strokeOps: EditOp[] = [];
 /** Press position for the select tool (to tell a click from a pan-drag). */
 let selDown: { x: number; y: number } | null = null;
+/** Shift+drag rubber-band start cell (select tool multi-select frame); null = not banding. */
+let boxSelStart: { x: number; y: number } | null = null;
 /** Last hovered cell (null = off-map); used to refresh the decor ghost on cycle. */
 let lastCell: { x: number; y: number } | null = null;
 
@@ -515,12 +522,13 @@ function objectsAtCell(cx: number, cy: number): MapObject[] {
   return [...concrete.map((c) => c.o), ...locs.map((l) => l.o)];
 }
 
-/** Pick from the covering candidates: plain click → topmost; Shift → one level below the
- *  current selection (cycling), so overlapping objects/locations can be reached. */
-function pickAtCell(cx: number, cy: number, shift: boolean): MapObject | null {
+/** Pick from the covering candidates: plain click → topmost; Alt (`below`) → one level
+ *  below the current selection (cycling), so overlapping objects/locations can be reached.
+ *  (Shift is the MULTI-SELECT modifier now — the cycle moved to Alt everywhere.) */
+function pickAtCell(cx: number, cy: number, below: boolean): MapObject | null {
   const list = objectsAtCell(cx, cy);
   if (!list.length) return null;
-  if (!shift) return list[0]!;
+  if (!below) return list[0]!;
   const i = list.findIndex((o) => o.id === toolStore.selectedId);
   return list[(i + 1) % list.length]!;
 }
@@ -697,8 +705,11 @@ function paintAt(cx: number, cy: number): void {
 }
 
 // road-select: re-clicking the same anchor cell bumps the level (segment -> strand -> net).
-let roadAnchor: { x: number; y: number } | null = null;
-let roadLevel = 0;
+// (the roadsel anchor/level live in toolStore — shared with the floating RoadActionBar)
+/** roadsel drag state: press INSIDE the selection starts a MOVE (interior cell) or an
+ *  EXTEND (endpoint cell, ≤1 selected neighbour); a press without movement falls back
+ *  to the classic click behavior (same-cell level bump) on pointerup. */
+let roadDrag: { kind: "move" | "extend"; start: { x: number; y: number }; last: { x: number; y: number }; moved: boolean } | null = null;
 
 // ---- right-click context menu + anchor-pick mode ("Заякорить к…") -------------------------
 /** Open context menu: screen position + the object it targets (obj=null → the EMPTY-cell
@@ -707,12 +718,22 @@ const ctxMenu = ref<{ x: number; y: number; obj: MapObject | null; cell: { x: nu
 /** While set, the NEXT left click picks the anchor PARENT for this child id. */
 const anchorPickFor = ref<string | null>(null);
 
-/** Double click = свойства объекта (select -> the inspector rail opens). */
+/** Double click = ВЗЯТЬ объект в перенос (инспектор уже открыт первым кликом двойного;
+ *  локации переносятся драгом в своём инструменте — для них dblclick остаётся выбором). */
 function onDblClick(e: MouseEvent): void {
   const cell = cellFromEvent(e as PointerEvent);
   if (!cell) return;
-  const hit = pickAtCell(cell.x, cell.y, e.shiftKey);
-  if (hit) toolStore.setSelectedId(hit.id);
+  const hit = pickAtCell(cell.x, cell.y, e.altKey);
+  if (!hit) return;
+  // don't COLLAPSE a multi-selection when double-clicking one of its members — the whole
+  // group is picked up (the move drop unions selectedIds with anchor groups).
+  if (!toolStore.selectedIds.includes(hit.id)) toolStore.setSelectedId(hit.id);
+  if (hit.type === "location") return;
+  // pick it up for moving: same state the Move tool's first click would set. Order matters
+  // less than it looks (the [decorId, moveId] watcher re-runs refreshGhost either way), but
+  // setMoveId-then-setTool avoids a ghost refresh with a null id.
+  toolStore.setMoveId(hit.id);
+  toolStore.setTool("move");
 }
 
 /** Right click = context menu: the object under the cursor, or the EMPTY-cell placement menu. */
@@ -721,7 +742,7 @@ function onContextMenu(e: MouseEvent): void {
   anchorPickFor.value = null;
   const cell = cellFromEvent(e as PointerEvent);
   if (!cell) { ctxMenu.value = null; return; }
-  const hit = pickAtCell(cell.x, cell.y, e.shiftKey);
+  const hit = pickAtCell(cell.x, cell.y, e.altKey);
   ctxMenu.value = { x: e.clientX, y: e.clientY, obj: hit, cell };
 }
 
@@ -812,6 +833,15 @@ function ctxAction(action: string): void {
     case "delete":
       deleteObjectSafely(obj);
       break;
+    case "roadAnchor": {
+      const on = editStore.toggleRoadAnchor(obj.id);
+      ElMessage.success(
+        on
+          ? "Дорога следует за входом: при переносе города дорога перепроложится к новому входу"
+          : "Дорога больше не следует за городом",
+      );
+      break;
+    }
   }
 }
 
@@ -884,7 +914,7 @@ function onPointerDown(e: PointerEvent): void {
   // anchor-pick mode: this click chooses the PARENT for the pending "Заякорить к…"
   if (anchorPickFor.value) {
     const cell = cellFromEvent(e);
-    const hit = cell ? pickAtCell(cell.x, cell.y, e.shiftKey) : null;
+    const hit = cell ? pickAtCell(cell.x, cell.y, e.altKey) : null;
     if (hit) finishAnchorPick(hit);
     else { anchorPickFor.value = null; ElMessage.info("Якорение отменено"); }
     return;
@@ -907,19 +937,30 @@ function onPointerDown(e: PointerEvent): void {
     return;
   }
   // road-select tool: click a road to select its segment; click the same cell to grow.
+  // A press INSIDE the selection starts a DRAG: interior cell = MOVE the whole segment,
+  // endpoint (≤1 selected neighbour) = EXTEND with an L-path. No movement → classic click.
   if (toolStore.tool === "roadsel") {
     const cell = cellFromEvent(e);
     const doc = editStore.liveDoc;
     if (!cell || !doc) return;
-    if (roadAnchor && roadAnchor.x === cell.x && roadAnchor.y === cell.y) {
-      roadLevel = Math.min(roadLevel + 1, 2);
-    } else {
-      roadAnchor = cell;
-      roadLevel = 0;
+    const inSel = toolStore.roadSel.some((c) => c.x === cell.x && c.y === cell.y);
+    if (inSel) {
+      const nbInSel = toolStore.roadSel.filter(
+        (c) => Math.abs(c.x - cell.x) + Math.abs(c.y - cell.y) === 1,
+      ).length;
+      roadDrag = { kind: nbInSel <= 1 ? "extend" : "move", start: cell, last: cell, moved: false };
+      getScene()?.canvas?.setPointerCapture(e.pointerId);
+      return;
     }
-    const sel = selectRoadSegment(doc, cell.x, cell.y, roadLevel);
-    if (sel.length === 0) roadAnchor = null;
-    toolStore.setRoadSel(sel);
+    const a = toolStore.roadAnchor;
+    if (a && a.x === cell.x && a.y === cell.y) {
+      toolStore.roadLevel = Math.min(toolStore.roadLevel + 1, 2);
+    } else {
+      toolStore.roadAnchor = cell;
+      toolStore.roadLevel = 0;
+    }
+    const sel = selectRoadSegment(doc, cell.x, cell.y, toolStore.roadLevel);
+    toolStore.setRoadSel(sel); // an empty result clears the anchor inside setRoadSel
     return;
   }
   // decor tool: a single click stamps the picked decoration (no drag stroke).
@@ -941,7 +982,7 @@ function onPointerDown(e: PointerEvent): void {
     const cell = cellFromEvent(e);
     if (!cell) return;
     if (!toolStore.moveId) {
-      const hit = pickAtCell(cell.x, cell.y, e.shiftKey);
+      const hit = pickAtCell(cell.x, cell.y, e.altKey);
       if (hit) {
         toolStore.setMoveId(hit.id);
         refreshGhost(cell);
@@ -951,18 +992,20 @@ function onPointerDown(e: PointerEvent): void {
       if (obj) {
         const dx = cell.x - obj.pos.x;
         const dy = cell.y - obj.pos.y;
-        // anchored group: the carried object + every transitively anchored child moves by the
-        // same delta — and the WHOLE group must fit (bounds + occupancy), else keep carrying.
-        const group = editStore.anchorGroup(obj.id);
+        // the moved GROUP = the multi-selection (when the carried object is part of it) +
+        // every member's transitively anchored children, deduped — one delta, one stroke.
+        // Otherwise just the carried object's anchor group (the pre-multiselect behavior).
+        const seeds = toolStore.selectedIds.includes(obj.id) ? toolStore.selectedIds : [obj.id];
+        const group = [...new Set(seeds.flatMap((id) => editStore.anchorGroup(id)))];
+        const doc = editStore.liveDoc!;
+        let moveOps: EditOp[] | null = null;
         if (group.length > 1) {
           if (dx !== 0 || dy !== 0) {
             if (groupMoveBlocked(group, dx, dy)) return; // не даём даже попытаться
-            const doc = editStore.liveDoc!;
-            const ops: EditOp[] = group
+            moveOps = group
               .map((id) => doc.objects.find((o) => o.id === id))
               .filter((o): o is NonNullable<typeof o> => !!o)
               .map((o) => ({ kind: "moveObject" as const, id: o.id, x: o.pos.x + dx, y: o.pos.y + dy }));
-            editStore.commit(ops); // one stroke = one undo for the whole group
           }
         } else {
           if (obj.type !== "location") {
@@ -971,8 +1014,27 @@ function onPointerDown(e: PointerEvent): void {
             if (!canPlaceFootprint(cell.x, cell.y, w, h, toolStore.moveId ?? undefined)) return;
           }
           if (dx !== 0 || dy !== 0) {
-            editStore.commit([{ kind: "moveObject", id: toolStore.moveId, x: cell.x, y: cell.y }]);
+            moveOps = [{ kind: "moveObject", id: obj.id, x: cell.x, y: cell.y }];
           }
+        }
+        if (moveOps) {
+          // «Дорога следует за входом»: for every moved fort with a roadAnchor, re-route
+          // its attached strand (erase old-entrance..bend, extend bend → new entrance) —
+          // planned SEQUENTIALLY against a working doc, committed WITH the move (one undo).
+          const reroutes: EditOp[] = [];
+          let planDoc = doc;
+          for (const op of moveOps) {
+            if (op.kind !== "moveObject" || !editStore.roadAnchors[op.id]) continue;
+            const o = doc.objects.find((x) => x.id === op.id);
+            if (!o || (o.type !== "village" && o.type !== "capital")) continue;
+            const { w } = objectFootprint(o, landmarkFootprints);
+            const ops = rerouteRoadOps(planDoc, o.pos, { x: op.x, y: op.y }, w);
+            if (ops.length) {
+              reroutes.push(...ops);
+              planDoc = applyOps(planDoc, ops);
+            }
+          }
+          editStore.commit([...moveOps, ...reroutes]); // one stroke = one undo for everything
         }
       }
       toolStore.setMoveId(null);
@@ -1003,8 +1065,18 @@ function onPointerDown(e: PointerEvent): void {
   }
   // select/inspect tool: remember the press; a click (no drag) on pointerup selects the
   // object under it (drag still pans the camera — we don't capture the pointer here).
+  // SHIFT+press starts the multi-select RUBBER BAND instead (drag = frame, click = toggle).
   if (toolStore.tool === "select") {
     selDown = { x: e.clientX, y: e.clientY };
+    if (e.shiftKey) {
+      const cell = cellFromEvent(e);
+      if (cell) {
+        boxSelStart = cell;
+        const s = getScene();
+        s?.setPanEnabled(false); // the band owns this drag — камера не должна ехать следом
+        s?.canvas?.setPointerCapture(e.pointerId);
+      }
+    }
     return;
   }
   const cell = cellFromEvent(e);
@@ -1016,6 +1088,57 @@ function onPointerDown(e: PointerEvent): void {
 }
 
 function onPointerUp(e: PointerEvent): void {
+  // roadsel drag: commit the move/extend (or fall back to the classic same-cell click).
+  if (roadDrag) {
+    const drag = roadDrag;
+    roadDrag = null;
+    try { getScene()?.canvas?.releasePointerCapture(e.pointerId); } catch { /* released */ }
+    const doc = editStore.liveDoc;
+    if (!doc) return;
+    if (!drag.moved) {
+      // no movement — the classic click: same-cell = bump level, else reselect from here
+      const a = toolStore.roadAnchor;
+      if (a && a.x === drag.start.x && a.y === drag.start.y) {
+        toolStore.roadLevel = Math.min(toolStore.roadLevel + 1, 2);
+      } else {
+        toolStore.roadAnchor = drag.start;
+        toolStore.roadLevel = 0;
+      }
+      toolStore.setRoadSel(selectRoadSegment(doc, drag.start.x, drag.start.y, toolStore.roadLevel));
+      return;
+    }
+    const target = drag.last;
+    if (drag.kind === "move") {
+      const dx = target.x - drag.start.x;
+      const dy = target.y - drag.start.y;
+      const ops = translateRoadCells(doc, toolStore.roadSel, dx, dy);
+      if (ops.length) {
+        editStore.commit(ops);
+        const shifted = toolStore.roadSel.map((c) => ({ x: c.x + dx, y: c.y + dy }));
+        const a = toolStore.roadAnchor;
+        toolStore.setRoadSel(shifted);
+        if (a) toolStore.roadAnchor = { x: a.x + dx, y: a.y + dy };
+      } else {
+        getScene()?.setRoadSelection(toolStore.roadSel); // aborted (off-map) — restore highlight
+      }
+      return;
+    }
+    // extend: draw the L-path from the grabbed endpoint to the drop cell
+    const ops = extendRoadPath(doc, drag.start, target);
+    if (ops.length) {
+      editStore.commit(ops);
+      const seen = new Set(toolStore.roadSel.map((c) => `${c.x},${c.y}`));
+      const merged = [...toolStore.roadSel];
+      for (const c of lPath(drag.start, target)) {
+        const k = `${c.x},${c.y}`;
+        if (!seen.has(k)) { seen.add(k); merged.push(c); }
+      }
+      toolStore.setRoadSel(merged);
+    } else {
+      getScene()?.setRoadSelection(toolStore.roadSel);
+    }
+    return;
+  }
   // region tool: finalize the drawn zone. rect -> bbox (no mask); brush/line/frame -> a
   // cell MASK + its bbox. A click without a drag yields a 1×1 "point" (rect mode), used by
   // the Copilot's "вокруг этой точки NxM" to anchor a centred region on that cell.
@@ -1084,15 +1207,43 @@ function onPointerUp(e: PointerEvent): void {
     }
     return;
   }
-  // select/inspect tool: a click (negligible movement) picks the topmost object → inspector.
-  // Hold Shift to step one level below the current pick (overlapping locations/objects).
+  // select/inspect tool. Plain click (negligible movement) → topmost object → inspector;
+  // Alt+клик — слой ниже (цикл); Shift+клик — toggle в мультивыделение; Shift+drag — рамка
+  // (выделяются НЕ-локации, чей якорь попал в прямоугольник; объединяется с текущим набором).
   if (toolStore.tool === "select" && selDown) {
     const moved = Math.abs(e.clientX - selDown.x) + Math.abs(e.clientY - selDown.y);
     selDown = null;
+    const band = boxSelStart;
+    boxSelStart = null;
+    if (band) {
+      const s = getScene();
+      s?.setFootprint([]); // clear the band preview
+      s?.setPanEnabled(true); // select tool owns the pan again
+      try { s?.canvas?.releasePointerCapture(e.pointerId); } catch { /* released */ }
+    }
     if (moved < 6) {
       const cell = cellFromEvent(e);
-      const hit = cell ? pickAtCell(cell.x, cell.y, e.shiftKey) : null;
+      if (e.shiftKey) {
+        const hit = cell ? pickAtCell(cell.x, cell.y, false) : null;
+        if (hit) toolStore.toggleSelected(hit.id);
+        return; // Shift+клик мимо объектов НЕ сбрасывает набранное выделение
+      }
+      const hit = cell ? pickAtCell(cell.x, cell.y, e.altKey) : null;
       toolStore.setSelectedId(hit ? hit.id : null);
+      return;
+    }
+    if (band) {
+      const cell = cellFromEvent(e);
+      const doc = editStore.liveDoc;
+      if (cell && doc) {
+        const x0 = Math.min(band.x, cell.x), x1 = Math.max(band.x, cell.x);
+        const y0 = Math.min(band.y, cell.y), y1 = Math.max(band.y, cell.y);
+        const ids = doc.objects
+          .filter((o) => o.type !== "location" && VISIBLE_OBJECT_TYPES.has(o.type))
+          .filter((o) => o.pos.x >= x0 && o.pos.x <= x1 && o.pos.y >= y0 && o.pos.y <= y1)
+          .map((o) => o.id);
+        toolStore.addSelected(ids);
+      }
     }
     return;
   }
@@ -1120,6 +1271,25 @@ function onPointerMove(e: PointerEvent): void {
     getScene()?.setCursorCell(null);
   }
   if (toolStore.tool === "decor" || toolStore.tool === "move") refreshGhost(cell);
+  // select tool: Shift+drag rubber band — live FRAME preview of the selection rectangle
+  if (boxSelStart && cell) {
+    getScene()?.setFootprint(maskRefs(frameMask(rectFrom(boxSelStart, cell))), true);
+  }
+  // roadsel drag: live highlight of the would-be segment (move = translated; extend = ∪ L-path)
+  if (roadDrag && cell) {
+    if (cell.x !== roadDrag.start.x || cell.y !== roadDrag.start.y) roadDrag.moved = true;
+    roadDrag.last = cell;
+    if (roadDrag.moved) {
+      const sel = toolStore.roadSel;
+      if (roadDrag.kind === "move") {
+        const dx = cell.x - roadDrag.start.x;
+        const dy = cell.y - roadDrag.start.y;
+        getScene()?.setRoadSelection(sel.map((c) => ({ x: c.x + dx, y: c.y + dy })));
+      } else {
+        getScene()?.setRoadSelection([...sel, ...lPath(roadDrag.start, cell)]);
+      }
+    }
+  }
   // hover spotlight for location overlays (all tools — this is what declutters the soup)
   updateLocationFocus(cell);
   // locations tool: a drag ≥1 cell moves the location — live footprint preview at the target
@@ -1214,20 +1384,25 @@ watch(
   },
 );
 
-// Persistent selection outline for the inspector's selected object (redraw when the
-// selection changes or the object moves/edits; clear when it's gone).
+// Persistent selection outline — for EVERY object in the multi-selection (redraw when the
+// selection changes or an object moves/edits; clear when gone). Scene.setSelection is
+// cell-array based, so N objects = one concatenated cell list.
 watch(
-  [() => toolStore.selectedId, () => editStore.objectsRev],
+  [() => toolStore.selectedIds, () => editStore.objectsRev],
   () => {
     const s = getScene();
     if (!s) return;
-    const id = toolStore.selectedId;
-    const obj = id ? editStore.liveDoc?.objects.find((o) => o.id === id) : null;
-    // A selected location is highlighted by LocationLayer (yellow accent on its centered
-    // area), so skip the generic footprint outline (which would be the wrong r×r box at pos).
-    if (!obj || obj.type === "location") { s.setSelection([]); return; }
-    const { w, h } = objectFootprint(obj, landmarkFootprints);
-    s.setSelection(footprintCells(obj.pos.x, obj.pos.y, w, h));
+    const doc = editStore.liveDoc;
+    const cells: { x: number; y: number }[] = [];
+    for (const id of toolStore.selectedIds) {
+      const obj = doc?.objects.find((o) => o.id === id);
+      // A selected location is highlighted by LocationLayer (yellow accent on its centered
+      // area), so skip the generic footprint outline (wrong r×r box at pos).
+      if (!obj || obj.type === "location") continue;
+      const { w, h } = objectFootprint(obj, landmarkFootprints);
+      cells.push(...footprintCells(obj.pos.x, obj.pos.y, w, h));
+    }
+    s.setSelection(cells);
   },
 );
 
@@ -1282,8 +1457,8 @@ watch(
 
 // Collab presence: broadcast my selection to room peers; render their live cursors.
 watch(
-  () => toolStore.selectedId,
-  (id) => collabStore.sendSelection(id ? [id] : []),
+  () => toolStore.selectedIds,
+  (ids) => collabStore.sendSelection(ids),
 );
 watch(
   () => collabStore.peerList,
@@ -1300,9 +1475,8 @@ watch(
     s?.setPanEnabled(t === "select");
     if (prev === "move") toolStore.setMoveId(null); // leaving move drops the carry
     if (prev === "roadsel") {
-      toolStore.setRoadSel([]); // leaving road-select clears the highlight
-      roadAnchor = null;
-      roadLevel = 0;
+      toolStore.setRoadSel([]); // leaving road-select clears the highlight (+anchor/level)
+      roadDrag = null;
     }
     if (prev === "region") regionDragging = false;
     // «режим локаций»: veil the world; make sure the location layer is actually visible
@@ -1418,6 +1592,13 @@ watch(
         <button v-if="ctxMenu.obj.type === 'location'" class="ctx-item" @click="ctxAction('spawnHere')">✨ Спавн отряда здесь</button>
         <div class="ctx-sep" />
         <button class="ctx-item" @click="ctxAction('anchor')">⚓ Заякорить к…</button>
+        <button
+          v-if="ctxMenu.obj.type === 'village' || ctxMenu.obj.type === 'capital'"
+          class="ctx-item"
+          @click="ctxAction('roadAnchor')"
+        >
+          🛣 Дорога следует за входом {{ editStore.roadAnchors[ctxMenu.obj.id] ? "✓" : "" }}
+        </button>
         <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">Снять якорь</button>
         <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
         <div class="ctx-sep" />
@@ -1453,12 +1634,16 @@ watch(
       <div class="hud-row"><span>buffer</span><b>{{ debugStats.drawingBuffer.w }}×{{ debugStats.drawingBuffer.h }} (dpr {{ debugStats.dpr }})</b></div>
       <div class="hud-sep" />
       <div class="hud-row"><span>tex vram</span><b>{{ debugStats.texMB.toFixed(0) }} MB / {{ debugStats.texCount }}</b></div>
+      <div class="hud-row"><span>atlas vram</span><b>{{ debugStats.atlasVramMB.toFixed(0) }} MB / {{ debugStats.sheets }} листов</b></div>
       <div class="hud-row">
         <span>js heap</span>
         <b v-if="debugStats.jsHeapMB != null">{{ debugStats.jsHeapMB.toFixed(0) }} / {{ debugStats.jsHeapLimitMB?.toFixed(0) }} MB</b>
         <b v-else>n/a</b>
       </div>
-      <div class="hud-row"><span>net</span><b>{{ debugStats.netMB.toFixed(1) }} MB ({{ debugStats.assetsMB.toFixed(0) }} dec)</b></div>
+      <div class="hud-row">
+        <span>assets dl</span>
+        <b>{{ debugStats.netMB != null ? debugStats.netMB.toFixed(1) + " MB" : "—" }}</b>
+      </div>
       <div class="hud-sep" />
       <div class="hud-row"><span>{{ debugStats.rendererType }}</span><b>max tex {{ debugStats.maxTexture }}</b></div>
       <div class="hud-row hud-gpu">{{ debugStats.gpu }}</div>

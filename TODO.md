@@ -128,6 +128,29 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   village adds (byte-verified footprints); freshly appended MidRoad blocks get no plan entry yet —
   verify road membership in shipped plans first, then emit alongside roadFrame.
 
+## UX v2 queue (researched 2026-07-04; multi-select + roads DONE)
+- ~~Дороги: move/extend~~ — DONE: `translateRoadCells`/`extendRoadPath`/`lPath` в roadSelect.ts;
+  roadsel: драг внутри выделения = перенос, за конец (≤1 соседа в выделении) = продление
+  L-путём; live-превью через setRoadSelection, клик без движения = прежний level-bump.
+  Рефактор-долг: overlay-хелпер (over/cur/updateRoad) скопирован 5-й раз — вынести.
+- ~~Дорога→здание~~ — DONE: entrance = pos+(size,size) (byte-derived, memory
+  building-entrance-rule); project.roadAnchors {fortId→{mode:'reroute'}}; ctx-меню города
+  «🛣 Дорога следует за входом»; при переносе форта: обход графа дорог от старого входа до
+  первого колена/развилки → erase хвоста → extendRoadPath(колено→новый вход), одним страйком
+  с moveObject (тест на реальной деревне Riders@(25,1)). Fail-soft: без дороги у входа — no-op.
+- **Зоны свободной формы** — рисование = клон region-инструмента (rect/brush/line/frame уже
+  есть); жадное покрытие маски квадратами 5×5/3×3/1×1 (локации законно перекрываются, тайлы
+  строго ⊆ маски); project.zones {name,cells,locIds,eventIds,guardVar}; **условия событий —
+  ТОЛЬКО AND (byte-факт TAppEdit.DBF, >1 enterZone запрещён)** → триггер зоны = N событий-
+  клонов (сворачивать в EventsPanel, occur-once через guard-переменную в autoVars); зона-как-
+  цель-эффекта = N эффектов ОДНОГО события; перегенерация = один commit (delete old + add new);
+  ZN-ссылки никогда не пишутся в .sg.
+- **Флайауты дока** (решение юзера: hover с задержкой ~350мс, тултип переезжает в шапку) —
+  data-driven из tools.ts (flyout-фабрика, max 4 ряда): Рельеф=свотчи 6 земель+кисть;
+  Декор=Природа/Постройки/Рельеф/🔍 (требует lift фильтров DecorPalette в стор — activeFamily/
+  search/faction/tone сейчас component-local); Локации=фильтр ролей+2 тумблера; Вода/Лес/
+  Ластик=кисть; Двигать=якоря. Обзор/Дорога/Дорога✂ — без флайаута.
+
 ## Anchors / scenario-window follow-ups (deferred 2026-07-02)
 - **Road follows anchored building** — when a building anchored to a road moves, re-route the road
   from the nearest bend (or the second bend) to the building's new entrance. Design: the road is a
@@ -152,8 +175,8 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   node to scroll the editor column to that card.
 
 ## Collaboration & editor follow-ups (deferred 2026-06-30)
-- **Events editor** — the one remaining big object type not yet editable (triggers/effects). Research the
-  `.sg` event block layout on bitbucket before touching the writer.
+- ~~Events editor~~ — DONE (E1+E2: full read/edit, все 746 событий Riders ре-сериализуются
+  байт-в-байт; см. секции событий выше).
 - **Collab: history-revert action** — the shared History panel is read-only. To add "откатить отсюда"
   (single + chain), each history entry must carry its INVERSE captured at apply time (today only my own
   ops capture inverses, in `editStore.myUndo`; peer ops via `applyIncoming` don't). Store the inverse per

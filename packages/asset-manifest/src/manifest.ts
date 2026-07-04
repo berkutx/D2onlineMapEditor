@@ -12,6 +12,10 @@ export const SpritesheetRef = z.object({
   ff: z.string().optional(), // source .ff archive
   image: z.string(), // path under public/assets
   meta: z.string(), // path to the spritesheet JSON under public/assets
+  /** Total download size (atlas PNG + meta JSON, bytes). Optional/additive: the debug HUD
+   *  sums it per LOADED sheet — worker-side image fetches are invisible to the main thread's
+   *  resource timing, so declared sizes are the only accurate accounting. */
+  bytes: z.number().int().nonnegative().optional(),
 });
 export type SpritesheetRef = z.infer<typeof SpritesheetRef>;
 

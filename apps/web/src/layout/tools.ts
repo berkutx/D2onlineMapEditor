@@ -20,12 +20,12 @@ export interface ToolDef {
 
 /** The dock tools, top-to-bottom. `region` is driven from the Copilot, not the dock. */
 export const EDIT_TOOLS: ToolDef[] = [
-  { value: "select", label: "Обзор", icon: Pointer, hint: "ЛКМ — осмотр · ⇧+клик — слой ниже (локации) · колесо — масштаб · тащить — двигать карту" },
+  { value: "select", label: "Обзор", icon: Pointer, hint: "ЛКМ — осмотр · 2×клик — перенести · ⇧+клик/рамка — выделить несколько · Alt+клик — слой ниже · тащить — карта" },
   { value: "terrain", label: "Рельеф", icon: Brush, hint: "рисуй землёй · Ctrl+тащить — двигать карту · колесо — масштаб" },
   { value: "water", label: "Вода", icon: WaterIcon, hint: "рисуй водой · Ctrl+тащить — двигать карту" },
   { value: "forest", label: "Лес", icon: ForestIcon, hint: "сажай лес · Ctrl+тащить — двигать карту" },
   { value: "road", label: "Дорога", icon: RoadIcon, hint: "веди дорогу · авто-стыковка · Ctrl+тащить — двигать карту" },
-  { value: "roadsel", label: "Дорога ✂", icon: Scissor, hint: "клик — выделить · ещё раз — расширить · Del — стереть · Esc — снять · Ctrl+тащить — двигать карту" },
+  { value: "roadsel", label: "Дорога ✂", icon: Scissor, hint: "клик — выделить · ещё раз — расширить · тащить — двигать · тащить за конец — продолжить · Del — стереть" },
   { value: "erase", label: "Ластик", icon: EraseIcon, hint: "стирай рельеф/дороги/декор · Ctrl+тащить — двигать карту" },
   { value: "decor", label: "Декор", icon: Picture, hint: "клик — поставить · R — другой облик · [ ] — листать · Ctrl+тащить — двигать карту" },
   { value: "move", label: "Двигать", icon: Rank, hint: "клик — взять/поставить · ⇧+клик — слой ниже · R — облик · Ctrl+тащить — двигать карту · Esc — отмена" },
