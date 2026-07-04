@@ -5,6 +5,7 @@
  */
 import { defineStore } from "pinia";
 import { ref } from "vue";
+import type { LocFilter } from "../services/scenarioRoles";
 
 /** select = pan/inspect (no painting); terrain/water/forest/road/erase paint cells;
  *  decor = place a decoration; move = pick+drop an object; roadsel = select a road segment;
@@ -54,9 +55,10 @@ export const useToolStore = defineStore("tool", () => {
   const selectedIds = ref<string[]>([]);
 
   /** «Локации»-tool role filter: which locations stay bright + pickable in the mode.
-   *  free = не используется ни одним событием; the rest = dominant scenario role. */
-  const locFilter = ref<"all" | "free" | "trigger" | "spawn" | "destination" | "env">("all");
-  function setLocFilter(f: "all" | "free" | "trigger" | "spawn" | "destination" | "env"): void {
+   *  free = не используется ни одним событием; enter/stackIn/itemTo = триггер-подтипы
+   *  (вход в зону / отряд в зоне / предмет в зону); spawn/destination/env = класс роли. */
+  const locFilter = ref<LocFilter>("all");
+  function setLocFilter(f: LocFilter): void {
     locFilter.value = f;
   }
 

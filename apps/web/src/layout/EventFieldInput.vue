@@ -43,6 +43,9 @@ const REF_TYPES: Record<string, string[]> = {
   "ref-ruin": ["ruin"],
   "ref-site": ["merchant", "mage", "trainer", "mercenary"],
   "ref-lmark": ["landmark"],
+  // цель приказа: отряд (атаковать/защищать/помогать), город (удерживать/красть/защищать)
+  // или локация (идти/защищать) — по категории приказа
+  "ref-target": ["stack", "village", "capital", "location"],
 };
 
 interface Opt { value: string; label: string }
@@ -129,6 +132,25 @@ const locGroups = computed<{ label: string; options: Opt[] }[]>(() => {
   return out;
 });
 
+/** Цель приказа (ref-target): три группы — отряды (по лидеру), города, локации. */
+const targetGroups = computed<{ label: string; options: Opt[] }[]>(() => {
+  const doc = edit.liveDoc;
+  if (!doc) return [];
+  const mk = (types: string[]): Opt[] =>
+    doc.objects
+      .filter((o) => types.includes(o.type))
+      .map((o) => ({ value: o.id, label: `${names.objName(o.id)} · ${o.pos.x},${o.pos.y}` }))
+      .sort((a, b) => a.label.localeCompare(b.label, "ru"));
+  const out: { label: string; options: Opt[] }[] = [];
+  const stacks = mk(["stack"]);
+  const cities = mk(["village", "capital"]);
+  const locs = mk(["location"]);
+  if (stacks.length) out.push({ label: "Отряды (атаковать / защищать / помогать)", options: stacks });
+  if (cities.length) out.push({ label: "Города (удерживать / красть / защищать)", options: cities });
+  if (locs.length) out.push({ label: "Локации (идти / защищать)", options: locs });
+  return out;
+});
+
 /** Scenario variables (the `var` field type): stored as the variable's numeric id. */
 const varOptions = computed<{ value: number; label: string }[]>(() =>
   (edit.liveDoc?.variables ?? []).map((v) => ({ value: v.id, label: `${v.name || "var"} (=${v.value})` })),
@@ -192,6 +214,7 @@ function newLocation(): void {
 const PICK_HINT: Record<string, string> = {
   "ref-loc": "локацию", "ref-stack": "отряд", "ref-city": "город",
   "ref-ruin": "руины", "ref-site": "постройку", "ref-lmark": "ориентир",
+  "ref-target": "цель приказа (отряд / город / локацию)",
 };
 /** Nonce of the pick THIS field requested; only that pick's result is consumed here
  *  (several EventFieldInput instances watch the same store). */
@@ -314,6 +337,29 @@ watch(
       @update:model-value="set($event || '')"
     >
       <el-option-group v-for="g in stackGroups" :key="g.label" :label="g.label">
+        <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
+      </el-option-group>
+    </el-select>
+    <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+      <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
+    </el-tooltip>
+    <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+      <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
+    </el-tooltip>
+  </div>
+
+  <!-- ref-target (цель приказа): группы отряды / города / локации, с 📍/🎯 -->
+  <div v-else-if="field.type === 'ref-target'" class="ev-loc-row">
+    <el-select
+      :model-value="(modelValue as string) || ''"
+      size="small"
+      filterable
+      clearable
+      placeholder="— цель приказа —"
+      class="ev-loc-sel"
+      @update:model-value="set($event || '')"
+    >
+      <el-option-group v-for="g in targetGroups" :key="g.label" :label="g.label">
         <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
       </el-option-group>
     </el-select>

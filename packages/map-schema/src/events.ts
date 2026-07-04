@@ -33,6 +33,7 @@ export interface EventFieldSpec {
     | "ref-site"
     | "ref-event"
     | "ref-lmark"
+    | "ref-target" // приказ-цель: отряд ИЛИ город ИЛИ локация (по категории приказа)
     | "template"
     | "item"
     | "spell"
@@ -58,6 +59,27 @@ const DIPLO_PRESETS = [
   { value: 100, label: "Мир (100)" },
   { value: 49, label: "Нейтралитет (49)" },
   { value: 0, label: "Война (0)" },
+] as const;
+
+/** Категории приказа отряду — КАНОН из игровой таблицы LOrder.dbf (byte-extracted):
+ *  1 L_NORMAL · 2 L_STAND · 3 L_GUARD · 4 L_ATTACK_STACK · 5 L_DEFEND_STACK ·
+ *  6 L_SECURE_CITY · 7 L_ROAM · 8 L_MOVE_TO_LOCATION · 9 L_DEFEND_LOCATION ·
+ *  10 L_BEZERK · 11 L_ASSIST · 12 L_EXPLORE (unused, скрыт) · 13 L_STEAL · 14 L_DEFEND_CITY.
+ *  Цель приказа (ORDER_TARG) — отряд (4/5/11), город (6/13/14) или локация (8/9). */
+export const STACK_ORDER_OPTIONS = [
+  { value: 1, label: "Обычный" },
+  { value: 2, label: "Стоять" },
+  { value: 3, label: "Охранять" },
+  { value: 4, label: "Атаковать отряд" },
+  { value: 5, label: "Защищать отряд" },
+  { value: 6, label: "Удерживать город" },
+  { value: 7, label: "Бродить" },
+  { value: 8, label: "Идти к локации" },
+  { value: 9, label: "Защищать локацию" },
+  { value: 10, label: "Берсерк" },
+  { value: 11, label: "Помогать" },
+  { value: 13, label: "Красть" },
+  { value: 14, label: "Защищать город" },
 ] as const;
 
 // ---- CONDITIONS ------------------------------------------------------------
@@ -204,9 +226,9 @@ export const EFFECT_SPECS: readonly EventTypeSpec[] = [
     { key: "boolValue", label: "BOOLVALUE (служебный)", type: "bool", hidden: true } ] },
   { code: 18, kind: "changeStackOrder", label: "Приказ отряду", fields: [
     { key: "stackId", label: "Отряд", type: "ref-stack" },
-    { key: "orderTarget", label: "Цель приказа", type: "ref-stack" },
+    { key: "orderTarget", label: "Цель приказа", type: "ref-target" },
     { key: "firstOnly", label: "Только первый", type: "bool" },
-    { key: "order", label: "Приказ (код)", type: "int" } ] },
+    { key: "order", label: "Приказ", type: "enum", options: STACK_ORDER_OPTIONS } ] },
   { code: 19, kind: "destroyItem", label: "Уничтожить предмет", fields: [
     { key: "itemType", label: "Предмет", type: "item" },
     { key: "triggerOnly", label: "Только у инициатора", type: "bool" } ] },

@@ -11,6 +11,7 @@ import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import { ElSegmented, ElSelect, ElOption, ElTooltip } from "element-plus";
 import { useToolStore } from "../stores/toolStore";
+import { LOC_FILTERS, type LocFilter } from "../services/scenarioRoles";
 
 const toolStore = useToolStore();
 const { tool, size, terrainId, locFilter } = storeToRefs(toolStore);
@@ -30,19 +31,12 @@ const sizeOptions = [
 ];
 
 /** «Локации»: role filter — non-matching locations dim out and are not pickable.
- *  free = не используется ни одним событием (безопасно занять под новый спавн/зону). */
-const locFilterOptions = [
-  { label: "Все", value: "all" },
-  { label: "∅", value: "free" },
-  { label: "⚡", value: "trigger" },
-  { label: "✨", value: "spawn" },
-  { label: "➜", value: "destination" },
-  { label: "☁", value: "env" },
-];
-const LOC_FILTER_HINT =
-  "Фильтр локаций: Все · ∅ свободные (не в сценарии) · ⚡ триггеры · ✨ спавны · ➜ цели движения · ☁ эффекты среды";
+ *  Значения и подписи — единый источник LOC_FILTERS (services/scenarioRoles): триггеры
+ *  разложены по смыслу (⚡ вход / 👣 отряд в зоне / 🎒 предмет), остальное по классу роли. */
+const locFilterOptions = LOC_FILTERS.map((f) => ({ label: f.icon, value: f.value }));
+const LOC_FILTER_HINT = "Фильтр локаций: " + LOC_FILTERS.map((f) => `${f.icon} ${f.hint}`).join(" · ");
 function onLocFilter(v: string | number | boolean): void {
-  toolStore.setLocFilter(v as "all" | "free" | "trigger" | "spawn" | "destination" | "env");
+  toolStore.setLocFilter(v as LocFilter);
 }
 
 const SIZED = new Set(["terrain", "water", "forest", "erase"]);

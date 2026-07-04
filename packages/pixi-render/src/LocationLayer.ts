@@ -16,11 +16,14 @@ import type { MapObject } from "@d2/map-schema";
 import { cellToWorld } from "./iso.js";
 
 /** Optional per-build inputs: editor-only captions, the selected object, and whether to show
- *  every location's name (vs only captioned + selected). */
+ *  every location's name (vs only captioned + selected). `summaries` = compact «что здесь
+ *  происходит» lines (scenario meaning) drawn UNDER the name — the host passes them only in
+ *  the «Локации» mode so the normal view stays clean. */
 export interface LocationOpts {
   captions?: Record<string, string>;
   selectedId?: string | null;
   showAllNames?: boolean;
+  summaries?: Record<string, string[]>;
 }
 
 /** Non-focused locations fade to this alpha while something is hovered. */
@@ -30,6 +33,8 @@ interface LocItem {
   root: Container;
   /** name/caption label; `alwaysOn` = shown regardless of focus (caption/selected/showAll). */
   label?: Text;
+  /** scenario-summary lines under the name (locations-mode only); follows label visibility. */
+  summary?: Text;
   alwaysOn: boolean;
 }
 
@@ -73,9 +78,9 @@ export class LocationLayer {
       const caption = opts.captions?.[o.id];
       const text = caption || o.name || "";
       const alwaysOn = !!text && (!!caption || sel || !!opts.showAllNames);
+      const center = cellToWorld(o.pos.x + 0.5, o.pos.y + 0.5);
       let label: Text | undefined;
       if (text) {
-        const center = cellToWorld(o.pos.x + 0.5, o.pos.y + 0.5);
         label = new Text({
           text,
           style: {
@@ -93,8 +98,29 @@ export class LocationLayer {
         label.visible = alwaysOn;
         root.addChild(label);
       }
+      // scenario meaning lines («⚡ вход → …», «➜ приказ: охранять») under the name
+      const sumLines = opts.summaries?.[o.id];
+      let summary: Text | undefined;
+      if (sumLines?.length) {
+        summary = new Text({
+          text: sumLines.join("\n"),
+          style: {
+            fontFamily: "sans-serif",
+            fontSize: 9,
+            fill: 0xcfe8ff,
+            stroke: { color: 0x000000, width: 3 },
+            align: "center",
+            lineHeight: 12,
+          },
+        });
+        summary.anchor.set(0.5, 0);
+        summary.position.set(center.x, center.y + (label ? 8 : 2));
+        summary.eventMode = "none";
+        summary.visible = label ? label.visible : alwaysOn;
+        root.addChild(summary);
+      }
 
-      this.items.set(o.id, { root, label, alwaysOn });
+      this.items.set(o.id, { root, label, summary, alwaysOn });
       this.view.addChild(root);
     }
     this.applyFocus(); // a rebuild keeps the current hover spotlight
@@ -111,6 +137,7 @@ export class LocationLayer {
       const focused = this.focus?.has(id) ?? false;
       it.root.alpha = this.focus === null || focused ? 1 : DIM;
       if (it.label) it.label.visible = it.alwaysOn || focused;
+      if (it.summary) it.summary.visible = it.alwaysOn || focused;
     }
   }
 

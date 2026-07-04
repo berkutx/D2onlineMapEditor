@@ -43,7 +43,13 @@ import { useAssetStore } from "../stores/assetStore";
 import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
-import { locationRoleCounts } from "../services/scenarioRoles";
+import {
+  locationRoleCounts,
+  locationSummaries,
+  computeObjectRoles,
+  rolesMatchFilter,
+  type ObjectRole,
+} from "../services/scenarioRoles";
 import { useDecorStore, type DecorEntry } from "../stores/decorStore";
 import { useUnitStore } from "../stores/unitStore";
 import { useCollabStore } from "../stores/collabStore";
@@ -308,25 +314,22 @@ function locationIdsAtCell(cx: number, cy: number): string[] {
   return ids;
 }
 
-// --- «Локации»-tool role filter: scenario role counts cached per objectsRev ------------
+// --- «Локации»-tool role filter: full role lists cached per objectsRev ------------------
 let locRolesRev = -1;
-let locRolesCache: Record<string, { trigger: number; spawn: number; destination: number; env: number }> = {};
-function locRoles(): typeof locRolesCache {
+let locRolesCache: Map<string, ObjectRole[]> = new Map();
+function locRoles(): Map<string, ObjectRole[]> {
   const doc = editStore.liveDoc;
   if (!doc) return locRolesCache;
   if (locRolesRev !== editStore.objectsRev) {
-    locRolesCache = locationRoleCounts(doc);
+    locRolesCache = computeObjectRoles(doc);
     locRolesRev = editStore.objectsRev;
   }
   return locRolesCache;
 }
-/** Does a location pass the active «Локации»-tool role filter? (all = no filter) */
+/** Does a location pass the active «Локации»-tool role filter? (all = no filter;
+ *  триггер-подтипы enter/stackIn/itemTo матчатся по KIND, остальное — по классу роли). */
 function locMatchesFilter(id: string): boolean {
-  const f = toolStore.locFilter;
-  if (f === "all") return true;
-  const c = locRoles()[id];
-  if (f === "free") return !c;
-  return !!c && c[f] > 0;
+  return rolesMatchFilter(locRoles().get(id), toolStore.locFilter);
 }
 /** The filter set (matching location ids) or null when inactive/off-tool. */
 function locFilterSet(): string[] | null {
@@ -1408,15 +1411,17 @@ watch(
 
 // Rebuild the LOCATION highlights + labels when an object edit moves/adds/removes a
 // location, when the selection changes (selected location gets its name label + accent),
-// or when an editor-only caption is edited. Cheap (a few Graphics/Text).
+// when an editor-only caption is edited, or when the «Локации» mode toggles (it adds the
+// scenario-SUMMARY lines — «⚡ вход → …», «➜ приказ: охранять» — under the names).
 watch(
-  [() => editStore.objectsRev, () => toolStore.selectedId, () => editStore.captions],
+  [() => editStore.objectsRev, () => toolStore.selectedId, () => editStore.captions, () => toolStore.tool],
   () => {
     const s = getScene();
     if (s && editStore.liveDoc) {
       s.updateLocations(editStore.liveDoc, {
         captions: editStore.captions,
         selectedId: toolStore.selectedId,
+        summaries: toolStore.tool === "locations" ? locationSummaries(editStore.liveDoc) : undefined,
       });
     }
   },
