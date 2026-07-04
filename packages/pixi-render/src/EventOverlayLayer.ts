@@ -13,21 +13,32 @@ import { cellToWorld } from "./iso.js";
 const ZONE = 0xffd54a; // amber — trigger zones
 const MARK = 0x7ad1ff; // cyan — referenced objects
 const ARROW = 0x66ff99; // green — movement / spawn arrows
+const LINK = 0xffc178; // warm — object-selection link threads
 
 type Pt = { x: number; y: number };
 
+/** Ref fields that point at map entities (shared by the event view + object links). */
+const REF_FIELDS = ["locId", "cityId", "stackId", "siteId", "ruinId", "lmarkId", "stackTmpId", "orderTarget"] as const;
+
 export class EventOverlayLayer {
   readonly view: Container;
+  /** selected EVENT visuals (zones/markers/arrows) — rebuilt on event selection. */
+  private readonly evC = new Container();
+  /** selected OBJECT link threads — rebuilt on object selection; coexists with evC. */
+  private readonly linkC = new Container();
 
   constructor() {
     this.view = new Container();
     this.view.label = "event-overlay";
     this.view.eventMode = "none";
+    this.evC.eventMode = "none";
+    this.linkC.eventMode = "none";
+    this.view.addChild(this.linkC, this.evC);
   }
 
   /** Highlight the referenced objects + draw arrows for the selected event (null = clear). */
   build(doc: MapDocument, ev: MapEvent | null): void {
-    this.view.removeChildren().forEach((c) => c.destroy());
+    this.evC.removeChildren().forEach((c) => c.destroy());
     if (!ev) return;
 
     const byId = new Map<string, MapObject>();
@@ -37,11 +48,10 @@ export class EventOverlayLayer {
     const g = new Graphics();
     const labels: Text[] = [];
 
-    // collect every referenced id from conditions + effects (fields ending in Id / *Type refs)
-    const refFields = ["locId", "cityId", "stackId", "siteId", "ruinId", "lmarkId", "templateId", "stackTmpId", "orderTarget"];
+    // collect every referenced id from conditions + effects
     const refs = new Set<string>();
     for (const part of [...ev.conditions, ...ev.effects] as Record<string, unknown>[]) {
-      for (const k of refFields) {
+      for (const k of REF_FIELDS) {
         const v = part[k];
         if (typeof v === "string" && v) refs.add(v);
       }
@@ -80,8 +90,54 @@ export class EventOverlayLayer {
       }
     }
 
-    this.view.addChild(g);
-    for (const t of labels) this.view.addChild(t);
+    this.evC.addChild(g);
+    for (const t of labels) this.evC.addChild(t);
+  }
+
+  /**
+   * Link threads for a SELECTED OBJECT: warm dashed-feel arcs from it to every map entity
+   * wired to it through `events` (the union of its events' refs), plus a soft marker on
+   * each linked entity. Selection-scoped by design — drawing EVERY event link permanently
+   * is unreadable on dense maps; a click shows exactly one object's web, deselect clears.
+   */
+  buildObjectLinks(doc: MapDocument, fromId: string | null, events: readonly MapEvent[]): void {
+    this.linkC.removeChildren().forEach((c) => c.destroy());
+    if (!fromId || !events.length) return;
+    const byId = new Map<string, MapObject>();
+    for (const o of doc.objects) byId.set(o.id, o);
+    const from = byId.get(fromId);
+    if (!from) return;
+    const center = (o: MapObject): Pt => cellToWorld(o.pos.x + 0.5, o.pos.y + 0.5);
+    const a = center(from);
+
+    // union of linked entity ids across all of the object's events (excluding itself)
+    const linked = new Set<string>();
+    for (const ev of events) {
+      for (const part of [...ev.conditions, ...ev.effects] as Record<string, unknown>[]) {
+        for (const k of REF_FIELDS) {
+          const v = part[k];
+          if (typeof v === "string" && v && v !== fromId && byId.has(v)) linked.add(v);
+        }
+      }
+    }
+    if (!linked.size) return;
+
+    const g = new Graphics();
+    const MAX_LINKS = 30; // a runaway web reads as noise — cap and let the inspector list the rest
+    let n = 0;
+    for (const id of linked) {
+      if (n++ >= MAX_LINKS) break;
+      const b = center(byId.get(id)!);
+      // a gentle arc (lifted control point) — visually distinct from the straight green
+      // movement arrows of the selected-event view
+      const mx = (a.x + b.x) / 2;
+      const my = (a.y + b.y) / 2 - Math.hypot(b.x - a.x, b.y - a.y) / 6 - 8;
+      g.moveTo(a.x, a.y).quadraticCurveTo(mx, my, b.x, b.y)
+        .stroke({ color: LINK, alpha: 0.8, width: 1.5 });
+      g.circle(b.x, b.y, 6).stroke({ color: LINK, alpha: 0.9, width: 1.5 });
+    }
+    g.circle(a.x, a.y, 4).fill({ color: LINK, alpha: 0.95 });
+    this.linkC.addChild(g);
   }
 
   /** An arrow from object `from` to object `to` (skips if either is missing). */

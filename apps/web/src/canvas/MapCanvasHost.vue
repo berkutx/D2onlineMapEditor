@@ -1732,6 +1732,22 @@ watch(
   { deep: true },
 );
 
+// Link threads of the SELECTED object: arcs to every entity its events wire. Selection-
+// scoped by design (permanent all-links rendering is unreadable on dense maps): click an
+// event-wired object → its web lights up; deselect → clean map.
+watch(
+  [() => toolStore.selectedId, () => editStore.objectsRev],
+  () => {
+    const s = getScene();
+    const doc = editStore.liveDoc;
+    if (!s || !doc) return;
+    const id = toolStore.selectedId;
+    const roles = id ? locRoles().get(id) : undefined;
+    const events = roles?.length ? [...new Set(roles.map((r) => r.ev))] : [];
+    s.updateObjectLinks(doc, events.length ? id : null, events);
+  },
+);
+
 // Collab presence: broadcast my selection to room peers; render their live cursors.
 watch(
   () => toolStore.selectedIds,
