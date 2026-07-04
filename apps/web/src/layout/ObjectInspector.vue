@@ -836,8 +836,7 @@ function close(): void {
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
       <template v-if="obj.type === 'village' || obj.type === 'capital'">
         <div class="d2-sec">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
-        <!-- roster=soldiers: в эталоне гарнизонные пикеры городов никогда не предлагают
-             героев (Village.qml leader:false) — герой в городе живёт ГОСТЕМ ниже -->
+        <!-- roster=soldiers: гарнизон города — без героев; герой в городе живёт ГОСТЕМ ниже -->
         <GarrisonEditor
           :garrison="defenseGarrison"
           :count="defenseCount"

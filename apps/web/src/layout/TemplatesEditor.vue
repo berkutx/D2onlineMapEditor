@@ -79,8 +79,7 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
       </div>
       <div class="tpl-leader">
         <label>Лидер</label>
-        <!-- вести отряд может только герой/вор — правило эталона (byte-verified: 3333
-             лидеров шаблонов на отгруженных картах = 100% L_LEADER/L_NOBLE) -->
+        <!-- вести отряд может только герой/вор (L_LEADER/L_NOBLE) -->
         <UnitPicker :model-value="sel.leader || null" nullable roster="leaders"
           title="Лидер отряда — герой или вор" @update:model-value="patch({ leader: $event || '' })" />
         <el-input-number :model-value="sel.leaderLevel" :min="1" :max="10" size="small" controls-position="right"

@@ -1,45 +1,34 @@
-# Кредиты
+# Credits
 
-## Vilgeforc — [NevendaarTools](https://bitbucket.org/NevendaarTools/)
+## Русский
 
-Проект построен поверх открытых наработок Vilgeforc: репозитории
-[toolsqt](https://bitbucket.org/NevendaarTools/toolsqt) и
-[d2mapeditorqt](https://bitbucket.org/NevendaarTools/d2mapeditorqt) служили **эталоном
-поведения** — правило проекта: «не угадывать, копировать эталон, верифицировать байтами».
-Ниже — что именно взято/портировано (по мере разработки список пополнялся).
+- **[NevendaarTools](https://bitbucket.org/NevendaarTools/) (Vilgeforc)** — открытые
+  инструменты [toolsqt](https://bitbucket.org/NevendaarTools/toolsqt) и
+  [d2mapeditorqt](https://bitbucket.org/NevendaarTools/d2mapeditorqt) использовались как
+  справочные материалы по формату и поведению редактора:
+  - автотайлинг дорог — портирована 16-масочная таблица `MapTileHelper::updateRoad`
+    и вариационный сид рельефа;
+  - фильтры выбора юнитов (лидер отряда — только герой/вор; гарнизоны без героев);
+  - раскладки полей ряда блоков `.sg` сверялись с заголовками `MapUtils/DataBlocks/D2*.h`.
+- **[MarkovJunior](https://github.com/mxgmn/MarkovJunior)** (mxgmn) — алгоритм процедурной
+  генерации; в `packages/mapgen/vendor` включён его TypeScript-порт
+  [MarkovJuniorWeb](https://github.com/Yuu6883/MarkovJuniorWeb) (Yuu6883, MIT).
+- **[D2ModdingToolset](https://github.com/VladimirMakeev/D2ModdingToolset)** — сверка
+  перечислений событий и категорий предметов.
 
-### Из toolsqt (формат данных)
+## English
 
-- **Фрейминг блоков `.sg`**: `WHAT` + код + `.?AVC<TypeName>@@` + `OBJ_ID` +
-  `BEGOBJECT…ENDOBJECT` — вся наша модель чтения/записи (`DataBlock.h`, `D2MapModel.*`).
-- **Кодирование полей**: тег + int32 LE; строки CP1251 с длиной (вкл. завершающий NUL);
-  ref-поля с префиксом длины `0B 00 00 00` + 10-символьный id (`ByteUtills.h`).
-- **Раскладки блоков** (`MapUtils/DataBlocks/D2*.h`): MidLocation (POS = **центр**,
-  RADIUS int32), MidStack (формация UNIT_0..5/POS_0..5 + LEADER_ID), MidRuin, MidVillage,
-  MidBag, MidEvent, MidgardPlan, MidRoad, MidMountains, TalismanCharges и др.
-- **Идиома `TagDataBlock`** — немоделируемые блоки переносятся байтами как есть; наш
-  patch-in-place писатель следует той же философии (ноль правок ⇒ байт-в-байт).
-- Понимание архивов **`.ff` (MQDB)** для пайплайна ассетов.
-
-### Из d2mapeditorqt (алгоритмы редактора)
-
-- **Автотайлинг дорог** — 16-масочная таблица `MapTileHelper::updateRoad` портирована
-  дословно (наш `roadTypeFromMask`), плюс вариационный сид `(x*y+x+y)%n` для рельефа.
-- **Валидация карт** — `MapConverter::validateMap`/`validateStack` легли в основу нашего
-  трёхуровневого валидатора; оттуда же правило: **лидер отряда — только категории
-  L_LEADER/L_NOBLE** (наш фильтр пикеров и гард звёздочки).
-- **Фильтры выбора юнитов** — `UnitSelectModel` (динамика «нет лидера → только лидеры»,
-  скрытие саммонов/иллюзий), гарнизоны городов без героев.
-- **Локации**: размеры 1×1/3×3/5×5/7×7 (наш предел радиуса зон/локаций), конверсия
-  центр↔угол, генерённые изображения радиусов.
-- Конверсия/семантика: iso-математика, `MapConverter::importStack` (LEADER_ID → флаг
-  лидера), спрайт отряда = спрайт лидера, undo-модель снапшотов как ориентир.
-- **ScenEdit** (родной редактор игры) как второй эталон: диалог локаций (spin 1×1..7×7),
-  «Создать сценарий» как источник эталонных байтов для карт «с нуля».
-
-### Прочее
-
-- **[MarkovJunior](https://github.com/mxgmn/MarkovJunior)** (mxgmn, MIT) — vendored в
-  `packages/mapgen` для генерации рельефа (headless-порт интерпретатора).
-- Сообщество **D2ModdingToolset** — заголовки mss32 сверялись при перечислении
-  условий/эффектов событий и категорий предметов.
+- **[NevendaarTools](https://bitbucket.org/NevendaarTools/) (Vilgeforc)** — the open-source
+  tools [toolsqt](https://bitbucket.org/NevendaarTools/toolsqt) and
+  [d2mapeditorqt](https://bitbucket.org/NevendaarTools/d2mapeditorqt) served as reference
+  material for the file format and editor behavior:
+  - road auto-tiling — the 16-mask table from `MapTileHelper::updateRoad` and the terrain
+    variation seed were ported;
+  - unit-selection filters (a stack leader must be a hero/thief; garrisons exclude heroes);
+  - field layouts of several `.sg` blocks were cross-checked against the
+    `MapUtils/DataBlocks/D2*.h` headers.
+- **[MarkovJunior](https://github.com/mxgmn/MarkovJunior)** (mxgmn) — the procedural
+  generation algorithm; `packages/mapgen/vendor` bundles its TypeScript port,
+  [MarkovJuniorWeb](https://github.com/Yuu6883/MarkovJuniorWeb) (Yuu6883, MIT).
+- **[D2ModdingToolset](https://github.com/VladimirMakeev/D2ModdingToolset)** — used to
+  cross-check event enumerations and item categories.

@@ -86,7 +86,7 @@ watch(mode, () => { subFilter.value = "all"; });
 
 interface DisplayGroup { key: string; label: string; units: UnitEntry[] }
 
-/** Может ли юнит ВЕСТИ отряд (LEADER_ID): только герои и воры — правило эталона. */
+/** Может ли юнит ВЕСТИ отряд (LEADER_ID): только герои и воры (L_LEADER/L_NOBLE). */
 const isLeaderUnit = (u: UnitEntry): boolean => u.catKey === "L_LEADER" || u.catKey === "L_NOBLE";
 const inRoster = (u: UnitEntry): boolean => {
   if (props.roster === "leaders") return isLeaderUnit(u);
