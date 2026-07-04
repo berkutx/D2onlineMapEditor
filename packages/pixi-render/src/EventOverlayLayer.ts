@@ -129,14 +129,18 @@ export class EventOverlayLayer {
       if (n++ >= MAX_LINKS) break;
       const b = center(byId.get(id)!);
       // a gentle arc (lifted control point) — visually distinct from the straight green
-      // movement arrows of the selected-event view
+      // movement arrows of the selected-event view. Double-stroked (dark under-line +
+      // warm top) so the thread stays readable over busy terrain at far zooms.
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2 - Math.hypot(b.x - a.x, b.y - a.y) / 6 - 8;
       g.moveTo(a.x, a.y).quadraticCurveTo(mx, my, b.x, b.y)
-        .stroke({ color: LINK, alpha: 0.8, width: 1.5 });
-      g.circle(b.x, b.y, 6).stroke({ color: LINK, alpha: 0.9, width: 1.5 });
+        .stroke({ color: 0x000000, alpha: 0.55, width: 5 });
+      g.moveTo(a.x, a.y).quadraticCurveTo(mx, my, b.x, b.y)
+        .stroke({ color: LINK, alpha: 0.95, width: 2.5 });
+      g.circle(b.x, b.y, 7).stroke({ color: 0x000000, alpha: 0.55, width: 4 });
+      g.circle(b.x, b.y, 7).stroke({ color: LINK, alpha: 0.95, width: 2 });
     }
-    g.circle(a.x, a.y, 4).fill({ color: LINK, alpha: 0.95 });
+    g.circle(a.x, a.y, 5).fill({ color: LINK, alpha: 0.95 });
     this.linkC.addChild(g);
   }
 
