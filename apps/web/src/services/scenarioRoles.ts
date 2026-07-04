@@ -10,8 +10,10 @@
 import type { MapDocument, MapEvent } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND, STACK_ORDER_OPTIONS } from "@d2/map-schema";
 
-/** Role classes (drive overlay color/icon + inspector grouping). */
-export type RoleClass = "trigger" | "spawn" | "destination" | "env";
+/** Role classes (drive overlay color/icon + inspector grouping). `target` = the event
+ *  CHANGES this object (removes/re-owns/orders a stack, swaps a landmark) — distinct from
+ *  `env`, which is area effects on zones (spell/fog/terrain). */
+export type RoleClass = "trigger" | "target" | "spawn" | "destination" | "env";
 
 export interface ObjectRole {
   cls: RoleClass;
@@ -24,17 +26,29 @@ export interface ObjectRole {
   detail?: string;
 }
 
-/** Effect kinds that mean «здесь что-то ПОЯВИТСЯ» vs «сюда кто-то ПРИДЁТ»; every other
- *  ref-loc/ref-city/... effect is an environment effect (заклинание/туман/рельеф/горы).
- *  Приказ отряду — тоже «сюда придёт/здесь будет действовать» (цель приказа). */
+/** Per-FIELD role class of effect refs. One effect can wire two objects differently:
+ *  «Приказ отряду» changes the stack (target 🎯) and sends it AT the orderTarget (➜).
+ *  Fields not listed default to `env` (area effects: заклинание/туман/рельеф/горы). */
+const EFFECT_FIELD_CLS: Record<string, Record<string, RoleClass>> = {
+  createStack: { locId: "spawn" },
+  moveStackToLocation: { stackTmpId: "target", locId: "destination" },
+  moveStackToTriggerer: { stackId: "target" },
+  changeStackOrder: { stackId: "target", orderTarget: "destination" },
+  changeStackOwner: { stackId: "target" },
+  goIntoBattle: { stackId: "target" },
+  removeStack: { stackId: "target" },
+  removeLandmark: { lmarkId: "target" },
+  changeLandmark: { lmarkId: "target" },
+};
+/** Spawn markers for event-list badges. */
 const SPAWN_EFFECTS = new Set(["createStack"]);
-const DEST_EFFECTS = new Set(["moveStackToLocation", "moveStackToTriggerer", "changeStackOrder"]);
 
 const ORDER_LABEL = new Map<number, string>(STACK_ORDER_OPTIONS.map((o) => [o.value, o.label]));
 
 /** Per-class display metadata (shared by overlay legend + inspector). */
 export const ROLE_META: Record<RoleClass, { icon: string; label: string; color: number }> = {
   trigger: { icon: "⚡", label: "триггер", color: 0xe6a23c },
+  target: { icon: "🎯", label: "событие меняет объект", color: 0xf56c6c },
   spawn: { icon: "✨", label: "спавн", color: 0x67c23a },
   destination: { icon: "➜", label: "цель движения", color: 0x409eff },
   env: { icon: "☁", label: "эффект среды", color: 0xb07dd8 },
@@ -59,14 +73,9 @@ export function computeObjectRoles(doc: MapDocument): Map<string, ObjectRole[]> 
         add((c as Record<string, unknown>)[f.key], { cls: "trigger", ev, what: spec!.label, kind: c.kind });
       }
     }
-    // effects: spawn / destination / environment by kind class
+    // effects: per-FIELD class (spawn / target / destination), defaulting to env
     for (const e of ev.effects) {
       const spec = EFFECT_BY_KIND[e.kind];
-      const cls: RoleClass = SPAWN_EFFECTS.has(e.kind)
-        ? "spawn"
-        : DEST_EFFECTS.has(e.kind)
-          ? "destination"
-          : "env";
       // «Приказ отряду»: показываем СМЫСЛ (категорию приказа из LOrder), не код
       const detail =
         e.kind === "changeStackOrder"
@@ -74,6 +83,7 @@ export function computeObjectRoles(doc: MapDocument): Map<string, ObjectRole[]> 
           : undefined;
       for (const f of spec?.fields ?? []) {
         if (!f.type.startsWith("ref-") || f.type === "ref-player" || f.type === "ref-event") continue;
+        const cls: RoleClass = EFFECT_FIELD_CLS[e.kind]?.[f.key] ?? "env";
         add((e as Record<string, unknown>)[f.key], { cls, ev, what: spec!.label, kind: e.kind, ...(detail ? { detail } : {}) });
       }
     }
@@ -82,11 +92,11 @@ export function computeObjectRoles(doc: MapDocument): Map<string, ObjectRole[]> 
 }
 
 /** Compact per-class counts for one object (what the pixi overlay renders). */
-export interface RoleCounts { trigger: number; spawn: number; destination: number; env: number }
+export interface RoleCounts { trigger: number; target: number; spawn: number; destination: number; env: number }
 
 export function countsOf(list: ObjectRole[] | undefined): RoleCounts | null {
   if (!list?.length) return null;
-  const c: RoleCounts = { trigger: 0, spawn: 0, destination: 0, env: 0 };
+  const c: RoleCounts = { trigger: 0, target: 0, spawn: 0, destination: 0, env: 0 };
   for (const r of list) c[r.cls]++;
   return c;
 }
@@ -94,7 +104,7 @@ export function countsOf(list: ObjectRole[] | undefined): RoleCounts | null {
 /** «⚡3 ✨» — compact role-badge line (dominance order, count when >1). */
 export function formatRoleBadges(c: RoleCounts | null | undefined): string {
   if (!c) return "";
-  return (["trigger", "spawn", "destination", "env"] as RoleClass[])
+  return (["trigger", "target", "spawn", "destination", "env"] as RoleClass[])
     .filter((k) => c[k] > 0)
     .map((k) => ROLE_META[k].icon + (c[k] > 1 ? c[k] : ""))
     .join(" ");
@@ -107,6 +117,22 @@ export function locationRoleCounts(doc: MapDocument): Record<string, RoleCounts>
   for (const o of doc.objects) {
     if (o.type !== "location") continue;
     const c = countsOf(roles.get(o.id));
+    if (c) out[o.id] = c;
+  }
+  return out;
+}
+
+/** Role counts for every NON-location object (feeds the on-map object badges). Pass the
+ *  already-computed roles map when you have one cached (avoids a second doc walk). */
+export function objectRoleCounts(
+  doc: MapDocument,
+  roles?: Map<string, ObjectRole[]>,
+): Record<string, RoleCounts> {
+  const map = roles ?? computeObjectRoles(doc);
+  const out: Record<string, RoleCounts> = {};
+  for (const o of doc.objects) {
+    if (o.type === "location") continue;
+    const c = countsOf(map.get(o.id));
     if (c) out[o.id] = c;
   }
   return out;

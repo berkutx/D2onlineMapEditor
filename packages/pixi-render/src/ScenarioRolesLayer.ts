@@ -21,15 +21,28 @@ import { cellToWorld, HALF_W, HALF_H } from "./iso.js";
  *  `RoleCounts` in apps/web scenarioRoles.ts). */
 export interface RoleCounts {
   trigger: number;
+  target: number;
   spawn: number;
   destination: number;
   env: number;
+}
+
+/** An OBJECT (non-location) wired into events: its anchored footprint + role counts —
+ *  plain data prepared by the host (footprints resolve through the decor catalog there). */
+export interface ObjectRoleMarker {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  counts: RoleCounts;
 }
 
 /** Render order = dominance priority. Icons + colors MUST match ROLE_META in
  *  apps/web/src/services/scenarioRoles.ts (the shared role model). */
 const ROLE_ORDER: ReadonlyArray<{ key: keyof RoleCounts; icon: string; color: number }> = [
   { key: "trigger", icon: "⚡", color: 0xe6a23c },
+  { key: "target", icon: "🎯", color: 0xf56c6c },
   { key: "spawn", icon: "✨", color: 0x67c23a },
   { key: "destination", icon: "➜", color: 0x409eff },
   { key: "env", icon: "☁", color: 0xb07dd8 },
@@ -52,10 +65,30 @@ export class ScenarioRolesLayer {
     this.view.eventMode = "none"; // pure overlay, never eats pointer events
   }
 
-  /** Redraw all location role markers. `roles` = location id → per-class counts. */
-  build(doc: MapDocument, roles: Record<string, RoleCounts>): void {
+  /** Redraw all role markers. `roles` = location id → per-class counts;
+   *  `objects` = event-wired NON-location objects (badge above the footprint). */
+  build(doc: MapDocument, roles: Record<string, RoleCounts>, objects?: readonly ObjectRoleMarker[]): void {
     this.view.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.items.clear();
+
+    // OBJECT markers: a thin ring over the object's footprint diamond + the badge row
+    // above it. Only wired objects render (no gray "unused" dots — the map has thousands).
+    for (const m of objects ?? []) {
+      const root = new Container();
+      root.eventMode = "none";
+      const g = new Graphics();
+      root.addChild(g);
+      const active = ROLE_ORDER.filter(({ key }) => m.counts[key] > 0);
+      const dominant = active[0];
+      if (!dominant) continue;
+      const span = (m.w + m.h) / 2; // iso diamond of a w×h footprint
+      const c = cellToWorld(m.x + m.w / 2, m.y + m.h / 2);
+      g.ellipse(c.x, c.y, span * HALF_W, span * HALF_H)
+        .stroke({ color: dominant.color, alpha: 0.65, width: 1.5 });
+      this.addBadgeRow(root, active, m.counts, c.x, c.y - span * HALF_H);
+      this.items.set(m.id, root);
+      this.view.addChild(root);
+    }
 
     for (const o of doc.objects) {
       if (o.type !== "location") continue;
@@ -81,34 +114,42 @@ export class ScenarioRolesLayer {
       const span = 2 * r + 1;
       g.ellipse(c.x, c.y, span * HALF_W, span * HALF_H)
         .stroke({ color: dominant.color, alpha: 0.9, width: 2 });
-
-      // badge row above the ring top: «⚡2 ✨» — one Text per class, in class color
-      const texts: Text[] = [];
-      let rowWidth = 0;
-      const GAP = 3;
-      for (const { key, icon, color } of active) {
-        const n = counts[key];
-        const t = new Text({
-          text: n > 1 ? `${icon}${n}` : icon,
-          style: { fontSize: 13, fill: color, stroke: { color: 0x000000, width: 3 } },
-        });
-        t.eventMode = "none";
-        rowWidth += t.width + (texts.length ? GAP : 0);
-        texts.push(t);
-      }
-      const topY = c.y - span * HALF_H; // top of the ring
-      let x = c.x - rowWidth / 2;
-      for (const t of texts) {
-        t.anchor.set(0, 1);
-        t.position.set(x, topY - 2);
-        x += t.width + GAP;
-        root.addChild(t);
-      }
+      this.addBadgeRow(root, active, counts, c.x, c.y - span * HALF_H);
 
       this.items.set(o.id, root);
       this.view.addChild(root);
     }
     this.applyFocus(); // a rebuild keeps the current hover spotlight
+  }
+
+  /** Badge row above `topY`: «⚡2 ✨» — one Text per active class, in class color. */
+  private addBadgeRow(
+    root: Container,
+    active: ReadonlyArray<{ key: keyof RoleCounts; icon: string; color: number }>,
+    counts: RoleCounts,
+    centerX: number,
+    topY: number,
+  ): void {
+    const texts: Text[] = [];
+    let rowWidth = 0;
+    const GAP = 3;
+    for (const { key, icon, color } of active) {
+      const n = counts[key];
+      const t = new Text({
+        text: n > 1 ? `${icon}${n}` : icon,
+        style: { fontSize: 13, fill: color, stroke: { color: 0x000000, width: 3 } },
+      });
+      t.eventMode = "none";
+      rowWidth += t.width + (texts.length ? GAP : 0);
+      texts.push(t);
+    }
+    let x = centerX - rowWidth / 2;
+    for (const t of texts) {
+      t.anchor.set(0, 1);
+      t.position.set(x, topY - 2);
+      x += t.width + GAP;
+      root.addChild(t);
+    }
   }
 
   /** Spotlight `ids` (full alpha), fade the rest; null = normal (no hover). */

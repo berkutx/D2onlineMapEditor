@@ -30,7 +30,7 @@ import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
 import { ZoneLayer, type ZoneVisual } from "./ZoneLayer.js";
 import { EventOverlayLayer } from "./EventOverlayLayer.js";
 import { AnchorLayer } from "./AnchorLayer.js";
-import { ScenarioRolesLayer, type RoleCounts } from "./ScenarioRolesLayer.js";
+import { ScenarioRolesLayer, type RoleCounts, type ObjectRoleMarker } from "./ScenarioRolesLayer.js";
 import { PresenceLayer, type PeerMarker } from "./PresenceLayer.js";
 import { OverlayLayer, type OverlayTint, type CellRef } from "./OverlayLayer.js";
 import { cellToWorld, mapWorldBounds, HALF_W, HALF_H } from "./iso.js";
@@ -138,8 +138,12 @@ export class Scene {
   /** anchors (child->parent) + visibility, kept so a full rebuild restores the overlay. */
   private anchorState: { anchors: Record<string, string>; visible: boolean } = { anchors: {}, visible: false };
   private scenarioRoles?: ScenarioRolesLayer;
-  /** location roles + visibility, kept so a full rebuild restores the overlay. */
-  private scenarioRolesState: { roles: Record<string, RoleCounts>; visible: boolean } = { roles: {}, visible: true };
+  /** location + object roles + visibility, kept so a full rebuild restores the overlay. */
+  private scenarioRolesState: {
+    roles: Record<string, RoleCounts>;
+    objects: ObjectRoleMarker[];
+    visible: boolean;
+  } = { roles: {}, objects: [], visible: true };
   /** «режим локаций»: a dark veil between objects and location overlays + its toggle state
    *  (kept so buildScene restores the mode after a map rebuild). */
   private locVeil?: Graphics;
@@ -322,7 +326,7 @@ export class Scene {
 
     // scenario-roles overlay («Роли локаций»): ring + role badges per event-wired location
     this.scenarioRoles = new ScenarioRolesLayer();
-    this.scenarioRoles.build(map, this.scenarioRolesState.roles);
+    this.scenarioRoles.build(map, this.scenarioRolesState.roles, this.scenarioRolesState.objects);
     this.scenarioRoles.setVisible(this.scenarioRolesState.visible);
     this.scenarioRoles.setFocus(this.locFocus);
     this.world.addChild(this.scenarioRoles.view);
@@ -442,12 +446,17 @@ export class Scene {
     this.renderNow();
   }
 
-  /** Redraw the «Роли локаций» overlay (per-location role counts from the host's
-   *  scenarioRoles model: trigger/spawn/destination/env). */
-  updateScenarioRoles(map: MapDocument, roles: Record<string, RoleCounts>, visible: boolean): void {
-    this.scenarioRolesState = { roles, visible };
+  /** Redraw the scenario-roles overlay: per-location role counts + event-wired OBJECT
+   *  markers (both from the host's scenarioRoles model). */
+  updateScenarioRoles(
+    map: MapDocument,
+    roles: Record<string, RoleCounts>,
+    visible: boolean,
+    objects: ObjectRoleMarker[] = [],
+  ): void {
+    this.scenarioRolesState = { roles, objects, visible };
     if (!this.scenarioRoles) return;
-    this.scenarioRoles.build(map, roles);
+    this.scenarioRoles.build(map, roles, objects);
     this.scenarioRoles.setVisible(visible);
     this.renderNow();
   }

@@ -127,6 +127,20 @@ function openRole(r: ObjectRole): void {
   eventStore.navigate({ tab: "events", eventId: r.ev.id });
   if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
 }
+/** Object types the event editor can seed a trigger for (eventStore.OBJ_CONDITION). */
+const EVENTABLE_TYPES = new Set([
+  "location", "stack", "village", "capital", "ruin", "merchant", "mage", "trainer", "mercenary",
+]);
+const canCreateEventFor = computed(() => !!obj.value && EVENTABLE_TYPES.has(obj.value.type));
+function newEventForObject(): void {
+  if (!obj.value) return;
+  const o = obj.value as { id: string; type: string; name?: string };
+  const ev = eventStore.createForObject(o.id, o.type, o.name);
+  if (ev) {
+    eventStore.select(ev.id);
+    if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
+  }
+}
 
 /** Site sprite key: "G000SI0000" + 4-char type code + image(2). */
 const SITE_CODE: Record<string, string> = { merchant: "MERH", mage: "MAGE", trainer: "TRAI", mercenary: "MERC" };
@@ -887,7 +901,11 @@ function close(): void {
           <span class="role-icon">{{ ROLE_META[r.cls].icon }}</span>
           <span class="stk-text">
             <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
-            <span class="stk-sub">{{ r.what }}</span>
+            <span class="stk-sub">{{ r.what }}{{ r.detail ? `: ${r.detail}` : "" }}</span>
+          </span>
+          <!-- сложность: событие с условиями сработает не всегда — видно сразу -->
+          <span v-if="r.ev.conditions.length > 1" class="role-cond muted" title="у события есть дополнительные условия (переменные, сроки и т.п.)">
+            {{ r.ev.conditions.length }} усл.
           </span>
         </div>
         <el-button
@@ -898,9 +916,19 @@ function close(): void {
           @click="rolesExpanded = !rolesExpanded"
         >{{ rolesExpanded ? "свернуть" : `+${objectRoles.length - ROLE_LIMIT} ещё` }}</el-button>
       </div>
+      <el-button v-if="canCreateEventFor" size="small" text type="primary" @click="newEventForObject()">
+        ＋ Событие с этим объектом
+      </el-button>
     </div>
     <div v-else-if="obj.type === 'location'" class="ins-body">
       <p class="muted sm">не используется в сценарии — ПКМ: „＋ Событие“ / „✨ Спавн“</p>
+    </div>
+    <div v-else-if="canCreateEventFor" class="ins-body">
+      <div class="d2-sec">Сценарий</div>
+      <p class="muted sm">событий с этим объектом нет</p>
+      <el-button size="small" text type="primary" @click="newEventForObject()">
+        ＋ Событие с этим объектом
+      </el-button>
     </div>
   </div>
 </template>
@@ -1117,6 +1145,13 @@ function close(): void {
   flex: 0 0 auto;
   font-size: 13px;
   line-height: 1;
+}
+.role-cond {
+  flex: 0 0 auto;
+  font-size: 10px;
+  background: var(--el-fill-color);
+  border-radius: 5px;
+  padding: 1px 5px;
 }
 .role-more {
   align-self: flex-start;

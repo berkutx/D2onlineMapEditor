@@ -16,7 +16,7 @@ import { ElMessage } from "element-plus";
 import { assetUrl } from "../services/api";
 import { storeToRefs } from "pinia";
 import { Scene } from "@d2/pixi-render";
-import type { CameraSnapshot, DebugStats, LandmarkFootprints } from "@d2/pixi-render";
+import type { CameraSnapshot, DebugStats, LandmarkFootprints, ObjectRoleMarker } from "@d2/pixi-render";
 import { worldToCell, cellToWorld, objectFootprint, objectZBase, objectSprites, type ZoneVisual } from "@d2/pixi-render";
 import type { MapDocument, MapObject } from "@d2/map-schema";
 import {
@@ -48,6 +48,7 @@ import {
   locationRoleCounts,
   locationSummaries,
   computeObjectRoles,
+  countsOf,
   rolesMatchFilter,
   formatRoleBadges,
   type ObjectRole,
@@ -165,6 +166,7 @@ async function rebuild(): Promise<void> {
       editStore.liveDoc ?? doc,
       zoneFilteredRoleCounts(editStore.liveDoc ?? doc),
       viewStore.rolesVisible,
+      objectRoleMarkers(editStore.liveDoc ?? doc),
     );
     for (const cat of OVERLAY_TINTS) scene.setOverlayTint(cat, overlayTints.value[cat]);
     scene.setAnimationEnabled(animate.value);
@@ -429,6 +431,21 @@ function locRoles(): Map<string, ObjectRole[]> {
     locRolesRev = editStore.objectsRev;
   }
   return locRolesCache;
+}
+
+/** Event-wired NON-location objects (отряд-цель, город-триггер, сайт…) as plain markers
+ *  for the roles overlay: anchored footprint + per-class counts. Reuses the cached roles. */
+function objectRoleMarkers(doc: MapDocument): ObjectRoleMarker[] {
+  const roles = locRoles();
+  const out: ObjectRoleMarker[] = [];
+  for (const o of doc.objects) {
+    if (o.type === "location") continue;
+    const c = countsOf(roles.get(o.id));
+    if (!c) continue;
+    const { w, h } = objectFootprint(o, landmarkFootprints);
+    out.push({ id: o.id, x: o.pos.x, y: o.pos.y, w, h, counts: c });
+  }
+  return out;
 }
 /** Does a location pass the active «Локации»-tool role filter? (all = no filter;
  *  триггер-подтипы enter/stackIn/itemTo матчатся по KIND, остальное — по классу роли). */
@@ -1697,14 +1714,20 @@ watch(
   { deep: true },
 );
 
-// «Роли локаций» overlay: every location shows its scenario role (⚡ trigger / ✨ spawn /
-// ➜ destination / ☁ env). objectsRev bumps on event edits too, so wiring stays live.
+// Scenario-roles overlay: locations AND event-wired objects (отряд/город/сайт/руина)
+// show their role (⚡ trigger / 🎯 target / ✨ spawn / ➜ dest / ☁ env). objectsRev bumps
+// on event edits too, so wiring stays live.
 watch(
   [() => editStore.objectsRev, () => viewStore.rolesVisible, () => editStore.zones],
   () => {
     const s = getScene();
     if (s && editStore.liveDoc)
-      s.updateScenarioRoles(editStore.liveDoc, zoneFilteredRoleCounts(editStore.liveDoc), viewStore.rolesVisible);
+      s.updateScenarioRoles(
+        editStore.liveDoc,
+        zoneFilteredRoleCounts(editStore.liveDoc),
+        viewStore.rolesVisible,
+        objectRoleMarkers(editStore.liveDoc),
+      );
   },
   { deep: true },
 );

@@ -33,7 +33,7 @@ export { ZoneLayer, type ZoneVisual } from "./ZoneLayer.js";
 export { EventOverlayLayer } from "./EventOverlayLayer.js";
 export { AnchorLayer } from "./AnchorLayer.js";
 export { ScenarioRolesLayer } from "./ScenarioRolesLayer.js";
-export type { RoleCounts } from "./ScenarioRolesLayer.js";
+export type { RoleCounts, ObjectRoleMarker } from "./ScenarioRolesLayer.js";
 export { PresenceLayer, type PeerMarker } from "./PresenceLayer.js";
 export { OverlayLayer } from "./OverlayLayer.js";
 export type { OverlayTint, CellRef } from "./OverlayLayer.js";
