@@ -1,15 +1,17 @@
 <script setup lang="ts">
 /**
  * Shared change history (collab). A floating, collapsible card listing the room's EditOp
- * log newest-first — each entry tagged with its author's colour + name. Read-only timeline
- * (revert-from-here is a planned follow-up); local undo/redo stays on the toolbar/Ctrl+Z.
- * Shown only while connected to a room with at least one recorded change.
+ * log newest-first — each entry tagged with its author's colour + name. A row expands to
+ * its detail + revert actions: «только это» (one entry) and «отсюда» (the entry and
+ * everything newer, exact inverses newest→oldest). Reverts are regular forward commits —
+ * append-only, broadcast to peers, and undoable (Ctrl+Z). Local undo/redo stays on the
+ * toolbar; shown only while connected to a room.
  */
 import { ref, computed } from "vue";
 import { storeToRefs } from "pinia";
-import { ElButton } from "element-plus";
+import { ElButton, ElMessage, ElMessageBox } from "element-plus";
 import { Clock, ArrowDown, ArrowUp } from "@element-plus/icons-vue";
-import { useCollabStore } from "../stores/collabStore";
+import { useCollabStore, type HistoryEntry } from "../stores/collabStore";
 import { useFloatingDock } from "../composables/useFloatingDock";
 
 const collab = useCollabStore();
@@ -62,6 +64,32 @@ function toggle(seq: number): void {
   s.has(seq) ? s.delete(seq) : s.add(seq);
   expanded.value = s;
 }
+
+// --- revert actions (per expanded row) ------------------------------------------------------
+/** Entries the given entry's chain revert would cover (it + everything newer). */
+const newerCount = (seq: number): number => history.value.filter((e) => e.seq >= seq).length;
+/** No captured inverse → nothing to revert (mid-stroke entry: its stroke's last row has it). */
+const revertable = (e: HistoryEntry): boolean => (e.inverse?.length ?? 0) > 0;
+
+function revertOne(e: HistoryEntry): void {
+  const ok = collab.revertOne(e.seq);
+  if (ok) ElMessage.success(`Откачено: ${e.summary}`);
+  else ElMessage.warning("Не удалось откатить — запись конфликтует с более поздними правками");
+}
+function revertFrom(e: HistoryEntry): void {
+  const n = newerCount(e.seq);
+  void ElMessageBox.confirm(
+    `Откатить ${n} ${n === 1 ? "правку" : n < 5 ? "правки" : "правок"} (#${e.seq} и новее)? Откат — обычная правка: попадёт в историю и отменяется Ctrl+Z.`,
+    "Откатить отсюда",
+    { confirmButtonText: "Откатить", cancelButtonText: "Отмена", type: "warning" },
+  )
+    .then(() => {
+      const ok = collab.revertFrom(e.seq);
+      if (ok) ElMessage.success(`Откачено правок: ${n}`);
+      else ElMessage.warning("Не удалось откатить — нет обратимых записей или конфликт");
+    })
+    .catch(() => { /* отмена */ });
+}
 </script>
 
 <template>
@@ -83,7 +111,24 @@ function toggle(seq: number): void {
             <span class="who" :class="{ mine: e.mine }">{{ e.mine ? 'вы' : e.byName }}</span>
             <span class="what">{{ e.summary }}</span>
           </div>
-          <pre v-if="expanded.has(e.seq)" class="hist-detail">{{ e.detail }}</pre>
+          <template v-if="expanded.has(e.seq)">
+            <pre class="hist-detail">{{ e.detail }}</pre>
+            <div class="hist-actions">
+              <button
+                type="button"
+                class="hist-act"
+                :disabled="!revertable(e)"
+                :title="revertable(e) ? 'Применить обратную правку только для этой записи' : 'Нет обратной правки (часть мазка — откатывайте с последней записи мазка)'"
+                @click.stop="revertOne(e)"
+              >⎌ только это</button>
+              <button
+                type="button"
+                class="hist-act"
+                title="Откатить эту запись и всё, что новее (точными инверсиями, новые - первыми)"
+                @click.stop="revertFrom(e)"
+              >⎌ отсюда ({{ newerCount(e.seq) }})</button>
+            </div>
+          </template>
         </li>
       </ul>
     </div>
@@ -169,6 +214,30 @@ function toggle(seq: number): void {
   padding: 5px 10px;
   white-space: nowrap;
   cursor: pointer;
+}
+/* revert buttons under the expanded detail */
+.hist-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 6px 27px;
+}
+.hist-act {
+  border: 1px solid var(--el-border-color);
+  background: transparent;
+  border-radius: var(--d2-radius);
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.hist-act:hover:not(:disabled) {
+  color: var(--el-color-danger);
+  border-color: var(--el-color-danger);
+}
+.hist-act:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .hist-detail {
   margin: 2px 0 4px;

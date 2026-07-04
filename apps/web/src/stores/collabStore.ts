@@ -31,6 +31,9 @@ export interface HistoryEntry {
   /** A slightly longer, click-to-reveal description (what exactly changed). */
   detail: string;
   mine: boolean;
+  /** Ops that undo this entry (apply in array order), captured at apply time. Empty for a
+   *  mid-stroke entry whose composed inverse rides on the stroke's LAST entry. */
+  inverse?: EditOp[];
 }
 
 function randomName(): string {
@@ -89,7 +92,10 @@ function valueRu(key: string, v: unknown, ctx?: OpContext): string {
 function summarize(op: EditOp, ctx?: OpContext): string {
   switch (op.kind) {
     case "setCell":
-      return op.roadType !== undefined ? `🛣 дорога (${op.x}, ${op.y})` : `⛰ рельеф (${op.x}, ${op.y})`;
+      // roadType rides along on every INVERSE setCell (exact restore; -1 = «нет дороги») —
+      // call it a road op only when it lays road (≥0), so terrain reverts don't read «дорога»
+      return op.roadType !== undefined && op.roadType >= 0
+        ? `🛣 дорога (${op.x}, ${op.y})` : `⛰ рельеф (${op.x}, ${op.y})`;
     case "addObject":
       return `➕ ${typeRu(op.object.type)}`;
     case "moveObject":
@@ -190,11 +196,11 @@ export const useCollabStore = defineStore("collab", () => {
     };
   }
 
-  function record(seq: number, by: string, op: EditOp, mine: boolean): void {
+  function record(seq: number, by: string, op: EditOp, mine: boolean, inverse?: EditOp[]): void {
     const ctx = opCtx();
     history.value = [
       ...history.value,
-      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op, ctx), detail: detailOf(op, ctx), mine },
+      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse },
     ];
   }
 
@@ -204,9 +210,9 @@ export const useCollabStore = defineStore("collab", () => {
     const socket = getSocket();
 
     socket.on("edit:applied", ({ seq, by, op }) => {
-      edit.applyIncoming([op]); // peer op → live doc + journal (not my undo stack)
+      const inv = edit.applyIncoming([op]); // peer op → live doc + journal (not my undo stack)
       lastSeq = Math.max(lastSeq, seq);
-      record(seq, by, op, false);
+      record(seq, by, op, false, inv);
     });
     socket.on("presence:update", (p) => {
       if (p.socketId !== me.value?.socketId) peers.set(p.socketId, p);
@@ -228,22 +234,62 @@ export const useCollabStore = defineStore("collab", () => {
     });
   }
 
-  /** The outgoing hook editStore calls on every local commit / undo / redo. */
-  function sendOps(ops: readonly EditOp[]): void {
+  /** The outgoing hook editStore calls on every local commit / undo / redo.
+   *  `inverses[i]` (captured at apply time) rides into the history entry of ops[i]. */
+  function sendOps(ops: readonly EditOp[], inverses?: EditOp[][]): void {
     const id = mapId.value;
     const socket = getSocket();
     if (!id || !me.value) return;
-    for (const op of ops) {
-      const clientOpId = `${me.value.socketId}:${opCounter++}`;
+    ops.forEach((op, i) => {
+      const clientOpId = `${me.value!.socketId}:${opCounter++}`;
+      const inverse = inverses?.[i];
       socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
         if (ack.ok && typeof ack.seq === "number") {
           lastSeq = Math.max(lastSeq, ack.seq);
-          record(ack.seq, me.value!.socketId, op, true);
+          record(ack.seq, me.value!.socketId, op, true, inverse);
         } else {
           // eslint-disable-next-line no-console
           console.warn("[collab] op rejected:", ack.reason);
         }
       });
+    });
+  }
+
+  // --- history revert («откатить») -------------------------------------------------------
+  // Revert = apply the captured inverses as a NEW forward commit (append-only model: nothing
+  // is rewound; peers receive it as a regular edit; it lands in MY undo stack).
+
+  /** Inverses of the given entries, newest→oldest, ready to apply in order. */
+  function inversesOf(entries: HistoryEntry[]): EditOp[] {
+    return entries
+      .slice()
+      .sort((a, b) => b.seq - a.seq)
+      .flatMap((e) => e.inverse ?? []);
+  }
+
+  /** Revert ONE entry (may conflict with later edits — applyOp fails loud, nothing applies). */
+  function revertOne(seq: number): boolean {
+    const entry = history.value.find((e) => e.seq === seq);
+    if (!entry) return false;
+    return applyRevert(inversesOf([entry]), `#${seq}`);
+  }
+
+  /** Revert entry `seq` and EVERYTHING newer (exact inverses, newest→oldest). */
+  function revertFrom(seq: number): boolean {
+    return applyRevert(inversesOf(history.value.filter((e) => e.seq >= seq)), `#${seq} и новее`);
+  }
+
+  function applyRevert(ops: EditOp[], label: string): boolean {
+    if (!ops.length) return false;
+    try {
+      edit.commit(ops);
+      return true;
+    } catch (err) {
+      // applyToLive assigns liveDoc only after ALL ops apply — a mid-chain conflict
+      // (e.g. reverting a delete whose object a peer re-created) leaves the doc untouched.
+      // eslint-disable-next-line no-console
+      console.warn(`[collab] откат ${label} не применился:`, err);
+      return false;
     }
   }
 
@@ -337,5 +383,7 @@ export const useCollabStore = defineStore("collab", () => {
     leave,
     sendCursor,
     sendSelection,
+    revertOne,
+    revertFrom,
   };
 });

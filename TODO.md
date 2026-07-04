@@ -175,16 +175,16 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   visual chains.** Practical split: EditorProject carries the visual scenario model (chains,
   counters) as the source of truth; export compiles model→vars; a map is "editor-native" when its
   project has that model, otherwise the vars tab stays in raw mode.
-- **Graph polish** — edge hover highlight, drag-to-pan/zoom in the SVG, click a condition/effect
-  node to scroll the editor column to that card.
+- ~~Graph polish~~ — DONE (4837b85): edge hover highlight (наведение гасит несвязанное),
+  drag-to-pan/zoom (были ранее), клик по условию/эффекту скроллит редактор к карточке + вспышка.
 
 ## Collaboration & editor follow-ups (deferred 2026-06-30)
 - ~~Events editor~~ — DONE (E1+E2: full read/edit, все 746 событий Riders ре-сериализуются
   байт-в-байт; см. секции событий выше).
-- **Collab: history-revert action** — the shared History panel is read-only. To add "откатить отсюда"
-  (single + chain), each history entry must carry its INVERSE captured at apply time (today only my own
-  ops capture inverses, in `editStore.myUndo`; peer ops via `applyIncoming` don't). Store the inverse per
-  entry in `collabStore`, then revert = `editStore.commit(inverse)` (broadcasts as a forward op).
+- ~~Collab: history-revert action~~ — DONE: каждая запись истории несёт свой INVERSE (мои — через
+  outgoing(ops, inverses) с per-op выравниванием, чужие — из applyIncoming); в раскрытой строке
+  кнопки «⎌ только это» / «⎌ отсюда (N)» (точные инверсы новые-первыми, confirm, обычный forward
+  commit → в историю, отменяется Ctrl+Z; конфликт = fail loud, док не трогается).
 - **Collab: share a pre-join local draft** — on `join`, the client's existing local journal stays on top
   locally but is NOT pushed to the server, so a peer won't see drafts made before joining. Decide: push
   `activeOps` on join (risk: double-apply on reconnect) vs. discard vs. prompt.

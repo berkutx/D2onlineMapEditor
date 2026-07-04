@@ -74,7 +74,11 @@ export const useEditStore = defineStore("edit", () => {
   // correct) WITHOUT entering my undo stack. Undo/redo switch to the append-inverse model:
   // undo sends the inverse of MY last op as a new forward edit (the decided collab model).
   const roomConnected = ref(false);
-  let outgoing: ((ops: readonly EditOp[]) => void) | null = null;
+  /** Broadcast hook (collabStore.sendOps). `inverses[i]` = ops that undo `ops[i]` (applied in
+   *  array order), captured at apply time — the history panel stores them per entry so
+   *  «откатить отсюда» can replay exact inverses newest→oldest. */
+  type OutgoingHook = (ops: readonly EditOp[], inverses?: EditOp[][]) => void;
+  let outgoing: OutgoingHook | null = null;
   /** Forward + INVERSE for each of MY commits (newest last). Only mine are undoable; the
    *  inverse is captured at apply time (applyOp's exact inverse) so collab undo is correct
    *  even after peers' ops land in between. */
@@ -83,14 +87,18 @@ export const useEditStore = defineStore("edit", () => {
   const myRedo = ref<UndoEntry[]>([]);
   /** Inverse ops accumulated for the in-progress (un-committed) preview, in undo order. */
   let pendingInverses: EditOp[] = [];
+  /** Same inverses in APPLY order (pendingPerOp[i] undoes the i-th previewed op) — aligns
+   *  1:1 with the committed stroke when every previewed op is committed (the brush path). */
+  let pendingPerOp: EditOp[] = [];
 
   /** Called by collabStore on join/leave to enable/disable the broadcast + inverse-undo path. */
-  function setCollab(connected: boolean, onOutgoing: ((ops: readonly EditOp[]) => void) | null): void {
+  function setCollab(connected: boolean, onOutgoing: OutgoingHook | null): void {
     roomConnected.value = connected;
     outgoing = connected ? onOutgoing : null;
     myUndo.value = [];
     myRedo.value = [];
     pendingInverses = [];
+    pendingPerOp = [];
   }
 
   /** True if any op touches objects (everything except setCell, which is terrain). */
@@ -200,7 +208,18 @@ export const useEditStore = defineStore("edit", () => {
    *  stroke's inverse so the eventual commitStroke can record it for collab undo. */
   function applyPreview(ops: readonly EditOp[]): void {
     const inv = applyToLive(ops);
-    if (inv.length) pendingInverses = [...inv, ...pendingInverses];
+    if (inv.length) {
+      pendingInverses = [...inv, ...pendingInverses];
+      pendingPerOp = [...pendingPerOp, ...inv.slice().reverse()]; // apply order
+    }
+  }
+
+  /** Per-op inverse map for a stroke: aligned when every previewed op was committed (brush
+   *  path); otherwise (hover previews à la ImagePicker) pin the COMPOSED inverse to the last
+   *  entry so a chain revert still restores the pre-stroke state. */
+  function strokeInverses(ops: readonly EditOp[], perOp: EditOp[], composed: EditOp[]): EditOp[][] {
+    if (perOp.length === ops.length) return perOp.map((o) => [o]);
+    return ops.map((_, i) => (i === ops.length - 1 ? composed.slice() : []));
   }
 
   /** Record a finished stroke as one commit (liveDoc already reflects it via preview). When
@@ -208,13 +227,15 @@ export const useEditStore = defineStore("edit", () => {
   function commitStroke(ops: readonly EditOp[]): void {
     if (!project.value || ops.length === 0) return;
     const inverse = pendingInverses;
+    const perOp = pendingPerOp;
     pendingInverses = [];
+    pendingPerOp = [];
     project.value = pushCommit(project.value, ops);
     report.value = null;
     persist();
     scheduleAutoValidate();
     if (roomConnected.value && outgoing) {
-      outgoing(ops);
+      outgoing(ops, strokeInverses(ops, perOp, inverse));
       myUndo.value = [...myUndo.value, { forward: ops.slice(), inverse }];
       myRedo.value = [];
     }
@@ -223,14 +244,16 @@ export const useEditStore = defineStore("edit", () => {
   /**
    * Fold a PEER's ops into the live doc + journal (so export includes them) without
    * broadcasting or touching my undo stack. Called by collabStore on `edit:applied`.
+   * Returns the exact inverse (apply in array order) so the shared history can revert it.
    */
-  function applyIncoming(ops: readonly EditOp[]): void {
-    if (!project.value || ops.length === 0) return;
-    applyToLive(ops); // incremental liveDoc update (+ rev/objectsRev); not part of my stroke
+  function applyIncoming(ops: readonly EditOp[]): EditOp[] {
+    if (!project.value || ops.length === 0) return [];
+    const inv = applyToLive(ops); // incremental liveDoc update (+ rev/objectsRev); not my stroke
     project.value = pushCommit(project.value, ops); // record for export / recompute
     report.value = null;
     persist();
     scheduleAutoValidate();
+    return inv;
   }
 
   /** Atomic apply + record (for non-drag single actions). */
@@ -246,10 +269,10 @@ export const useEditStore = defineStore("edit", () => {
     if (roomConnected.value) {
       const entry = myUndo.value[myUndo.value.length - 1];
       if (!entry) return;
-      applyToLive(entry.inverse);
+      const inv = applyToLive(entry.inverse);
       project.value = pushCommit(project.value, entry.inverse);
       persist();
-      outgoing?.(entry.inverse);
+      outgoing?.(entry.inverse, inv.slice().reverse().map((o) => [o]));
       myUndo.value = myUndo.value.slice(0, -1);
       myRedo.value = [...myRedo.value, entry];
       report.value = null;
@@ -268,10 +291,10 @@ export const useEditStore = defineStore("edit", () => {
     if (roomConnected.value) {
       const entry = myRedo.value[myRedo.value.length - 1];
       if (!entry) return;
-      applyToLive(entry.forward);
+      const inv = applyToLive(entry.forward);
       project.value = pushCommit(project.value, entry.forward);
       persist();
-      outgoing?.(entry.forward);
+      outgoing?.(entry.forward, inv.slice().reverse().map((o) => [o]));
       myRedo.value = myRedo.value.slice(0, -1);
       myUndo.value = [...myUndo.value, entry];
       report.value = null;
