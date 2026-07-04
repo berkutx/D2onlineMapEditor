@@ -12,7 +12,9 @@
 
 import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import type { EditOp, UserPresence } from "@d2/socket-contract";
+import { activeOps } from "@d2/map-edit";
 import { getSocket } from "../realtime/socket";
 import { getChannelId } from "../services/clientId";
 import { useEditStore } from "./editStore";
@@ -339,6 +341,42 @@ export const useCollabStore = defineStore("collab", () => {
     mapId.value = id;
     history.value = [];
     await doJoin(id);
+    offerPreJoinDraft(id);
+  }
+
+  /** Pre-join local draft: edits made OUTSIDE the room (offline / before ever joining) live
+   *  only in my journal — peers can't see them. When joining a room WITH peers, offer to
+   *  broadcast the draft as regular room ops (my journal keeps them — it stays the full
+   *  op list for export). Declining keeps the draft local-on-top; either way the offer is
+   *  made once per room per session (no nagging on every map open). NOT on reconnects —
+   *  doJoin from the reconnect handler bypasses this. */
+  function offerPreJoinDraft(id: string): void {
+    if (!connected.value || mapId.value !== id) return;
+    if (peers.size === 0) return; // solo room — no one to share the draft with
+    const p = edit.project;
+    if (!p || p.baseScenarioId !== id) return;
+    // capture NOW: peer ops folding into the journal while the dialog is open must not ride along
+    const draft = activeOps(p);
+    if (!draft.length) return;
+    const key = `d2.collab.draftOffered.${id}#${channel.value ?? ""}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* storage unavailable — offer anyway */
+    }
+    void ElMessageBox.confirm(
+      `У вас есть локальный черновик этой карты (правок: ${draft.length}), сделанный до входа в комнату — участники его не видят. Отправить черновик в комнату?`,
+      "Локальный черновик",
+      { confirmButtonText: "Отправить в комнату", cancelButtonText: "Оставить локально", type: "info" },
+    )
+      .then(() => {
+        sendOps(draft); // no captured inverses (applied long ago) — their revert rows come disabled
+        ElMessage.success(`Черновик отправлен: участники теперь видят ваши правки (${draft.length})`);
+      })
+      .catch(() => {
+        /* оставить локально (текущее поведение: черновик поверх, только у меня) */
+      });
   }
 
   function leave(): void {

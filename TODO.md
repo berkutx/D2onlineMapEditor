@@ -185,9 +185,14 @@ Landed: `deleteBlocks(ids, dependentIds)` (frame splice + OB0000 decrement + ref
   outgoing(ops, inverses) с per-op выравниванием, чужие — из applyIncoming); в раскрытой строке
   кнопки «⎌ только это» / «⎌ отсюда (N)» (точные инверсы новые-первыми, confirm, обычный forward
   commit → в историю, отменяется Ctrl+Z; конфликт = fail loud, док не трогается).
-- **Collab: share a pre-join local draft** — on `join`, the client's existing local journal stays on top
-  locally but is NOT pushed to the server, so a peer won't see drafts made before joining. Decide: push
-  `activeOps` on join (risk: double-apply on reconnect) vs. discard vs. prompt.
+- ~~Collab: share a pre-join local draft~~ — DONE: при входе в комнату С УЧАСТНИКАМИ и локальным
+  черновиком — диалог «Отправить черновик в комнату?» (отправка = обычные ops через sendOps, журнал
+  их сохраняет — он остаётся полным оп-логом для экспорта; отказ = черновик поверх только у меня;
+  раз за сессию на комнату; на реконнектах не спрашивает — doJoin в обход join()).
+- **Collab: reconnect resync double-apply (pre-existing gap)** — на реконнекте snapshot:request →
+  setBaseDoc(серверный док С МОИМИ опами) + recompute поверх журнала (в котором те же опы) →
+  повторное применение: setCell/patch идемпотентны, а addObject/deleteObject КИДАЮТ. Правильный
+  фикс: реплей только пропущенных ops (seq>lastSeq) вместо полного снапшота — трогает Contract C.
 - **Locations: on-canvas drag-resize handles** — radius field already resizes "relative to center"; canvas
   handles are polish.
 
