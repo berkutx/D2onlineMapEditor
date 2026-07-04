@@ -29,6 +29,7 @@ export { TerrainLayer } from "./TerrainLayer.js";
 export type { TerrainMeta } from "./TerrainLayer.js";
 export { ObjectLayer } from "./ObjectLayer.js";
 export { LocationLayer } from "./LocationLayer.js";
+export { ZoneLayer, type ZoneVisual } from "./ZoneLayer.js";
 export { EventOverlayLayer } from "./EventOverlayLayer.js";
 export { AnchorLayer } from "./AnchorLayer.js";
 export { ScenarioRolesLayer } from "./ScenarioRolesLayer.js";

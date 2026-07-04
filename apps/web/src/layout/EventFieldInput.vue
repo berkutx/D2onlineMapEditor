@@ -22,8 +22,18 @@ import { locationRoleCounts, ROLE_META, type RoleClass, type RoleCounts } from "
 import CodeInput from "./CodeInput.vue";
 import MiniMap from "./MiniMap.vue";
 
-const props = defineProps<{ field: EventFieldSpec; modelValue: unknown }>();
-const emit = defineEmits<{ (e: "update:modelValue", v: unknown): void }>();
+const props = defineProps<{
+  field: EventFieldSpec;
+  modelValue: unknown;
+  /** ref-loc only: offer «▦ Вся зона» entries (the owner expands them into event clones). */
+  allowZone?: boolean;
+}>();
+const emit = defineEmits<{
+  (e: "update:modelValue", v: unknown): void;
+  /** «▦ Вся зона» chosen: modelValue is already set to the zone's first primitive;
+   *  the owner (EventsPanel) clones the event across the rest. */
+  (e: "zonePick", zid: string): void;
+}>();
 
 const edit = useEditStore();
 const toolStore = useToolStore();
@@ -137,8 +147,14 @@ const locGroups = computed<{ label: string; options: Opt[] }[]>(() => {
   }
   for (const list of Object.values(buckets)) list.sort((a, b) => a.label.localeCompare(b.label, "ru"));
   const out: { label: string; options: Opt[] }[] = [];
+  const zidByName = new Map(Object.entries(edit.zones).map(([zid, z]) => [z.name, zid]));
   for (const [zn, list] of [...zoneBuckets.entries()].sort((a, b) => a[0].localeCompare(b[0], "ru"))) {
     list.sort((a, b) => a.label.localeCompare(b.label, "ru"));
+    // for condition fields: pick the WHOLE zone — the panel clones the event per primitive
+    if (props.allowZone && list.length >= 2) {
+      const zid = zidByName.get(zn);
+      if (zid) list.unshift({ value: `ZONE::${zid}`, label: `▦ Вся зона «${zn}» (${list.length} лок.)` });
+    }
     out.push({ label: `▦ Зона «${zn}» (${list.length})`, options: list });
   }
   if (buckets.free!.length) out.push({ label: `Свободные — не в сценарии (${buckets.free!.length})`, options: buckets.free! });
@@ -194,6 +210,26 @@ const spellOptions = computed<Opt[]>(() =>
 
 function set(v: unknown): void {
   emit("update:modelValue", v);
+}
+
+/** ref-loc select handler: «▦ Вся зона» resolves to the zone's FIRST live primitive (the
+ *  model field always holds a real location id — the codec knows nothing about zones) and
+ *  tells the owner to clone the event across the rest. */
+function onLocPick(v: unknown): void {
+  const s = String(v ?? "");
+  if (s.startsWith("ZONE::")) {
+    const zid = s.slice(6);
+    const z = edit.zones[zid];
+    const first = z?.locIds.find((id) => edit.liveDoc?.objects.some((o) => o.id === id));
+    if (!z || !first) {
+      ElMessage.warning("У зоны нет живых локаций");
+      return;
+    }
+    emit("update:modelValue", first);
+    emit("zonePick", zid);
+    return;
+  }
+  set(s);
 }
 
 // --- ref-loc extras: показать на карте / создать новую локацию / миникарта ---------------
@@ -319,10 +355,11 @@ watch(
         clearable
         placeholder="— локация —"
         class="ev-loc-sel"
-        @update:model-value="set($event || '')"
+        @update:model-value="onLocPick($event || '')"
       >
         <!-- группы по роли: «Свободные» первыми — их берут для нового спавна/зоны;
-             вход-триггерные и прочие занятые исключаются одним взглядом -->
+             вход-триггерные и прочие занятые исключаются одним взглядом.
+             «▦ Вся зона» (allowZone) разворачивается панелью в клоны события -->
         <el-option-group v-for="g in locGroups" :key="g.label" :label="g.label">
           <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
         </el-option-group>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tileZone, tilesCover, zoneLocationOps, type ZoneTile } from "../src/zones";
+import { tileZone, tilesCover, zoneLocationOps, MAX_TILE_RADIUS, type ZoneTile } from "../src/zones";
 import type { MapDocument } from "@d2/map-schema";
 
 const key = (x: number, y: number): string => `${x},${y}`;
@@ -23,11 +23,24 @@ const coversExactly = (tiles: ZoneTile[], mask: Set<string>): boolean => {
 };
 
 describe("@d2/map-edit zones — greedy square tiling", () => {
-  it("10×10 square = 4 perfect 5×5 tiles", () => {
-    const mask = rect(0, 0, 10, 10);
+  it("safe max radius = 3 (7×7): ScenEdit's dialog knows exactly 1×1..7×7", () => {
+    expect(MAX_TILE_RADIUS).toBe(3);
+  });
+
+  it("14×14 square = 4 perfect 7×7 tiles (r=3)", () => {
+    const mask = rect(0, 0, 14, 14);
     const tiles = tileZone(mask);
     expect(tiles).toHaveLength(4);
-    expect(tiles.every((t) => t.r === 2)).toBe(true);
+    expect(tiles.every((t) => t.r === 3)).toBe(true);
+    expect(allInside(tiles, mask)).toBe(true);
+    expect(coversExactly(tiles, mask)).toBe(true);
+  });
+
+  it("10×10 square: exact cover, ≤4 tiles, nothing beyond r=3", () => {
+    const mask = rect(0, 0, 10, 10);
+    const tiles = tileZone(mask);
+    expect(tiles.length).toBeLessThanOrEqual(4);
+    expect(tiles.every((t) => t.r <= MAX_TILE_RADIUS)).toBe(true);
     expect(allInside(tiles, mask)).toBe(true);
     expect(coversExactly(tiles, mask)).toBe(true);
   });

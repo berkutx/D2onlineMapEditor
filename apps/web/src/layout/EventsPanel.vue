@@ -198,6 +198,22 @@ function doCloneZone(): void {
   }
 }
 
+/** «▦ Вся зона» chosen in a condition's location picker: the field already points at the
+ *  first primitive (committed by setCondField just before this handler) — expand into
+ *  derived clones. «Один раз на зону» rides the event's own occurOnce. */
+function onZonePick(zid: string): void {
+  const ev = sel.value;
+  if (!ev) return;
+  void nextTick(() => {
+    const n = store.cloneEventForZone(ev.id, zid, ev.occurOnce);
+    if (n > 0) {
+      ElMessage.success(
+        `Событие развёрнуто на зону: +${n} скрытых клонов${ev.occurOnce ? " · сработает один раз на зону" : ""}. Правки этого события тянутся в клоны автоматически.`,
+      );
+    }
+  });
+}
+
 const condFields = (c: EventCondition) =>
   (CONDITION_BY_KIND[c.kind]?.fields ?? []).filter((f) => !f.hidden);
 const effFields = (e: EventEffect) =>
@@ -375,7 +391,9 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
               <div v-for="f in condFields(c)" :key="f.key" class="ev-field">
                 <label>{{ f.label }}</label>
                 <EventFieldInput :field="f" :model-value="(c as Record<string, unknown>)[f.key]"
-                  @update:model-value="setCondField(i, f.key, $event)" />
+                  allow-zone
+                  @update:model-value="setCondField(i, f.key, $event)"
+                  @zone-pick="onZonePick($event)" />
               </div>
             </div>
 

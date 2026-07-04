@@ -753,8 +753,10 @@ function close(): void {
           <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
         </div>
         <div class="row">
+          <!-- max 3 (7×7) — the native ScenEdit dialog knows exactly 1×1/3×3/5×5/7×7;
+               a bigger radius risks breaking the map in the game's own editor -->
           <label>Радиус</label>
-          <el-input-number :model-value="obj.radius ?? 0" :min="0" :max="20" size="small" controls-position="right" @change="(v: number) => patch({ radius: v ?? 0 })" />
+          <el-input-number :model-value="obj.radius ?? 0" :min="0" :max="3" size="small" controls-position="right" @change="(v: number) => patch({ radius: v ?? 0 })" />
         </div>
         <div class="ro-row">
           <label>Размер области</label>

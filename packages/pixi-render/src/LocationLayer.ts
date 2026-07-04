@@ -24,6 +24,8 @@ export interface LocationOpts {
   selectedId?: string | null;
   showAllNames?: boolean;
   summaries?: Record<string, string[]>;
+  /** Location ids to SKIP entirely — zone primitives render as ONE ZoneLayer shape instead. */
+  hideIds?: ReadonlyArray<string>;
 }
 
 /** Non-focused locations fade to this alpha while something is hovered. */
@@ -55,8 +57,10 @@ export class LocationLayer {
   build(objects: ReadonlyArray<MapObject>, opts: LocationOpts = {}): void {
     this.view.removeChildren().forEach((c) => c.destroy({ children: true }));
     this.items.clear();
+    const hide = opts.hideIds?.length ? new Set(opts.hideIds) : null;
     for (const o of objects) {
       if (o.type !== "location") continue;
+      if (hide?.has(o.id)) continue; // zone primitive — drawn by ZoneLayer as one shape
       const root = new Container();
       root.eventMode = "none";
       const r = o.radius ?? 0;

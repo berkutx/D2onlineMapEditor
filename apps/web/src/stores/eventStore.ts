@@ -131,14 +131,70 @@ export const useEventStore = defineStore("events", () => {
     cardReveal.value = { kind, index, tick: (cardReveal.value?.tick ?? 0) + 1 };
   }
 
-  /** Commit a full event (add or replace) as one undoable edit. */
+  /** Commit a full event (add or replace) as one undoable edit. If the event is the BASE
+   *  of a zone clone group, the clones re-stamp from it in the SAME commit — clones are
+   *  DERIVED (copy of the base with their own id/name/location), the user never maintains
+   *  them by hand. */
   function upsert(ev: MapEvent): void {
-    edit.commit([{ kind: "upsertEvent", event: ev } as EditOp]);
+    edit.commit([{ kind: "upsertEvent", event: ev } as EditOp, ...zoneCloneResyncOps(ev)]);
     selectedId.value = ev.id;
   }
 
+  /** Re-derive every clone of `base` (same fields, own id/name/locId). A base that lost
+   *  its zone condition unbinds the group: the clones are deleted with it. */
+  function zoneCloneResyncOps(base: MapEvent): EditOp[] {
+    const ops: EditOp[] = [];
+    for (const z of Object.values(edit.zones)) {
+      for (const g of z.eventGroups ?? []) {
+        if (g[0] !== base.id) continue;
+        const ci = zoneCondIndex(base);
+        const clones = g.slice(1).filter((id) => events.value.some((e) => e.id === id));
+        if (ci < 0) {
+          for (const id of clones) ops.push({ kind: "deleteEvent", id } as EditOp);
+          edit.dropZoneEventGroup(base.id);
+          continue;
+        }
+        clones.forEach((cloneId, k) => {
+          const cur = events.value.find((e) => e.id === cloneId)!;
+          const curCi = zoneCondIndex(cur);
+          const locId =
+            curCi >= 0
+              ? ((cur.conditions[curCi] as unknown as Record<string, unknown>).locId as string)
+              : undefined;
+          if (!locId) return; // clone lost its own zone condition — leave it alone
+          ops.push({
+            kind: "upsertEvent",
+            event: {
+              ...base,
+              id: cloneId,
+              name: `${base.name || "Событие"} · ${k + 2}`,
+              conditions: base.conditions.map((c, i) =>
+                i === ci ? ({ ...c, locId } as EventCondition) : c),
+            },
+          } as EditOp);
+        });
+      }
+    }
+    return ops;
+  }
+
   function remove(id: string): void {
-    edit.commit([{ kind: "deleteEvent", id } as EditOp]);
+    const ops: EditOp[] = [{ kind: "deleteEvent", id } as EditOp];
+    // deleting a zone-group BASE takes its derived clones along; deleting a clone by hand
+    // only drops it from the group (the rest stay derived)
+    let wasBase = false;
+    for (const z of Object.values(edit.zones)) {
+      for (const g of z.eventGroups ?? []) {
+        if (g[0] === id) {
+          wasBase = true;
+          for (const cid of g.slice(1))
+            if (events.value.some((e) => e.id === cid)) ops.push({ kind: "deleteEvent", id: cid } as EditOp);
+        }
+      }
+    }
+    edit.commit(ops);
+    if (wasBase) edit.dropZoneEventGroup(id);
+    else edit.removeCloneFromZoneGroups(id);
     if (selectedId.value === id) selectedId.value = null;
   }
 
@@ -489,9 +545,29 @@ export const useEventStore = defineStore("events", () => {
     const cloneLocs = locs.filter((id) => id !== baseLoc);
 
     const ops: EditOp[] = [];
+    // re-binding: a previous clone group of this base (this OR another zone) is superseded —
+    // its clones die in the same commit, the group record is replaced
+    let hadGroup = false;
+    for (const z of Object.values(edit.zones)) {
+      for (const g of z.eventGroups ?? []) {
+        if (g[0] !== from.id) continue;
+        hadGroup = true;
+        for (const cid of g.slice(1))
+          if (events.value.some((e) => e.id === cid)) ops.push({ kind: "deleteEvent", id: cid } as EditOp);
+      }
+    }
+    if (hadGroup) edit.dropZoneEventGroup(from.id);
+
+    // «один раз на зону»: reuse the base's existing AUTO_зона gate if it already carries one
+    // (clones are copies — the gate rides along); otherwise mint the variable + gate now
+    const hasGate = from.conditions.some((c) => {
+      if (c.kind !== "varInRange") return false;
+      const v = variables.value.find((x) => x.id === (c as unknown as Record<string, number>).var1);
+      return !!v && v.name.startsWith("AUTO_зона_") && edit.autoVars.includes(v.id);
+    });
     let gateCond: EventCondition | null = null;
     let gateEff: ((ev: MapEvent) => EventEffect) | null = null;
-    if (oncePerZone) {
+    if (oncePerZone && !hasGate) {
       const newVarId = Math.max(0, ...variables.value.map((v) => v.id)) + 1;
       const slug = (zone.name || zoneId).replace(/[^0-9A-Za-zА-Яа-яЁё]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24) || zoneId;
       const newVar: ScenarioVariable = { id: newVarId, name: `AUTO_зона_${slug}`, value: 0 };
@@ -539,6 +615,47 @@ export const useEventStore = defineStore("events", () => {
     edit.commit(ops);
     edit.recordZoneEventGroup(zoneId, [from.id, ...cloneIds]);
     return cloneIds.length;
+  }
+
+  /** After a zone REGENERATION its primitives are new — every clone group re-derives:
+   *  stale clones die, the base repoints at the first new primitive, fresh clones are
+   *  minted (an existing «один раз» gate rides along in the copies). */
+  function resyncZoneEventsAfterRegen(zid: string): number {
+    const z = edit.zones[zid];
+    if (!z) return 0;
+    const groups = (z.eventGroups ?? []).slice();
+    let total = 0;
+    for (const g of groups) {
+      const baseId = g[0]!;
+      const base = events.value.find((e) => e.id === baseId);
+      const ci = base ? zoneCondIndex(base) : -1;
+      const locs = z.locIds.filter((id) => edit.liveDoc?.objects.some((o) => o.id === id));
+      if (!base || ci < 0 || !locs.length) {
+        // nothing to re-derive — purge stale clones + the record
+        const ops: EditOp[] = g.slice(1)
+          .filter((id) => events.value.some((e) => e.id === id))
+          .map((id) => ({ kind: "deleteEvent", id }) as EditOp);
+        if (ops.length) edit.commit(ops);
+        edit.dropZoneEventGroup(baseId);
+        continue;
+      }
+      // repoint the base at a live primitive (old ones are deleted); purge stale clones
+      const ops: EditOp[] = g.slice(1)
+        .filter((id) => events.value.some((e) => e.id === id))
+        .map((id) => ({ kind: "deleteEvent", id }) as EditOp);
+      ops.push({
+        kind: "upsertEvent",
+        event: {
+          ...base,
+          conditions: base.conditions.map((c, i) =>
+            i === ci ? ({ ...c, locId: locs[0]! } as EventCondition) : c),
+        },
+      } as EditOp);
+      edit.commit(ops);
+      edit.dropZoneEventGroup(baseId);
+      total += cloneEventForZone(baseId, zid, false); // существующий гейт едет в копиях
+    }
+    return total;
   }
 
   // --- scenario variables (one MidScenVariables block; edited as a whole list) ---
@@ -628,7 +745,7 @@ export const useEventStore = defineStore("events", () => {
     select, upsert, remove, create, clone, referencesObject,
     breadcrumbs, canGoBack, navigate, goBack, goToCrumb, cardReveal, revealCard,
     createForObject, createChainedEvent, createCounterGate, createSpawnAt,
-    cloneEventForZone, zoneCondIndex,
+    cloneEventForZone, zoneCondIndex, resyncZoneEventsAfterRegen,
     createOrBranch, bindEventToPhase, addGotoPhaseEffect, createTimerAfter, phaseVarId,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,

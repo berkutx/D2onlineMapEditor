@@ -1,7 +1,8 @@
 /**
  * Free-form ZONES → game MidLocation primitives. The editor lets the user draw an
- * arbitrary cell mask; the game only has (2r+1)² SQUARE locations (r = 0/1/2 → 1×1/3×3/
- * 5×5, byte-verified). This module tiles the mask with overlapping squares so that:
+ * arbitrary cell mask; the game only has (2r+1)² SQUARE locations (r = 0..3 → 1×1..7×7,
+ * byte-verified — see MAX_TILE_RADIUS). This module tiles the mask with overlapping
+ * squares so that:
  *   - every mask cell is covered (the zone triggers everywhere it was drawn), and
  *   - every tile is a SUBSET of the mask (cells outside the drawing never trigger) —
  *     overlap is legal: locations are exempt from occupancy (Riders ships 418).
@@ -19,9 +20,19 @@ export interface ZoneTile {
   /** CENTER cell of the location (MidLocation POS is the center). */
   x: number;
   y: number;
-  /** radius: 0=1×1, 1=3×3, 2=5×5. */
+  /** radius: 0=1×1, 1=3×3, 2=5×5, 3=7×7. */
   r: number;
 }
+
+/**
+ * The largest location radius PROVEN safe for the game + native ScenEdit (byte-verified
+ * 2026-07-04): the ScenEdit location dialog offers exactly 1×1/3×3/5×5/7×7 (RADIUS =
+ * spin index 0..3), the reference Qt editor whitelists the same four, and across 54
+ * shipped campaign .sg maps (1877 locations) the global max RADIUS is 3. The format
+ * stores int32 with no clamp, but r≥4 risks an out-of-range spin index in ScenEdit —
+ * don't emit it.
+ */
+export const MAX_TILE_RADIUS = 3;
 
 /** Parse "x,y" keys into coords + bbox. */
 function parseMask(cells: ReadonlySet<string>): {
@@ -49,7 +60,7 @@ function parseMask(cells: ReadonlySet<string>): {
  * Tile the mask with overlapping in-mask squares of radius ≤ rMax. Deterministic
  * (scanline order). Returns center+radius tiles; `tilesCover(tiles)` == the mask.
  */
-export function tileZone(cells: ReadonlySet<string>, rMax = 2): ZoneTile[] {
+export function tileZone(cells: ReadonlySet<string>, rMax = MAX_TILE_RADIUS): ZoneTile[] {
   if (cells.size === 0) return [];
   const { pts, x0, y0, w, h } = parseMask(cells);
   const idx = (x: number, y: number): number => (y - y0) * w + (x - x0);
@@ -144,7 +155,7 @@ export function tilesCover(tiles: readonly ZoneTile[]): Set<string> {
 }
 
 /** Live counter while drawing (same greedy — cheap for hand-drawn masks). */
-export function estimateTileCount(cells: ReadonlySet<string>, rMax = 2): number {
+export function estimateTileCount(cells: ReadonlySet<string>, rMax = MAX_TILE_RADIUS): number {
   return tileZone(cells, rMax).length;
 }
 

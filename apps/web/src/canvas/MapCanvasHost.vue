@@ -17,8 +17,8 @@ import { assetUrl } from "../services/api";
 import { storeToRefs } from "pinia";
 import { Scene } from "@d2/pixi-render";
 import type { CameraSnapshot, DebugStats, LandmarkFootprints } from "@d2/pixi-render";
-import { worldToCell, cellToWorld, objectFootprint, objectZBase, objectSprites } from "@d2/pixi-render";
-import type { MapObject } from "@d2/map-schema";
+import { worldToCell, cellToWorld, objectFootprint, objectZBase, objectSprites, type ZoneVisual } from "@d2/pixi-render";
+import type { MapDocument, MapObject } from "@d2/map-schema";
 import {
   terrainBrush,
   roadBrush,
@@ -48,7 +48,9 @@ import {
   locationSummaries,
   computeObjectRoles,
   rolesMatchFilter,
+  formatRoleBadges,
   type ObjectRole,
+  type RoleCounts,
 } from "../services/scenarioRoles";
 import { useDecorStore, type DecorEntry } from "../stores/decorStore";
 import { useUnitStore } from "../stores/unitStore";
@@ -153,17 +155,14 @@ async function rebuild(): Promise<void> {
     scene.setLayerVisibility("objects", objectsVisible.value);
     scene.setLayerVisibility("grid", gridVisible.value);
     scene.setLayerVisibility("locations", locationsVisible.value);
-    // seed location labels (own captions + current selection) onto the fresh scene
-    scene.updateLocations(editStore.liveDoc ?? doc, {
-      captions: editStore.captions,
-      selectedId: toolStore.selectedId,
-    });
+    // seed location labels + zone shapes (own captions + current selection) onto the fresh scene
+    refreshZonesAndLocations();
     // seed the «Роли локаций» overlay too — a fresh Scene starts with an empty roles state,
     // and the objectsRev watcher only fires on the NEXT edit; without this the rings/badges
     // stay invisible after a reload until something bumps the doc.
     scene.updateScenarioRoles(
       editStore.liveDoc ?? doc,
-      locationRoleCounts(editStore.liveDoc ?? doc),
+      zoneFilteredRoleCounts(editStore.liveDoc ?? doc),
       viewStore.rolesVisible,
     );
     for (const cat of OVERLAY_TINTS) scene.setOverlayTint(cat, overlayTints.value[cat]);
@@ -308,11 +307,98 @@ let lastCell: { x: number; y: number } | null = null;
 
 // --- locations tool («режим локаций») + hover spotlight ----------------------
 /** Press state: click (no drag) cycles the pick; a drag ≥1 cell moves the location. */
-let locDown: { cell: { x: number; y: number }; locs: MapObject[] } | null = null;
+let locDown: { cell: { x: number; y: number }; locs: MapObject[]; zids: string[] } | null = null;
 let locDragId: string | null = null;
 let locDragging = false;
 /** «Локации»: drag of the SELECTED location's corner handle = radius resize. */
 let locResize: { id: string; lastR: number } | null = null;
+/** «Локации»: drag of a whole ZONE (every primitive + the mask move together). */
+let zoneDrag: { zid: string; start: { x: number; y: number }; moved: boolean } | null = null;
+
+// ---- free-form ZONES as one entity -------------------------------------------------------
+// A zone's location primitives are HIDDEN from LocationLayer/roles (they'd read as N circles);
+// ZoneLayer draws the zone as one shape instead, and the locations tool picks/drags the whole.
+/** locId → zoneId for every live zone primitive. */
+function zoneByLoc(): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const [zid, z] of Object.entries(editStore.zones))
+    for (const id of z.locIds) m.set(id, zid);
+  return m;
+}
+/** Zone visuals for the scene: mask + name (+ aggregated roles/summaries in locations mode). */
+function zoneVisuals(): ZoneVisual[] {
+  const doc = editStore.liveDoc;
+  if (!doc) return [];
+  const inLocMode = toolStore.tool === "locations";
+  const counts = inLocMode ? locationRoleCounts(doc) : null;
+  const sums = inLocMode ? locationSummaries(doc) : null;
+  return Object.entries(editStore.zones).map(([zid, z]) => {
+    let badges: string | undefined;
+    let summary: string[] | undefined;
+    if (counts) {
+      const agg: RoleCounts = { trigger: 0, spawn: 0, destination: 0, env: 0 };
+      for (const id of z.locIds) {
+        const c = counts[id];
+        if (c) {
+          agg.trigger += c.trigger;
+          agg.spawn += c.spawn;
+          agg.destination += c.destination;
+          agg.env += c.env;
+        }
+      }
+      badges = formatRoleBadges(agg) || undefined;
+    }
+    if (sums) {
+      const uniq: string[] = [];
+      for (const id of z.locIds)
+        for (const line of sums[id] ?? []) if (!uniq.includes(line)) uniq.push(line);
+      if (uniq.length) {
+        summary = uniq.slice(0, 2);
+        if (uniq.length > 2) summary.push(`… ещё ${uniq.length - 2}`);
+      }
+    }
+    return {
+      id: zid,
+      name: z.name,
+      cells: z.cells,
+      selected: toolStore.selectedZoneId === zid,
+      badges,
+      summary,
+    };
+  });
+}
+/** Clamp a zone shift so every mask cell stays inside the map (tiles ⊆ mask ⇒ safe). */
+function clampZoneShift(cells: ReadonlyArray<string>, dx: number, dy: number, size: number): [number, number] {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const k of cells) {
+    const [x, y] = k.split(",").map(Number);
+    minX = Math.min(minX, x!); minY = Math.min(minY, y!);
+    maxX = Math.max(maxX, x!); maxY = Math.max(maxY, y!);
+  }
+  return [
+    Math.max(-minX, Math.min(dx, size - 1 - maxX)),
+    Math.max(-minY, Math.min(dy, size - 1 - maxY)),
+  ];
+}
+/** Role counts with zone primitives dropped — the zone title carries them aggregated. */
+function zoneFilteredRoleCounts(doc: MapDocument): Record<string, RoleCounts> {
+  const counts = locationRoleCounts(doc);
+  for (const id of zoneByLoc().keys()) delete counts[id];
+  return counts;
+}
+/** Push zone visuals + the primitive-hiding list to the scene (with location labels). */
+function refreshZonesAndLocations(): void {
+  const s = getScene();
+  const doc = editStore.liveDoc;
+  if (!s || !doc) return;
+  s.updateLocations(doc, {
+    captions: editStore.captions,
+    selectedId: toolStore.selectedId,
+    summaries: toolStore.tool === "locations" ? locationSummaries(doc) : undefined,
+    hideIds: [...zoneByLoc().keys()],
+  });
+  s.updateZones(zoneVisuals());
+}
 /** Last hovered cell key for the location spotlight (avoid re-computing per pixel). */
 let hoverKey: string | null = null;
 
@@ -915,6 +1001,10 @@ function onKeyDown(e: KeyboardEvent): void {
     locResize = null; // drop the radius drag without committing
     clearPreview();
   }
+  if (zoneDrag) {
+    zoneDrag = null; // drop the zone drag without committing
+    clearPreview();
+  }
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -1088,19 +1178,35 @@ function onPointerDown(e: PointerEvent): void {
     }
     const cell = cellFromEvent(e);
     if (!cell) return;
-    // the role filter constrains picking too: dimmed-out locations are not clickable
+    // the role filter constrains picking too: dimmed-out locations are not clickable.
+    // ZONE primitives are hidden — the zone itself joins the pick ring after the locations
+    // (click cycles: локация → … → зона → локация …); drag moves whatever is selected.
+    const zbl = zoneByLoc();
     const locs = objectsAtCell(cell.x, cell.y).filter(
-      (o) => o.type === "location" && locMatchesFilter(o.id),
+      (o) => o.type === "location" && !zbl.has(o.id) && locMatchesFilter(o.id),
     );
-    if (!locs.length) {
+    const key = `${cell.x},${cell.y}`;
+    const zids = Object.entries(editStore.zones)
+      .filter(([, z]) => z.cells.includes(key))
+      .map(([zid]) => zid);
+    if (!locs.length && !zids.length) {
       toolStore.setSelectedId(null);
+      toolStore.setSelectedZone(null);
       return;
     }
-    // drag target: keep the current selection if it covers the cell, else the topmost
-    const selHit = locs.find((o) => o.id === toolStore.selectedId);
-    locDragId = (selHit ?? locs[0]!).id;
-    locDown = { cell, locs };
-    locDragging = false;
+    // drag target: the SELECTED thing if it covers the cell (zone or location), else the
+    // topmost location, else the first zone. Selection/cycling happens on pointerup.
+    const selZoneHit = zids.find((z) => z === toolStore.selectedZoneId);
+    const selLocHit = locs.find((o) => o.id === toolStore.selectedId);
+    if (selZoneHit && !selLocHit) {
+      zoneDrag = { zid: selZoneHit, start: cell, moved: false };
+    } else if (locs.length) {
+      locDragId = (selLocHit ?? locs[0]!).id;
+      locDragging = false;
+    } else {
+      zoneDrag = { zid: zids[0]!, start: cell, moved: false };
+    }
+    locDown = { cell, locs, zids };
     getScene()?.canvas?.setPointerCapture(e.pointerId);
     return;
   }
@@ -1213,6 +1319,24 @@ function onPointerUp(e: PointerEvent): void {
     }
     return;
   }
+  // locations tool: releasing a zone drag commits the whole-zone move (one undo step);
+  // a zone press WITHOUT movement falls through to the unified click-cycle below
+  if (zoneDrag && zoneDrag.moved) {
+    const d = zoneDrag;
+    zoneDrag = null;
+    locDown = null;
+    clearPreview();
+    try { getScene()?.canvas?.releasePointerCapture(e.pointerId); } catch { /* released */ }
+    const cell = cellFromEvent(e);
+    const z = editStore.zones[d.zid];
+    const doc = editStore.liveDoc;
+    if (cell && z && doc) {
+      const [dx, dy] = clampZoneShift(z.cells, cell.x - d.start.x, cell.y - d.start.y, doc.size);
+      if (dx !== 0 || dy !== 0) editStore.moveZone(d.zid, dx, dy);
+    }
+    return;
+  }
+  zoneDrag = null;
   // locations tool: releasing the corner handle commits the radius change (one undo step)
   if (locResize) {
     const { id, lastR } = locResize;
@@ -1253,10 +1377,17 @@ function onPointerUp(e: PointerEvent): void {
       }
       toolStore.setSelectedId(dragId);
     } else {
-      const list = start.locs;
-      const i = list.findIndex((o) => o.id === toolStore.selectedId);
-      const next = list[(i + 1) % list.length]!;
-      toolStore.setSelectedId(next.id);
+      // unified click-cycle: locations (smaller-first) then ZONES covering the cell
+      const ring: { kind: "loc" | "zone"; id: string }[] = [
+        ...start.locs.map((o) => ({ kind: "loc" as const, id: o.id })),
+        ...(start.zids ?? []).map((zid) => ({ kind: "zone" as const, id: zid })),
+      ];
+      const cur = ring.findIndex((c) =>
+        c.kind === "loc" ? c.id === toolStore.selectedId : c.id === toolStore.selectedZoneId,
+      );
+      const next = ring[(cur + 1) % ring.length]!;
+      if (next.kind === "loc") toolStore.setSelectedId(next.id);
+      else toolStore.setSelectedZone(next.id);
     }
     return;
   }
@@ -1345,13 +1476,31 @@ function onPointerMove(e: PointerEvent): void {
   }
   // hover spotlight for location overlays (all tools — this is what declutters the soup)
   updateLocationFocus(cell);
+  // locations tool: dragging a ZONE moves the whole entity — shifted-mask preview
+  if (zoneDrag && cell) {
+    if (!zoneDrag.moved && (cell.x !== zoneDrag.start.x || cell.y !== zoneDrag.start.y)) zoneDrag.moved = true;
+    if (zoneDrag.moved) {
+      const z = editStore.zones[zoneDrag.zid];
+      const doc = editStore.liveDoc;
+      if (z && doc) {
+        const [dx, dy] = clampZoneShift(z.cells, cell.x - zoneDrag.start.x, cell.y - zoneDrag.start.y, doc.size);
+        const shifted = z.cells.map((k) => {
+          const [x, y] = k.split(",").map(Number);
+          return { x: x! + dx, y: y! + dy };
+        });
+        getScene()?.setFootprint(shifted, true);
+      }
+    }
+    return;
+  }
   // locations tool: dragging the corner handle = radius resize (live footprint preview)
   if (locResize && cell) {
     const o = editStore.liveDoc?.objects.find((x) => x.id === locResize!.id);
     const doc = editStore.liveDoc;
     if (o && doc && o.type === "location") {
       const cheb = Math.max(Math.abs(cell.x - o.pos.x), Math.abs(cell.y - o.pos.y));
-      const maxR = Math.min(o.pos.x, o.pos.y, doc.size - 1 - o.pos.x, doc.size - 1 - o.pos.y);
+      // r≤3: the native ScenEdit dialog knows only 1×1..7×7 — bigger breaks the map there
+      const maxR = Math.min(3, o.pos.x, o.pos.y, doc.size - 1 - o.pos.x, doc.size - 1 - o.pos.y);
       const nr = Math.max(0, Math.min(cheb, maxR));
       locResize.lastR = nr;
       getScene()?.setFootprint(footprintCells(o.pos.x - nr, o.pos.y - nr, 2 * nr + 1, 2 * nr + 1), true);
@@ -1477,17 +1626,12 @@ watch(
 // when an editor-only caption is edited, or when the «Локации» mode toggles (it adds the
 // scenario-SUMMARY lines — «⚡ вход → …», «➜ приказ: охранять» — under the names).
 watch(
-  [() => editStore.objectsRev, () => toolStore.selectedId, () => editStore.captions, () => toolStore.tool],
-  () => {
-    const s = getScene();
-    if (s && editStore.liveDoc) {
-      s.updateLocations(editStore.liveDoc, {
-        captions: editStore.captions,
-        selectedId: toolStore.selectedId,
-        summaries: toolStore.tool === "locations" ? locationSummaries(editStore.liveDoc) : undefined,
-      });
-    }
-  },
+  [
+    () => editStore.objectsRev, () => toolStore.selectedId, () => editStore.captions,
+    () => toolStore.tool, () => toolStore.selectedZoneId, () => editStore.zones,
+  ],
+  () => refreshZonesAndLocations(),
+  { deep: true },
 );
 
 // Event overlay: draw the selected event's trigger zones + movement arrows. Re-run when the
@@ -1515,12 +1659,13 @@ watch(
 // «Роли локаций» overlay: every location shows its scenario role (⚡ trigger / ✨ spawn /
 // ➜ destination / ☁ env). objectsRev bumps on event edits too, so wiring stays live.
 watch(
-  [() => editStore.objectsRev, () => viewStore.rolesVisible],
+  [() => editStore.objectsRev, () => viewStore.rolesVisible, () => editStore.zones],
   () => {
     const s = getScene();
     if (s && editStore.liveDoc)
-      s.updateScenarioRoles(editStore.liveDoc, locationRoleCounts(editStore.liveDoc), viewStore.rolesVisible);
+      s.updateScenarioRoles(editStore.liveDoc, zoneFilteredRoleCounts(editStore.liveDoc), viewStore.rolesVisible);
   },
+  { deep: true },
 );
 
 // Collab presence: broadcast my selection to room peers; render their live cursors.
@@ -1558,6 +1703,7 @@ watch(
       locDragId = null;
       locDragging = false;
       locResize = null;
+      zoneDrag = null;
       updateLocationFocus(lastCell, true); // drop the filter spotlight with the mode
     }
     if (t === "decor" || t === "move") refreshGhost(lastCell);

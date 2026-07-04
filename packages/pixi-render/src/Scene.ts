@@ -27,6 +27,7 @@ import { TerrainTilemapLayer } from "./TerrainTilemapLayer.js";
 import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer, collectSpriteKeys, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
+import { ZoneLayer, type ZoneVisual } from "./ZoneLayer.js";
 import { EventOverlayLayer } from "./EventOverlayLayer.js";
 import { AnchorLayer } from "./AnchorLayer.js";
 import { ScenarioRolesLayer, type RoleCounts } from "./ScenarioRolesLayer.js";
@@ -127,6 +128,9 @@ export class Scene {
   private locations?: LocationLayer;
   /** label/highlight inputs (captions, selected id) kept so locations can rebuild in place. */
   private locOpts: LocationOpts = {};
+  private zones?: ZoneLayer;
+  /** zone visuals kept so a full rebuild restores the layer. */
+  private zoneState: ReadonlyArray<ZoneVisual> = [];
   private eventOverlay?: EventOverlayLayer;
   /** The selected event to visualize; kept so a rebuild after an edit re-draws it. */
   private selectedEvent: import("@d2/map-schema").MapEvent | null = null;
@@ -299,6 +303,10 @@ export class Scene {
     this.locations.build(map.objects, this.locOpts);
     this.locations.setFocus(this.locFocus);
     this.world.addChild(this.locations.view);
+    // free-form editor zones: one shape per zone, right above the location primitives
+    this.zones = new ZoneLayer();
+    this.zones.build(this.zoneState);
+    this.world.addChild(this.zones.view);
     if (this.locationsModeOn) this.addLocVeil(); // restore «режим локаций» after a rebuild
 
     // event overlay (trigger zones / movement arrows), above locations
@@ -402,6 +410,14 @@ export class Scene {
     if (opts) this.locOpts = { ...this.locOpts, ...opts };
     if (!this.locations) return;
     this.locations.build(map.objects, this.locOpts);
+    this.renderNow();
+  }
+
+  /** Redraw the free-form editor ZONES (one shape per zone; state survives rebuilds). */
+  updateZones(zones: ReadonlyArray<ZoneVisual>): void {
+    this.zoneState = zones;
+    if (!this.zones) return;
+    this.zones.build(zones);
     this.renderNow();
   }
 
@@ -578,8 +594,10 @@ export class Scene {
     if (layer === "terrain") this.terrain?.setVisible(visible);
     else if (layer === "grid") this.grid?.setVisible(visible);
     else if (layer === "objects") this.objects?.setVisible(visible);
-    else if (layer === "locations") this.locations?.setVisible(visible);
-    else if (layer === "overlay") this.overlay?.setVisible(visible);
+    else if (layer === "locations") {
+      this.locations?.setVisible(visible);
+      this.zones?.setVisible(visible); // zones ride with the locations layer
+    } else if (layer === "overlay") this.overlay?.setVisible(visible);
     this.requestRender();
   }
 
@@ -906,6 +924,7 @@ export class Scene {
     this.anchorLayer?.destroy();
     this.scenarioRoles?.destroy();
     this.locations?.destroy();
+    this.zones?.destroy();
     this.grid?.destroy();
     this.terrain?.destroy();
     this.anim?.destroy();
@@ -916,6 +935,7 @@ export class Scene {
     this.anchorLayer = undefined;
     this.scenarioRoles = undefined;
     this.locations = undefined;
+    this.zones = undefined;
     this.grid = undefined;
     this.terrain = undefined;
     this.anim = undefined;

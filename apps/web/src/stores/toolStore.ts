@@ -125,9 +125,24 @@ export const useToolStore = defineStore("tool", () => {
   function setEyeZone(v: boolean): void {
     eyeZone.value = v;
   }
+  /** Selected free-form ZONE (a project entity, not a map object) — mutually exclusive
+   *  with the object selection so the inspector shows exactly one thing. */
+  const selectedZoneId = ref<string | null>(null);
+  /** Zone queued for REGENERATION in the «Зона» tool (the drawn mask replaces its tiles).
+   *  Lifted here so the zone inspector's «Перегенерировать» can preset the tool. */
+  const regenZoneId = ref<string>("");
+  function setSelectedZone(zid: string | null): void {
+    selectedZoneId.value = zid;
+    if (zid) {
+      selectedId.value = null;
+      selectedIds.value = [];
+    }
+  }
+
   function setSelectedId(id: string | null): void {
     selectedId.value = id;
     selectedIds.value = id ? [id] : [];
+    if (id) selectedZoneId.value = null;
   }
   /** Shift+клик: toggle an object in/out of the multi-selection (primary follows). */
   function toggleSelected(id: string): void {
@@ -160,6 +175,7 @@ export const useToolStore = defineStore("tool", () => {
 
   return {
     tool, size, terrainId, decorId, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, selectedId, selectedIds,
+    selectedZoneId, setSelectedZone, regenZoneId,
     locFilter, setLocFilter,
     objectPickTypes, objectPickResult, startObjectPick, finishObjectPick,
     painting, setTool, setSize, setTerrainId, setDecor, setMoveId, setRoadSel,

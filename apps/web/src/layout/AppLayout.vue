@@ -21,6 +21,7 @@ import ToolDock from "./ToolDock.vue";
 import ToolOptionsBar from "./ToolOptionsBar.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import ObjectInspector from "./ObjectInspector.vue";
+import ZoneInspector from "./ZoneInspector.vue";
 import StatusBar from "./StatusBar.vue";
 import CopilotBar from "./CopilotBar.vue";
 import DecorPalette from "./DecorPalette.vue";
@@ -96,9 +97,10 @@ function onKey(e: KeyboardEvent): void {
     e.preventDefault();
     return;
   }
-  // Escape clears the selection (closes the object inspector rail).
-  if (e.key === "Escape" && toolStore.selectedId) {
+  // Escape clears the selection (closes the object/zone inspector rail).
+  if (e.key === "Escape" && (toolStore.selectedId || toolStore.selectedZoneId)) {
     toolStore.setSelectedId(null);
+    toolStore.setSelectedZone(null);
     e.preventDefault();
     return;
   }
@@ -177,6 +179,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       </el-main>
       <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="clamp(240px, 26vw, 300px)">
         <DecorPalette />
+      </el-aside>
+      <!-- zone inspector (mutually exclusive with the object selection by store invariant) -->
+      <el-aside v-if="toolStore.selectedZoneId" class="app-inspector" width="clamp(220px, 24vw, 260px)">
+        <ZoneInspector />
       </el-aside>
       <el-aside v-if="toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
         <ObjectInspector />

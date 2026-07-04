@@ -377,7 +377,12 @@ export const useEditStore = defineStore("edit", () => {
     const gen = zoneLocationOps(d2, name, tiles);
     ops.push(...gen.ops);
     commit(ops);
-    const zid = regenId ?? `ZN${String(Object.keys(project.value.zones ?? {}).length + 1).padStart(4, "0")}`;
+    // id = max+1 over EXISTING keys (count+1 would collide after a removeZone)
+    const zid =
+      regenId ??
+      `ZN${String(
+        Math.max(0, ...Object.keys(project.value.zones ?? {}).map((k) => parseInt(k.slice(2), 10) || 0)) + 1,
+      ).padStart(4, "0")}`;
     project.value = {
       ...project.value,
       zones: {
@@ -389,6 +394,44 @@ export const useEditStore = defineStore("edit", () => {
     persist();
     return zid;
   }
+  /** Move the WHOLE zone by (dx,dy): every primitive location moves in ONE commit and the
+   *  drawn mask shifts with it (project metadata). Bounds clamping is the caller's job. */
+  function moveZone(zid: string, dx: number, dy: number): boolean {
+    const doc = liveDoc.value;
+    const z = project.value?.zones?.[zid];
+    if (!doc || !project.value || !z || (dx === 0 && dy === 0)) return false;
+    const ops: EditOp[] = [];
+    for (const id of z.locIds) {
+      const o = doc.objects.find((x) => x.id === id);
+      if (o) ops.push({ kind: "moveObject", id, x: o.pos.x + dx, y: o.pos.y + dy });
+    }
+    if (!ops.length) return false;
+    commit(ops);
+    const cells = z.cells.map((k) => {
+      const [x, y] = k.split(",").map(Number);
+      return `${x + dx},${y + dy}`;
+    });
+    project.value = { ...project.value, zones: { ...project.value.zones, [zid]: { ...z, cells } } };
+    persist();
+    return true;
+  }
+
+  /** Rename the zone: its primitives follow («имя · k») in one commit + project metadata. */
+  function renameZone(zid: string, name: string): void {
+    const doc = liveDoc.value;
+    const z = project.value?.zones?.[zid];
+    const clean = name.trim();
+    if (!doc || !project.value || !z || !clean || clean === z.name) return;
+    const ops: EditOp[] = [];
+    z.locIds.forEach((id, i) => {
+      if (doc.objects.some((o) => o.id === id))
+        ops.push({ kind: "patchObject", id, fields: { name: `${clean} · ${i + 1}` } });
+    });
+    if (ops.length) commit(ops);
+    project.value = { ...project.value, zones: { ...project.value.zones, [zid]: { ...z, name: clean } } };
+    persist();
+  }
+
   /** Remember a zone-event clone group ([baseId, ...cloneIds]) — editor-only metadata for
    *  collapsing the clones behind the base row in the events list. */
   function recordZoneEventGroup(zid: string, group: string[]): void {
@@ -401,6 +444,42 @@ export const useEditStore = defineStore("edit", () => {
         [zid]: { ...z, eventGroups: [...(z.eventGroups ?? []), group] },
       },
     };
+    persist();
+  }
+
+  /** Drop a base's clone group everywhere (base deleted / unbound from the zone). */
+  function dropZoneEventGroup(baseId: string): void {
+    if (!project.value) return;
+    const zones = { ...(project.value.zones ?? {}) };
+    let changed = false;
+    for (const [zid, z] of Object.entries(zones)) {
+      const kept = (z.eventGroups ?? []).filter((g) => g[0] !== baseId);
+      if (kept.length !== (z.eventGroups ?? []).length) {
+        zones[zid] = { ...z, eventGroups: kept };
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    project.value = { ...project.value, zones };
+    persist();
+  }
+
+  /** A clone was deleted by hand — remove it from its group (base stays derived for the rest). */
+  function removeCloneFromZoneGroups(cloneId: string): void {
+    if (!project.value) return;
+    const zones = { ...(project.value.zones ?? {}) };
+    let changed = false;
+    for (const [zid, z] of Object.entries(zones)) {
+      const groups = (z.eventGroups ?? []).map((g) =>
+        g.includes(cloneId) && g[0] !== cloneId ? g.filter((id) => id !== cloneId) : g,
+      );
+      if (JSON.stringify(groups) !== JSON.stringify(z.eventGroups ?? [])) {
+        zones[zid] = { ...z, eventGroups: groups.filter((g) => g.length >= 2) };
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    project.value = { ...project.value, zones };
     persist();
   }
 
@@ -604,7 +683,11 @@ export const useEditStore = defineStore("edit", () => {
     zones,
     createZone,
     removeZone,
+    moveZone,
+    renameZone,
     recordZoneEventGroup,
+    dropZoneEventGroup,
+    removeCloneFromZoneGroups,
     autoVars,
     markAutoVar,
     unmarkAutoVar,

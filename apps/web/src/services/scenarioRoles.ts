@@ -91,6 +91,15 @@ export function countsOf(list: ObjectRole[] | undefined): RoleCounts | null {
   return c;
 }
 
+/** «⚡3 ✨» — compact role-badge line (dominance order, count when >1). */
+export function formatRoleBadges(c: RoleCounts | null | undefined): string {
+  if (!c) return "";
+  return (["trigger", "spawn", "destination", "env"] as RoleClass[])
+    .filter((k) => c[k] > 0)
+    .map((k) => ROLE_META[k].icon + (c[k] > 1 ? c[k] : ""))
+    .join(" ");
+}
+
 /** Plain-data role counts for every LOCATION (feeds Scene.updateScenarioRoles). */
 export function locationRoleCounts(doc: MapDocument): Record<string, RoleCounts> {
   const roles = computeObjectRoles(doc);

@@ -13,11 +13,13 @@ import { ElSegmented, ElSelect, ElOption, ElTooltip, ElInput, ElButton, ElMessag
 import { estimateTileCount } from "@d2/map-edit";
 import { useToolStore, type ZoneMode } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
+import { useEventStore } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
 import { LOC_FILTERS, type LocFilter } from "../services/scenarioRoles";
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
+const eventStore = useEventStore();
 const viewStore = useViewStore();
 const { tool, size, terrainId, locFilter, zoneMode, regionMask, region } = storeToRefs(toolStore);
 
@@ -62,8 +64,9 @@ const zoneCells = computed<string[]>(() => {
 const zoneEstimate = computed(() =>
   zoneCells.value.length ? estimateTileCount(new Set(zoneCells.value)) : 0,
 );
-/** Existing zones — pick one to REGENERATE (new mask replaces its locations) or delete. */
-const regenZoneId = ref<string>("");
+/** Existing zones — pick one to REGENERATE (new mask replaces its locations) or delete.
+ *  Store-lifted: the zone inspector's «Перегенерировать» presets it before switching here. */
+const { regenZoneId } = storeToRefs(toolStore);
 const zoneOptions = computed(() =>
   Object.entries(editStore.zones).map(([id, z]) => ({ value: id, label: `${z.name} (${z.locIds.length})` })),
 );
@@ -76,16 +79,19 @@ function makeZone(): void {
   const regen = regenZoneId.value || undefined;
   const zid = editStore.createZone(name, zoneCells.value, regen);
   if (!zid) return;
+  // regen: события зоны пере-деривируются на новые примитивы (клоны пересоздаются)
+  const resynced = regen ? eventStore.resyncZoneEventsAfterRegen(zid) : 0;
   ElMessage.success(
     regen
-      ? `«${name}»: перегенерировано — локаций ${zoneEstimate.value} (старые удалены)`
-      : `«${name}»: создано локаций — ${zoneEstimate.value}; правятся как обычные локации`,
+      ? `«${name}»: перегенерировано — локаций ${zoneEstimate.value}${resynced ? `, событий-клонов пересобрано ${resynced}` : ""}`
+      : `«${name}»: зона создана (${zoneEstimate.value} лок. под капотом) — управляется как одно целое`,
   );
   zoneName.value = "";
   regenZoneId.value = "";
   toolStore.clearZone(); // сбросить маску (рисуй следующую)
-  // показать результат сразу: слой локаций (+роли едут следом)
+  // показать результат сразу: слой локаций (+роли едут следом) + выбрать зону
   if (!viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
+  toolStore.setSelectedZone(zid);
 }
 function deleteZone(): void {
   const zid = regenZoneId.value;
