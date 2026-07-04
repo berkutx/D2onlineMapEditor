@@ -7,7 +7,7 @@
  * Tabs: События (3-zone layout) / Настройки / Дипломатия / Переменные / Шаблоны.
  * Edits commit through editStore (undoable + collab).
  */
-import { computed, ref, onMounted, onBeforeUnmount } from "vue";
+import { computed, nextTick, ref, onMounted, onBeforeUnmount, watch } from "vue";
 import {
   ElDialog, ElInput, ElButton, ElScrollbar, ElInputNumber, ElSwitch, ElCheckbox, ElSelect,
   ElOption, ElTag, ElTooltip, ElEmpty, ElTabs, ElTabPane,
@@ -54,6 +54,24 @@ onMounted(() => window.addEventListener("keydown", onNavKey));
 onBeforeUnmount(() => window.removeEventListener("keydown", onNavKey));
 
 const sel = computed(() => store.selected);
+
+/** Graph node click → scroll the editor column to the matching cond/eff card + flash it. */
+const editorCol = ref<HTMLElement | null>(null);
+const flashCard = ref<string | null>(null);
+let flashTimer: ReturnType<typeof setTimeout> | undefined;
+watch(() => store.cardReveal, (r) => {
+  if (!r) return;
+  const key = (r.kind === "cond" ? "c" : "e") + r.index;
+  void nextTick(() => {
+    editorCol.value
+      ?.querySelector(`[data-card="${key}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    flashCard.value = key;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => (flashCard.value = null), 1300);
+  });
+});
+
 const RACES = [
   { key: "human", label: "Имп" }, { key: "dwarf", label: "Кланы" }, { key: "undead", label: "Нежить" },
   { key: "heretic", label: "Легионы" }, { key: "neutral", label: "Нейтр" }, { key: "elf", label: "Эльфы" },
@@ -235,7 +253,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
         <!-- star topology: what triggers it (left), what it does (right), everything by name -->
         <EventGraph v-if="view.eventGraphVisible" class="ev-col ev-col-graph" />
 
-        <div class="ev-col ev-col-editor d2-rail--left">
+        <div ref="editorCol" class="ev-col ev-col-editor d2-rail--left">
           <el-scrollbar v-if="sel" class="ev-editor">
             <el-input :model-value="sel.name" size="small" placeholder="Название события"
               @update:model-value="patch({ name: $event })" />
@@ -272,7 +290,8 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <el-option v-for="s in CONDITION_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
               </el-select>
             </div>
-            <div v-for="(c, i) in sel.conditions" :key="'c' + i" class="ev-item d2-card">
+            <div v-for="(c, i) in sel.conditions" :key="'c' + i" class="ev-item d2-card"
+              :data-card="'c' + i" :class="{ flash: flashCard === 'c' + i }">
               <div class="ev-item-head">
                 <span>{{ condLabel(c) }}</span>
                 <el-button size="small" text class="icon-btn" @click="removeCondition(i)">🗑</el-button>
@@ -292,7 +311,8 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <el-option v-for="s in EFFECT_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
               </el-select>
             </div>
-            <div v-for="(e, i) in sel.effects" :key="'e' + i" class="ev-item d2-card">
+            <div v-for="(e, i) in sel.effects" :key="'e' + i" class="ev-item d2-card"
+              :data-card="'e' + i" :class="{ flash: flashCard === 'e' + i }">
               <div class="ev-item-head">
                 <span>{{ i + 1 }}. {{ effLabel(e) }}</span>
                 <span class="ev-item-actions">
@@ -402,6 +422,12 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 }
 .ev-sec-head .d2-sec { margin: 0; }
 .ev-item { margin-bottom: 8px; margin-right: 8px; }
+/* graph-click reveal: a fading ring pulls the eye to the card just scrolled to */
+.ev-item.flash { animation: card-flash 1.25s ease-out; }
+@keyframes card-flash {
+  0% { box-shadow: 0 0 0 2px var(--el-color-primary); }
+  100% { box-shadow: 0 0 0 6px transparent; }
+}
 .ev-item-head { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 4px; }
 .ev-item-actions { display: inline-flex; }
 .ev-field { display: grid; grid-template-columns: 96px 1fr; gap: 6px; align-items: center; margin: 6px 0; }

@@ -38,7 +38,8 @@ interface GNode {
   click?: () => void;
   tip?: string;
 }
-interface GEdge { x1: number; y1: number; x2: number; y2: number; cls: string }
+/** a/b = indices into `nodes` — the hover highlight walks edges by node index. */
+interface GEdge { x1: number; y1: number; x2: number; y2: number; cls: string; a: number; b: number }
 
 const truncate = (s: string, n: number): string => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
@@ -88,31 +89,38 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
     cls: "g-center", tip: `${sel.name} · ${sel.id}`,
   };
   nodes.push(center);
+  const centerIdx = 0;
 
-  // conditions column
+  // conditions column (click = scroll the editor column to that card)
   const condYs = stackYs(conds.length, cy);
+  const condIdx: number[] = [];
   conds.forEach((c, i) => {
     const y = condYs[i]!;
     nodes.push({
       x: COL.cond, y, w: BW.cond, h: NODE_H,
       title: truncate(c.spec?.label ?? "условие", 26),
       sub: c.refs.length ? truncate(c.refs.map((r) => r.text).join(", "), 30) : undefined,
-      icon: "⚡", cls: "g-cond",
+      icon: "⚡", cls: "g-cond", tip: "к карточке условия →",
+      click: () => store.revealCard("cond", i),
     });
-    edges.push({ x1: COL.cond + BW.cond, y1: y + NODE_H / 2, x2: center.x, y2: cy, cls: "e-cond" });
+    condIdx.push(nodes.length - 1);
+    edges.push({ x1: COL.cond + BW.cond, y1: y + NODE_H / 2, x2: center.x, y2: cy, cls: "e-cond", a: condIdx[i]!, b: centerIdx });
   });
 
-  // effects column
+  // effects column (click = scroll the editor column to that card)
   const effYs = stackYs(effs.length, cy);
+  const effIdx: number[] = [];
   effs.forEach((e, i) => {
     const y = effYs[i]!;
     nodes.push({
       x: COL.eff, y, w: BW.eff, h: NODE_H,
       title: truncate(`${i + 1}. ${e.spec?.label ?? "эффект"}`, 27),
       sub: e.refs.length ? truncate(e.refs.map((r) => r.text).join(", "), 30) : undefined,
-      icon: "★", cls: "g-eff",
+      icon: "★", cls: "g-eff", tip: "к карточке эффекта →",
+      click: () => store.revealCard("eff", i),
     });
-    edges.push({ x1: center.x + center.w, y1: cy, x2: COL.eff, y2: y + NODE_H / 2, cls: "e-eff" });
+    effIdx.push(nodes.length - 1);
+    edges.push({ x1: center.x + center.w, y1: cy, x2: COL.eff, y2: y + NODE_H / 2, cls: "e-eff", a: centerIdx, b: effIdx[i]! });
   });
 
   // left satellites (enabler events + condition entities)
@@ -126,7 +134,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
         title: truncate(names.eventName(ev), 24), sub: "включает это событие", icon: "⚑",
         cls: "g-evt", click: () => store.navigate({ tab: "events", eventId: ev }), tip: ev,
       });
-      edges.push({ x1: COL.satL + BW.sat, y1: y + NODE_H / 2, x2: center.x, y2: cy - 8, cls: "e-chain" });
+      edges.push({ x1: COL.satL + BW.sat, y1: y + NODE_H / 2, x2: center.x, y2: cy - 8, cls: "e-chain", a: nodes.length - 1, b: centerIdx });
     } else if (s.ref) {
       const r = s.ref;
       nodes.push({
@@ -135,7 +143,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
         cls: "g-sat", click: satClick(r), tip: String(r.value),
       });
       const oy = condYs[s.owner as number]! + NODE_H / 2;
-      edges.push({ x1: COL.satL + BW.sat, y1: y + NODE_H / 2, x2: COL.cond, y2: oy, cls: "e-sat" });
+      edges.push({ x1: COL.satL + BW.sat, y1: y + NODE_H / 2, x2: COL.cond, y2: oy, cls: "e-sat", a: nodes.length - 1, b: condIdx[s.owner as number]! });
     }
   });
 
@@ -151,10 +159,35 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
       cls: isEvt ? "g-evt" : "g-sat", click: satClick(r), tip: String(r.value),
     });
     const oy = effYs[s.owner]! + NODE_H / 2;
-    edges.push({ x1: COL.eff + BW.eff, y1: oy, x2: COL.satR, y2: y + NODE_H / 2, cls: isEvt ? "e-chain" : "e-sat" });
+    edges.push({ x1: COL.eff + BW.eff, y1: oy, x2: COL.satR, y2: y + NODE_H / 2, cls: isEvt ? "e-chain" : "e-sat", a: effIdx[s.owner]!, b: nodes.length - 1 });
   });
 
   return { nodes, edges, h };
+});
+
+// ---- hover highlight: a node lights up its edges + neighbours, the rest dims -------------
+const hoverNode = ref<number | null>(null);
+const hotEdges = computed<Set<number>>(() => {
+  const g = graph.value;
+  const hv = hoverNode.value;
+  if (!g || hv === null) return new Set();
+  const out = new Set<number>();
+  g.edges.forEach((e, i) => {
+    if (e.a === hv || e.b === hv) out.add(i);
+  });
+  return out;
+});
+const hotNodes = computed<Set<number>>(() => {
+  const g = graph.value;
+  const hv = hoverNode.value;
+  if (!g || hv === null) return new Set();
+  const out = new Set<number>([hv]);
+  for (const i of hotEdges.value) {
+    const e = g.edges[i]!;
+    out.add(e.a);
+    out.add(e.b);
+  }
+  return out;
 });
 
 /** Satellite click: events recenter, vars jump to their tab, map objects get selected.
@@ -321,12 +354,20 @@ function onNodeClick(n: GNode): void {
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
       >
-        <path v-for="(e, i) in graph.edges" :key="'e' + i" :d="edgePath(e)" :class="e.cls" fill="none" />
+        <path
+          v-for="(e, i) in graph.edges"
+          :key="'e' + i"
+          :d="edgePath(e)"
+          :class="[e.cls, { hot: hotEdges.has(i), faded: hoverNode !== null && !hotEdges.has(i) }]"
+          fill="none"
+        />
         <g
           v-for="(n, i) in graph.nodes"
           :key="'n' + i"
-          :class="[n.cls, { clickable: !!n.click }]"
+          :class="[n.cls, { clickable: !!n.click, faded: hoverNode !== null && !hotNodes.has(i) }]"
           @click="onNodeClick(n)"
+          @pointerenter="hoverNode = i"
+          @pointerleave="hoverNode = null"
         >
           <title v-if="n.tip">{{ n.tip }}</title>
           <rect :x="n.x" :y="n.y" :width="n.w" :height="n.h" rx="7" />
@@ -466,4 +507,9 @@ rect {
 .e-eff { stroke: var(--el-color-success); stroke-width: 1.4; opacity: 0.7; }
 .e-sat { stroke: var(--el-border-color); stroke-width: 1.1; opacity: 0.9; }
 .e-chain { stroke: var(--el-color-primary); stroke-width: 1.3; stroke-dasharray: 5 4; opacity: 0.8; }
+/* hover highlight: the hovered node's edges pop, everything else fades */
+path, g { transition: opacity 0.14s ease; }
+path.hot { stroke-width: 2.4; opacity: 1; }
+path.faded { opacity: 0.12; }
+g.faded { opacity: 0.3; }
 </style>

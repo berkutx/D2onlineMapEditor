@@ -124,6 +124,13 @@ export const useEventStore = defineStore("events", () => {
     selectedId.value = target.eventId;
   }
 
+  /** Graph → editor column: "scroll to this condition/effect card". EventsPanel watches it,
+   *  scrolls the card into view and flashes it. `tick` makes repeat clicks re-fire. */
+  const cardReveal = ref<{ kind: "cond" | "eff"; index: number; tick: number } | null>(null);
+  function revealCard(kind: "cond" | "eff", index: number): void {
+    cardReveal.value = { kind, index, tick: (cardReveal.value?.tick ?? 0) + 1 };
+  }
+
   /** Commit a full event (add or replace) as one undoable edit. */
   function upsert(ev: MapEvent): void {
     edit.commit([{ kind: "upsertEvent", event: ev } as EditOp]);
@@ -369,7 +376,7 @@ export const useEventStore = defineStore("events", () => {
   return {
     selectedId, filter, objectFilter, panelTab, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
-    breadcrumbs, canGoBack, navigate, goBack, goToCrumb,
+    breadcrumbs, canGoBack, navigate, goBack, goToCrumb, cardReveal, revealCard,
     createForObject, createChainedEvent, createCounterGate, createSpawnAt,
     variables, setVariables, addVariable, patchVariable, removeVariable,
     templates, selectedTemplateId, selectedTemplate, selectTemplate,
