@@ -15,6 +15,7 @@ import {
   serializeProject,
   deserializeProject,
   pushCommit,
+  ensureOpUids,
   undo,
   redo,
   applyOp,
@@ -76,9 +77,18 @@ export const useEditStore = defineStore("edit", () => {
   const roomConnected = ref(false);
   /** Broadcast hook (collabStore.sendOps). `inverses[i]` = ops that undo `ops[i]` (applied in
    *  array order), captured at apply time — the history panel stores them per entry so
-   *  «откатить отсюда» can replay exact inverses newest→oldest. */
-  type OutgoingHook = (ops: readonly EditOp[], inverses?: EditOp[][]) => void;
+   *  «откатить отсюда» can replay exact inverses newest→oldest. `uids[i]` is ops[i]'s stable
+   *  uid — it is persisted in the journal AND sent as clientOpId, so room-log replays can
+   *  skip ops this journal already holds. */
+  type OutgoingHook = (ops: readonly EditOp[], inverses?: EditOp[][], uids?: readonly string[]) => void;
   let outgoing: OutgoingHook | null = null;
+
+  /** Random stable per-op uid. Deliberately NOT derived from the private clientId — the uid
+   *  travels to peers as clientOpId (the ownership token must never leave this browser). */
+  const newOpUid = (): string =>
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   /** Forward + INVERSE for each of MY commits (newest last). Only mine are undoable; the
    *  inverse is captured at apply time (applyOp's exact inverse) so collab undo is correct
    *  even after peers' ops land in between. */
@@ -230,12 +240,13 @@ export const useEditStore = defineStore("edit", () => {
     const perOp = pendingPerOp;
     pendingInverses = [];
     pendingPerOp = [];
-    project.value = pushCommit(project.value, ops);
+    const uids = ops.map(() => newOpUid());
+    project.value = pushCommit(project.value, ops, uids);
     report.value = null;
     persist();
     scheduleAutoValidate();
     if (roomConnected.value && outgoing) {
-      outgoing(ops, strokeInverses(ops, perOp, inverse));
+      outgoing(ops, strokeInverses(ops, perOp, inverse), uids);
       myUndo.value = [...myUndo.value, { forward: ops.slice(), inverse }];
       myRedo.value = [];
     }
@@ -246,10 +257,12 @@ export const useEditStore = defineStore("edit", () => {
    * broadcasting or touching my undo stack. Called by collabStore on `edit:applied`.
    * Returns the exact inverse (apply in array order) so the shared history can revert it.
    */
-  function applyIncoming(ops: readonly EditOp[]): EditOp[] {
+  function applyIncoming(ops: readonly EditOp[], uids?: readonly string[]): EditOp[] {
     if (!project.value || ops.length === 0) return [];
     const inv = applyToLive(ops); // incremental liveDoc update (+ rev/objectsRev); not my stroke
-    project.value = pushCommit(project.value, ops); // record for export / recompute
+    // record for export / recompute; the peer op's uid too, so a future room-log replay
+    // (reload / second tab) recognizes this op as already-held and skips it
+    project.value = pushCommit(project.value, ops, uids);
     report.value = null;
     persist();
     scheduleAutoValidate();
@@ -262,6 +275,17 @@ export const useEditStore = defineStore("edit", () => {
     commitStroke(ops);
   }
 
+  /** Backfill per-op uids for commits made before uid tracking, so the collab join can
+   *  dedup room-log replays against the WHOLE journal. Called by collabStore on join. */
+  function ensureJournalUids(): void {
+    if (!project.value) return;
+    const ensured = ensureOpUids(project.value, newOpUid);
+    if (ensured !== project.value) {
+      project.value = ensured;
+      persist();
+    }
+  }
+
   function undoEdit(): void {
     if (!project.value) return;
     // Collab: apply the captured inverse of MY last op as a NEW forward edit (append-inverse,
@@ -270,9 +294,10 @@ export const useEditStore = defineStore("edit", () => {
       const entry = myUndo.value[myUndo.value.length - 1];
       if (!entry) return;
       const inv = applyToLive(entry.inverse);
-      project.value = pushCommit(project.value, entry.inverse);
+      const uids = entry.inverse.map(() => newOpUid());
+      project.value = pushCommit(project.value, entry.inverse, uids);
       persist();
-      outgoing?.(entry.inverse, inv.slice().reverse().map((o) => [o]));
+      outgoing?.(entry.inverse, inv.slice().reverse().map((o) => [o]), uids);
       myUndo.value = myUndo.value.slice(0, -1);
       myRedo.value = [...myRedo.value, entry];
       report.value = null;
@@ -292,9 +317,10 @@ export const useEditStore = defineStore("edit", () => {
       const entry = myRedo.value[myRedo.value.length - 1];
       if (!entry) return;
       const inv = applyToLive(entry.forward);
-      project.value = pushCommit(project.value, entry.forward);
+      const uids = entry.forward.map(() => newOpUid());
+      project.value = pushCommit(project.value, entry.forward, uids);
       persist();
-      outgoing?.(entry.forward, inv.slice().reverse().map((o) => [o]));
+      outgoing?.(entry.forward, inv.slice().reverse().map((o) => [o]), uids);
       myRedo.value = myRedo.value.slice(0, -1);
       myUndo.value = [...myUndo.value, entry];
       report.value = null;
@@ -666,6 +692,7 @@ export const useEditStore = defineStore("edit", () => {
     applyPreview,
     commitStroke,
     commit,
+    ensureJournalUids,
     applyIncoming,
     setCollab,
     roomConnected,

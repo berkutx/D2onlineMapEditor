@@ -26,6 +26,15 @@ export const EditorProject = z.object({
    * lives past the cursor.
    */
   journal: z.array(z.array(EditOp)).default([]),
+  /**
+   * Per-op stable uids, parallel to `journal` (opUids[i][j] names journal[i][j]).
+   * The collab layer sends an op's uid as its `clientOpId`, so any later room-log
+   * replay (fresh join, second tab, reconnect) can SKIP ops this journal already
+   * holds — the fix for the double-apply crash («addObject: id already exists»).
+   * Random uuids, deliberately NOT derived from the private clientId (uids are
+   * visible to peers). Older projects lack entries — see ensureOpUids.
+   */
+  opUids: z.array(z.array(z.string())).default([]),
   /** How many commits are currently applied (undo decrements, redo increments). */
   cursor: z.number().int().nonnegative().default(0),
   /** Editor-only, optional per-location display captions (object id → text). NOT written to the
@@ -88,6 +97,7 @@ export function emptyProject(
     baseScenarioId,
     relations: [],
     journal: [],
+    opUids: [],
     cursor: 0,
     captions: {},
     anchors: {},
@@ -108,11 +118,18 @@ export function activeOps(p: EditorProject): EditOp[] {
   return activeCommits(p).flat();
 }
 
-/** Record a commit (one logical action's ops): drop any redo tail, append, advance. */
-export function pushCommit(p: EditorProject, ops: readonly EditOp[]): EditorProject {
+/** Record a commit (one logical action's ops): drop any redo tail, append, advance.
+ *  `uids` (parallel to `ops`) are the stable per-op ids the collab layer dedups by;
+ *  omitted (server-side augment paths) → the commit simply has no uids. */
+export function pushCommit(
+  p: EditorProject,
+  ops: readonly EditOp[],
+  uids?: readonly string[],
+): EditorProject {
   if (ops.length === 0) return p;
   const journal = p.journal.slice(0, p.cursor).concat([ops.slice()]);
-  return { ...p, journal, cursor: journal.length };
+  const opUids = (p.opUids ?? []).slice(0, p.cursor).concat([uids ? uids.slice() : []]);
+  return { ...p, journal, opUids, cursor: journal.length };
 }
 
 /** Record a single op as its own commit (convenience). */
@@ -128,6 +145,40 @@ export function undo(p: EditorProject): EditorProject {
 }
 export function redo(p: EditorProject): EditorProject {
   return canRedo(p) ? { ...p, cursor: p.cursor + 1 } : p;
+}
+
+/** Every op uid the journal knows about (INCLUDING the redo tail past the cursor —
+ *  an undone-but-sent op must still be recognized in a room-log replay). */
+export function allOpUids(p: EditorProject): Set<string> {
+  const s = new Set<string>();
+  for (const commit of p.opUids ?? []) for (const uid of commit) if (uid) s.add(uid);
+  return s;
+}
+
+/** Uids of the ACTIVE ops, flat + parallel to activeOps(p); "" where a commit predates
+ *  uid tracking (run ensureOpUids first to avoid that). */
+export function activeOpUids(p: EditorProject): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < p.cursor; i++) {
+    const ops = p.journal[i] ?? [];
+    const uids = (p.opUids ?? [])[i] ?? [];
+    for (let j = 0; j < ops.length; j++) out.push(uids[j] ?? "");
+  }
+  return out;
+}
+
+/** Backfill missing per-op uids (projects saved before uid tracking) using `gen`.
+ *  Returns the same object when nothing was missing. */
+export function ensureOpUids(p: EditorProject, gen: () => string): EditorProject {
+  const src = p.opUids ?? [];
+  let changed = src.length !== p.journal.length;
+  const opUids = p.journal.map((ops, i) => {
+    const uids = src[i] ?? [];
+    if (uids.length === ops.length && uids.every((u) => u)) return uids;
+    changed = true;
+    return ops.map((_, j) => uids[j] || gen());
+  });
+  return changed ? { ...p, opUids } : p;
 }
 
 export function serializeProject(p: EditorProject): string {

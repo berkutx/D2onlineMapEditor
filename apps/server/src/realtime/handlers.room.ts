@@ -157,7 +157,7 @@ export function registerRoomHandlers(
     ack({ ok: true, seq: entry.seq });
     socket
       .to(roomId(key))
-      .emit("edit:applied", { seq: entry.seq, by: socket.id, op: parsed.data });
+      .emit("edit:applied", { seq: entry.seq, by: socket.id, clientOpId: p.clientOpId, op: parsed.data });
   });
 
   // Catch-up: return the base map with the entire log applied, plus the head seq, so a late

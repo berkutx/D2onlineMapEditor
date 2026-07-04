@@ -63,7 +63,10 @@ export interface ServerToClientEvents {
   "presence:update": (p: UserPresence) => void;
   "presence:left": (p: { socketId: string }) => void;
 
-  "edit:applied": (p: { seq: number; by: string; op: EditOp }) => void;
+  /** v0.4: carries the author's `clientOpId` (= the op's stable uid, persisted in the
+   *  author's journal) so receivers sharing that journal (a second tab of the same
+   *  browser) can skip ops they already hold instead of double-applying them. */
+  "edit:applied": (p: { seq: number; by: string; clientOpId: string; op: EditOp }) => void;
   "edit:rejected": (p: { clientOpId: string; reason: string }) => void;
 
   "assets:reload": (p: { version: string }) => void;

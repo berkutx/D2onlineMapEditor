@@ -14,7 +14,7 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { EditOp, UserPresence } from "@d2/socket-contract";
-import { activeOps } from "@d2/map-edit";
+import { activeOps, activeOpUids, allOpUids } from "@d2/map-edit";
 import { getSocket } from "../realtime/socket";
 import { getChannelId } from "../services/clientId";
 import { useEditStore } from "./editStore";
@@ -211,10 +211,22 @@ export const useCollabStore = defineStore("collab", () => {
     listenersBound = true;
     const socket = getSocket();
 
-    socket.on("edit:applied", ({ seq, by, op }) => {
-      const inv = edit.applyIncoming([op]); // peer op → live doc + journal (not my undo stack)
+    socket.on("edit:applied", ({ seq, by, clientOpId, op }) => {
       lastSeq = Math.max(lastSeq, seq);
-      record(seq, by, op, false, inv);
+      // a second tab of THIS browser shares the localStorage journal — an op it already
+      // holds must not double-apply (addObject would throw)
+      if (clientOpId && knownOpIds.has(clientOpId)) return;
+      try {
+        const inv = edit.applyIncoming([op], clientOpId ? [clientOpId] : undefined); // peer op → live doc + journal (not my undo stack)
+        if (clientOpId) knownOpIds.add(clientOpId);
+        record(seq, by, op, false, inv);
+      } catch (err) {
+        // a conflicting peer op (e.g. an id our local draft already used) must not kill
+        // the socket pipeline — surface it instead
+        // eslint-disable-next-line no-console
+        console.error("[collab] правка участника не применилась:", err, op);
+        ElMessage.warning("Правка участника конфликтует с вашим локальным черновиком и не применена");
+      }
     });
     socket.on("presence:update", (p) => {
       if (p.socketId !== me.value?.socketId) peers.set(p.socketId, p);
@@ -237,19 +249,23 @@ export const useCollabStore = defineStore("collab", () => {
     });
   }
 
-  /** clientOpIds this browser has emitted — a reconnect replay skips them (those ops are
-   *  already applied optimistically AND sit in the journal; replaying = double-apply). */
-  const mySentOpIds = new Set<string>();
+  /** Op uids this client's journal holds (rebuilt from the project at join, grown on every
+   *  send/fold). Any room-log replay — fresh join, second tab, reconnect — skips these:
+   *  they are already applied AND sit in the journal; replaying = double-apply
+   *  (addObject throws). Replaces the old per-session mySentOpIds, which could not
+   *  recognize ops sent by an earlier session or another tab of the same browser. */
+  let knownOpIds = new Set<string>();
 
   /** The outgoing hook editStore calls on every local commit / undo / redo.
-   *  `inverses[i]` (captured at apply time) rides into the history entry of ops[i]. */
-  function sendOps(ops: readonly EditOp[], inverses?: EditOp[][]): void {
+   *  `inverses[i]` (captured at apply time) rides into the history entry of ops[i];
+   *  `uids[i]` is ops[i]'s journal-persisted uid, sent as clientOpId. */
+  function sendOps(ops: readonly EditOp[], inverses?: EditOp[][], uids?: readonly string[]): void {
     const id = mapId.value;
     const socket = getSocket();
     if (!id || !me.value) return;
     ops.forEach((op, i) => {
-      const clientOpId = `${me.value!.socketId}:${opCounter++}`;
-      mySentOpIds.add(clientOpId);
+      const clientOpId = uids?.[i] || `${me.value!.socketId}:${opCounter++}`;
+      knownOpIds.add(clientOpId);
       const inverse = inverses?.[i];
       socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
         if (ack.ok && typeof ack.seq === "number") {
@@ -306,6 +322,34 @@ export const useCollabStore = defineStore("collab", () => {
     pendingShare = { mapId: forMapId, channel: chan };
   }
 
+  /** Fold room-log entries into the live doc, skipping ops the journal already holds
+   *  (matched by clientOpId == the op's journal uid). One conflicting entry must not
+   *  abort the rest — it is reported and skipped (the old snapshot path crashed the
+   *  whole join on the first conflict). */
+  function foldEntries(
+    entries: readonly { seq: number; by: string; clientOpId: string; op: EditOp }[],
+  ): void {
+    let failed = 0;
+    for (const en of entries) {
+      lastSeq = Math.max(lastSeq, en.seq);
+      if (en.clientOpId && knownOpIds.has(en.clientOpId)) continue; // уже в журнале (мой / другой таб)
+      try {
+        const inv = edit.applyIncoming([en.op], en.clientOpId ? [en.clientOpId] : undefined);
+        if (en.clientOpId) knownOpIds.add(en.clientOpId);
+        record(en.seq, en.by, en.op, false, inv);
+      } catch (err) {
+        failed++;
+        // eslint-disable-next-line no-console
+        console.error(`[collab] правка из комнаты (seq ${en.seq}) не применилась:`, err, en.op);
+      }
+    }
+    if (failed > 0) {
+      ElMessage.warning(
+        `Правок из комнаты не применилось: ${failed} (конфликт с локальным черновиком) — подробности в консоли`,
+      );
+    }
+  }
+
   async function doJoin(id: string, reconnect = false): Promise<void> {
     const socket = getSocket();
     bindListeners();
@@ -315,6 +359,10 @@ export const useCollabStore = defineStore("collab", () => {
       pendingShare?.mapId === id ? pendingShare.channel : channel.value ?? getChannelId();
     if (pendingShare?.mapId === id) pendingShare = null; // consume once
     channel.value = chan;
+    // the dedup base: every uid the journal holds (backfill legacy commits first, so a
+    // draft sent to the room in THIS session is recognizable after the next reload)
+    edit.ensureJournalUids();
+    knownOpIds = edit.project ? allOpUids(edit.project) : new Set();
     await new Promise<void>((resolve) => {
       socket.emit("room:join", { mapId: id, channel: chan, user: { name: userName.value } }, (r) => {
         if (!r.ok) {
@@ -328,36 +376,20 @@ export const useCollabStore = defineStore("collab", () => {
         for (const p of r.peers) peers.set(p.socketId, p);
         edit.setCollab(true, sendOps);
         const serverHead = r.snapshotSeq;
-        if (reconnect && lastSeq > 0) {
-          // RECONNECT: the journal already holds every op we saw — a snapshot would
-          // double-apply them (addObject/deleteObject throw). Replay only the missed
-          // tail, skipping our own ops (identified by clientOpId).
-          if (serverHead > lastSeq) {
-            socket.emit("ops:since", { mapId: id, afterSeq: lastSeq }, (res) => {
-              if (!res.ok) return;
-              for (const en of res.entries) {
-                lastSeq = Math.max(lastSeq, en.seq);
-                if (mySentOpIds.has(en.clientOpId)) continue; // мой — уже применён и в журнале
-                const inv = edit.applyIncoming([en.op]);
-                record(en.seq, en.by, en.op, false, inv);
-              }
-            });
-          } else if (serverHead < lastSeq) {
-            // сервер перезапустился и потерял лог — локальный журнал полнее; просто
-            // принимаем новый отсчёт seq (экспорт от серверного лога не зависит)
-            lastSeq = serverHead;
-          }
-          // serverHead === lastSeq → ничего не пропущено
-        } else {
-          // FRESH join: full snapshot catch-up (local drafts stay on top — see the
-          // pre-join draft offer in join())
+        // Catch-up (fresh join AND reconnect): replay the room log as OPS with uid dedup —
+        // never a snapshot. A snapshot doc already CONTAINS the results of ops sitting in
+        // this journal (sent by an earlier session / another tab), so rebasing on it and
+        // re-applying the journal double-applied them (addObject threw, the join died).
+        const after = reconnect ? lastSeq : 0;
+        if (!reconnect) lastSeq = serverHead;
+        if (serverHead > after) {
+          socket.emit("ops:since", { mapId: id, afterSeq: after }, (res) => {
+            if (res.ok) foldEntries(res.entries);
+          });
+        } else if (serverHead < after) {
+          // сервер перезапустился и потерял лог — локальный журнал полнее; просто
+          // принимаем новый отсчёт seq (экспорт от серверного лога не зависит)
           lastSeq = serverHead;
-          if (serverHead > 0) {
-            socket.emit("snapshot:request", { mapId: id }, ({ seq, doc }) => {
-              edit.setBaseDoc(doc);
-              lastSeq = Math.max(lastSeq, seq);
-            });
-          }
         }
         resolve();
       });
@@ -385,8 +417,11 @@ export const useCollabStore = defineStore("collab", () => {
     if (peers.size === 0) return; // solo room — no one to share the draft with
     const p = edit.project;
     if (!p || p.baseScenarioId !== id) return;
-    // capture NOW: peer ops folding into the journal while the dialog is open must not ride along
+    // capture NOW: peer ops folding into the journal while the dialog is open must not ride along.
+    // The uids ride along too — the room log must carry the SAME uids the journal holds,
+    // or the next reload would re-apply the sent draft (the double-apply crash).
     const draft = activeOps(p);
+    const draftUids = activeOpUids(p);
     if (!draft.length) return;
     const key = `d2.collab.draftOffered.${id}#${channel.value ?? ""}`;
     try {
@@ -401,7 +436,7 @@ export const useCollabStore = defineStore("collab", () => {
       { confirmButtonText: "Отправить в комнату", cancelButtonText: "Оставить локально", type: "info" },
     )
       .then(() => {
-        sendOps(draft); // no captured inverses (applied long ago) — their revert rows come disabled
+        sendOps(draft, undefined, draftUids); // no captured inverses (applied long ago) — their revert rows come disabled
         ElMessage.success(`Черновик отправлен: участники теперь видят ваши правки (${draft.length})`);
       })
       .catch(() => {
