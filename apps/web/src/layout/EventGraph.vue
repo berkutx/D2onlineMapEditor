@@ -443,9 +443,8 @@ function onNodeClick(n: GNode): void {
         <button type="button" class="ev-nav-btn" title="Отдалить" @click="zoomStep(-1)">−</button>
         <button type="button" class="ev-nav-btn" title="Вписать граф" @click="fitToContent()">⤢</button>
       </div>
-      <!-- auto-wiring: hidden-variable constructions (the E5 builders) — one click each.
-           The caption names the ANCHOR event: without it users can't tell what these
-           chips are or what they attach to (prod feedback). -->
+      <!-- auto-wiring: hidden-variable constructions — one click each. The caption names
+           the ANCHOR event so it is clear what the chips attach to. -->
       <div class="ev-actions">
         <span class="ev-actions-lbl">
           Пристроить к «{{ (store.selected?.name || store.selected?.id || "").slice(0, 24) }}»:

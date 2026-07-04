@@ -213,7 +213,7 @@ export const useEditStore = defineStore("edit", () => {
   // Two tabs of one browser share the localStorage project key. The op JOURNAL converges
   // through the room op-log (broadcast + uid dedup), but editor-only METADATA (zones,
   // captions, anchors…) is not op-carried: a tab persisting its older view silently
-  // clobbered the other tab's freshly created zone (prod-smoke finding). The `storage`
+  // clobbered the other tab's freshly created zone. The `storage`
   // event fires in every OTHER tab on each write; metaRev orders the views:
   //  - theirs NEWER → adopt their metadata (keep our journal);
   //  - theirs OLDER → they clobbered us in localStorage — re-persist ours (their tab then

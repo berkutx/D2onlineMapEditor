@@ -59,8 +59,8 @@ const sending = ref(false);
 /** LLM mode (Phase-4 POC): route the command through the server's LLM file-bridge instead
  *  of the offline keyword router. Off by default (keyword router needs no agent watching). */
 const llmMode = ref(false);
-/** HARD OFF (владелец, 2026-07-04): LLM-режим временно отключён везде — кнопка остаётся
- *  видимой, но disabled, чтобы фича не потерялась. Вернуть: true (+ VITE_COPILOT_LLM). */
+/** HARD OFF: LLM-режим временно отключён — кнопка остаётся видимой, но disabled.
+ *  Вернуть: true (+ VITE_COPILOT_LLM). */
 const LLM_ENABLED = false;
 /** Whether the LLM bridge is available on this deployment (disabled in prod: no agent). */
 const LLM_AVAILABLE = LLM_ENABLED && import.meta.env.VITE_COPILOT_LLM !== "off";

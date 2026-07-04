@@ -103,7 +103,7 @@ export const config = {
     process.env.LLM_DIR ?? resolve(REPO_ROOT, "var", "llm"),
 
   /** TTL for EPHEMERAL maps (first-visit auto-clones): swept this long after the last
-   *  access. Override with EPHEMERAL_TTL_MS. Default 2 days (per the product decision). */
+   *  access. Override with EPHEMERAL_TTL_MS. Default 2 days. */
   EPHEMERAL_TTL_MS: envInt("EPHEMERAL_TTL_MS", 2 * 24 * 60 * 60 * 1000),
 
   /** Upload guard: 32 MiB cap and required magic. */

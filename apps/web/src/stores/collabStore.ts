@@ -2,7 +2,7 @@
  * Collaboration store: connects the typed socket, joins the room for the open map (room =
  * map id = share link), broadcasts my edits, and folds peers' edits into the live doc.
  *
- * Model (decided with the user): the server keeps ONE ordered EditOp log per map; every
+ * Model: the server keeps ONE ordered EditOp log per map; every
  * client applies the broadcast stream in seq order (last-writer-wins, no OT/CRDT). My local
  * edits apply optimistically and are sent immediately; peers' arrive via `edit:applied` and
  * fold into the journal (so Export still materialises them). Undo is append-inverse

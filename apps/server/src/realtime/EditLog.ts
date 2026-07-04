@@ -1,7 +1,7 @@
 /**
  * EditLog — the server-authoritative, append-only edit history per map (= per room).
  *
- * The collaboration model (decided with the user): the server serialises every peer's
+ * The collaboration model: the server serialises every peer's
  * EditOps into ONE ordered log. `seq` is a monotonic 1-based counter; applying the log's
  * ops to the base MapDocument in seq order yields the shared state. Conflict resolution
  * is last-writer-wins by seq (no OT/CRDT) — later ops simply overwrite earlier ones, which

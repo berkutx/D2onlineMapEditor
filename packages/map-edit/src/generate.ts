@@ -265,8 +265,7 @@ export function decodeGrid(
    *  scale×scale sprite). Used by the wall maze (scale 2 → 2×2 stone wall pieces). */
   scale = 1,
   /** Cells occupied by existing OBJECTS (buildOccupiedSet) — water/forest never write
-   *  there, and wall/mountain/decor placements must fit entirely outside (the prod audit
-   *  found every water recipe drowning villages and mazes burying stacks). Unconditional
+   *  there, and wall/mountain/decor placements must fit entirely outside. Unconditional
    *  (not gated by `protect`): overwriting objects is never a legitimate generation. */
   occupied?: ReadonlySet<string>,
 ): EditOp[] {
