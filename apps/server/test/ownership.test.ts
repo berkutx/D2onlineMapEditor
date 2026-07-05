@@ -152,7 +152,7 @@ describe("GET/PUT /api/maps/:id/project (server-saved EditorProject)", () => {
     expect(got.statusCode).toBe(200);
     // the server zod-normalizes on PUT: editor-only fields get their schema defaults
     expect(got.json()).toEqual({
-      ...project, anchors: {}, autoVars: [], roadAnchors: {}, zones: {}, opUids: [], metaRev: 0,
+      ...project, anchors: {}, autoVars: [], roadAnchors: {}, zones: {}, opUids: [], metaRev: 0, eventDescs: {},
     });
 
     // another visitor has no saved project for this map — 204 "nothing yet" (a success,

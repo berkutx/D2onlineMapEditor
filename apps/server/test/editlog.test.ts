@@ -46,4 +46,22 @@ describe("EditLog", () => {
     expect(e.op).toEqual(op);
     expect(e.clientOpId).toBe("c");
   });
+
+  it("appendBatch adds a run of consecutive seqs sharing one batchId", () => {
+    const log = new EditLog();
+    log.append("m", setCell(0, 0, 1), "s", "solo", 0); // a prior standalone op (seq 1)
+    const ops = [
+      { clientOpId: "b0", op: setCell(1, 1, 5) },
+      { clientOpId: "b1", op: setCell(2, 2, 6) },
+      { clientOpId: "b2", op: setCell(3, 3, 7) },
+    ];
+    const entries = log.appendBatch("m", ops, "sock", "BATCH1", 42);
+    expect(entries.map((e) => e.seq)).toEqual([2, 3, 4]); // consecutive, continuing the log
+    expect(entries.every((e) => e.batchId === "BATCH1")).toBe(true);
+    expect(entries.every((e) => e.by === "sock")).toBe(true);
+    expect(log.head("m")).toBe(4);
+    // the batch is visible to a catch-up (since) with its batchId intact
+    expect(log.since("m", 1).map((e) => e.batchId)).toEqual(["BATCH1", "BATCH1", "BATCH1"]);
+    expect(log.since("m", 1).map((e) => e.op)).toEqual(ops.map((o) => o.op));
+  });
 });
