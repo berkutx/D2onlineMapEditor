@@ -31,8 +31,11 @@ export interface ClientToServerEvents {
   "presence:select": (p: { mapId: string; selection: string[] }) => void;
 
   // Stage 4. Server returns { ok:false, reason:"read-only" } before that.
+  // `batchId` (additive, v0.5): ops of ONE commit (a brush stroke, a Copilot generation)
+  // share a batch id so receivers collapse them into a SINGLE history row / undo unit
+  // instead of one per changed tile. Absent -> a standalone op (its own row).
   "edit:op": (
-    p: { mapId: string; clientOpId: string; baseSeq: number; op: EditOp },
+    p: { mapId: string; clientOpId: string; baseSeq: number; op: EditOp; batchId?: string },
     ack: (r: OpAck) => void,
   ) => void;
 
@@ -53,7 +56,7 @@ export interface ClientToServerEvents {
       ok: boolean;
       /** current log head (authoritative seq to resume from) */
       seq: number;
-      entries: { seq: number; by: string; clientOpId: string; op: EditOp }[];
+      entries: { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }[];
     }) => void,
   ) => void;
 }
@@ -66,7 +69,7 @@ export interface ServerToClientEvents {
   /** v0.4: carries the author's `clientOpId` (= the op's stable uid, persisted in the
    *  author's journal) so receivers sharing that journal (a second tab of the same
    *  browser) can skip ops they already hold instead of double-applying them. */
-  "edit:applied": (p: { seq: number; by: string; clientOpId: string; op: EditOp }) => void;
+  "edit:applied": (p: { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }) => void;
   "edit:rejected": (p: { clientOpId: string; reason: string }) => void;
 
   "assets:reload": (p: { version: string }) => void;

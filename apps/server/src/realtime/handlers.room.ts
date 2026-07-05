@@ -153,11 +153,11 @@ export function registerRoomHandlers(
       ack({ ok: false, reason: "invalid op: " + parsed.error.issues[0]?.message });
       return;
     }
-    const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now());
+    const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now(), p.batchId);
     ack({ ok: true, seq: entry.seq });
     socket
       .to(roomId(key))
-      .emit("edit:applied", { seq: entry.seq, by: socket.id, clientOpId: p.clientOpId, op: parsed.data });
+      .emit("edit:applied", { seq: entry.seq, by: socket.id, clientOpId: p.clientOpId, op: parsed.data, batchId: p.batchId });
   });
 
   // Catch-up: return the base map with the entire log applied, plus the head seq, so a late
@@ -194,7 +194,7 @@ export function registerRoomHandlers(
     }
     const entries = log
       .since(key, p.afterSeq)
-      .map((e) => ({ seq: e.seq, by: e.by, clientOpId: e.clientOpId, op: e.op }));
+      .map((e) => ({ seq: e.seq, by: e.by, clientOpId: e.clientOpId, op: e.op, batchId: e.batchId }));
     ack({ ok: true, seq: log.head(key), entries });
   });
 

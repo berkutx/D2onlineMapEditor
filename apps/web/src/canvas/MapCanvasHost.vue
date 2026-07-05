@@ -259,7 +259,7 @@ onMounted(async () => {
   (window as unknown as { __d2scene?: unknown }).__d2scene = scene;
   (window as unknown as { __d2assets?: unknown }).__d2assets = getAssetStore();
   (window as unknown as { __d2stores?: unknown }).__d2stores = {
-    edit: editStore, tool: toolStore, view: viewStore, events: eventStore, map: mapStore,
+    edit: editStore, tool: toolStore, view: viewStore, events: eventStore, map: mapStore, collab: collabStore,
   };
 
   // Report the cursor cell to the status bar (cheap pointer math via the

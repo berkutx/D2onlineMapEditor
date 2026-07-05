@@ -33,9 +33,15 @@ export interface HistoryEntry {
   /** A slightly longer, click-to-reveal description (what exactly changed). */
   detail: string;
   mine: boolean;
-  /** Ops that undo this entry (apply in array order), captured at apply time. Empty for a
-   *  mid-stroke entry whose composed inverse rides on the stroke's LAST entry. */
+  /** Ops that undo this entry (apply in array order), captured at apply time. For a batched
+   *  entry this is EVERY op's inverse, newest-first, so one revert undoes the whole commit.
+   *  Empty for a mid-stroke entry whose composed inverse rides on the stroke's LAST entry. */
   inverse?: EditOp[];
+  /** Ops of ONE commit (brush stroke, Copilot generation) collapse into a single row keyed
+   *  by this. Absent for a standalone op. */
+  batchId?: string;
+  /** How many ops this row represents (undefined/1 = standalone). */
+  count?: number;
 }
 
 function randomName(): string {
@@ -117,6 +123,29 @@ function summarize(op: EditOp, ctx?: OpContext): string {
     case "deleteTemplate":
       return "🗑 удалён шаблон";
   }
+}
+
+/** One-line summary for a whole COMMIT collapsed into ONE row — «⛰ рельеф — 412 кл.» instead
+ *  of 412 «⛰ рельеф (x, y)» rows (the whole point of batching). */
+function summarizeBatch(ops: readonly EditOp[], ctx?: OpContext): string {
+  const n = ops.length;
+  if (n === 1) return summarize(ops[0]!, ctx);
+  const allCells = ops.every((o) => o.kind === "setCell");
+  if (allCells) {
+    const roads = ops.filter((o) => o.kind === "setCell" && o.roadType !== undefined && o.roadType >= 0).length;
+    if (roads === n) return `🛣 дороги — ${n} кл.`;
+    if (roads === 0) return `⛰ рельеф — ${n} кл.`;
+    return `⛰ рельеф + 🛣 дороги — ${n} кл.`;
+  }
+  const allSameAdd = ops.every((o) => o.kind === "addObject");
+  if (allSameAdd) return `➕ объектов: ${n}`;
+  return `✎ правок за операцию: ${n}`;
+}
+function detailBatch(ops: readonly EditOp[]): string {
+  const by = new Map<string, number>();
+  for (const o of ops) by.set(o.kind, (by.get(o.kind) ?? 0) + 1);
+  const tally = [...by].map(([k, c]) => `${k} × ${c}`).join(", ");
+  return `${ops.length} правок за одну операцию\n${tally}`;
 }
 
 /** A slightly longer description revealed when a history row is clicked (not exhaustive). */
@@ -206,12 +235,37 @@ export const useCollabStore = defineStore("collab", () => {
     ];
   }
 
+  /** Live/catch-up grouping of a peer's (or a reloaded) commit: ops sharing a `batchId` fold
+   *  into ONE row as they stream in (find-or-create), so a peer's generation is one line, not
+   *  thousands. My OWN commits are recorded whole in sendOps (I have every op at once). */
+  const batchAgg = new Map<string, { entry: HistoryEntry; count: number }>();
+  function recordGrouped(seq: number, by: string, op: EditOp, mine: boolean, inverse: EditOp[] | undefined, batchId?: string): void {
+    if (!batchId) return record(seq, by, op, mine, inverse);
+    const agg = batchAgg.get(batchId);
+    if (agg) {
+      agg.count++;
+      agg.entry.count = agg.count;
+      agg.entry.seq = Math.min(agg.entry.seq, seq);
+      if (inverse?.length) agg.entry.inverse = [...inverse, ...(agg.entry.inverse ?? [])]; // newest-first
+      agg.entry.summary = `✎ правок за операцию: ${agg.count}`;
+      agg.entry.detail = `${agg.count} правок за одну операцию`;
+      return;
+    }
+    const ctx = opCtx();
+    const entry: HistoryEntry = {
+      seq, by, byName: nameOf(by), byColor: colorOf(by), op,
+      summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse: inverse ?? [], batchId, count: 1,
+    };
+    batchAgg.set(batchId, { entry, count: 1 });
+    history.value = [...history.value, entry];
+  }
+
   function bindListeners(): void {
     if (listenersBound) return;
     listenersBound = true;
     const socket = getSocket();
 
-    socket.on("edit:applied", ({ seq, by, clientOpId, op }) => {
+    socket.on("edit:applied", ({ seq, by, clientOpId, op, batchId }) => {
       lastSeq = Math.max(lastSeq, seq);
       // a second tab of THIS browser shares the localStorage journal — an op it already
       // holds must not double-apply (addObject would throw)
@@ -219,7 +273,7 @@ export const useCollabStore = defineStore("collab", () => {
       try {
         const inv = edit.applyIncoming([op], clientOpId ? [clientOpId] : undefined); // peer op → live doc + journal (not my undo stack)
         if (clientOpId) knownOpIds.add(clientOpId);
-        record(seq, by, op, false, inv);
+        recordGrouped(seq, by, op, false, inv, batchId); // peer's stroke/generation → ONE row
       } catch (err) {
         // a conflicting peer op (e.g. an id our local draft already used) must not kill
         // the socket pipeline — surface it instead
@@ -263,14 +317,32 @@ export const useCollabStore = defineStore("collab", () => {
     const id = mapId.value;
     const socket = getSocket();
     if (!id || !me.value) return;
+    const meId = me.value.socketId;
+    // A multi-op commit (brush stroke / Copilot generation) is ONE history row + ONE undo
+    // unit. Record it whole NOW (I hold every op + inverse); the per-op acks below only
+    // advance seq/known-ids. The shared `batchId` rides the wire so peers + a later reload
+    // collapse the same ops into one row too (recordGrouped).
+    const batchId = ops.length > 1 ? `${meId}:B${opCounter++}` : undefined;
+    if (batchId) {
+      const ctx = opCtx();
+      const flatInverse = inverses ? inverses.slice().reverse().flatMap((iv) => iv) : []; // newest-first
+      history.value = [
+        ...history.value,
+        {
+          seq: lastSeq + 1, by: meId, byName: nameOf(meId), byColor: colorOf(meId),
+          op: ops[0]!, summary: summarizeBatch(ops, ctx), detail: detailBatch(ops),
+          mine: true, inverse: flatInverse, batchId, count: ops.length,
+        },
+      ];
+    }
     ops.forEach((op, i) => {
-      const clientOpId = uids?.[i] || `${me.value!.socketId}:${opCounter++}`;
+      const clientOpId = uids?.[i] || `${meId}:${opCounter++}`;
       knownOpIds.add(clientOpId);
       const inverse = inverses?.[i];
-      socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
+      socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op, batchId }, (ack) => {
         if (ack.ok && typeof ack.seq === "number") {
           lastSeq = Math.max(lastSeq, ack.seq);
-          record(ack.seq, me.value!.socketId, op, true, inverse);
+          if (!batchId) record(ack.seq, meId, op, true, inverse); // singles: their own row
         } else {
           // eslint-disable-next-line no-console
           console.warn("[collab] op rejected:", ack.reason);
@@ -327,7 +399,7 @@ export const useCollabStore = defineStore("collab", () => {
    *  abort the rest — it is reported and skipped (the old snapshot path crashed the
    *  whole join on the first conflict). */
   function foldEntries(
-    entries: readonly { seq: number; by: string; clientOpId: string; op: EditOp }[],
+    entries: readonly { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }[],
   ): void {
     let failed = 0;
     for (const en of entries) {
@@ -336,7 +408,7 @@ export const useCollabStore = defineStore("collab", () => {
       try {
         const inv = edit.applyIncoming([en.op], en.clientOpId ? [en.clientOpId] : undefined);
         if (en.clientOpId) knownOpIds.add(en.clientOpId);
-        record(en.seq, en.by, en.op, false, inv);
+        recordGrouped(en.seq, en.by, en.op, false, inv, en.batchId); // catch-up: one row per commit
       } catch (err) {
         failed++;
         // eslint-disable-next-line no-console
@@ -402,6 +474,7 @@ export const useCollabStore = defineStore("collab", () => {
     if (mapId.value) leave();
     mapId.value = id;
     history.value = [];
+    batchAgg.clear();
     await doJoin(id);
     offerPreJoinDraft(id);
   }
@@ -451,6 +524,7 @@ export const useCollabStore = defineStore("collab", () => {
     me.value = null;
     peers.clear();
     history.value = [];
+    batchAgg.clear();
     lastSeq = 0;
     mapId.value = null;
     channel.value = null; // the next map joins its own channel (no cross-map channel leaks)

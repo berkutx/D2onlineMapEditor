@@ -22,6 +22,9 @@ export interface LogEntry {
   by: string;
   /** the author's optimistic op id, echoed back so they can reconcile their pending op. */
   clientOpId: string;
+  /** ops of one commit (stroke / generation) share this so clients collapse them into a
+   *  single history row / undo unit. Absent for a standalone op. */
+  batchId?: string;
   /** wall-clock ms when the server accepted it. */
   ts: number;
 }
@@ -30,13 +33,13 @@ export class EditLog {
   private logs = new Map<string, LogEntry[]>();
 
   /** Append an op and return its assigned entry (with the new seq). */
-  append(mapId: string, op: EditOp, by: string, clientOpId: string, ts: number): LogEntry {
+  append(mapId: string, op: EditOp, by: string, clientOpId: string, ts: number, batchId?: string): LogEntry {
     let log = this.logs.get(mapId);
     if (!log) {
       log = [];
       this.logs.set(mapId, log);
     }
-    const entry: LogEntry = { seq: log.length + 1, op, by, clientOpId, ts };
+    const entry: LogEntry = { seq: log.length + 1, op, by, clientOpId, batchId, ts };
     log.push(entry);
     return entry;
   }
