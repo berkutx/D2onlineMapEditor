@@ -101,8 +101,13 @@ export const useEventStore = defineStore("events", () => {
   /** Forward stack (undone goBacks) — a NEW navigate clears it, browser-style. */
   const fwdStack = ref<NavEntry[]>([]);
   const canGoForward = computed(() => fwdStack.value.length > 0);
+  /** Bumped whenever we ARRIVE at a stop via a link/jump (graph node, ref-event button, map
+   *  context menu, builders) — the panel watches it to auto-collapse the events list on arrival.
+   *  A plain list-row click does NOT pass fromLink, so it never collapses the list under the user. */
+  const linkNavSignal = ref(0);
   /** Jump somewhere, remembering where we were (skips no-op jumps). */
-  function navigate(to: { tab?: PanelTab; eventId?: string | null }): void {
+  function navigate(to: { tab?: PanelTab; eventId?: string | null; fromLink?: boolean }): void {
+    if (to.fromLink) linkNavSignal.value++;
     const tab = to.tab ?? panelTab.value;
     const eventId = to.eventId !== undefined ? to.eventId : selectedId.value;
     if (tab === panelTab.value && eventId === selectedId.value) return;
@@ -757,7 +762,7 @@ export const useEventStore = defineStore("events", () => {
   return {
     selectedId, filter, objectFilter, panelTab, events, selected, filtered,
     select, upsert, remove, create, clone, referencesObject,
-    breadcrumbs, canGoBack, canGoForward, navigate, goBack, goForward, goToCrumb, cardReveal, revealCard,
+    breadcrumbs, canGoBack, canGoForward, navigate, goBack, goForward, goToCrumb, cardReveal, revealCard, linkNavSignal,
     createForObject, createChainedEvent, createCounterGate, createSpawnAt,
     cloneEventForZone, zoneCondIndex, resyncZoneEventsAfterRegen,
     createOrBranch, bindEventToPhase, addGotoPhaseEffect, createTimerAfter, phaseVarId,

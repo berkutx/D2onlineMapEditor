@@ -48,6 +48,9 @@ export const EditorProject = z.object({
   /** Editor-only, optional per-location display captions (object id → text). NOT written to the
    *  .sg (the game has no such field); shown as a label on the world map. */
   captions: z.record(z.string(), z.string()).default({}),
+  /** Editor-only per-event notes (event id → free-form description). The event's game NAME
+   *  (e.g. "1ZoneKreigSay2") goes to the .sg; this longer note stays in the project only. */
+  eventDescs: z.record(z.string(), z.string()).default({}),
   /**
    * Editor-only ANCHORS (child object id → parent object id): moving the parent moves every
    * transitively anchored child by the same delta (one undoable stroke). NOT in the .sg —
@@ -109,6 +112,7 @@ export function emptyProject(
     cursor: 0,
     metaRev: 0,
     captions: {},
+    eventDescs: {},
     anchors: {},
     autoVars: [],
     roadAnchors: {},

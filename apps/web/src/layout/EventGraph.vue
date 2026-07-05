@@ -132,7 +132,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
       nodes.push({
         x: COL.satL, y, w: BW.sat, h: NODE_H,
         title: truncate(names.eventName(ev), 24), sub: "включает это событие", icon: "⚑",
-        cls: "g-evt", click: () => store.navigate({ tab: "events", eventId: ev }), tip: ev,
+        cls: "g-evt", click: () => store.navigate({ tab: "events", eventId: ev, fromLink: true }), tip: ev,
       });
       edges.push({ x1: COL.satL + BW.sat, y1: y + NODE_H / 2, x2: center.x, y2: cy - 8, cls: "e-chain", a: nodes.length - 1, b: centerIdx });
     } else if (s.ref) {
@@ -193,7 +193,7 @@ const hotNodes = computed<Set<number>>(() => {
 /** Satellite click: events recenter, vars jump to their tab, map objects get selected.
  *  Every in-window jump goes through navigate() so «← Назад» / breadcrumbs can return. */
 function satClick(r: ResolvedRef): (() => void) | undefined {
-  if (r.kind === "event") return () => store.navigate({ tab: "events", eventId: String(r.value) });
+  if (r.kind === "event") return () => store.navigate({ tab: "events", eventId: String(r.value), fromLink: true });
   if (r.kind === "var") return () => store.navigate({ tab: "vars" });
   if (r.kind === "template")
     return () => {

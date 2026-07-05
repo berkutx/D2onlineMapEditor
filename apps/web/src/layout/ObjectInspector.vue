@@ -124,7 +124,7 @@ const objectRoles = computed<ObjectRole[]>(() => {
 const visibleRoles = computed<ObjectRole[]>(() =>
   rolesExpanded.value ? objectRoles.value : objectRoles.value.slice(0, ROLE_LIMIT));
 function openRole(r: ObjectRole): void {
-  eventStore.navigate({ tab: "events", eventId: r.ev.id });
+  eventStore.navigate({ tab: "events", eventId: r.ev.id, fromLink: true });
   if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
 }
 /** Object types the event editor can seed a trigger for (eventStore.OBJ_CONDITION). */

@@ -85,7 +85,7 @@ const unused = (id: number): boolean => {
 
 /** Jump to the event in the События tab — recorded in the nav history («← Назад» returns). */
 function jump(ev: MapEvent): void {
-  store.navigate({ tab: "events", eventId: ev.id });
+  store.navigate({ tab: "events", eventId: ev.id, fromLink: true });
 }
 </script>
 

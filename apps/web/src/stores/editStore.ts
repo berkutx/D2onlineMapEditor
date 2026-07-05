@@ -201,7 +201,7 @@ export const useEditStore = defineStore("edit", () => {
    *  one write path so every change bumps metaRev — the cross-tab reconciliation key. */
   function patchMeta(
     fields: Partial<
-      Pick<EditorProject, "zones" | "captions" | "anchors" | "roadAnchors" | "autoVars">
+      Pick<EditorProject, "zones" | "captions" | "eventDescs" | "anchors" | "roadAnchors" | "autoVars">
     >,
   ): void {
     if (!project.value) return;
@@ -231,6 +231,7 @@ export const useEditStore = defineStore("edit", () => {
             ...p,
             zones: stored.zones,
             captions: stored.captions,
+            eventDescs: stored.eventDescs,
             anchors: stored.anchors,
             roadAnchors: stored.roadAnchors,
             autoVars: stored.autoVars,
@@ -420,6 +421,17 @@ export const useEditStore = defineStore("edit", () => {
     if (t) next[id] = t;
     else delete next[id];
     patchMeta({ captions: next }); // editor-only metadata: no op-journal entry
+  }
+
+  /** Editor-only per-event notes (event id → free-form text); persisted, NOT in the .sg. */
+  const eventDescs = computed<Record<string, string>>(() => project.value?.eventDescs ?? {});
+  function setEventDesc(id: string, text: string): void {
+    if (!project.value) return;
+    const next = { ...(project.value.eventDescs ?? {}) };
+    const t = text.trim();
+    if (t) next[id] = t;
+    else delete next[id];
+    patchMeta({ eventDescs: next });
   }
 
   /** Editor-only ANCHORS (child id → parent id): moving the parent drags every transitively
@@ -754,6 +766,8 @@ export const useEditStore = defineStore("edit", () => {
     reset,
     captions,
     setCaption,
+    eventDescs,
+    setEventDesc,
     anchors,
     setAnchor,
     clearAnchor,

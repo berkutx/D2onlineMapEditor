@@ -71,6 +71,13 @@ function openTemplate(): void {
   eventStore.navigate({ tab: "templates" });
 }
 
+/** «Событие» (ref-event, e.g. вкл/выкл) → jump to the referenced event (breadcrumbed). */
+function openEvent(): void {
+  const id = typeof props.modelValue === "string" ? props.modelValue : "";
+  if (!id) return;
+  eventStore.navigate({ tab: "events", eventId: id, fromLink: true });
+}
+
 /** Which object types back each ref picker. */
 const REF_TYPES: Record<string, string[]> = {
   "ref-loc": ["location"],
@@ -474,6 +481,9 @@ watch(
     </template>
     <el-tooltip v-if="field.type === 'template'" content="Открыть во вкладке «Шаблоны»" :show-after="300">
       <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="openTemplate()">✎</el-button>
+    </el-tooltip>
+    <el-tooltip v-if="field.type === 'ref-event'" content="Перейти к этому событию" :show-after="300">
+      <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="openEvent()">➜</el-button>
     </el-tooltip>
   </div>
 
