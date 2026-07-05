@@ -15,7 +15,10 @@ const props = withDefaults(
 const failed = ref(false);
 watch(() => props.id, () => { failed.value = false; });
 
-const src = computed(() => (props.id ? assetUrl(`uniticons/${props.id.toLowerCase()}.png`) : ""));
+// ?v bump busts the stale Cloudflare/browser cache after uniticons were regenerated (FACEB fix);
+// the filenames are stable (unit id), so a version query is the cache key. Bump on any regen.
+const ICON_VER = 2;
+const src = computed(() => (props.id ? assetUrl(`uniticons/${props.id.toLowerCase()}.png?v=${ICON_VER}`) : ""));
 const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px` }));
 </script>
 
