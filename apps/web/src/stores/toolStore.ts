@@ -60,6 +60,9 @@ export const useToolStore = defineStore("tool", () => {
    *  IMMEDIATELY generates along it (road/river follow the line; decor sprinkles along
    *  the brush). null = the region tool is a plain Copilot zone selector. */
   const drawGenRecipe = ref<string | null>(null);
+  /** Deep-link focus (?obj= in the share URL): the object/zone id to centre, select and
+   *  blink once the scene is built. Cleared after the focus fires. */
+  const focusObjectId = ref<string | null>(null);
   /** PRIMARY selected object (drives ObjectInspector + pick-below cycling), null = none. */
   const selectedId = ref<string | null>(null);
   /** The FULL multi-selection (Shift+клик / Shift+рамка). Invariant: selectedId ∈ selectedIds
@@ -211,7 +214,7 @@ export const useToolStore = defineStore("tool", () => {
   }
 
   return {
-    tool, size, terrainId, decorId, objectKind, stackLeaderId, setObjectKind, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, drawGenRecipe, setDrawGen, selectedId, selectedIds,
+    tool, size, terrainId, decorId, objectKind, stackLeaderId, setObjectKind, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, drawGenRecipe, setDrawGen, focusObjectId, selectedId, selectedIds,
     selectedZoneId, setSelectedZone, regenZoneId,
     locFilter, setLocFilter,
     objectPickTypes, objectPickResult, startObjectPick, finishObjectPick,

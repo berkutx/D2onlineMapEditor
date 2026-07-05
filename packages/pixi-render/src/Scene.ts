@@ -797,8 +797,11 @@ export class Scene {
    * updateObjects after a Copilot generation would otherwise paint nothing until a
    * pointermove wakes rAF (the "result appears only when I move the mouse" bug). One
    * extra immediate frame alongside the ticker is harmless.
+   *
+   * PUBLIC: hosts drive timer-based effects (the deep-link attention blink) through it —
+   * rAF throttling would otherwise freeze those frames until the pointer moves.
    */
-  private renderNow(): void {
+  renderNow(): void {
     if (!this.app) return;
     if (this.rafId !== undefined) {
       cancelAnimationFrame(this.rafId);

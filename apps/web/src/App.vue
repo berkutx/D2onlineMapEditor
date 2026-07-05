@@ -13,12 +13,14 @@ import { ElMessage, ElButton, ElConfigProvider } from "element-plus";
 import { useMapStore } from "./stores/mapStore";
 import { useAssetStore } from "./stores/assetStore";
 import { useCollabStore } from "./stores/collabStore";
+import { useToolStore } from "./stores/toolStore";
 import { cloneMap } from "./services/api";
 import AppLayout from "./layout/AppLayout.vue";
 
 const mapStore = useMapStore();
 const assetStore = useAssetStore();
 const collabStore = useCollabStore();
+const toolStore = useToolStore();
 
 const bootLoading = ref(true);
 const bootMessage = ref("Loading assets and map…");
@@ -38,11 +40,14 @@ async function boot(): Promise<void> {
     const params = new URLSearchParams(window.location.search);
     const shared = params.get("map");
     const room = params.get("room");
+    // deep link на объект (?obj=): после сборки сцены канвас центрирует, выделяет и мигает им
+    const focusObj = params.get("obj");
     if (shared && room) collabStore.setPendingShare(shared, room);
     if (shared) {
       try {
         bootMessage.value = "Загружаю карту по ссылке…";
         await mapStore.openMap(shared);
+        if (focusObj) toolStore.focusObjectId = focusObj;
         bootLoading.value = false;
         return;
       } catch {

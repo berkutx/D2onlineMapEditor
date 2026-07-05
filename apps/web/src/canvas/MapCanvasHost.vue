@@ -178,11 +178,66 @@ async function rebuild(): Promise<void> {
       viewStore.setZoom(cam.zoom);
       updateVisibleCells(cam.snapshot());
     }
+    focusPendingObject(); // deep link (?obj=): центр + выделение + мигание
   } catch (e) {
     buildError.value = e instanceof Error ? e.message : String(e);
   } finally {
     building.value = false;
   }
+}
+
+// --- deep link на объект (?obj= в URL) ----------------------------------------------------
+/** Мигание «вот этот объект»: футпринт-ромбы 3 секунды (12 тиков × 250мс), затем чисто.
+ *  renderNow на каждый тик — rAF заморожен, пока указатель вне канваса. */
+let blinkTimer: number | undefined;
+function blinkCells(cells: { x: number; y: number }[]): void {
+  const scene = getScene();
+  if (!scene || !cells.length) return;
+  if (blinkTimer !== undefined) window.clearInterval(blinkTimer);
+  let n = 0;
+  blinkTimer = window.setInterval(() => {
+    n++;
+    scene.setFootprint(n % 2 === 1 ? cells : [], true);
+    scene.renderNow();
+    if (n >= 12) {
+      window.clearInterval(blinkTimer);
+      blinkTimer = undefined;
+      scene.setFootprint([]);
+      scene.renderNow();
+    }
+  }, 250);
+}
+
+/** Открытие ссылки вида ?map=…&obj=…: найти объект/зону, центрировать камеру, выделить
+ *  (инспектор откроется сам) и мигнуть футпринтом. Однократно — фокус сбрасывается. */
+function focusPendingObject(): void {
+  const id = toolStore.focusObjectId;
+  if (!id) return;
+  toolStore.focusObjectId = null;
+  const scene = getScene();
+  const doc = editStore.liveDoc ?? currentMap.value;
+  if (!scene || !doc) return;
+  if (id.startsWith("ZN")) {
+    const z = editStore.zones[id];
+    if (!z || !z.cells.length) { ElMessage.warning("Зона из ссылки не найдена на карте"); return; }
+    if (!viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
+    toolStore.setSelectedZone(id);
+    const pts = z.cells.map((k) => { const [x, y] = k.split(",").map(Number); return { x: x!, y: y! }; });
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const w = cellToWorld(cx + 0.5, cy + 0.5);
+    scene.centerOn(w.x, w.y);
+    blinkCells(pts);
+    return;
+  }
+  const obj = doc.objects.find((o) => o.id === id);
+  if (!obj) { ElMessage.warning("Объект из ссылки не найден на карте"); return; }
+  if (obj.type === "location" && !viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
+  toolStore.setSelectedId(obj.id);
+  const { w, h } = objectFootprint(obj, landmarkFootprints);
+  const c = cellToWorld(obj.pos.x + w / 2, obj.pos.y + h / 2);
+  scene.centerOn(c.x, c.y);
+  blinkCells(obj.type === "location" ? locationCells(obj) : footprintCells(obj.pos.x, obj.pos.y, w, h));
 }
 
 onMounted(async () => {
@@ -1885,6 +1940,30 @@ watch(
 watch(
   () => toolStore.locFilter,
   () => updateLocationFocus(lastCell, true),
+);
+
+// Deep-link routing: адресная строка ВСЕГДА несёт ?map&obj текущего выбора — скопировать URL
+// и есть «пошарить»; получатель откроет карту с центром/выделением/миганием на объекте.
+watch(
+  () => [toolStore.selectedId, toolStore.selectedZoneId, mapStore.currentScenarioId] as const,
+  ([sel, zid, mapId]) => {
+    if (!mapId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("map", String(mapId));
+    const target = sel ?? zid;
+    if (target) url.searchParams.set("obj", target);
+    else url.searchParams.delete("obj");
+    window.history.replaceState(null, "", url);
+  },
+);
+
+// Страховка гонки бута: App ставит focusObjectId ПОСЛЕ openMap — если rebuild уже успел
+// завершиться (кэшированные ассеты), фокусируем прямо отсюда.
+watch(
+  () => toolStore.focusObjectId,
+  (id) => {
+    if (id && !building.value && (editStore.liveDoc ?? currentMap.value)) focusPendingObject();
+  },
 );
 
 // Refresh the ghost when the picked decoration / carried object / placed kind changes.
