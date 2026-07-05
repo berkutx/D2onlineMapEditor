@@ -32,6 +32,7 @@ import SpellIcon from "./SpellIcon.vue";
 import GarrisonEditor from "./GarrisonEditor.vue";
 import ImagePicker from "./ImagePicker.vue";
 import SpriteThumb from "./SpriteThumb.vue";
+import RegionPreview from "./RegionPreview.vue";
 import { useSpriteStore } from "../stores/spriteStore";
 
 /** RuinObjectAccessor sprite key: "G000RU0000" + image(3) (base look; looted adds +100). */
@@ -792,6 +793,10 @@ function close(): void {
 
       <!-- 📍 LOCATION (именованная область) -->
       <template v-else-if="obj.type === 'location'">
+        <div class="col">
+          <label>Точка на карте <span class="muted xs">(рельеф + объекты)</span></label>
+          <RegionPreview :cell="obj.pos" :radius="Math.max(4, (obj.radius ?? 0) + 3)" />
+        </div>
         <div class="col">
           <label>Название</label>
           <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />

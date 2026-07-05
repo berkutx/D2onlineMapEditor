@@ -18,7 +18,7 @@
  * Layer order (back to front): terrain tilemap, then the z-sorted object layer.
  * Both live under a single `world` Container that the {@link Camera} pans/zooms.
  */
-import { Application, Container, Sprite, Graphics } from "pixi.js";
+import { Application, Container, Sprite, Graphics, RenderTexture } from "pixi.js";
 import type { MapDocument } from "@d2/map-schema";
 import type { AssetManifest } from "@d2/asset-manifest";
 
@@ -650,6 +650,60 @@ export class Scene {
   centerOn(worldX: number, worldY: number): void {
     this.camera?.centerOn(worldX, worldY);
     this.renderNow();
+  }
+
+  /**
+   * Render a small OVERLAY-FREE snapshot (terrain + objects only — no grid, locations, zones,
+   * event threads, role badges, veil or cursor) of the region around a cartesian cell into an
+   * offscreen canvas. For the scenario window's location preview: the user sees WHAT point a
+   * location means, sprite-accurately, without jumping the live camera.
+   *
+   * Reuses the single renderer + scene graph (a second Application would have to re-upload every
+   * atlas). The live camera transform is saved and restored around the offscreen pass, and the
+   * pass targets a RenderTexture (never the screen), so the live view never flickers.
+   */
+  renderRegionPreview(
+    cell: { x: number; y: number },
+    opts: { radiusCells?: number; pxWidth?: number } = {},
+  ): HTMLCanvasElement | null {
+    const app = this.app, world = this.world;
+    if (!app || !world) return null;
+    const r = Math.max(1, opts.radiusCells ?? 4);
+    const pxW = Math.max(48, opts.pxWidth ?? 220);
+    // iso world bbox of the (2r+1)² cell window; iso windows are 2:1 (HALF_W:HALF_H).
+    const halfW = (2 * r + 1) * HALF_W;
+    const pxH = Math.round(pxW * (HALF_H / HALF_W));
+    const c = cellToWorld(cell.x + 0.5, cell.y + 0.5); // +0.5 → cell CENTRE (top-vertex convention)
+    const z = pxW / (2 * halfW);
+    const rt = RenderTexture.create({ width: pxW, height: pxH, resolution: 1 });
+
+    // hide every overlay + loose graphic; keep terrain + objects
+    const hidden: Array<{ v: { visible: boolean }; was: boolean }> = [];
+    const hide = (v?: { visible: boolean } | null): void => {
+      if (v) { hidden.push({ v, was: v.visible }); v.visible = false; }
+    };
+    hide(this.grid?.view); hide(this.locations?.view); hide(this.zones?.view);
+    hide(this.eventOverlay?.view); hide(this.anchorLayer?.view); hide(this.scenarioRoles?.view);
+    hide(this.presence?.view); hide(this.overlay?.view);
+    hide(this.locVeil); hide(this.ghost); hide(this.roadSel); hide(this.footprint); hide(this.selection);
+
+    // frame the crop via the world transform, saved + restored (live view untouched)
+    const sx = world.position.x, sy = world.position.y, sc = world.scale.x;
+    world.scale.set(z);
+    world.position.set(pxW / 2 - z * c.x, pxH / 2 - z * c.y);
+
+    let canvas: HTMLCanvasElement | null = null;
+    try {
+      app.renderer.render({ container: world, target: rt, clear: true });
+      canvas = app.renderer.extract.canvas(rt) as HTMLCanvasElement;
+    } finally {
+      world.scale.set(sc);
+      world.position.set(sx, sy);
+      for (const h of hidden) h.v.visible = h.was;
+      rt.destroy(true);
+      this.renderNow(); // repaint the live canvas with the restored camera
+    }
+    return canvas;
   }
 
   /** Hover spotlight for location overlays: the ids under the cursor render at full alpha
