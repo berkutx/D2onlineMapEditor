@@ -372,7 +372,7 @@ export class Scene {
     if (!this.terrain || !this.assets) return;
     if (dirtyCells?.length && this.terrain.canUpdate(map)) this.terrain.updateCells(map, dirtyCells);
     else this.terrain.build(map, this.assets, this.terrainCodes);
-    this.paintNowAndNextFrame(); // reliably COMPOSITE off-canvas (Copilot generation) — see method
+    this.paintNowAndSettle(); // reliably COMPOSITE off-canvas (idle rAF is stalled) — see method
   }
 
   /**
@@ -385,7 +385,7 @@ export class Scene {
     if (!this.objects || !this.assets || !this.anim) return;
     this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
     this.updateRenderMode();
-    this.paintNowAndNextFrame(); // reliably COMPOSITE off-canvas (Copilot generation) — see method
+    this.paintNowAndSettle(); // reliably COMPOSITE off-canvas (idle rAF is stalled) — see method
     // Self-heal: a freshly ADDED object can reference a LAZY sheet not pulled yet (a new
     // stack's unit chunk; an animated object when playback is on). Fetch just the missing
     // keys and rebuild ONCE when any of them became resolvable — invisible-until-hover
@@ -826,27 +826,31 @@ export class Scene {
   }
 
   /**
-   * Paint NOW and again on the next animation frame — the reliable repaint for a
-   * PROGRAMMATIC scene edit while the pointer is off the canvas (the Copilot-generation
-   * / retry case). A single out-of-rAF `app.render()` updates the WebGL back-buffer
-   * (readPixels confirms the tiles are there) but, with `preserveDrawingBuffer:false`,
-   * the browser does not always COMPOSITE that frame to the screen until its next paint;
-   * an object edit incidentally gets a second render (the host fires both the terrain and
-   * the object watcher), so it shows, while a terrain-only edit (lake, snow, grass) fired
-   * one render and stayed invisible until a pointer-move woke a frame. Scheduling one
-   * rAF-aligned render guarantees the composite (rAF fires ~16 ms even when idle), so
-   * terrain and object generations now update the map uniformly, with no mouse move.
+   * Paint NOW and re-paint a few times over the next ~300 ms — the reliable repaint for a
+   * PROGRAMMATIC scene edit (Copilot generation / retry / undo) while the pointer is off
+   * the canvas.
+   *
+   * Why not one render, and why setTimeout (not rAF): this app renders ON DEMAND — the
+   * Pixi ticker is stopped while idle, so nothing schedules frames. **rAF is stalled while
+   * the page is idle** (verified: a bare requestAnimationFrame loop never fires until an
+   * input event), so a `requestRender()`/rAF-based repaint stays frozen until a pointermove
+   * — the exact "map updates only when the mouse enters the tiles" bug. `renderNow()` does
+   * an immediate `app.render()`, but a SINGLE out-of-gesture draw is not always composited
+   * to the screen by the browser when nothing else drives a frame. So we tick renderNow a
+   * few times through setTimeout (which DOES fire when idle) — the same mechanism as the
+   * attention blink, which paints fine off-canvas — to force the composite. Cheap
+   * (<2 ms/frame) and self-cancelling; no-op tail once the animation ticker is running.
    */
-  private nextFrameRaf?: number;
-  private paintNowAndNextFrame(): void {
+  private settleTimers: ReturnType<typeof setTimeout>[] = [];
+  private paintNowAndSettle(): void {
     if (!this.app) return;
     this.renderNow();
+    for (const t of this.settleTimers) clearTimeout(t);
+    this.settleTimers = [];
     if (this.animContinuous) return; // the ticker already paints every frame
-    if (this.nextFrameRaf !== undefined) cancelAnimationFrame(this.nextFrameRaf);
-    this.nextFrameRaf = requestAnimationFrame(() => {
-      this.nextFrameRaf = undefined;
-      this.app?.render();
-    });
+    for (const ms of [50, 130, 300]) {
+      this.settleTimers.push(setTimeout(() => this.renderNow(), ms));
+    }
   }
 
   /** Wrap the renderer so EVERY frame (ticker, rAF, or renderNow) is timed for the
