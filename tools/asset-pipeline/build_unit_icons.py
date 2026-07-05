@@ -1,7 +1,8 @@
 """build_unit_icons: extract unit face portraits from Imgs/Faces.ff into per-unit PNGs.
 
-Faces.ff records are named UNIT_ID + a suffix: "<id>FACE" (full 130x142 portrait — used here),
-with "FACES"/"FACEB" fallbacks. Colour-keys the magenta border to transparency and writes
+Faces.ff records are named UNIT_ID + a suffix. "<id>FACEB" (the big battle portrait) is the
+authoritative per-unit face and is used here; the small "<id>FACE" records are shifted by one
+unit and must NOT be preferred. Colour-keys the magenta border to transparency and writes
 public/assets/uniticons/<id>.png (lowercased) so the unit picker can render <img>.
 
 Only ~479/856 units ship their OWN face; the other 377 are upgrades/variants that reuse a base
@@ -49,7 +50,12 @@ def main():
     by_name = {os.path.splitext(i.name)[0].upper(): i for i in images}
 
     def face(uid):
-        return by_name.get(uid + "FACE") or by_name.get(uid + "FACES") or by_name.get(uid + "FACEB")
+        # FACEB (the big battle portrait) is the authoritative per-unit face. The small
+        # <id>FACE records in Faces.ff are shifted by one unit — each holds the PREVIOUS
+        # unit's face (verified: G000UU0022FACE shows the archmage, G000UU0023FACE the
+        # archangel, while their FACEB records show the correct archangel/thief). FACEB has
+        # full coverage (479 own + 377 via BASE_UNIT = 856/856), so FACE is never needed.
+        return by_name.get(uid + "FACEB") or by_name.get(uid + "FACES") or by_name.get(uid + "FACE")
 
     def resolve(uid, depth=0):
         """The portrait source for uid: its own face, else its BASE_UNIT chain's face."""
