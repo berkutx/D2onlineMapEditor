@@ -68,6 +68,11 @@ export const useEditStore = defineStore("edit", () => {
   /** Bumped only when an edit changes OBJECTS (place/move/delete/patch), so the
    *  canvas rebuilds the object layer without re-running it on every terrain stroke. */
   const objectsRev = ref(0);
+  /** While true, the canvas SKIPS terrain re-tiles (dirty accumulates); on clear it renders
+   *  ONCE. Copilot "↻ другой вариант" wraps its undo+regenerate in this so the intermediate
+   *  rollback-to-base isn't painted — the map goes straight to the new variant. */
+  const renderMuted = ref(false);
+  function setRenderMuted(v: boolean): void { renderMuted.value = v; }
 
   // --- collaboration (Stage 4) ------------------------------------------------
   // When joined to a room, every local commit is ALSO broadcast (set by collabStore via
@@ -748,6 +753,8 @@ export const useEditStore = defineStore("edit", () => {
     liveDoc,
     rev,
     objectsRev,
+    renderMuted,
+    setRenderMuted,
     undoable,
     redoable,
     dirty,

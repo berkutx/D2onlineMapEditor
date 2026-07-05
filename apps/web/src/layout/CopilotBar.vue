@@ -573,28 +573,35 @@ async function send(): Promise<void> {
 async function retry(): Promise<void> {
   const g = lastGen.value;
   if (!g || sending.value) return;
-  if (editStore.undoable) editStore.undoEdit(); // undo the previous generation commit
-  if (g.mode === "keyword" && g.recipeId && g.region) {
-    log.value.push({ role: "user", text: "↻ другой вариант" });
-    sending.value = true;
-    const t0 = performance.now();
-    try {
-      const rep = await editStore.generate(g.recipeId, g.region, undefined, g.cells ?? null, g.protect); // new random seed
-      const ms = Math.round(performance.now() - t0);
-      notify(
-        rep?.ok
-          ? `↻ ${g.recipeId.replace(/_/g, " ")} ${g.region.w}×${g.region.h} · ${debugLine(ms)}`
-          : `Не прошло — откатил. · ${debugLine(ms)}${validationReason()}`,
-        rep?.ok ? "success" : "warning",
-      );
-    } catch (e) {
-      notify("⚠ " + (e instanceof Error ? e.message : String(e)), "warning");
-    } finally {
-      sending.value = false;
+  // Mute the canvas so the undo (revert to base) isn't painted — the map jumps straight from
+  // the current variant to the new one, no rollback flash in between.
+  editStore.setRenderMuted(true);
+  try {
+    if (editStore.undoable) editStore.undoEdit(); // undo the previous generation commit
+    if (g.mode === "keyword" && g.recipeId && g.region) {
+      log.value.push({ role: "user", text: "↻ другой вариант" });
+      sending.value = true;
+      const t0 = performance.now();
+      try {
+        const rep = await editStore.generate(g.recipeId, g.region, undefined, g.cells ?? null, g.protect); // new random seed
+        const ms = Math.round(performance.now() - t0);
+        notify(
+          rep?.ok
+            ? `↻ ${g.recipeId.replace(/_/g, " ")} ${g.region.w}×${g.region.h} · ${debugLine(ms)}`
+            : `Не прошло — откатил. · ${debugLine(ms)}${validationReason()}`,
+          rep?.ok ? "success" : "warning",
+        );
+      } catch (e) {
+        notify("⚠ " + (e instanceof Error ? e.message : String(e)), "warning");
+      } finally {
+        sending.value = false;
+      }
+    } else if (g.mode === "llm") {
+      log.value.push({ role: "user", text: "↻ другой вариант: " + g.text });
+      await sendLlm(g.text);
     }
-  } else if (g.mode === "llm") {
-    log.value.push({ role: "user", text: "↻ другой вариант: " + g.text });
-    await sendLlm(g.text);
+  } finally {
+    editStore.setRenderMuted(false); // paints the final variant once (MapCanvasHost watcher)
   }
 }
 

@@ -1741,22 +1741,32 @@ watch([currentMap, manifest], () => {
 // Incremental (#35): editStore accumulates the setCell coordinates since the last tick —
 // a brush stroke re-tiles only the touched chunks; an object-only edit skips the terrain
 // layer entirely; undo/redo/load (recompute) falls back to the full rebuild.
+function flushTerrain(): void {
+  const s = getScene();
+  if (!s || !editStore.liveDoc) return;
+  const dirty = editStore.takeTerrainDirty();
+  if (dirty.full) s.updateTerrain(editStore.liveDoc);
+  else if (dirty.cells.length) s.updateTerrain(editStore.liveDoc, dirty.cells);
+  // else: object-only edit — terrain unchanged
+}
 let retileScheduled = false;
 watch(
   () => editStore.rev,
   () => {
-    if (retileScheduled) return;
+    if (editStore.renderMuted) return; // «↻ другой вариант»: skip the undo's rollback paint;
+    if (retileScheduled) return; //       dirty accumulates and renders once on unmute
     retileScheduled = true;
     setTimeout(() => {
       retileScheduled = false;
-      const s = getScene();
-      if (!s || !editStore.liveDoc) return;
-      const dirty = editStore.takeTerrainDirty();
-      if (dirty.full) s.updateTerrain(editStore.liveDoc);
-      else if (dirty.cells.length) s.updateTerrain(editStore.liveDoc, dirty.cells);
-      // else: object-only edit — terrain unchanged
+      flushTerrain();
     }, 0);
   },
+);
+// When the Copilot un-mutes (retry finished), paint the FINAL accumulated terrain once — so
+// the map jumps straight from the previous variant to the new one, no base flash between.
+watch(
+  () => editStore.renderMuted,
+  (muted) => { if (!muted) flushTerrain(); },
 );
 
 // Re-render the OBJECT layer after an object edit (place/move/delete/undo/redo).
