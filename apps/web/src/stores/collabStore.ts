@@ -384,6 +384,47 @@ export const useCollabStore = defineStore("collab", () => {
     });
   }
 
+  /**
+   * RE-SEED an EMPTY room log from my whole journal after the server lost it (restart /
+   * redeploy — the log is in-memory). Without this, a guest catching up after a restart sees
+   * a TRUNCATED map (the server head is behind my journal), which looked like "the shared map
+   * isn't the one the owner sees". Sends the journal in seq order (log is empty → order is
+   * correct) in chunks under the server's MAX_BATCH, WITHOUT recording history rows (I already
+   * hold them) — peers dedup by uid, so no double-apply. Called only when serverHead === 0.
+   */
+  const RESEED_CHUNK = 20_000; // < server MAX_BATCH (50k); each chunk ≪ the 8 MB socket buffer
+  let reseedInFlight = false; // reconnect can flap several times — re-seed at most ONCE per loss
+  function reseedRoom(id: string): void {
+    const socket = getSocket();
+    const p = edit.project;
+    if (reseedInFlight || !socket || !me.value || !p) return;
+    const ops = activeOps(p);
+    const uids = activeOpUids(p);
+    if (ops.length === 0) return;
+    reseedInFlight = true;
+    window.setTimeout(() => { reseedInFlight = false; }, 30_000); // safety release
+    const meId = me.value.socketId;
+    // eslint-disable-next-line no-console
+    console.info(`[collab] re-seeding room log from journal (${ops.length} ops) after server restart`);
+    let pending = 0;
+    for (let i = 0; i < ops.length; i += RESEED_CHUNK) {
+      const chunkOps = ops.slice(i, i + RESEED_CHUNK);
+      const chunkUids = uids.slice(i, i + RESEED_CHUNK);
+      const batchId = `${meId}:R${opCounter++}`;
+      const payload = chunkOps.map((op, j) => {
+        const clientOpId = chunkUids[j] || `${meId}:r${opCounter++}`;
+        knownOpIds.add(clientOpId);
+        return { clientOpId, op };
+      });
+      pending++;
+      socket.emit("edit:ops", { mapId: id, batchId, baseSeq: lastSeq, ops: payload }, (ack) => {
+        if (ack.ok) lastSeq = Math.max(lastSeq, ack.seqEnd);
+        else console.warn("[collab] re-seed chunk rejected:", ack.reason); // eslint-disable-line no-console
+        if (--pending === 0) reseedInFlight = false;
+      });
+    }
+  }
+
   // --- history revert («откатить») -------------------------------------------------------
   // Revert = apply the captured inverses as a NEW forward commit (append-only model: nothing
   // is rewound; peers receive it as a regular edit; it lands in MY undo stack).
@@ -514,9 +555,12 @@ export const useCollabStore = defineStore("collab", () => {
             if (res.ok) foldEntries(res.entries);
           });
         } else if (serverHead < after) {
-          // сервер перезапустился и потерял лог — локальный журнал полнее; просто
-          // принимаем новый отсчёт seq (экспорт от серверного лога не зависит)
+          // Сервер перезапустился и потерял лог — мой журнал полнее. Принимаем новый отсчёт,
+          // и если лог ПУСТ (0) — RE-SEED его моим журналом, чтобы гость/второй таб снова могли
+          // догнать полное состояние (иначе шаринг отдаёт обрезанную карту). Только при head===0:
+          // пустой лог гарантирует корректный порядок; частичный лог (>0) не трогаем.
           lastSeq = serverHead;
+          if (serverHead === 0) reseedRoom(id);
         }
         resolve();
       });
