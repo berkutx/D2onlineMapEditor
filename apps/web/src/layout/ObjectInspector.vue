@@ -877,10 +877,18 @@ function close(): void {
         <div class="d2-sec">
           Гость (герой)
           <span class="muted">{{ visitorStack ? `(${visitorCount}/6)` : "— нет —" }}</span>
-          <el-button v-if="visitorStack" class="visitor-open" size="small" text @click="openVisitor">Свойства гостя →</el-button>
+          <!-- Столица: гостя-лорда выбирает игрок в игре — не редактируется, только гарнизон -->
+          <el-button v-if="visitorStack && obj.type !== 'capital'" class="visitor-open" size="small" text @click="openVisitor">Свойства гостя →</el-button>
         </div>
+        <!-- Capital: гость только для просмотра (readonly); Village: полностью редактируемый -->
         <GarrisonEditor
-          v-if="visitorStack"
+          v-if="visitorStack && obj.type === 'capital'"
+          :garrison="visitorGarrison"
+          :count="visitorCount"
+          readonly
+        />
+        <GarrisonEditor
+          v-else-if="visitorStack"
           :garrison="visitorGarrison"
           :count="visitorCount"
           :leader-cell="(visitorStack.leaderCell ?? -1)"
@@ -889,7 +897,8 @@ function close(): void {
           @set-stat="(c, k, v) => stackSetStat(visitorStack, c, k, v)"
           @set-leader="(c) => stackSetLeader(visitorStack, c)"
         />
-        <template v-else>
+        <p v-if="obj.type === 'capital'" class="muted sm">Гостя-лорда выбирает игрок в игре — редактируется только оборона.</p>
+        <template v-else-if="!visitorStack">
           <p class="muted sm">В городе нет гостящего героя.</p>
           <el-button class="item-add" size="small" @click="addVisitor">+ Добавить гостя</el-button>
         </template>
