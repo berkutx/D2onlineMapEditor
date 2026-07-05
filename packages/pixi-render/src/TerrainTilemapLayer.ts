@@ -178,6 +178,7 @@ export class TerrainTilemapLayer {
       if (c.ground === 1) this.placeTree(c.x, c.y, c.value);
     }
     this.built = true;
+    this.markDirty();
 
     if (this.missing.size > 0) {
       console.warn(
@@ -223,6 +224,7 @@ export class TerrainTilemapLayer {
       }
     }
     for (const ci of chunks) this.retileChunk(ci);
+    this.markDirty();
     // roads/trees: only the dirty cells themselves (autotiling already delivers
     // neighbour road changes as their own setCell ops)
     for (const c of dirtyCells.values()) {
@@ -251,6 +253,28 @@ export class TerrainTilemapLayer {
         this.placeBorders(x, y, v);
       }
     }
+  }
+
+  /**
+   * Flag EVERY terrain tilemap's VIEW dirty so the NEXT render rebuilds the GPU geometry.
+   *
+   * @pixi/tilemap mutates a Tilemap's tile buffer via `clear()`/`tile()` but never calls
+   * `onViewUpdate()`, so Pixi v8 — which caches the render instruction set and only re-runs
+   * a renderable's `updateBuffer` when its view changed — keeps drawing the STALE geometry
+   * after a brush stroke / Copilot generation. It only refreshed when an UNRELATED scene
+   * change rebuilt the whole instruction set: an object add/remove (why a maze always showed)
+   * or the cursor-overlay moving on pointermove (why terrain "appeared only when the mouse
+   * moved"). Flagging fixes it, but must cover ALL children — flagging only the retiled
+   * chunks left Pixi on a partial-update path that never called the tilemap pipe's
+   * `updateRenderable` (verified: retiled-only → 0 `updateBuffer`; all → 162, on ONE render).
+   * This is the same "rebuild all terrain geometry" an object edit / a mouse-move already
+   * incurred — no new cost, just done at the right moment so a single `renderNow` shows it.
+   */
+  private markDirty(): void {
+    for (const comp of this.baseChunks.values())
+      for (const child of comp.children) (child as unknown as { onViewUpdate?: () => void }).onViewUpdate?.();
+    for (const comp of this.borderChunks.values())
+      for (const child of comp.children) (child as unknown as { onViewUpdate?: () => void }).onViewUpdate?.();
   }
 
   // ---- per-cell helpers ----------------------------------------------------

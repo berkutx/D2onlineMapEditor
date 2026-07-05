@@ -372,7 +372,10 @@ export class Scene {
     if (!this.terrain || !this.assets) return;
     if (dirtyCells?.length && this.terrain.canUpdate(map)) this.terrain.updateCells(map, dirtyCells);
     else this.terrain.build(map, this.assets, this.terrainCodes);
-    this.paintNowAndSettle(); // reliably COMPOSITE off-canvas (idle rAF is stalled) — see method
+    // TerrainTilemapLayer.build/updateCells flag the tilemaps' view dirty, so this single
+    // render rebuilds their geometry (Pixi caches unchanged renderables — the reason terrain
+    // edits used to stay invisible until the mouse moved). No rAF/timer hacks needed.
+    this.renderNow();
   }
 
   /**
@@ -385,7 +388,7 @@ export class Scene {
     if (!this.objects || !this.assets || !this.anim) return;
     this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
     this.updateRenderMode();
-    this.paintNowAndSettle(); // reliably COMPOSITE off-canvas (idle rAF is stalled) — see method
+    this.renderNow(); // ObjectLayer.build add/removes children → Pixi rebuilds the instruction set
     // Self-heal: a freshly ADDED object can reference a LAZY sheet not pulled yet (a new
     // stack's unit chunk; an animated object when playback is on). Fetch just the missing
     // keys and rebuild ONCE when any of them became resolvable — invisible-until-hover
@@ -825,33 +828,6 @@ export class Scene {
     this.app.render();
   }
 
-  /**
-   * Paint NOW and re-paint a few times over the next ~300 ms — the reliable repaint for a
-   * PROGRAMMATIC scene edit (Copilot generation / retry / undo) while the pointer is off
-   * the canvas.
-   *
-   * Why not one render, and why setTimeout (not rAF): this app renders ON DEMAND — the
-   * Pixi ticker is stopped while idle, so nothing schedules frames. **rAF is stalled while
-   * the page is idle** (verified: a bare requestAnimationFrame loop never fires until an
-   * input event), so a `requestRender()`/rAF-based repaint stays frozen until a pointermove
-   * — the exact "map updates only when the mouse enters the tiles" bug. `renderNow()` does
-   * an immediate `app.render()`, but a SINGLE out-of-gesture draw is not always composited
-   * to the screen by the browser when nothing else drives a frame. So we tick renderNow a
-   * few times through setTimeout (which DOES fire when idle) — the same mechanism as the
-   * attention blink, which paints fine off-canvas — to force the composite. Cheap
-   * (<2 ms/frame) and self-cancelling; no-op tail once the animation ticker is running.
-   */
-  private settleTimers: ReturnType<typeof setTimeout>[] = [];
-  private paintNowAndSettle(): void {
-    if (!this.app) return;
-    this.renderNow();
-    for (const t of this.settleTimers) clearTimeout(t);
-    this.settleTimers = [];
-    if (this.animContinuous) return; // the ticker already paints every frame
-    for (const ms of [50, 130, 300]) {
-      this.settleTimers.push(setTimeout(() => this.renderNow(), ms));
-    }
-  }
 
   /** Wrap the renderer so EVERY frame (ticker, rAF, or renderNow) is timed for the
    *  debug HUD. `sampleGpuNext` triggers a one-off gl.finish so we get a real
