@@ -320,17 +320,19 @@ const ORDER_OPTIONS = [
   { value: 4, label: "Атаковать" }, { value: 7, label: "Бродить" }, { value: 8, label: "Идти" },
   { value: 9, label: "Защищать" }, { value: 10, label: "Берсерк" },
 ];
-// Standard D2 slot→item-category eligibility (user-approved; the exact rule isn't in the RE'd
-// sources, so this is centralized for easy tweaking). LmagItm catKeys per slot.
-const ARTIFACT_CATS = ["L_ARMOR", "L_WEAPON", "L_JEWEL"];
-const BATTLE_CATS = ["L_POTION_BOOST", "L_POTION_HEAL", "L_POTION_REVIVE", "L_SCROLL", "L_WAND", "L_ORB", "L_TALISMAN"];
+// Leader equipment: which ItemCat (LmagItm category number) each slot accepts, per the game.
+//   0,2 армор/оружие → артефакты · 1 реликвия · 3 знамя · 13 сапоги
+//   4,5,6,7,11,12 зелья/сфера/талисман → боевые (в руки) · 8,9,10,14 не надеваются
+// The "tome" KEY maps to the .sg TOME field, but that slot functionally holds the RELIC (jewel).
+const ARTIFACT_CATS = [0, 2]; // армор + оружие
+const BATTLE_CATS = [4, 5, 6, 7, 11, 12]; // зелья (усил./лечение/воскр./постоянные) + сфера + талисман
 const EQUIP_SLOTS = [
-  { key: "tome", label: "Книга", cats: ["L_SCROLL"] }, // спелбук = свитки (L_SCROLL); L_SPECIAL — квестовые, не экипируются
+  { key: "tome", label: "Реликвия", cats: [1] }, // .sg TOME-поле = слот реликвии (L_JEWEL)
   { key: "battle1", label: "Боевой 1", cats: BATTLE_CATS },
   { key: "battle2", label: "Боевой 2", cats: BATTLE_CATS },
   { key: "artifact1", label: "Артефакт 1", cats: ARTIFACT_CATS },
   { key: "artifact2", label: "Артефакт 2", cats: ARTIFACT_CATS },
-  { key: "boots", label: "Сапоги", cats: ["L_TRAVEL_ITEM"] },
+  { key: "boots", label: "Сапоги", cats: [13] },
 ];
 const EMPTY_REFS = new Set(["000000", "G000000000"]);
 /** Stack banner-item slot (the BANNER field; separate from the faction banner = subRace). */
@@ -755,7 +757,7 @@ function close(): void {
         <div class="equip-grid">
           <div class="equip-row">
             <label>Знамя</label>
-            <ItemPicker :model-value="bannerVal()" nullable title="Знамя" :allow-cats="['L_BANNER']" @update:model-value="(v: string | null) => setStackBanner(v)" />
+            <ItemPicker :model-value="bannerVal()" nullable title="Знамя" :allow-cats="[3]" @update:model-value="(v: string | null) => setStackBanner(v)" />
           </div>
           <div v-for="s in EQUIP_SLOTS" :key="s.key" class="equip-row">
             <label>{{ s.label }}</label>

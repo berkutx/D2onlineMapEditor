@@ -27,7 +27,7 @@ const props = withDefaults(
     nullable?: boolean;
     title?: string;
     triggerLabel?: string;
-    allowCats?: string[]; // restrict to these LmagItm catKeys (equip slots); undefined = all
+    allowCats?: number[]; // restrict to these ItemCat numbers (LmagItm category; equip slots); undefined = all
   }>(),
   { modelValue: null, nullable: false, title: "Выбор предмета", triggerLabel: "", allowCats: undefined },
 );
@@ -100,10 +100,10 @@ const baseGroups = computed<DisplayGroup[]>(() => {
     }
     return itemStore.groups.map((g) => ({ key: g.catKey || String(g.cat), label: g.label, items: g.items }));
   })();
-  // Equip-slot restriction: keep only items whose category is allowed for this slot.
+  // Equip-slot restriction: keep only items whose ItemCat is allowed for this slot.
   if (!props.allowCats?.length) return raw;
   const ok = new Set(props.allowCats);
-  return raw.map((g) => ({ ...g, items: g.items.filter((it) => ok.has(it.catKey)) })).filter((g) => g.items.length);
+  return raw.map((g) => ({ ...g, items: g.items.filter((it) => ok.has(it.cat)) })).filter((g) => g.items.length);
 });
 
 /** Sub-group options for the active mode (drives the subcategory combobox). */
