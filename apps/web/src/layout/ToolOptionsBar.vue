@@ -11,7 +11,8 @@ import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { ElSegmented, ElSelect, ElOption, ElTooltip, ElInput, ElButton, ElMessage, ElMessageBox } from "element-plus";
 import { estimateTileCount } from "@d2/map-edit";
-import { useToolStore, type ZoneMode } from "../stores/toolStore";
+import { useToolStore, type ZoneMode, type PlaceObjectKind } from "../stores/toolStore";
+import UnitPicker from "./UnitPicker.vue";
 import { useEditStore } from "../stores/editStore";
 import { useEventStore } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
@@ -114,11 +115,25 @@ function onZoneMode(v: string | number | boolean): void {
   toolStore.setZoneMode(v as ZoneMode);
 }
 
+/** «Объекты»: what the object tool places + the mandatory leader for a stack. */
+const OBJECT_KINDS: { value: PlaceObjectKind; label: string }[] = [
+  { value: "village", label: "🏘 Город" },
+  { value: "ruin", label: "🏚 Руина" },
+  { value: "treasure", label: "💰 Сундук" },
+  { value: "stack", label: "⚔ Отряд" },
+  { value: "merchant", label: "🛒 Торговец" },
+  { value: "mage", label: "🔮 Маг" },
+  { value: "trainer", label: "🎓 Тренер" },
+  { value: "mercenary", label: "🛡 Наёмники" },
+];
+const { objectKind, stackLeaderId } = storeToRefs(toolStore);
+
 const SIZED = new Set(["terrain", "water", "forest", "erase"]);
 const showTerrain = computed(() => tool.value === "terrain");
 const showLocFilter = computed(() => tool.value === "locations");
 const showZoneTool = computed(() => tool.value === "zone");
-const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || showZoneTool.value);
+const showObjectTool = computed(() => tool.value === "object");
+const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || showZoneTool.value || showObjectTool.value);
 </script>
 
 <template>
@@ -151,6 +166,15 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
         <el-segmented :model-value="locFilter" :options="locFilterOptions" size="small" @change="onLocFilter" />
       </el-tooltip>
     </template>
+    <template v-else-if="showObjectTool">
+      <el-select v-model="objectKind" size="small" style="width: 132px" title="Что ставим">
+        <el-option v-for="k in OBJECT_KINDS" :key="k.value" :label="k.label" :value="k.value" />
+      </el-select>
+      <template v-if="objectKind === 'stack'">
+        <span class="obj-lbl">Лидер:</span>
+        <UnitPicker v-model="stackLeaderId" nullable roster="leaders" title="Лидер нового отряда" />
+      </template>
+    </template>
     <template v-else>
       <el-select
         v-if="showTerrain"
@@ -179,5 +203,9 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
 }
 .to-terrain {
   width: 150px;
+}
+.obj-lbl {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 </style>

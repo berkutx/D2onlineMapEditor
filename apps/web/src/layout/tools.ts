@@ -4,7 +4,7 @@
  * (label + hint) so the two never drift.
  */
 import type { Component } from "vue";
-import { Pointer, Brush, Scissor, Picture, Rank, Crop } from "@element-plus/icons-vue";
+import { Pointer, Brush, Scissor, Picture, Rank, Crop, OfficeBuilding } from "@element-plus/icons-vue";
 import type { EditTool } from "../stores/toolStore";
 import { WaterIcon, ForestIcon, RoadIcon, EraseIcon, LocationsIcon } from "./toolIcons";
 
@@ -28,6 +28,7 @@ export const EDIT_TOOLS: ToolDef[] = [
   { value: "roadsel", label: "Дорога ✂", icon: Scissor, hint: "клик — выделить · ещё раз — расширить · тащить — двигать · тащить за конец — продолжить · Del — стереть" },
   { value: "erase", label: "Ластик", icon: EraseIcon, hint: "стирай рельеф/дороги/декор · Ctrl+тащить — двигать карту" },
   { value: "decor", label: "Декор", icon: Picture, hint: "клик — поставить · R — другой облик · [ ] — листать · Ctrl+тащить — двигать карту" },
+  { value: "object", label: "Объекты", icon: OfficeBuilding, hint: "клик — поставить · тип в панели опций · отряду нужен лидер · свойства — в инспекторе" },
   { value: "move", label: "Двигать", icon: Rank, hint: "клик — взять/поставить · ⇧+клик — слой ниже · R — облик · Ctrl+тащить — двигать карту · Esc — отмена" },
   { value: "locations", label: "Локации", icon: LocationsIcon, hint: "клик — выбрать локацию · ещё клик — следующая · тащить — переместить · ◆-ручка у выбранной — радиус · Ctrl+тащить — карта" },
   { value: "zone", label: "Зона", icon: Crop, hint: "нарисуй территорию (прямоуг/кисть/линия/рамка) — редактор нарежет её в локации-примитивы" },

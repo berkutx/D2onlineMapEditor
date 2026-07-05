@@ -283,6 +283,66 @@ export function placeStackOps(
   return [{ kind: "addObject", object: stack as unknown as MapObject }];
 }
 
+/** Ops to place an EMPTY ruin (MidRuin): one addObject. The object mirrors readRuin +
+ *  the assemble post-pass for a fresh ruinFrame exactly: TITLE "", IMAGE always written,
+ *  LOOTER = the nil ref kept as the raw string (looted=false), CASH ""/ITEM nil → omitted,
+ *  empty 6-cell guardian formation. The inspector edits everything after placement. */
+export function placeRuinOps(doc: MapDocument, cx: number, cy: number, image = 0): EditOp[] {
+  const version = doc.header.version || "S143";
+  let max = -1;
+  for (const o of doc.objects) {
+    if (o.type === "ruin") {
+      const m = /RU([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) max = Math.max(max, parseInt(m[1]!, 16));
+    }
+  }
+  const id = `${version}RU${hex4(max + 1)}`;
+  const ruin = {
+    type: "ruin" as const,
+    id,
+    pos: { x: cx, y: cy },
+    name: "",
+    image,
+    looted: false,
+    looter: "G000000000",
+    priority: 0,
+    garrison: [null, null, null, null, null, null] as null[],
+  };
+  return [{ kind: "addObject", object: ruin as unknown as MapObject }];
+}
+
+export type PlaceSiteKind = "merchant" | "mage" | "trainer" | "mercenary";
+
+/** Ops to place an EMPTY site (MidSite*): one addObject. The SI id prefix is shared by all
+ *  four site kinds, so the fresh id scans every site. The object mirrors readSite for a
+ *  fresh siteFrame exactly: TXT_TITLE "", IMG_ISO always written, desc "" → omitted, and
+ *  the kind's stock list empty (merchant items / mage spells / mercenary units; trainer none).
+ *  AIPRIORITY is written by the frame but not read back — no priority field. */
+export function placeSiteOps(
+  doc: MapDocument,
+  cx: number,
+  cy: number,
+  kind: PlaceSiteKind,
+  image = 0,
+): EditOp[] {
+  const version = doc.header.version || "S143";
+  let max = -1;
+  for (const o of doc.objects) {
+    if (o.type === "merchant" || o.type === "mage" || o.type === "trainer" || o.type === "mercenary") {
+      const m = /SI([0-9a-fA-F]{4})$/.exec(o.id);
+      if (m) max = Math.max(max, parseInt(m[1]!, 16));
+    }
+  }
+  const id = `${version}SI${hex4(max + 1)}`;
+  const stock =
+    kind === "merchant" ? { items: [] as { id: string; count: number }[] } :
+    kind === "mage" ? { spells: [] as string[] } :
+    kind === "mercenary" ? { units: [] as { id: string; level: number; unique: boolean }[] } :
+    {};
+  const site = { type: kind, id, pos: { x: cx, y: cy }, name: "", image, ...stock };
+  return [{ kind: "addObject", object: site as unknown as MapObject }];
+}
+
 /** Ops to place a location (named region): one addObject. id = a fresh S143LO####
  *  (max existing + 1, allocated HERE so model and export agree). */
 export function placeLocationOps(

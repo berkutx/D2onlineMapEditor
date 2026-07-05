@@ -30,6 +30,8 @@ import {
   placeVillageOps,
   placeChestOps,
   placeStackOps,
+  placeRuinOps,
+  placeSiteOps,
   selectRoadSegment,
   translateRoadCells,
   extendRoadPath,
@@ -42,7 +44,7 @@ import {
 import { useMapStore } from "../stores/mapStore";
 import { useAssetStore } from "../stores/assetStore";
 import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
-import { useToolStore } from "../stores/toolStore";
+import { useToolStore, type PlaceObjectKind } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import {
   locationRoleCounts,
@@ -774,6 +776,19 @@ function refreshGhost(cell: { x: number; y: number } | null): void {
     s.setFootprint(footprintCells(cell.x, cell.y, w, h), valid);
     return;
   }
+  if (toolStore.tool === "object") {
+    if (!cell || !doc) return clearPreview();
+    const ops = buildPlaceOps(toolStore.objectKind, cell.x, cell.y);
+    const obj = (ops[0] as Extract<EditOp, { kind: "addObject" }> | undefined)?.object;
+    if (!obj) return clearPreview();
+    const { w, h } = objectFootprint(obj, landmarkFootprints);
+    const waterBad = obj.type === "village" &&
+      footprintCells(cell.x, cell.y, w, h).some((c) => isWaterCell(c.x, c.y));
+    const valid = !waterBad && canPlaceFootprint(cell.x, cell.y, w, h);
+    s.setGhost(objectGhostKey(obj, cell), cell, { w, h }, valid); // null key => footprint only
+    s.setFootprint(footprintCells(cell.x, cell.y, w, h), valid);
+    return;
+  }
   if (toolStore.tool === "move" && toolStore.moveId) {
     const obj = doc?.objects.find((o) => o.id === toolStore.moveId);
     if (!obj || !cell || !doc) return clearPreview();
@@ -888,39 +903,63 @@ function onContextMenu(e: MouseEvent): void {
   ctxMenu.value = { x: e.clientX, y: e.clientY, obj: hit, cell };
 }
 
-/** Empty-cell placement («Поставить здесь»): village 4×4 / chest 1×1 / stack 1×1 with a
- *  default hero leader — everything is then edited in the inspector (fully editable). */
-function placeAction(kind: "village" | "chest" | "stack"): void {
+/** EditOps to place an interactive object of `kind` at (x,y); [] when not buildable yet
+ *  (unit catalog still loading for a stack). Shared by the «Объекты» tool, its ghost
+ *  preview, and the right-click «Поставить здесь» menu. */
+function buildPlaceOps(kind: PlaceObjectKind, x: number, y: number): EditOp[] {
+  const doc = editStore.liveDoc;
+  if (!doc) return [];
+  switch (kind) {
+    case "village": return placeVillageOps(doc, x, y, "Новая деревня", 1);
+    case "treasure": return placeChestOps(doc, x, y, 0, []);
+    case "ruin": return placeRuinOps(doc, x, y, 0);
+    case "merchant": case "mage": case "trainer": case "mercenary":
+      return placeSiteOps(doc, x, y, kind);
+    case "stack": {
+      // leader = the tool's picked leader, else the first hero (L_LEADER) from the catalog
+      const picked = toolStore.stackLeaderId ? unitStore.get(toolStore.stackLeaderId) : undefined;
+      const hero = picked ?? unitStore.all
+        .filter((u) => u.catKey === "L_LEADER")
+        .sort((a, b) => a.name.localeCompare(b.name, "ru"))[0];
+      if (!hero) return [];
+      return placeStackOps(doc, x, y, {
+        units: [null, null, { unit: hero.id, level: hero.level, hp: hero.hp }, null, null, null],
+        leaderCell: 2,
+      });
+    }
+  }
+}
+
+/** Place an interactive object at a cell: footprint + water guard → commit → select in the
+ *  inspector. Returns false (with a toast) when the spot is invalid. */
+function placeObjectAt(kind: PlaceObjectKind, x: number, y: number): boolean {
+  const ops = buildPlaceOps(kind, x, y);
+  const obj = (ops[0] as Extract<EditOp, { kind: "addObject" }> | undefined)?.object;
+  if (!obj) {
+    if (kind === "stack") ElMessage.warning("Каталог юнитов ещё загружается — попробуйте через секунду");
+    return false;
+  }
+  const { w, h } = objectFootprint(obj, landmarkFootprints);
+  if (!canPlaceFootprint(x, y, w, h)) {
+    ElMessage.warning(w > 1 ? `Не помещается: нужно ${w}×${h} свободных клеток` : "Клетка занята");
+    return false;
+  }
+  // города на воде нелегальны (подводные клады/затонувшие руины/лодки — легальны)
+  if (obj.type === "village" && footprintCells(x, y, w, h).some((c) => isWaterCell(c.x, c.y))) {
+    ElMessage.warning("Город нельзя ставить на воду");
+    return false;
+  }
+  editStore.commit(ops);
+  toolStore.setSelectedId(obj.id);
+  return true;
+}
+
+/** Empty-cell placement («Поставить здесь») from the right-click menu. */
+function placeAction(kind: PlaceObjectKind): void {
   const at = ctxMenu.value?.cell;
   ctxMenu.value = null;
-  const doc = editStore.liveDoc;
-  if (!at || !doc) return;
-  const need = kind === "village" ? 4 : 1;
-  if (!canPlaceFootprint(at.x, at.y, need, need)) {
-    ElMessage.warning(kind === "village" ? "Не помещается: деревне нужно 4×4 свободных клетки" : "Клетка занята");
-    return;
-  }
-  let ops: EditOp[] = [];
-  if (kind === "village") ops = placeVillageOps(doc, at.x, at.y, "Новая деревня", 1);
-  else if (kind === "chest") ops = placeChestOps(doc, at.x, at.y, 0, []);
-  else {
-    // default leader = the first hero (L_LEADER) from the catalog; change it in the editor
-    const hero = unitStore.all
-      .filter((u) => u.catKey === "L_LEADER")
-      .sort((a, b) => a.name.localeCompare(b.name, "ru"))[0];
-    if (!hero) {
-      ElMessage.warning("Каталог юнитов ещё загружается — попробуйте через секунду");
-      return;
-    }
-    ops = placeStackOps(doc, at.x, at.y, {
-      units: [null, null, { unit: hero.id, level: hero.level, hp: hero.hp }, null, null, null],
-      leaderCell: 2,
-    });
-  }
-  const first = ops[0] as { object?: { id: string } } | undefined;
-  editStore.commit(ops);
-  if (first?.object) toolStore.setSelectedId(first.object.id);
-  ElMessage.success("Поставлено — свойства в инспекторе справа");
+  if (!at) return;
+  if (placeObjectAt(kind, at.x, at.y)) ElMessage.success("Поставлено — свойства в инспекторе справа");
 }
 
 function ctxAction(action: string): void {
@@ -1125,6 +1164,12 @@ function onPointerDown(e: PointerEvent): void {
         if (ops.length) editStore.commit(ops); // objectsRev watcher re-renders objects
       }
     }
+    return;
+  }
+  // object tool: a single click places the picked interactive object (руина/город/сундук/отряд/сайт).
+  if (toolStore.tool === "object") {
+    const cell = cellFromEvent(e);
+    if (cell) placeObjectAt(toolStore.objectKind, cell.x, cell.y);
     return;
   }
   // move tool: 1st click picks the object (Shift = one level below, like select); 2nd click
@@ -1523,7 +1568,7 @@ function onPointerMove(e: PointerEvent): void {
     viewStore.setCursorCell(null);
     getScene()?.setCursorCell(null);
   }
-  if (toolStore.tool === "decor" || toolStore.tool === "move") refreshGhost(cell);
+  if (toolStore.tool === "decor" || toolStore.tool === "move" || toolStore.tool === "object") refreshGhost(cell);
   // select tool: Shift+drag rubber band — live FRAME preview of the selection rectangle
   if (boxSelStart && cell) {
     getScene()?.setFootprint(maskRefs(frameMask(rectFrom(boxSelStart, cell))), true);
@@ -1804,7 +1849,7 @@ watch(
       zoneDrag = null;
       updateLocationFocus(lastCell, true); // drop the filter spotlight with the mode
     }
-    if (t === "decor" || t === "move") refreshGhost(lastCell);
+    if (t === "decor" || t === "move" || t === "object") refreshGhost(lastCell);
     else if (t === "region") showZone(); // re-show the existing zone (mask or bbox)
     else clearPreview();
   },
@@ -1842,11 +1887,11 @@ watch(
   () => updateLocationFocus(lastCell, true),
 );
 
-// Refresh the ghost when the picked decoration or carried object changes.
+// Refresh the ghost when the picked decoration / carried object / placed kind changes.
 watch(
-  () => [toolStore.decorId, toolStore.moveId],
+  () => [toolStore.decorId, toolStore.moveId, toolStore.objectKind, toolStore.stackLeaderId],
   () => {
-    if (toolStore.tool === "decor" || toolStore.tool === "move") refreshGhost(lastCell);
+    if (toolStore.tool === "decor" || toolStore.tool === "move" || toolStore.tool === "object") refreshGhost(lastCell);
   },
 );
 
@@ -1922,7 +1967,12 @@ watch(
         <div class="ctx-title">Поставить здесь <code>{{ ctxMenu.cell.x }}, {{ ctxMenu.cell.y }}</code></div>
         <button class="ctx-item" @click="placeAction('village')">🏘 Деревню (4×4)</button>
         <button class="ctx-item" @click="placeAction('stack')">⚔️ Отряд (герой)</button>
-        <button class="ctx-item" @click="placeAction('chest')">📦 Сундук</button>
+        <button class="ctx-item" @click="placeAction('treasure')">📦 Сундук</button>
+        <button class="ctx-item" @click="placeAction('ruin')">🏚 Руину (3×3)</button>
+        <button class="ctx-item" @click="placeAction('merchant')">🛒 Торговца (3×3)</button>
+        <button class="ctx-item" @click="placeAction('mage')">🔮 Мага (3×3)</button>
+        <button class="ctx-item" @click="placeAction('trainer')">🎓 Тренера (3×3)</button>
+        <button class="ctx-item" @click="placeAction('mercenary')">🛡 Наёмников (3×3)</button>
       </template>
     </div>
     <div v-if="debugOverlay && debugStats" class="debug-hud">

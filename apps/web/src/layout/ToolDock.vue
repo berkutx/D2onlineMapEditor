@@ -16,7 +16,7 @@ import { nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import { View, MagicStick, Check, EditPen } from "@element-plus/icons-vue";
 import { useViewStore } from "../stores/viewStore";
-import { useToolStore, type EditTool, type ZoneMode } from "../stores/toolStore";
+import { useToolStore, type EditTool, type ZoneMode, type PlaceObjectKind } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useDecorStore } from "../stores/decorStore";
 import { LOC_FILTERS, type LocFilter } from "../services/scenarioRoles";
@@ -46,7 +46,7 @@ const layers = [
 ];
 
 /** Tools that get a hover flyout; the rest keep the plain name tooltip. */
-const FLY = new Set<EditTool>(["terrain", "water", "forest", "erase", "decor", "move", "locations", "zone"]);
+const FLY = new Set<EditTool>(["terrain", "water", "forest", "erase", "decor", "object", "move", "locations", "zone"]);
 const FLY_WIDTH: Partial<Record<EditTool, number>> = { terrain: 236, locations: 284, decor: 190 };
 
 /** Land swatches (same set/order as ToolOptionsBar's dropdown, as color chips). */
@@ -95,6 +95,18 @@ function decorSearch(): void {
   toolStore.setTool("decor");
   void nextTick(() => decorStore.focusSearch());
 }
+
+/** «Объекты»: interactive objects the tool places (kinds mirror ToolOptionsBar). */
+const OBJECT_KINDS: { value: PlaceObjectKind; label: string }[] = [
+  { value: "village", label: "🏘 Город" },
+  { value: "ruin", label: "🏚 Руина" },
+  { value: "treasure", label: "💰 Сундук" },
+  { value: "stack", label: "⚔ Отряд" },
+  { value: "merchant", label: "🛒 Торговец" },
+  { value: "mage", label: "🔮 Маг" },
+  { value: "trainer", label: "🎓 Тренер" },
+  { value: "mercenary", label: "🛡 Наёмники" },
+];
 
 /** «По рисунку»: draw a stroke → generation follows it (roads/rivers = the line, decor is
  *  sprinkled along the brush). The flyout picks WHAT to generate; the button toggles. */
@@ -186,6 +198,13 @@ function pickDrawGen(id: string): void {
           <button class="pop-row" @click="decorFamily('structures')"><span class="pop-lbl">🏛 Постройки</span></button>
           <button class="pop-row" @click="decorFamily('terrain')"><span class="pop-lbl">⛰ Рельеф</span></button>
           <button class="pop-row" @click="decorSearch()"><span class="pop-lbl">🔍 Поиск…</span></button>
+        </template>
+
+        <template v-else-if="t.value === 'object'">
+          <button v-for="k in OBJECT_KINDS" :key="k.value" class="pop-row" @click="toolStore.setObjectKind(k.value)">
+            <el-icon class="pop-ck" :style="{ visibility: toolStore.objectKind === k.value && tool === 'object' ? 'visible' : 'hidden' }"><Check /></el-icon>
+            <span class="pop-lbl">{{ k.label }}</span>
+          </button>
         </template>
 
         <template v-else-if="t.value === 'move'">

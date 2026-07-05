@@ -32,6 +32,8 @@ import {
   placeChestOps,
   placeVillageOps,
   placeStackOps,
+  placeRuinOps,
+  placeSiteOps,
   emptyProject,
   pushOp,
   undo,
@@ -1841,6 +1843,57 @@ describe("@d2/map-edit addObject writers (chest / village / stack) + MidgardPlan
     const res = roundTripSemantic(doc, out, ops);
     expect(res.reason).toBeUndefined();
     expect(res.ok).toBe(true);
+  });
+
+  it("places an empty ruin: fresh MidRuin, plan +9 (3×3), round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops = placeRuinOps(doc, 26, 27, 1);
+    const id = addedId(ops);
+    expect(id).toMatch(/RU[0-9a-f]{4}$/);
+    expect(doc.objects.some((o) => o.id === id)).toBe(false);
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const ru = re.objects.find((o) => o.id === id) as {
+      name?: string; image?: number; looted?: boolean; item?: string;
+      garrison?: (unknown | null)[]; pos: { x: number; y: number };
+    };
+    expect(ru).toBeTruthy();
+    expect(ru.pos).toEqual({ x: 26, y: 27 });
+    expect(ru.image).toBe(1);
+    expect(ru.looted).toBe(false);
+    expect(ru.item).toBeUndefined();
+    expect((ru.garrison ?? []).filter(Boolean).length).toBe(0);
+    expect(validateMap(re).ok).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    // plan: the 3×3 ruin footprint anchored at pos
+    expect(planCount(out)).toBe(planCount(bytes) + 9);
+    expect(planCellsOf(out, id).length).toBe(9);
+  });
+
+  it("places an empty merchant site: fresh MidSiteMerchant, plan +9 (3×3), round-trips", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    const ops = placeSiteOps(doc, 44, 45, "merchant", 2);
+    const id = addedId(ops);
+    expect(id).toMatch(/SI[0-9a-f]{4}$/);
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    const site = re.objects.find((o) => o.id === id) as {
+      type: string; name?: string; image?: number;
+      items?: { id: string; count: number }[]; pos: { x: number; y: number };
+    };
+    expect(site).toBeTruthy();
+    expect(site.type).toBe("merchant");
+    expect(site.pos).toEqual({ x: 44, y: 45 });
+    expect(site.image).toBe(2);
+    expect(site.items).toEqual([]);
+    expect(validateMap(re).ok).toBe(true);
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+    expect(planCount(out)).toBe(planCount(bytes) + 9);
+    expect(planCellsOf(out, id).length).toBe(9);
   });
 
   it("plan entries for landmark (1×1) and location (anchor only) placements", () => {

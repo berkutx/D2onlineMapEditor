@@ -13,7 +13,12 @@ import type { LocFilter } from "../services/scenarioRoles";
  *  dimmed under a veil, clicks pick/drag ONLY locations). */
 export type EditTool =
   | "select" | "terrain" | "water" | "forest" | "road" | "erase"
-  | "decor" | "move" | "roadsel" | "region" | "locations" | "zone";
+  | "decor" | "object" | "move" | "roadsel" | "region" | "locations" | "zone";
+
+/** What the "object" tool places (interactive objects, unlike the decor tool's landmarks). */
+export type PlaceObjectKind =
+  | "treasure" | "village" | "ruin" | "stack"
+  | "merchant" | "mage" | "trainer" | "mercenary";
 
 /** How the "region" tool paints a generation zone: a rectangle, a freehand brush, a
  *  thick line, or just the rectangle's perimeter (frame). rect = the whole bbox; the
@@ -28,6 +33,10 @@ export const useToolStore = defineStore("tool", () => {
   const terrainId = ref(5);
   /** Catalog id of the decoration the "decor" tool will place (null = none picked). */
   const decorId = ref<string | null>(null);
+  /** What the "object" tool places (руина/город/сундук/отряд/сайты). */
+  const objectKind = ref<PlaceObjectKind>("treasure");
+  /** Gunit id of the leader a placed stack starts with (обязателен для «Отряд»). */
+  const stackLeaderId = ref<string | null>(null);
   /** Object id picked by the "move" tool, awaiting a drop click (null = none picked). */
   const moveId = ref<string | null>(null);
   /** Cells of the road segment currently selected by the "roadsel" tool. */
@@ -119,6 +128,11 @@ export const useToolStore = defineStore("tool", () => {
     decorId.value = id;
     if (id) tool.value = "decor";
   }
+  /** Pick what the object tool places; also switches to the object tool. */
+  function setObjectKind(k: PlaceObjectKind): void {
+    objectKind.value = k;
+    tool.value = "object";
+  }
   /** Set/clear the object the move tool is carrying. */
   function setMoveId(id: string | null): void {
     moveId.value = id;
@@ -197,7 +211,7 @@ export const useToolStore = defineStore("tool", () => {
   }
 
   return {
-    tool, size, terrainId, decorId, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, drawGenRecipe, setDrawGen, selectedId, selectedIds,
+    tool, size, terrainId, decorId, objectKind, stackLeaderId, setObjectKind, moveId, roadSel, roadAnchor, roadLevel, region, zoneMode, regionMask, zoneHidden, eyeZone, drawGenRecipe, setDrawGen, selectedId, selectedIds,
     selectedZoneId, setSelectedZone, regenZoneId,
     locFilter, setLocFilter,
     objectPickTypes, objectPickResult, startObjectPick, finishObjectPick,
