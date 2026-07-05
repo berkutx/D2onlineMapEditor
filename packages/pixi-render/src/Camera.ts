@@ -150,6 +150,19 @@ export class Camera {
     this.emit();
   }
 
+  /** Set an ABSOLUTE zoom level (clamped to min/max), keeping the current view
+   *  centre fixed. For programmatic view resets — e.g. a deep-link that should open
+   *  at 100% regardless of the map's fit-to-screen zoom. Pair with {@link centerOn}
+   *  to re-target afterwards. */
+  setZoom(z: number): void {
+    const next = clampNumber(z, this.minZoom, this.maxZoom);
+    if (next === this.zoomValue) return;
+    const centre = this.screenToWorld(this.screenW / 2, this.screenH / 2);
+    this.zoomValue = next;
+    this.world.scale.set(next, next);
+    this.centerOn(centre.x, centre.y); // reposition + clamp + emit under the new zoom
+  }
+
   /** Fit the whole map into the viewport and center it. */
   fitToScreen(): void {
     const zx = this.screenW / Math.max(1, this.bounds.width);

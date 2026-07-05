@@ -236,7 +236,7 @@ function focusPendingObject(): void {
   toolStore.setSelectedId(obj.id);
   const { w, h } = objectFootprint(obj, landmarkFootprints);
   const c = cellToWorld(obj.pos.x + w / 2, obj.pos.y + h / 2);
-  scene.centerOn(c.x, c.y);
+  scene.focusOn(c.x, c.y, 1); // open the shared object at 100% (not the map's fit-to-screen zoom)
   blinkCells(obj.type === "location" ? locationCells(obj) : footprintCells(obj.pos.x, obj.pos.y, w, h));
 }
 

@@ -652,6 +652,15 @@ export class Scene {
     this.renderNow();
   }
 
+  /** Deep-link focus: set an ABSOLUTE zoom AND center on a world point in one paint,
+   *  so a shared link opens every object at the same readable scale (100%) instead of
+   *  the map's fit-to-screen zoom (tiny on big maps, over-zoomed on small ones). */
+  focusOn(worldX: number, worldY: number, zoom: number): void {
+    this.camera?.setZoom(zoom);
+    this.camera?.centerOn(worldX, worldY);
+    this.renderNow();
+  }
+
   /**
    * Render a small OVERLAY-FREE snapshot (terrain + objects only — no grid, locations, zones,
    * event threads, role badges, veil or cursor) of the region around a cartesian cell into an
