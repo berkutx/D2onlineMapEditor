@@ -44,6 +44,29 @@ export class EditLog {
     return entry;
   }
 
+  /** Append MANY ops as one batch (shared batchId) and return their entries (in order).
+   *  Each op still gets its own seq so LWW / catch-up work unchanged. */
+  appendBatch(
+    mapId: string,
+    ops: readonly { clientOpId: string; op: EditOp }[],
+    by: string,
+    batchId: string,
+    ts: number,
+  ): LogEntry[] {
+    let log = this.logs.get(mapId);
+    if (!log) {
+      log = [];
+      this.logs.set(mapId, log);
+    }
+    const entries: LogEntry[] = [];
+    for (const { clientOpId, op } of ops) {
+      const entry: LogEntry = { seq: log.length + 1, op, by, clientOpId, batchId, ts };
+      log.push(entry);
+      entries.push(entry);
+    }
+    return entries;
+  }
+
   /** The current head sequence (0 = empty / no edits yet). */
   head(mapId: string): number {
     return this.logs.get(mapId)?.length ?? 0;

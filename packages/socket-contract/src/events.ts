@@ -39,6 +39,20 @@ export interface ClientToServerEvents {
     ack: (r: OpAck) => void,
   ) => void;
 
+  /**
+   * BATCHED op transfer (additive, v0.6): a whole commit — a brush stroke or a Copilot
+   * generation with THOUSANDS of setCell ops — is sent as ONE message instead of one
+   * `edit:op` per tile (which lagged the client and flooded the log). The server appends
+   * them all under one `batchId` (each still gets its own seq for LWW) and re-broadcasts
+   * ONE `edit:opsApplied` to the room. Empty/oversized batches are rejected.
+   */
+  "edit:ops": (
+    p: { mapId: string; batchId: string; baseSeq: number; ops: { clientOpId: string; op: EditOp }[] },
+    ack: (
+      r: { ok: true; seqStart: number; seqEnd: number } | { ok: false; reason: string },
+    ) => void,
+  ) => void;
+
   "snapshot:request": (
     p: { mapId: string },
     ack: (r: { seq: number; doc: MapDocument }) => void,
@@ -70,6 +84,13 @@ export interface ServerToClientEvents {
    *  author's journal) so receivers sharing that journal (a second tab of the same
    *  browser) can skip ops they already hold instead of double-applying them. */
   "edit:applied": (p: { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }) => void;
+  /** Broadcast of a whole batched commit (see `edit:ops`): the receiver applies every op and
+   *  records ONE history row keyed by `batchId`. */
+  "edit:opsApplied": (p: {
+    batchId: string;
+    by: string;
+    ops: { seq: number; clientOpId: string; op: EditOp }[];
+  }) => void;
   "edit:rejected": (p: { clientOpId: string; reason: string }) => void;
 
   "assets:reload": (p: { version: string }) => void;
@@ -98,12 +119,14 @@ export const EVENTS = {
   presenceViewport: "presence:viewport",
   presenceSelect: "presence:select",
   editOp: "edit:op",
+  editOps: "edit:ops",
   snapshotRequest: "snapshot:request",
   opsSince: "ops:since",
   roomPeers: "room:peers",
   presenceUpdate: "presence:update",
   presenceLeft: "presence:left",
   editApplied: "edit:applied",
+  editOpsApplied: "edit:opsApplied",
   editRejected: "edit:rejected",
   assetsReload: "assets:reload",
   mapReloaded: "map:reloaded",

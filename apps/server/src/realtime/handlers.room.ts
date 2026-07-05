@@ -160,6 +160,46 @@ export function registerRoomHandlers(
       .emit("edit:applied", { seq: entry.seq, by: socket.id, clientOpId: p.clientOpId, op: parsed.data, batchId: p.batchId });
   });
 
+  // BATCHED apply: a whole commit (brush stroke / Copilot generation, up to thousands of
+  // setCell ops) arrives as ONE message — append them all under one batchId, ack the seq
+  // range, and re-broadcast ONE edit:opsApplied. Fixes the per-tile flood/lag.
+  const MAX_BATCH = 50_000;
+  socket.on("edit:ops", (p, ack) => {
+    if (!p || typeof p.mapId !== "string" || typeof p.batchId !== "string" || !Array.isArray(p.ops)) {
+      ack({ ok: false, reason: "invalid edit:ops payload" });
+      return;
+    }
+    const key = keyFor(p.mapId);
+    if (!key) {
+      ack({ ok: false, reason: "not joined to this map's room" });
+      return;
+    }
+    if (p.ops.length === 0) {
+      ack({ ok: false, reason: "empty batch" });
+      return;
+    }
+    if (p.ops.length > MAX_BATCH) {
+      ack({ ok: false, reason: `batch too large (${p.ops.length} > ${MAX_BATCH})` });
+      return;
+    }
+    const validated: { clientOpId: string; op: EditOp }[] = [];
+    for (const item of p.ops) {
+      const parsed = EditOp.safeParse(item?.op);
+      if (!parsed.success) {
+        ack({ ok: false, reason: "invalid op in batch: " + parsed.error.issues[0]?.message });
+        return;
+      }
+      validated.push({ clientOpId: String(item?.clientOpId ?? ""), op: parsed.data });
+    }
+    const entries = log.appendBatch(key, validated, socket.id, p.batchId, Date.now());
+    ack({ ok: true, seqStart: entries[0]!.seq, seqEnd: entries[entries.length - 1]!.seq });
+    socket.to(roomId(key)).emit("edit:opsApplied", {
+      batchId: p.batchId,
+      by: socket.id,
+      ops: entries.map((e) => ({ seq: e.seq, clientOpId: e.clientOpId, op: e.op })),
+    });
+  });
+
   // Catch-up: return the base map with the entire log applied, plus the head seq, so a late
   // joiner (or a client that fell behind) can resync to the authoritative shared state.
   socket.on("snapshot:request", (p, ack) => {

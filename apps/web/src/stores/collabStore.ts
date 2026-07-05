@@ -260,10 +260,28 @@ export const useCollabStore = defineStore("collab", () => {
     history.value = [...history.value, entry];
   }
 
+  /** Record a WHOLE batched commit as ONE history row (I have every op + inverse at once —
+   *  from my own send, a peer's edit:opsApplied, or a catch-up run). `inverse` is newest-first
+   *  so a single revert undoes the whole commit. */
+  function recordBatchRow(
+    seq: number, by: string, ops: readonly EditOp[], inverse: EditOp[] | undefined, batchId: string, mine: boolean,
+  ): HistoryEntry {
+    const ctx = opCtx();
+    const entry: HistoryEntry = {
+      seq, by, byName: nameOf(by), byColor: colorOf(by),
+      op: ops[0]!, summary: summarizeBatch(ops, ctx), detail: detailBatch(ops),
+      mine, inverse: inverse ?? [], batchId, count: ops.length,
+    };
+    batchAgg.set(batchId, { entry, count: ops.length }); // a stray later op merges, not dups
+    history.value = [...history.value, entry];
+    return entry;
+  }
+
   function bindListeners(): void {
     if (listenersBound) return;
     listenersBound = true;
     const socket = getSocket();
+    (window as unknown as { __d2socket?: unknown }).__d2socket = socket; // debug hook (inspect emits)
 
     socket.on("edit:applied", ({ seq, by, clientOpId, op, batchId }) => {
       lastSeq = Math.max(lastSeq, seq);
@@ -280,6 +298,23 @@ export const useCollabStore = defineStore("collab", () => {
         // eslint-disable-next-line no-console
         console.error("[collab] правка участника не применилась:", err, op);
         ElMessage.warning("Правка участника конфликтует с вашим локальным черновиком и не применена");
+      }
+    });
+
+    // A peer's WHOLE batched commit (see edit:ops) — apply every op in ONE pass and record
+    // ONE history row. This is the receive side of the per-tile-flood fix.
+    socket.on("edit:opsApplied", ({ batchId, by, ops }) => {
+      for (const o of ops) lastSeq = Math.max(lastSeq, o.seq);
+      const fresh = ops.filter((o) => !(o.clientOpId && knownOpIds.has(o.clientOpId))); // skip 2nd-tab dups
+      if (fresh.length === 0) return;
+      try {
+        const inv = edit.applyIncoming(fresh.map((f) => f.op), fresh.map((f) => f.clientOpId)); // ONE apply pass
+        for (const f of fresh) if (f.clientOpId) knownOpIds.add(f.clientOpId);
+        recordBatchRow(fresh[0]!.seq, by, fresh.map((f) => f.op), inv, batchId, false);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("[collab] пакет правок участника не применился:", err);
+        ElMessage.warning("Пакет правок участника конфликтует с вашим локальным черновиком");
       }
     });
     socket.on("presence:update", (p) => {
@@ -316,38 +351,36 @@ export const useCollabStore = defineStore("collab", () => {
   function sendOps(ops: readonly EditOp[], inverses?: EditOp[][], uids?: readonly string[]): void {
     const id = mapId.value;
     const socket = getSocket();
-    if (!id || !me.value) return;
+    if (!id || !me.value || ops.length === 0) return;
     const meId = me.value.socketId;
-    // A multi-op commit (brush stroke / Copilot generation) is ONE history row + ONE undo
-    // unit. Record it whole NOW (I hold every op + inverse); the per-op acks below only
-    // advance seq/known-ids. The shared `batchId` rides the wire so peers + a later reload
-    // collapse the same ops into one row too (recordGrouped).
-    const batchId = ops.length > 1 ? `${meId}:B${opCounter++}` : undefined;
-    if (batchId) {
-      const ctx = opCtx();
-      const flatInverse = inverses ? inverses.slice().reverse().flatMap((iv) => iv) : []; // newest-first
-      history.value = [
-        ...history.value,
-        {
-          seq: lastSeq + 1, by: meId, byName: nameOf(meId), byColor: colorOf(meId),
-          op: ops[0]!, summary: summarizeBatch(ops, ctx), detail: detailBatch(ops),
-          mine: true, inverse: flatInverse, batchId, count: ops.length,
-        },
-      ];
-    }
-    ops.forEach((op, i) => {
-      const clientOpId = uids?.[i] || `${meId}:${opCounter++}`;
+
+    // Single op → one edit:op message + its own history row (unchanged).
+    if (ops.length === 1) {
+      const op = ops[0]!;
+      const clientOpId = uids?.[0] || `${meId}:${opCounter++}`;
       knownOpIds.add(clientOpId);
-      const inverse = inverses?.[i];
-      socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op, batchId }, (ack) => {
-        if (ack.ok && typeof ack.seq === "number") {
-          lastSeq = Math.max(lastSeq, ack.seq);
-          if (!batchId) record(ack.seq, meId, op, true, inverse); // singles: their own row
-        } else {
-          // eslint-disable-next-line no-console
-          console.warn("[collab] op rejected:", ack.reason);
-        }
+      const inverse = inverses?.[0];
+      socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
+        if (ack.ok && typeof ack.seq === "number") { lastSeq = Math.max(lastSeq, ack.seq); record(ack.seq, meId, op, true, inverse); }
+        else console.warn("[collab] op rejected:", ack.reason); // eslint-disable-line no-console
       });
+      return;
+    }
+
+    // Multi-op commit (brush stroke / Copilot generation) → ONE batch message + ONE history
+    // row. The whole diff crosses the wire as a single frame — NOT one edit:op per tile
+    // (that flooded the socket + log and lagged everyone).
+    const batchId = `${meId}:B${opCounter++}`;
+    const opsWithIds = ops.map((op, i) => {
+      const clientOpId = uids?.[i] || `${meId}:o${opCounter++}`;
+      knownOpIds.add(clientOpId);
+      return { clientOpId, op };
+    });
+    const flatInverse = inverses ? inverses.slice().reverse().flatMap((iv) => iv) : []; // newest-first
+    const entry = recordBatchRow(lastSeq + 1, meId, ops, flatInverse, batchId, true);
+    socket.emit("edit:ops", { mapId: id, batchId, baseSeq: lastSeq, ops: opsWithIds }, (ack) => {
+      if (ack.ok) { lastSeq = Math.max(lastSeq, ack.seqEnd); entry.seq = ack.seqStart; }
+      else console.warn("[collab] batch rejected:", ack.reason); // eslint-disable-line no-console
     });
   }
 
@@ -402,13 +435,35 @@ export const useCollabStore = defineStore("collab", () => {
     entries: readonly { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }[],
   ): void {
     let failed = 0;
-    for (const en of entries) {
+    let i = 0;
+    while (i < entries.length) {
+      const en = entries[i]!;
       lastSeq = Math.max(lastSeq, en.seq);
+      // A batched commit's ops are consecutive in the log (appendBatch assigns them in a run):
+      // fold the WHOLE run in one applyIncoming + one history row (not thousands of calls).
+      if (en.batchId) {
+        const bid = en.batchId;
+        const run: typeof entries[number][] = [];
+        while (i < entries.length && entries[i]!.batchId === bid) { run.push(entries[i]!); lastSeq = Math.max(lastSeq, entries[i]!.seq); i++; }
+        const fresh = run.filter((r) => !(r.clientOpId && knownOpIds.has(r.clientOpId)));
+        if (fresh.length === 0) continue;
+        try {
+          const inv = edit.applyIncoming(fresh.map((f) => f.op), fresh.map((f) => f.clientOpId));
+          for (const f of fresh) if (f.clientOpId) knownOpIds.add(f.clientOpId);
+          recordBatchRow(fresh[0]!.seq, fresh[0]!.by, fresh.map((f) => f.op), inv, bid, false);
+        } catch (err) {
+          failed += fresh.length;
+          // eslint-disable-next-line no-console
+          console.error(`[collab] пакет из комнаты (batch ${bid}) не применился:`, err);
+        }
+        continue;
+      }
+      i++;
       if (en.clientOpId && knownOpIds.has(en.clientOpId)) continue; // уже в журнале (мой / другой таб)
       try {
         const inv = edit.applyIncoming([en.op], en.clientOpId ? [en.clientOpId] : undefined);
         if (en.clientOpId) knownOpIds.add(en.clientOpId);
-        recordGrouped(en.seq, en.by, en.op, false, inv, en.batchId); // catch-up: one row per commit
+        record(en.seq, en.by, en.op, false, inv); // singleton row
       } catch (err) {
         failed++;
         // eslint-disable-next-line no-console
