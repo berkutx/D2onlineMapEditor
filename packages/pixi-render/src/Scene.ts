@@ -699,7 +699,12 @@ export class Scene {
 
     let canvas: HTMLCanvasElement | null = null;
     try {
-      app.renderer.render({ container: world, target: rt, clear: true });
+      // Render the STAGE (already the render-group root), not `world` directly: Pixi's
+      // render(container) PROMOTES its target to a render-group root permanently, and a
+      // world-as-group breaks @pixi/tilemap's pipe (u_proj_trans = proj × groupWorld ×
+      // tilemap.worldTransform — the world transform applied twice). Symptom: after the
+      // first preview the terrain tiles "jump"/vanish in the main view when zoomed out.
+      app.renderer.render({ container: app.stage, target: rt, clear: true });
       canvas = app.renderer.extract.canvas(rt) as HTMLCanvasElement;
     } finally {
       world.scale.set(sc);
