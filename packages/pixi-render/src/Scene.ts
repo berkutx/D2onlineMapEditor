@@ -677,11 +677,16 @@ export class Scene {
     const z = pxW / (2 * halfW);
     const rt = RenderTexture.create({ width: pxW, height: pxH, resolution: 1 });
 
-    // hide every overlay + loose graphic; keep terrain + objects
+    // hide every overlay + loose graphic; FORCE terrain + objects visible — the preview's
+    // contract is "рельеф + объекты" regardless of the host's view-layer toggles (a hidden
+    // terrain layer otherwise yields objects floating on black).
     const hidden: Array<{ v: { visible: boolean }; was: boolean }> = [];
-    const hide = (v?: { visible: boolean } | null): void => {
-      if (v) { hidden.push({ v, was: v.visible }); v.visible = false; }
+    const setVis = (v: { visible: boolean } | null | undefined, on: boolean): void => {
+      if (v) { hidden.push({ v, was: v.visible }); v.visible = on; }
     };
+    const hide = (v?: { visible: boolean } | null): void => setVis(v, false);
+    setVis(this.terrain?.view, true);
+    setVis(this.objects?.view, true);
     hide(this.grid?.view); hide(this.locations?.view); hide(this.zones?.view);
     hide(this.eventOverlay?.view); hide(this.anchorLayer?.view); hide(this.scenarioRoles?.view);
     hide(this.presence?.view); hide(this.overlay?.view);
