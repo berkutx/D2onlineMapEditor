@@ -372,7 +372,7 @@ export class Scene {
     if (!this.terrain || !this.assets) return;
     if (dirtyCells?.length && this.terrain.canUpdate(map)) this.terrain.updateCells(map, dirtyCells);
     else this.terrain.build(map, this.assets, this.terrainCodes);
-    this.renderNow(); // paint immediately — rAF is throttled when the pointer is off-canvas
+    this.paintNowAndNextFrame(); // reliably COMPOSITE off-canvas (Copilot generation) — see method
   }
 
   /**
@@ -385,7 +385,7 @@ export class Scene {
     if (!this.objects || !this.assets || !this.anim) return;
     this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
     this.updateRenderMode();
-    this.renderNow(); // paint immediately — rAF is throttled when the pointer is off-canvas
+    this.paintNowAndNextFrame(); // reliably COMPOSITE off-canvas (Copilot generation) — see method
     // Self-heal: a freshly ADDED object can reference a LAZY sheet not pulled yet (a new
     // stack's unit chunk; an animated object when playback is on). Fetch just the missing
     // keys and rebuild ONCE when any of them became resolvable — invisible-until-hover
@@ -814,6 +814,30 @@ export class Scene {
     }
     this.renderScheduled = false;
     this.app.render();
+  }
+
+  /**
+   * Paint NOW and again on the next animation frame — the reliable repaint for a
+   * PROGRAMMATIC scene edit while the pointer is off the canvas (the Copilot-generation
+   * / retry case). A single out-of-rAF `app.render()` updates the WebGL back-buffer
+   * (readPixels confirms the tiles are there) but, with `preserveDrawingBuffer:false`,
+   * the browser does not always COMPOSITE that frame to the screen until its next paint;
+   * an object edit incidentally gets a second render (the host fires both the terrain and
+   * the object watcher), so it shows, while a terrain-only edit (lake, snow, grass) fired
+   * one render and stayed invisible until a pointer-move woke a frame. Scheduling one
+   * rAF-aligned render guarantees the composite (rAF fires ~16 ms even when idle), so
+   * terrain and object generations now update the map uniformly, with no mouse move.
+   */
+  private nextFrameRaf?: number;
+  private paintNowAndNextFrame(): void {
+    if (!this.app) return;
+    this.renderNow();
+    if (this.animContinuous) return; // the ticker already paints every frame
+    if (this.nextFrameRaf !== undefined) cancelAnimationFrame(this.nextFrameRaf);
+    this.nextFrameRaf = requestAnimationFrame(() => {
+      this.nextFrameRaf = undefined;
+      this.app?.render();
+    });
   }
 
   /** Wrap the renderer so EVERY frame (ticker, rAF, or renderNow) is timed for the
