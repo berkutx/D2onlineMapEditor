@@ -627,6 +627,10 @@ watch(
 
 <template>
   <div ref="floatEl" class="copilot-float" :style="floatStyle" @mouseenter="markActive()" @pointerdown="markActive()">
+    <!-- Log + zone/point hint float ABOVE the bar, OUT of the flex flow, so opening them never
+         moves the bar (the "copilot slides lower + scrollbar" bug when the bar was dragged and
+         thus top-anchored: a taller flex column pushed the bar down). -->
+    <div class="cp-above">
     <transition name="cp-fade">
       <div v-if="expanded" ref="scroller" class="copilot-log d2-float" :class="{ idle: idleEffective }">
         <div v-for="(m, i) in log" :key="i" class="cp-msg" :class="m.role">
@@ -668,6 +672,7 @@ watch(
           <el-button size="small" text type="success" @click="acceptZone">Сбросить</el-button>
         </div>
       </template>
+    </div>
     </div>
 
     <div class="copilot-bar d2-float" :class="{ idle: idleEffective }">
@@ -770,6 +775,20 @@ watch(
   flex-direction: column;
   gap: 8px;
   pointer-events: none; /* let the canvas receive events except on our controls */
+}
+/* Log + hint stack, anchored to sit ABOVE the bar and grow UPWARD out of flow, so they never
+   shift the bar (whatever the bar's own anchor — bottom by default, top once dragged). */
+.cp-above {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  pointer-events: none;
 }
 .cp-grip {
   pointer-events: auto;
