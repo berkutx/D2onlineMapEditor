@@ -82,6 +82,23 @@ const editable = computed(
 /** MidLocation radius is a size step r → a (2r+1)×(2r+1) cell square. */
 const locationSpan = (r: number): string => `${2 * r + 1}×${2 * r + 1} клеток`;
 
+/** Границы области выбранной локации для превью «Точка на карте». */
+const locPreviewBounds = computed(() => {
+  const o = obj.value;
+  if (o?.type !== "location") return null;
+  const r = o.radius ?? 0;
+  return { x0: o.pos.x - r, y0: o.pos.y - r, x1: o.pos.x + r, y1: o.pos.y + r };
+});
+/** Если локация — примитив ЗОНЫ, превью подсвечивает всю маску зоны (зона = набор локаций). */
+const locZoneCells = computed<readonly string[] | null>(() => {
+  const o = obj.value;
+  if (o?.type !== "location") return null;
+  for (const z of Object.values(editStore.zones)) {
+    if (z.locIds.includes(o.id)) return z.cells;
+  }
+  return null;
+});
+
 /** ── Decor (landmark / mountains): appearance = a decorCatalog variant. Show name/footprint +
  *  cycle/re-roll the look (the catalog groups interchangeable variants). */
 const decorVariantId = computed(() =>
@@ -795,7 +812,14 @@ function close(): void {
       <template v-else-if="obj.type === 'location'">
         <div class="col">
           <label>Точка на карте <span class="muted xs">(рельеф + объекты)</span></label>
-          <RegionPreview :cell="obj.pos" :radius="Math.max(4, (obj.radius ?? 0) + 3)" />
+          <RegionPreview
+            :cell="obj.pos"
+            :radius="Math.max(4, (obj.radius ?? 0) + 3)"
+            :mark="obj.pos"
+            :bounds="locPreviewBounds"
+            :cells="locZoneCells"
+            zoomable
+          />
         </div>
         <div class="col">
           <label>Название</label>

@@ -24,6 +24,7 @@ import { locationRoleCounts, ROLE_META, type RoleClass, type RoleCounts } from "
 import CodeInput from "./CodeInput.vue";
 import DecorThumb from "./DecorThumb.vue";
 import MiniMap from "./MiniMap.vue";
+import RegionPreview from "./RegionPreview.vue";
 
 const props = defineProps<{
   field: EventFieldSpec;
@@ -265,6 +266,27 @@ function onLocPick(v: unknown): void {
   set(s);
 }
 
+/** Террейн-превью выбранной локации (ref-loc): крестик = якорная клетка, жёлтый контур =
+ *  область (2r+1)², синие ромбы = маска зоны, если локация — примитив зоны. */
+const locPreview = computed(() => {
+  if (props.field.type !== "ref-loc") return null;
+  const id = typeof props.modelValue === "string" ? props.modelValue : "";
+  const o = id ? edit.liveDoc?.objects.find((x) => x.id === id) : null;
+  if (!o || o.type !== "location") return null;
+  const r = o.radius ?? 0;
+  let zoneCells: readonly string[] | null = null;
+  for (const z of Object.values(edit.zones)) {
+    if (z.locIds.includes(o.id)) { zoneCells = z.cells; break; }
+  }
+  return {
+    cell: o.pos,
+    radius: Math.max(4, r + 3),
+    mark: o.pos,
+    bounds: { x0: o.pos.x - r, y0: o.pos.y - r, x1: o.pos.x + r, y1: o.pos.y + r },
+    cells: zoneCells,
+  };
+});
+
 // --- ref-loc extras: показать на карте / создать новую локацию / миникарта ---------------
 /** Center the main camera on the referenced object + select it (overlay follows). */
 function showOnMap(): void {
@@ -407,6 +429,17 @@ watch(
         <el-button size="small" text class="ev-loc-btn" @click="newLocation()">＋</el-button>
       </el-tooltip>
     </div>
+    <!-- террейн-превью точки: крестик = якорь, контур = область, ромбы = маска зоны; 🔍 = лупа -->
+    <RegionPreview
+      v-if="locPreview"
+      :cell="locPreview.cell"
+      :radius="locPreview.radius"
+      :mark="locPreview.mark"
+      :bounds="locPreview.bounds"
+      :cells="locPreview.cells"
+      zoomable
+      class="ev-loc-map"
+    />
     <!-- мини-вью: где именно эта зона — изометрический ромб, только море + города
          + подсвеченная локация (клик центрирует камеру) -->
     <MiniMap v-if="modelValue" :highlight-id="(modelValue as string)" :size="216" mode="simple" class="ev-loc-map" />

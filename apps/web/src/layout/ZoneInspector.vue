@@ -10,6 +10,7 @@ import { ElInput, ElButton, ElMessage, ElMessageBox, ElTooltip } from "element-p
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useEventStore } from "../stores/eventStore";
+import RegionPreview from "./RegionPreview.vue";
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
@@ -17,6 +18,22 @@ const eventStore = useEventStore();
 
 const zid = computed(() => toolStore.selectedZoneId);
 const zone = computed(() => (zid.value ? editStore.zones[zid.value] : undefined));
+
+/** Превью зоны: центр bbox её маски + охват, вмещающий всю форму. */
+const zonePreview = computed(() => {
+  const z = zone.value;
+  if (!z || !z.cells.length) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const key of z.cells) {
+    const [xs, ys] = key.split(",");
+    const x = Number(xs), y = Number(ys);
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const cell = { x: Math.round((minX + maxX) / 2), y: Math.round((minY + maxY) / 2) };
+  const radius = Math.max(4, Math.ceil(Math.max(maxX - minX, maxY - minY) / 2) + 2);
+  return { cell, radius };
+});
 
 const name = ref("");
 watch(zone, (z) => { name.value = z?.name ?? ""; }, { immediate: true });
@@ -73,6 +90,16 @@ function remove(): void {
       <span class="zi-id">{{ zid }}</span>
       <el-button text size="small" class="zi-close" @click="toolStore.setSelectedZone(null)">✕</el-button>
     </div>
+
+    <template v-if="zonePreview">
+      <label class="zi-label">Территория зоны <span class="zi-id">(рельеф + объекты)</span></label>
+      <RegionPreview
+        :cell="zonePreview.cell"
+        :radius="zonePreview.radius"
+        :cells="zone.cells"
+        zoomable
+      />
+    </template>
 
     <label class="zi-label">Название</label>
     <el-input v-model="name" size="small" @blur="commitName" @keyup.enter="commitName" />
