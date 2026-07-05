@@ -5,9 +5,9 @@
  * floats above only while expanded (on focus / after a message). "/" focuses it (viewStore
  * focusCopilot); the ✕ hides it (and "/" brings it back). STUB responder for now (M6).
  */
-import { ref, nextTick, watch, onMounted, onBeforeUnmount } from "vue";
-import { ElInput, ElPopover, ElSegmented } from "element-plus";
-import { Promotion, Close, RefreshRight, Reading } from "@element-plus/icons-vue";
+import { ref, nextTick, watch } from "vue";
+import { ElInput, ElPopover, ElSegmented, ElMessage } from "element-plus";
+import { Promotion, Close, RefreshRight, Reading, ChatLineSquare } from "@element-plus/icons-vue";
 import { computed } from "vue";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
@@ -154,28 +154,25 @@ function maybeHintExamples(): void {
 }
 
 function onFocus(): void {
-  expanded.value = true;
+  // NB: do NOT auto-open the chat log here — it obscures the map and jitters the layout
+  // (user request). The log is opened only by the 💬 toggle; results surface as toasts.
   inputFocused.value = true;
   markActive();
   maybeHintExamples();
 }
 
-/**
- * Auto-collapse the chat log on ANY click outside the Copilot — it's rarely needed and
- * obscures the map (user request). A click inside the bar/log or on the teleported
- * «Примеры» popover keeps it open (you're using it); a new message re-expands it. Capture
- * phase so it runs before the map's own pointer handlers.
- */
-function onDocPointerDown(e: PointerEvent): void {
-  if (!expanded.value) return;
-  const t = e.target as Node | null;
-  if (t && floatEl.value?.contains(t)) return; // inside the Copilot itself
-  if (t instanceof Element && t.closest(".cp-ex-pop")) return; // inside the examples popover
-  expanded.value = false;
-  inputFocused.value = false;
+/** Manual show/hide of the chat log (💬). The ONLY way it opens — never automatic. */
+function toggleLog(): void {
+  expanded.value = !expanded.value;
+  markActive();
 }
-onMounted(() => document.addEventListener("pointerdown", onDocPointerDown, true));
-onBeforeUnmount(() => document.removeEventListener("pointerdown", onDocPointerDown, true));
+
+/** Surface a Copilot result: a toast (so it's seen without the log popping open) AND a log
+ *  line the user can review later by opening 💬. */
+function notify(text: string, kind: "success" | "warning" | "info" = "info"): void {
+  ElMessage({ message: text, type: kind, duration: 3500, showClose: true });
+  pushAi(text);
+}
 function onBlur(): void {
   inputFocused.value = false;
 }
@@ -458,7 +455,6 @@ async function send(): Promise<void> {
   markActive();
   log.value.push({ role: "user", text });
   input.value = "";
-  expanded.value = true;
 
   if (llmMode.value && LLM_AVAILABLE) {
     await sendLlm(text);
@@ -467,17 +463,17 @@ async function send(): Promise<void> {
 
   const recipeId = routeRecipe(text);
   if (!recipeId) {
-    pushAi("Не понял команду. Примеры: «лабиринт», «залей водой», «снег на севере», «лес», «трава».");
+    notify("Не понял команду. Примеры: «лабиринт», «залей водой», «снег на севере», «лес», «трава».", "warning");
     return;
   }
   const doc = editStore.liveDoc;
   if (!doc) {
-    pushAi("Карта не загружена.");
+    notify("Карта не загружена.", "warning");
     return;
   }
   const zone = resolveZone(text, doc.size);
   if (!zone) {
-    pushAi("Сначала выдели зону кнопкой ⛶ (или 👁) — или укажи размер/сторону (напр. «25x25» или «север»).");
+    notify("Сначала выдели зону кнопкой ⛶ (или 👁) — или укажи размер/сторону (напр. «25x25» или «север»).", "warning");
     return;
   }
   const { region, cells } = zone;
@@ -487,13 +483,14 @@ async function send(): Promise<void> {
     const rep = await editStore.generate(recipeId, region, undefined, cells, protect.value);
     const ms = Math.round(performance.now() - t0);
     if (rep?.ok) lastGen.value = { mode: "keyword", text, recipeId, region, cells, protect: protect.value };
-    pushAi(
+    notify(
       rep?.ok
         ? `Готово: ${recipeId.replace(/_/g, " ")} ${region.w}×${region.h} · ${debugLine(ms)} (↻ другой вариант)`
         : `Валидация не прошла — откатил. · ${debugLine(ms)}${validationReason()}`,
+      rep?.ok ? "success" : "warning",
     );
   } catch (e) {
-    pushAi("⚠ " + (e instanceof Error ? e.message : String(e)));
+    notify("⚠ " + (e instanceof Error ? e.message : String(e)), "warning");
   } finally {
     sending.value = false;
   }
@@ -503,7 +500,6 @@ async function send(): Promise<void> {
 async function retry(): Promise<void> {
   const g = lastGen.value;
   if (!g || sending.value) return;
-  expanded.value = true;
   if (editStore.undoable) editStore.undoEdit(); // undo the previous generation commit
   if (g.mode === "keyword" && g.recipeId && g.region) {
     log.value.push({ role: "user", text: "↻ другой вариант" });
@@ -512,13 +508,14 @@ async function retry(): Promise<void> {
     try {
       const rep = await editStore.generate(g.recipeId, g.region, undefined, g.cells ?? null, g.protect); // new random seed
       const ms = Math.round(performance.now() - t0);
-      pushAi(
+      notify(
         rep?.ok
           ? `↻ ${g.recipeId.replace(/_/g, " ")} ${g.region.w}×${g.region.h} · ${debugLine(ms)}`
           : `Не прошло — откатил. · ${debugLine(ms)}${validationReason()}`,
+        rep?.ok ? "success" : "warning",
       );
     } catch (e) {
-      pushAi("⚠ " + (e instanceof Error ? e.message : String(e)));
+      notify("⚠ " + (e instanceof Error ? e.message : String(e)), "warning");
     } finally {
       sending.value = false;
     }
@@ -542,11 +539,11 @@ function hide(): void {
   view.copilotVisible = false;
 }
 
-// "/" (viewStore.focusCopilot bumps the tick) -> reveal + focus the input.
+// "/" (viewStore.focusCopilot bumps the tick) -> reveal + focus the input (but NOT the log —
+// that stays user-controlled via the 💬 toggle).
 watch(
   () => view.copilotFocusTick,
   () => {
-    expanded.value = true;
     markActive();
     void nextTick(() => inputRef.value?.focus());
   },
@@ -639,6 +636,15 @@ watch(
         @keyup.enter="send()"
       />
 
+      <el-tooltip :content="expanded ? 'Скрыть лог' : 'Показать лог команд'" placement="top" :show-after="300">
+        <el-button
+          class="cp-ico"
+          text
+          :icon="ChatLineSquare"
+          :type="expanded ? 'primary' : 'default'"
+          @click="toggleLog()"
+        />
+      </el-tooltip>
       <el-button
         class="cp-ico"
         text
