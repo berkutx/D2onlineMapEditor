@@ -5,7 +5,7 @@
  * floats above only while expanded (on focus / after a message). "/" focuses it (viewStore
  * focusCopilot); the ✕ hides it (and "/" brings it back). STUB responder for now (M6).
  */
-import { ref, nextTick, watch } from "vue";
+import { ref, nextTick, watch, onMounted, onBeforeUnmount } from "vue";
 import { ElInput, ElPopover, ElSegmented } from "element-plus";
 import { Promotion, Close, RefreshRight, Reading } from "@element-plus/icons-vue";
 import { computed } from "vue";
@@ -159,6 +159,23 @@ function onFocus(): void {
   markActive();
   maybeHintExamples();
 }
+
+/**
+ * Auto-collapse the chat log on ANY click outside the Copilot — it's rarely needed and
+ * obscures the map (user request). A click inside the bar/log or on the teleported
+ * «Примеры» popover keeps it open (you're using it); a new message re-expands it. Capture
+ * phase so it runs before the map's own pointer handlers.
+ */
+function onDocPointerDown(e: PointerEvent): void {
+  if (!expanded.value) return;
+  const t = e.target as Node | null;
+  if (t && floatEl.value?.contains(t)) return; // inside the Copilot itself
+  if (t instanceof Element && t.closest(".cp-ex-pop")) return; // inside the examples popover
+  expanded.value = false;
+  inputFocused.value = false;
+}
+onMounted(() => document.addEventListener("pointerdown", onDocPointerDown, true));
+onBeforeUnmount(() => document.removeEventListener("pointerdown", onDocPointerDown, true));
 function onBlur(): void {
   inputFocused.value = false;
 }
