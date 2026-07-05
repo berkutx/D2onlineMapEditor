@@ -5,7 +5,7 @@
  * floats above only while expanded (on focus / after a message). "/" focuses it (viewStore
  * focusCopilot); the ✕ hides it (and "/" brings it back). STUB responder for now (M6).
  */
-import { ref, nextTick, watch } from "vue";
+import { ref, nextTick, watch, onMounted } from "vue";
 import { ElInput, ElPopover, ElSegmented, ElMessage } from "element-plus";
 import { Promotion, Close, RefreshRight, Reading, ChatLineSquare } from "@element-plus/icons-vue";
 import { computed } from "vue";
@@ -32,16 +32,46 @@ const floatStyle = computed(() =>
   dockPos.value ? { ...dockStyle.value, transform: "none" } : dockStyle.value,
 );
 
-const zoneActive = computed(() => toolStore.tool === "region");
 const region = computed(() => toolStore.region);
 
-/** Toggle the "select zone" mode: on -> region tool; off -> back to select + clear zone. */
-function toggleZone(): void {
-  if (zoneActive.value) {
-    toolStore.setRegion(null);
-    toolStore.setTool("select");
+/**
+ * Copilot generation AREA has THREE mutually-exclusive modes (the filter the user picks, or
+ * that a command auto-selects):
+ *   👁 screen — the visible screen (the DEFAULT); the area = what you see.
+ *   ⛶ zone   — draw a rectangle / brush / line / frame on the map.
+ *   📍 point  — click ONE cell; generate an NxN patch centred on it.
+ * `area` is the single source of truth; setArea() syncs it onto the tool state (eyeZone +
+ * the region tool). "zone" and "point" both drive the region tool — a click makes a 1×1
+ * (the point), a drag makes an area — so the difference is intent (hint + default size).
+ */
+type Area = "screen" | "zone" | "point";
+const area = ref<Area>("screen");
+const POINT_DEFAULT = 16; // NxN for 📍 point when the command gives no explicit size
+
+/** Which mode button is pulsing (drew the user's eye after an auto-switch). */
+const areaPulse = ref<Area | null>(null);
+function pulseArea(m: Area): void {
+  areaPulse.value = m;
+  window.setTimeout(() => { if (areaPulse.value === m) areaPulse.value = null; }, 1600);
+}
+
+/** Switch the generation area mode and mirror it onto the tool state. `auto` = selected by a
+ *  command (pulse the button + hint) vs a manual click (silent). */
+function setArea(m: Area, opts: { auto?: boolean } = {}): void {
+  area.value = m;
+  markActive();
+  if (m === "screen") {
+    toolStore.setEyeZone(true);
+    if (toolStore.tool === "region") { toolStore.setRegion(null); toolStore.setTool("select"); }
   } else {
+    toolStore.setEyeZone(false);
+    if (m === "point") toolStore.setZoneMode("rect"); // a click = one cell = the point
     toolStore.setTool("region");
+  }
+  if (opts.auto) {
+    pulseArea(m);
+    if (m === "point") notify("📍 Точка — кликни клетку на карте, потом Enter", "info");
+    else if (m === "zone") notify("⛶ Зона — обведи область на карте, потом Enter", "info");
   }
 }
 const input = ref("");
@@ -128,12 +158,7 @@ const lastGen = ref<{ mode: "keyword" | "llm"; text: string; recipeId?: string; 
 const zoneMode = computed(() => toolStore.zoneMode);
 const regionMask = computed(() => toolStore.regionMask);
 const zoneHidden = computed(() => toolStore.zoneHidden);
-const eyeActive = computed(() => toolStore.eyeZone);
 const visibleMaskLen = computed(() => view.visibleMask?.length ?? null);
-function toggleEye(): void {
-  markActive();
-  toolStore.setEyeZone(!toolStore.eyeZone);
-}
 /** One-time onboarding: the first time the user focuses the Copilot, draw their eye to the
  *  «Примеры» button (pulse) and pop it open, so they discover the command catalogue. Persisted
  *  so it fires exactly once per browser. */
@@ -153,13 +178,37 @@ function maybeHintExamples(): void {
   void nextTick(() => exBtn.value?.$el?.click?.());
 }
 
+/** First FEW times the Copilot is used, remind that the default area is 👁 Экран (= the
+ *  visible screen) and how to change it. Shown up to 3 times, then never again. */
+const AREA_HINT_KEY = "d2.cp.areaHint.v1";
+function maybeHintArea(): void {
+  let n = 0;
+  try {
+    n = Number(localStorage.getItem(AREA_HINT_KEY)) || 0;
+    if (n >= 3) return;
+    localStorage.setItem(AREA_HINT_KEY, String(n + 1));
+  } catch {
+    return;
+  }
+  ElMessage({
+    message: "Область генерации — 👁 Экран: то, что видно на экране. Сменить: ⛶ Зона (обвести) · 📍 Точка (кликнуть).",
+    type: "info", duration: 5000, showClose: true,
+  });
+  pulseArea("screen");
+}
+
 function onFocus(): void {
   // NB: do NOT auto-open the chat log here — it obscures the map and jitters the layout
   // (user request). The log is opened only by the 💬 toggle; results surface as toasts.
   inputFocused.value = true;
   markActive();
   maybeHintExamples();
+  maybeHintArea();
 }
+
+// Default the generation area to 👁 Экран so a bare command "just works" on the visible
+// map (no "выдели зону" dead-end). Purely a default — the user can switch any time.
+onMounted(() => setArea("screen"));
 
 /** Manual show/hide of the chat log (💬). The ONLY way it opens — never automatic. */
 function toggleLog(): void {
@@ -225,7 +274,7 @@ const exPop = ref<InstanceType<typeof ElPopover> | null>(null);
 //   MJ  = generated by MarkovJunior — the shape is procedural and varies on ↻ "другой вариант".
 //   LLM = flips on 🧠 mode (multi-step composition through the agent).
 //   ✎   = "follows your drawing" group: pick ⛶ → кисть/полоса, draw, then the command.
-const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: boolean }[] }[] = [
+const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: boolean; need?: "screen" | "zone" | "point" | "side" }[] }[] = [
   { group: "🌊 Вода", items: [
     { text: "озеро в центре", mj: true },
     { text: "озеро", mj: true },
@@ -280,12 +329,12 @@ const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: bool
     { text: "руины", mj: true },
     { text: "кладбище 16x16", mj: true },
   ] },
-  { group: "✎ По рисунку — проще инструментом ✎ в панели слева (или: ⛶ → кисть/полоса, проведи, потом команду)", items: [
-    { text: "дорога" },
-    { text: "река" },
-    { text: "камни" },
-    { text: "кусты" },
-    { text: "руины" },
+  { group: "✎ По рисунку (режим ⛶ Зона — проведи кистью/полосой, потом команду)", items: [
+    { text: "дорога", need: "zone" },
+    { text: "река", need: "zone" },
+    { text: "камни", need: "zone" },
+    { text: "кусты", need: "zone" },
+    { text: "руины", need: "zone" },
   ] },
   { group: "📍 Вокруг точки / стороны (зону можно не рисовать)", items: [
     { text: "озеро вокруг этой точки 20x20", mj: true },
@@ -364,14 +413,27 @@ function pushAi(text: string): void {
 }
 
 type Zone = { region: Region; cells: [number, number][] | null };
+type Need = "screen" | "zone" | "point" | "side";
+
+/** What AREA a command implies, so the right filter (👁/⛶/📍) can be auto-selected. */
+function needOf(text: string): Need {
+  if (/вокруг|около|возле|здесь|тут|это[йм]\s*точк|в\s*точк|в\s*этом\s*месте/i.test(text)) return "point";
+  if (/север|\bюг|\bюж|запад|восток|слев|справ|сверху|снизу|вверх|вниз/i.test(text)) return "side";
+  return "screen"; // "zone" can't be inferred from words alone — it's set by the ✎ examples
+}
+/** A command's implied area maps onto one of the three filter buttons (side runs textually
+ *  within the 👁 screen mode via the direction-halves branch). */
+function areaForNeed(n: Need): Area {
+  return n === "point" ? "point" : n === "zone" ? "zone" : "screen";
+}
 
 /**
  * Resolve the target zone — its bbox `region` + an optional cell `cells` mask. Priority:
- *  1. point-anchored "… вокруг этой точки NxM" — centre NxM on the clicked point / cursor.
- *  2. an explicit drag selection (⛶) — with its drawn mask (brush/line/frame).
+ *  1. 📍 point mode / "вокруг точки" — centre NxN (or POINT_DEFAULT) on the clicked cell.
+ *  2. ⛶ an explicit drag selection — with its drawn mask (brush/line/frame).
  *  3. "NxM" centred on the map.
  *  4. a direction ("север/юг/запад/восток") -> half the map.
- *  5. 👁 eye -> the EXACT visible cells (diamond mask), so it matches what you see.
+ *  5. 👁 screen -> the EXACT visible cells (diamond mask), so it matches what you see.
  */
 function resolveZone(text: string, size: number): Zone | null {
   const clamp = (n: number): number => Math.max(2, Math.min(n, size));
@@ -384,9 +446,11 @@ function resolveZone(text: string, size: number): Zone | null {
       ? { x: view.cursorCell.x, y: view.cursorCell.y }
       : null;
 
-  // 1) point-anchored size (explicit "вокруг точки", or a 1×1 point selection + a size)
-  if (m && anchor && (around || (sel ? sel.w <= 2 && sel.h <= 2 : false))) {
-    const w = clamp(+m[1]!), h = clamp(+m[2]!);
+  // 1) POINT: the 📍 mode, an explicit "вокруг точки", or a 1×1 selection + a size. Size = the
+  //    command's NxN, else POINT_DEFAULT (so a bare "озеро" in 📍 mode isn't a single cell).
+  const pointIntent = area.value === "point" || around || (!!m && sel ? sel.w <= 2 && sel.h <= 2 : false);
+  if (pointIntent && anchor) {
+    const w = clamp(m ? +m[1]! : POINT_DEFAULT), h = clamp(m ? +m[2]! : POINT_DEFAULT);
     const x = Math.max(0, Math.min(anchor.x - Math.floor(w / 2), size - w));
     const y = Math.max(0, Math.min(anchor.y - Math.floor(h / 2), size - h));
     return { region: { x, y, w, h }, cells: null };
@@ -471,9 +535,18 @@ async function send(): Promise<void> {
     notify("Карта не загружена.", "warning");
     return;
   }
+  // Auto-select the area filter a TYPED command implies (point → 📍, direction → 👁 screen);
+  // a generic command keeps the current mode (respect a drawn ⛶ zone).
+  const need = needOf(text);
+  if (need === "point" && area.value !== "point") setArea("point", { auto: true });
+  else if (need === "side" && area.value === "point") setArea("screen");
+
   const zone = resolveZone(text, doc.size);
   if (!zone) {
-    notify("Сначала выдели зону кнопкой ⛶ (или 👁) — или укажи размер/сторону (напр. «25x25» или «север»).", "warning");
+    // mode-aware dead-end hint (+ the filter is already switched above for point commands)
+    if (area.value === "point") notify("📍 Точка — кликни клетку на карте, потом Enter.", "warning");
+    else if (area.value === "zone") notify("⛶ Зона — обведи область на карте, потом Enter.", "warning");
+    else notify("Не понял область. Наведи карту (👁 Экран) или выбери ⛶ Зона / 📍 Точка, либо укажи размер («25x25») / сторону («север»).", "warning");
     return;
   }
   const { region, cells } = zone;
@@ -525,13 +598,15 @@ async function retry(): Promise<void> {
   }
 }
 
-/** Fill the input from an example (and switch to LLM mode for composition examples). */
-function applyExample(ex: { text: string; llm?: boolean; mj?: boolean }): void {
+/** Fill the input from an example, and AUTO-SELECT the area filter the command needs
+ *  (👁 screen / ⛶ zone / 📍 point) — the button pulses so the switch is visible. */
+function applyExample(ex: { text: string; llm?: boolean; mj?: boolean; need?: Need }): void {
   input.value = ex.text;
   if (ex.llm) llmMode.value = true;
   examplesOpen.value = false;
   (exPop.value as unknown as { hide?: () => void } | null)?.hide?.();
-  expanded.value = true;
+  const need = ex.need ?? needOf(ex.text);
+  setArea(areaForNeed(need), { auto: true });
   void nextTick(() => inputRef.value?.focus());
 }
 
@@ -561,26 +636,38 @@ watch(
       </div>
     </transition>
 
-    <div v-if="zoneActive" class="cp-zonehint d2-float" :class="{ idle: idleEffective }">
-      <div class="cp-zrow">
-        <span class="cp-zlabel">Зона:</span>
-        <el-segmented :model-value="zoneMode" :options="zoneModeOptions" size="small" @change="onZoneMode" />
-        <el-segmented
-          v-if="zoneMode === 'brush' || zoneMode === 'line'"
-          :model-value="toolStore.size"
-          :options="zoneSizeOptions"
-          size="small"
-          @change="onZoneSize"
-        />
-      </div>
-      <div class="cp-zrow">
-        <span class="cp-zhelp">{{ zoneHelp }}</span>
-        <template v-if="region">
-          <span class="cp-zsel">{{ regionMask?.length ? regionMask.length + " кл." : region.w + "×" + region.h }}</span>
-          <el-button size="small" text @click="toggleZoneHidden">{{ zoneHidden ? "Показать" : "Скрыть" }}</el-button>
-          <el-button size="small" text type="success" @click="acceptZone">Принять</el-button>
-        </template>
-      </div>
+    <div v-if="area !== 'screen'" class="cp-zonehint d2-float" :class="{ idle: idleEffective }">
+      <template v-if="area === 'zone'">
+        <div class="cp-zrow">
+          <span class="cp-zlabel">⛶ Зона:</span>
+          <el-segmented :model-value="zoneMode" :options="zoneModeOptions" size="small" @change="onZoneMode" />
+          <el-segmented
+            v-if="zoneMode === 'brush' || zoneMode === 'line'"
+            :model-value="toolStore.size"
+            :options="zoneSizeOptions"
+            size="small"
+            @change="onZoneSize"
+          />
+        </div>
+        <div class="cp-zrow">
+          <span class="cp-zhelp">{{ zoneHelp }}</span>
+          <template v-if="region">
+            <span class="cp-zsel">{{ regionMask?.length ? regionMask.length + " кл." : region.w + "×" + region.h }}</span>
+            <el-button size="small" text @click="toggleZoneHidden">{{ zoneHidden ? "Показать" : "Скрыть" }}</el-button>
+            <el-button size="small" text type="success" @click="acceptZone">Принять</el-button>
+          </template>
+        </div>
+      </template>
+      <template v-else>
+        <div class="cp-zrow">
+          <span class="cp-zlabel">📍 Точка:</span>
+          <span class="cp-zhelp">кликни клетку на карте — сгенерирую {{ POINT_DEFAULT }}×{{ POINT_DEFAULT }} вокруг (или укажи размер в команде)</span>
+        </div>
+        <div v-if="region" class="cp-zrow">
+          <span class="cp-zsel">точка ({{ region.x }}, {{ region.y }})</span>
+          <el-button size="small" text type="success" @click="acceptZone">Сбросить</el-button>
+        </div>
+      </template>
     </div>
 
     <div class="copilot-bar d2-float" :class="{ idle: idleEffective }">
@@ -618,11 +705,15 @@ watch(
       <el-tooltip content="Беречь рельеф — не перетирать воду и горы" placement="top" :show-after="300">
         <el-button class="cp-ico" text :type="protect ? 'primary' : 'default'" @click="protect = !protect">🛡</el-button>
       </el-tooltip>
-      <el-tooltip content="Глаз: видимая область экрана = зона генерации" placement="top" :show-after="300">
-        <el-button class="cp-ico" text :type="eyeActive ? 'primary' : 'default'" @click="toggleEye()">👁<span v-if="eyeActive && visibleMaskLen" class="cp-badge">{{ visibleMaskLen }}</span></el-button>
+      <!-- Область генерации (взаимоисключающий фильтр; по умолчанию 👁 Экран) -->
+      <el-tooltip content="👁 Экран — генерировать в видимую область (по умолчанию)" placement="top" :show-after="300">
+        <el-button class="cp-ico cp-mode" :class="{ pulse: areaPulse === 'screen' }" text :type="area === 'screen' ? 'primary' : 'default'" @click="setArea('screen')">👁<span v-if="area === 'screen' && visibleMaskLen" class="cp-badge">{{ visibleMaskLen }}</span></el-button>
       </el-tooltip>
-      <el-tooltip content="Выделить зону для генерации" placement="top" :show-after="300">
-        <el-button class="cp-ico" text :type="zoneActive ? 'primary' : 'default'" @click="toggleZone()">⛶<span v-if="region" class="cp-badge">{{ region.w }}×{{ region.h }}</span></el-button>
+      <el-tooltip content="⛶ Зона — обвести область на карте (прямоуг./кисть/полоса/рамка)" placement="top" :show-after="300">
+        <el-button class="cp-ico cp-mode" :class="{ pulse: areaPulse === 'zone' }" text :type="area === 'zone' ? 'primary' : 'default'" @click="setArea('zone')">⛶<span v-if="area === 'zone' && region" class="cp-badge">{{ region.w }}×{{ region.h }}</span></el-button>
+      </el-tooltip>
+      <el-tooltip content="📍 Точка — кликнуть клетку, генерировать вокруг неё" placement="top" :show-after="300">
+        <el-button class="cp-ico cp-mode" :class="{ pulse: areaPulse === 'point' }" text :type="area === 'point' ? 'primary' : 'default'" @click="setArea('point')">📍<span v-if="area === 'point' && region" class="cp-badge">{{ region.x }},{{ region.y }}</span></el-button>
       </el-tooltip>
 
       <el-input
@@ -784,6 +875,16 @@ watch(
 @keyframes cpExPulse {
   0%, 100% { transform: scale(1); filter: none; }
   50% { transform: scale(1.28); filter: drop-shadow(0 0 6px var(--el-color-primary)); }
+}
+/* blink the area-mode button (👁/⛶/📍) when a command auto-switches the filter */
+.cp-mode.pulse {
+  color: var(--el-color-primary);
+  opacity: 1;
+  animation: cpModePulse 0.5s ease-in-out 3;
+}
+@keyframes cpModePulse {
+  0%, 100% { transform: scale(1); filter: none; }
+  50% { transform: scale(1.32); filter: drop-shadow(0 0 7px var(--el-color-primary)); }
 }
 .cp-close {
   color: var(--el-text-color-secondary);
