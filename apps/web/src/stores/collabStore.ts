@@ -370,8 +370,12 @@ export const useCollabStore = defineStore("collab", () => {
       pending.value++;
       socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
         pending.value = Math.max(0, pending.value - 1);
-        if (ack.ok && typeof ack.seq === "number") { lastSeq = Math.max(lastSeq, ack.seq); record(ack.seq, meId, op, true, inverse); }
-        else console.warn("[collab] op rejected:", ack.reason); // eslint-disable-line no-console
+        if (ack.ok && typeof ack.seq === "number") {
+          lastSeq = Math.max(lastSeq, ack.seq);
+          record(ack.seq, meId, op, true, inverse);
+          // M4: the server reassigned this add's id to avoid a collision — reconcile our copy.
+          if (ack.assignedId && op.kind === "addObject") edit.reconcileObjectId(op.object.id, ack.assignedId);
+        } else console.warn("[collab] op rejected:", ack.reason); // eslint-disable-line no-console
       });
       return;
     }
@@ -390,8 +394,12 @@ export const useCollabStore = defineStore("collab", () => {
     pending.value++;
     socket.emit("edit:ops", { mapId: id, batchId, baseSeq: lastSeq, ops: opsWithIds }, (ack) => {
       pending.value = Math.max(0, pending.value - 1);
-      if (ack.ok) { lastSeq = Math.max(lastSeq, ack.seqEnd); entry.seq = ack.seqStart; }
-      else console.warn("[collab] batch rejected:", ack.reason); // eslint-disable-line no-console
+      if (ack.ok) {
+        lastSeq = Math.max(lastSeq, ack.seqEnd);
+        entry.seq = ack.seqStart;
+        // M4: reconcile any adds the server reassigned to avoid a collision.
+        if (ack.assignedIds) for (const [tempId, serverId] of Object.entries(ack.assignedIds)) edit.reconcileObjectId(tempId, serverId);
+      } else console.warn("[collab] batch rejected:", ack.reason); // eslint-disable-line no-console
     });
   }
 

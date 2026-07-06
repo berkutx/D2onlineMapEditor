@@ -24,7 +24,7 @@ import type {
   UserPresence,
 } from "@d2/socket-contract";
 import { EditOp } from "@d2/socket-contract";
-import { applyOps, diffDocs, opKeys } from "@d2/map-edit";
+import { applyOps, diffDocs, opKeys, assignObjectIds } from "@d2/map-edit";
 import type { MapStore } from "../maps/mapStore.js";
 import { RoomManager, roomId, roomKey } from "./RoomManager.js";
 import type { EditLog } from "./EditLog.js";
@@ -83,6 +83,18 @@ export function registerRoomHandlers(
     } else {
       fn();
     }
+  };
+
+  /** The object ids currently live in the room (base doc + log adds − deletes), via the
+   *  snapshot cache — for M4 addObject id reassignment. Node processes socket messages in
+   *  order, so the append of an earlier add is already reflected before the next is folded. */
+  const liveObjectIds = async (mapId: string, key: string): Promise<Set<string>> => {
+    const loaded = await store.getMap(mapId);
+    if (!loaded) return new Set();
+    const doc = snapshots
+      ? snapshots.materialize(key, loaded.doc, log).doc
+      : applyOps(loaded.doc, log.all(key).map((e) => e.op));
+    return new Set(doc.objects.map((o) => o.id));
   };
 
   socket.on("room:join", (p, ack) => {
@@ -177,11 +189,23 @@ export function registerRoomHandlers(
     }
     withRoom(key, () => {
       const author = socket.data.clientId ?? socket.id;
-      const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now(), p.batchId, author);
-      ack({ ok: true, seq: entry.seq });
-      socket
-        .to(roomId(key))
-        .emit("edit:applied", { seq: entry.seq, by: socket.id, author, clientOpId: p.clientOpId, op: parsed.data, batchId: p.batchId });
+      const finish = (op: EditOp, assignedId?: string): void => {
+        const entry = log.append(key, op, socket.id, p.clientOpId, Date.now(), p.batchId, author);
+        ack({ ok: true, seq: entry.seq, assignedId });
+        socket
+          .to(roomId(key))
+          .emit("edit:applied", { seq: entry.seq, by: socket.id, author, clientOpId: p.clientOpId, op, batchId: p.batchId });
+      };
+      // M4: a colliding addObject id is reassigned to a fresh one so no peer ever drops it.
+      if (parsed.data.kind === "addObject") {
+        const tempId = parsed.data.object.id;
+        void liveObjectIds(p.mapId, key).then((ids) => {
+          const { ops: [assigned], remap } = assignObjectIds(ids, [parsed.data]);
+          finish(assigned!, remap[tempId]);
+        });
+      } else {
+        finish(parsed.data);
+      }
     });
   });
 
@@ -218,14 +242,26 @@ export function registerRoomHandlers(
     }
     withRoom(key, () => {
       const author = socket.data.clientId ?? socket.id;
-      const entries = log.appendBatch(key, validated, socket.id, p.batchId, Date.now(), author);
-      ack({ ok: true, seqStart: entries[0]!.seq, seqEnd: entries[entries.length - 1]!.seq });
-      socket.to(roomId(key)).emit("edit:opsApplied", {
-        batchId: p.batchId,
-        by: socket.id,
-        author,
-        ops: entries.map((e) => ({ seq: e.seq, clientOpId: e.clientOpId, op: e.op })),
-      });
+      const finish = (items: { clientOpId: string; op: EditOp }[], assignedIds?: Record<string, string>): void => {
+        const entries = log.appendBatch(key, items, socket.id, p.batchId, Date.now(), author);
+        ack({ ok: true, seqStart: entries[0]!.seq, seqEnd: entries[entries.length - 1]!.seq, assignedIds });
+        socket.to(roomId(key)).emit("edit:opsApplied", {
+          batchId: p.batchId,
+          by: socket.id,
+          author,
+          ops: entries.map((e) => ({ seq: e.seq, clientOpId: e.clientOpId, op: e.op })),
+        });
+      };
+      // M4: reassign any colliding addObject ids across the whole batch (later refs follow).
+      if (validated.some((v) => v.op.kind === "addObject")) {
+        void liveObjectIds(p.mapId, key).then((ids) => {
+          const { ops, remap } = assignObjectIds(ids, validated.map((v) => v.op));
+          const items = validated.map((v, i) => ({ clientOpId: v.clientOpId, op: ops[i]! }));
+          finish(items, Object.keys(remap).length ? remap : undefined);
+        });
+      } else {
+        finish(validated);
+      }
     });
   });
 

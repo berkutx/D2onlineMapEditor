@@ -61,5 +61,8 @@ export const OpAck = z.object({
   ok: z.boolean(),
   seq: z.number().int().optional(),
   reason: z.string().optional(),
+  /** v0.7 (M4): if the server had to REASSIGN a colliding addObject id, the new id — so the
+   *  author reconciles its optimistic object from the temp id it sent to this one. */
+  assignedId: z.string().optional(),
 });
 export type OpAck = z.infer<typeof OpAck>;

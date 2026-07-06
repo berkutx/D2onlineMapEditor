@@ -148,3 +148,38 @@ describe("edit:revertRange", () => {
     expect(doc.terrain.cells[0]!.value).toBe(9);  // (0,0) kept (peer's)
   });
 });
+
+const landmark = (id: string): EditOp => ({ kind: "addObject", object: { id, type: "landmark", pos: { x: 1, y: 1 } } as never });
+
+describe("edit:op addObject id reassignment (M4)", () => {
+  it("reassigns a colliding addObject to the next free id (no peer ever drops it)", async () => {
+    const rooms = new RoomManager();
+    const log = new EditLog();
+    const snaps = new RoomSnapshots();
+    const A = fakeSocket("sockA", "clientA");
+    const B = fakeSocket("sockB", "clientB");
+    registerRoomHandlers(fakeIo, A.socket, rooms, log, fakeStore, snaps);
+    registerRoomHandlers(fakeIo, B.socket, rooms, log, fakeStore, snaps);
+    A.invoke("room:join", { mapId: MAP, channel: CH, user: { name: "A" } }, () => undefined);
+    B.invoke("room:join", { mapId: MAP, channel: CH, user: { name: "B" } }, () => undefined);
+
+    // A places a landmark; base is empty so no collision.
+    const ackA = await ackP<{ ok: boolean; assignedId?: string }>(
+      A.invoke, "edit:op", { mapId: MAP, clientOpId: "a1", baseSeq: 0, op: landmark("S143MG0001") },
+    );
+    expect(ackA.ok).toBe(true);
+    expect(ackA.assignedId).toBeUndefined();
+
+    // B independently minted the SAME id → server reassigns it to the next free one.
+    const ackB = await ackP<{ ok: boolean; assignedId?: string }>(
+      B.invoke, "edit:op", { mapId: MAP, clientOpId: "b1", baseSeq: 0, op: landmark("S143MG0001") },
+    );
+    expect(ackB.ok).toBe(true);
+    expect(ackB.assignedId).toBe("S143MG0002");
+
+    const ids = snaps.materialize(KEY, baseDoc(), log).doc.objects.map((o) => o.id);
+    expect(ids).toContain("S143MG0001");
+    expect(ids).toContain("S143MG0002");
+    expect(ids.filter((i) => i === "S143MG0001")).toHaveLength(1); // no duplicate → no drop
+  });
+});

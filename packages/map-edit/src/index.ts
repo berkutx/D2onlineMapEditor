@@ -12,6 +12,7 @@
 export * from "./bits.js";
 export * from "./ops.js";
 export * from "./diff.js";
+export * from "./objectIds.js";
 export * from "./brush.js";
 // selective (not *): brush.js already re-exports roadTypeFromMask — a second star export
 // would make the symbol ambiguous and ESM would silently DROP it from the barrel
