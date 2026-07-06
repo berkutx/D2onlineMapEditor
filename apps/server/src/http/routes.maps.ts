@@ -59,6 +59,7 @@ function buildAndValidate(
   baseBytes: Uint8Array,
   project: EditorProject,
   talismanTemplates?: ReadonlySet<string>,
+  landmarkSize?: (baseType: string) => readonly [number, number] | undefined,
 ): { report: ValidationReport; bytes?: Uint8Array } {
   const { doc, raw } = parseScenarioRaw(baseBytes);
   // Fold add→delete pairs (a collab undo of a placement) BEFORE the byte writer: it cannot
@@ -72,7 +73,7 @@ function buildAndValidate(
   let bytes: Uint8Array | undefined;
   let buildError: string | undefined;
   try {
-    bytes = applyEditsToBytes(raw, ops, { talismanTemplates });
+    bytes = applyEditsToBytes(raw, ops, { talismanTemplates, landmarkSize });
   } catch (e) {
     buildError = e instanceof Error ? e.message : String(e);
   }
@@ -91,7 +92,7 @@ function buildAndValidate(
     // game-MECHANICS warnings (our addition — the reference validator checks only db
     // refs): cities on water / roads under water. Calibrated to be SILENT on all 52
     // shipped campaign maps, so any hit is a real editing accident.
-    const mech = validateMechanics(built);
+    const mech = validateMechanics(built, { landmarkSize });
     structural = {
       ok: doc3.ok && integ.ok,
       errors: [...doc3.errors, ...integ.errors],
@@ -165,6 +166,22 @@ async function loadCatalogSets(): Promise<{
     landmarkSizesCache = sizes;
   }
   return { walls: wallSetCache, decor: decorSetCache, landmarkSizes: landmarkSizesCache };
+}
+
+/** A baseType → GLmark `[w,h]` resolver for the byte writer's plan footprints + the mechanics
+ *  overlap check. Degrades to `undefined` (⇒ 1×1) when the catalog is missing, so asset
+ *  volumes without decorCatalog.json validate exactly as before. */
+let landmarkSizeFnCache: ((baseType: string) => readonly [number, number] | undefined) | null = null;
+async function loadLandmarkSizeFn(): Promise<(baseType: string) => readonly [number, number] | undefined> {
+  if (!landmarkSizeFnCache) {
+    try {
+      const { landmarkSizes } = await loadCatalogSets();
+      landmarkSizeFnCache = (baseType: string) => landmarkSizes[(baseType ?? "").toUpperCase()];
+    } catch {
+      landmarkSizeFnCache = () => undefined;
+    }
+  }
+  return landmarkSizeFnCache;
 }
 
 /** Parse a hand-drawn cell mask (body.cells = [[x,y],…]) into an "x,y" Set; undefined if empty. */
@@ -441,7 +458,7 @@ export async function registerMapRoutes(
         return reply.code(404).send({ error: "map not found" });
       }
 
-      const { report, bytes } = buildAndValidate(base.bytes, project, await loadTalismanTemplates());
+      const { report, bytes } = buildAndValidate(base.bytes, project, await loadTalismanTemplates(), await loadLandmarkSizeFn());
 
       if (action === "validate") {
         return reply.send(report);
@@ -507,7 +524,7 @@ export async function registerMapRoutes(
 
     // validate the generated ops as one more commit on top of the project
     const augmented = ops.length ? pushCommit(project, ops) : project;
-    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates());
+    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates(), await loadLandmarkSizeFn());
     const debug = {
       serverMs: Date.now() - t0,
       opCount: ops.length,
@@ -618,7 +635,7 @@ export async function registerMapRoutes(
     }
 
     const augmented = ops.length ? pushCommit(project, ops) : project;
-    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates());
+    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates(), await loadLandmarkSizeFn());
     const debug = {
       serverMs: Date.now() - t0,
       opCount: ops.length,

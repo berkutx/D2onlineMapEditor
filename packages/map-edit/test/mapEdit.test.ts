@@ -238,6 +238,41 @@ describe("@d2/map-edit road brush + append export", () => {
   });
 });
 
+describe("@d2/map-edit landmark footprint plan (passability = plan occupancy)", () => {
+  /** Count how many times an id appears as a plan ELEMENT (within the MidgardPlan span). */
+  function planRefCount(out: Uint8Array, id: string): number {
+    const outBuf = Buffer.from(out);
+    const planAvc = outBuf.indexOf(".?AVCMidgardPlan@@");
+    const planEnd = outBuf.indexOf("ENDOBJECT\0", planAvc);
+    let count = 0;
+    for (let p = outBuf.indexOf(id, planAvc); p >= 0 && p < planEnd; p = outBuf.indexOf(id, p + 1)) count++;
+    return count;
+  }
+
+  it("a 2×2 wall claims all 4 footprint cells in the plan (1×1 without a resolver)", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    // free 2×2 corner (footprint (2..3,2..3) in-bounds on 72×72 Riders)
+    const lm = {
+      kind: "addObject" as const,
+      object: { type: "landmark" as const, id: "S143MM9000", pos: { x: 2, y: 2 }, baseType: "G000MG0047" },
+    };
+    // G000MG0047 = 2×2 (byte-verified on the original's walltest.sg).
+    const size = (b: string): readonly [number, number] | undefined => (b === "G000MG0047" ? [2, 2] : undefined);
+
+    // legacy path (no resolver): only the anchor cell → a maze wall would be ¾ passable.
+    expect(planRefCount(applyEditsToBytes(raw, [lm]), "S143MM9000")).toBe(1);
+
+    // with the GLmark footprint: all 4 cells occupied — the wall actually blocks.
+    const out = applyEditsToBytes(raw, [lm], { landmarkSize: size });
+    expect(planRefCount(out, "S143MM9000")).toBe(4);
+
+    // footprint is byte-plan only (never on the object model) — the semantic tier stays green.
+    const res = roundTripSemantic(doc, out, [lm]);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
+  });
+});
+
 describe("@d2/map-edit road segment selection", () => {
   const key = (c: { x: number; y: number }) => `${c.x},${c.y}`;
 

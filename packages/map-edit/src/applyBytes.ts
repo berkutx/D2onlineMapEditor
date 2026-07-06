@@ -55,6 +55,13 @@ export interface ApplyBytesOptions {
    *  entry (the reference's D2MapEditor::addItem behavior). Omitted = entries not added
    *  (callers without catalog access — the delete-side purge still always runs). */
   talismanTemplates?: ReadonlySet<string>;
+  /** baseType (GLmark id) → its `[w, h]` GLmark footprint (decorCatalog cx/cy). A placed
+   *  landmark occupies its FULL footprint in the MidgardPlan (byte-verified on the original's
+   *  walltest: G000MG8022=1×1, G000MG0047=2×2, G000MG0003=4×4 — passability comes from plan
+   *  occupancy, not terrain). Omitted → 1×1 per landmark (a 2×2 wall would then block only
+   *  ¼ of itself — the "passable walls" bug). Footprint is a DERIVED render field, never on
+   *  the persisted object model, so it can't affect the semantic round-trip. */
+  landmarkSize?: (baseType: string) => readonly [number, number] | undefined;
 }
 
 export function applyEditsToBytes(
@@ -568,9 +575,16 @@ export function applyEditsToBytes(
       const second = m ? parseInt(m[1]!, 16) : nextMM++;
       const full = `${raw.version}MM${hex4(second)}`;
       appends.push(landmarkFrame(raw.version, second, o.pos.x, o.pos.y, o.baseType ?? "G000000000"));
-      // plan: 1×1 — the landmark's true GLmark footprint isn't available in map-edit (the
-      // reference rebuilds the whole plan from footprints; per-type exactness is a refinement).
-      planAdds.push({ x: o.pos.x, y: o.pos.y, element: full });
+      // plan = the landmark's FULL GLmark footprint (from the injected resolver; 1×1 if absent).
+      // The original editor registers every footprint cell (byte-verified on walltest.sg), and
+      // passability is plan occupancy — a 2×2 wall MUST claim all 4 cells or units walk through
+      // ¾ of it. In-bounds guarded (a footprint never extends past the map edge).
+      const [lw, lh] = opts.landmarkSize?.(o.baseType ?? "") ?? [1, 1];
+      for (let dy = 0; dy < lh; dy++)
+        for (let dx = 0; dx < lw; dx++) {
+          const px = o.pos.x + dx, py = o.pos.y + dy;
+          if (px < raw.size && py < raw.size) planAdds.push({ x: px, y: py, element: full });
+        }
     } else if (o.type === "location") {
       // A named region (MidLocation). Same-session patchObject of name/radius already
       // folded into `o` via the addedObjects {...added, ...fields} merge above.

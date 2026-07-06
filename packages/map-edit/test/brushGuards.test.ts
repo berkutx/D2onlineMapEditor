@@ -88,3 +88,44 @@ describe("validateMechanics (calibrated: silent on shipped maps)", () => {
     expect(warns.some((w) => w.includes("дорога под водой"))).toBe(true);
   });
 });
+
+describe("validateMechanics occupancy (no overlapping footprints — the original's rule)", () => {
+  // G000MG0047 = a 2×2 wall piece; byte-verified footprint from the original's walltest.sg
+  // (G000MG8022=1×1, G000MG0047=2×2, G000MG0003=4×4). The resolver stands in for decorCatalog.
+  const LM = "G000MG0047";
+  const size = (b: string): readonly [number, number] | undefined =>
+    b === LM ? [2, 2] : undefined;
+
+  /** First 2×2 spot free of any object cell (buildOccupiedSet) — no overlap possible there. */
+  function freeSpot(): { x: number; y: number } {
+    const n = doc.size;
+    for (let y = 0; y + 1 < n; y++)
+      for (let x = 0; x + 1 < n; x++) {
+        let ok = true;
+        for (let dy = 0; dy < 2 && ok; dy++)
+          for (let dx = 0; dx < 2; dx++) if (occupied.has(`${x + dx},${y + dy}`)) { ok = false; break; }
+        if (ok) return { x, y };
+      }
+    throw new Error("no free 2×2 spot on Riders");
+  }
+
+  it("flags a landmark overlapping a village footprint", () => {
+    const lm = { type: "landmark" as const, id: "S143MM9000", pos: { ...village.pos }, baseType: LM };
+    const bad = applyOps(doc, [{ kind: "addObject", object: lm }]);
+    const warns = validateMechanics(bad, { landmarkSize: size });
+    expect(warns.some((w) => w.includes("перекрывает") && w.includes("S143MM9000"))).toBe(true);
+  });
+
+  it("does NOT flag the same landmark on free ground", () => {
+    const lm = { type: "landmark" as const, id: "S143MM9001", pos: freeSpot(), baseType: LM };
+    const bad = applyOps(doc, [{ kind: "addObject", object: lm }]);
+    const warns = validateMechanics(bad, { landmarkSize: size });
+    expect(warns.some((w) => w.includes("S143MM9001"))).toBe(false);
+  });
+
+  it("Riders stays clean with real landmark footprints (calibration)", () => {
+    // every landmark at a plausible size — the shipped map must still produce zero overlaps.
+    const all = (b: string): readonly [number, number] => (b === LM ? [2, 2] : [1, 1]);
+    expect(validateMechanics(doc, { landmarkSize: all })).toEqual([]);
+  });
+});
