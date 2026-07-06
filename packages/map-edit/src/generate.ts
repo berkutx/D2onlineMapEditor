@@ -139,7 +139,10 @@ export function buildWallSet(
   for (const e of arr) {
     if (e.shape !== "tower" || (e.cx ?? 1) !== 1 || (e.cy ?? 1) !== 1) continue;
     const fac = e.id.slice(0, 4);
-    const score = e.tone === "neutral" || (e.tags ?? []).includes("neutral") ? 1 : 0;
+    // Prefer G000MG0149 — the round stone "Башня" the game's OWN maze maps place at junctions
+    // (verified on a shipped maze scenario); fall back to any neutral turret of the faction.
+    const score =
+      (e.id === "G000MG0149" ? 2 : 0) + (e.tone === "neutral" || (e.tags ?? []).includes("neutral") ? 1 : 0);
     const cur = towerByFaction.get(fac);
     if (!cur || score > cur.score) towerByFaction.set(fac, { id: e.id, score });
   }
@@ -357,12 +360,13 @@ export function decodeGrid(
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
       const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
-      // A corner/junction/isolated cell must fill its WHOLE scale×scale block or units slip
-      // through the unfilled cells. Scale 1 → a 1×1 turret fills its single cell (no gap, keeps
-      // the tower look). Scale 2 → the 2×2 wall CORNER piece turns the wall and fully seals the
-      // block (a 1×1 tower filled only ¼ of a 2×2 junction — the walk-through gap the maze had).
-      if (!straight && !wantS2 && style?.tower) {
-        place(x, y, style.tower);
+      // A corner/junction/isolated cell gets the round stone TOWER the game's own maze maps
+      // place at nodes (G000MG0149). A lone 1×1 tower fills only one cell, so we tile the WHOLE
+      // scale×scale block with it (scale 2 → 4× 1×1 = a sealed bastion): the shipped-map tower
+      // look WITHOUT the walk-through gap a single 1×1 tower left at a 2×2 junction.
+      if (!straight && style?.tower) {
+        for (let dy = 0; dy < scale; dy++)
+          for (let dx = 0; dx < scale; dx++) place(x + dx, y + dy, style.tower);
       } else {
         const wallType = wallPiece(m, pieces);
         if (wallType) place(x, y, wallType);

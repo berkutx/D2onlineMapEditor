@@ -118,20 +118,36 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
     }
   }
 
-  it("wall_maze seals every junction — every piece is a full 2×2 block (no walk-through gap)", async () => {
-    // A wall/junction piece must fill its whole 2×2 block or units slip through the unfilled
-    // cells. Every placed piece must be 2×2 (straight OR wall corner; a 1×1 tower filled only ¼
-    // of a 2×2 junction — the old gap). The maze region is also snapped to a multiple of 2.
+  it("wall_maze seals every block — no walk-through gap (straights=2×2, junctions=tower bastions)", async () => {
+    // The maze is a scale-2 lattice: straight runs are 2×2 wall pieces; junctions tile the block
+    // with the round tower (4× 1×1). Either way a touched 2×2 block must be FULLY covered — an
+    // unfilled cell is a gap a unit slips through. Region is snapped to a multiple of 2, so every
+    // piece anchors on the even lattice and blocks align to even origins.
     for (const seed of SEEDS) {
       const { ops } = await run("wall_maze", seed);
       const walls = ops.filter(
         (o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject" && o.object.type === "landmark",
       );
       expect(walls.length, `seed=${seed}: placed no walls`).toBeGreaterThan(0);
+      // union of every placed piece's footprint
+      const covered = new Set<string>();
       for (const op of walls) {
         const bt = String((op.object as { baseType?: string }).baseType ?? "").toUpperCase();
         const [w, h] = landmarkSizes[bt] ?? [1, 1];
-        expect(`${w}×${h}`, `seed=${seed}: piece ${bt} is ${w}×${h}, not 2×2`).toBe("2×2");
+        const { x, y } = op.object.pos as { x: number; y: number };
+        for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) covered.add(`${x + dx},${y + dy}`);
+      }
+      // every 2×2 block that received any piece must have all four cells filled
+      const blocks = new Set<string>();
+      for (const k of covered) {
+        const [x, y] = k.split(",").map(Number) as [number, number];
+        blocks.add(`${x - (x % 2)},${y - (y % 2)}`);
+      }
+      for (const b of blocks) {
+        const [bx, by] = b.split(",").map(Number) as [number, number];
+        for (let dy = 0; dy < 2; dy++)
+          for (let dx = 0; dx < 2; dx++)
+            expect(covered.has(`${bx + dx},${by + dy}`), `seed=${seed}: GAP at ${bx + dx},${by + dy} (block ${b})`).toBe(true);
       }
     }
   });
