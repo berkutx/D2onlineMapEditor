@@ -152,7 +152,11 @@ export const useEditStore = defineStore("edit", () => {
   const redoable = computed(() =>
     roomConnected.value ? myRedo.value.length > 0 : project.value ? canRedoFn(project.value) : false,
   );
+  // `dirty` = the journal has ANY commits (drives «Сбросить правки» + auto-validate).
   const dirty = computed(() => (project.value?.journal.length ?? 0) > 0);
+  // `edited` = the live doc actually DIFFERS from the base (active commits present). Unlike
+  // `dirty` it goes false when you undo everything to the baseline — the honest "modified" bit.
+  const edited = computed(() => (project.value?.cursor ?? 0) > 0);
 
   /** Load (or create) the project for `mapId`, restoring any persisted edits. localStorage
    *  first (this device's live state); if it yields an EMPTY project, the server-saved copy
@@ -798,6 +802,7 @@ export const useEditStore = defineStore("edit", () => {
     undoable,
     redoable,
     dirty,
+    edited,
     redoBlockedTick,
     ensureProject,
     setBaseDoc,

@@ -193,6 +193,13 @@ export const useCollabStore = defineStore("collab", () => {
   const peers = reactive(new Map<string, UserPresence>());
   const history = ref<HistoryEntry[]>([]);
   const connected = computed(() => me.value !== null);
+  /** Ops emitted but not yet acked by the server (in flight) — drives the honest sync badge. */
+  const pending = ref(0);
+  /** offline (no room) · syncing (ops in flight) · synced (everything acked). Replaces the old
+   *  «есть правки» flag, which meant "journal non-empty" and never reflected actual sync. */
+  const syncState = computed<"offline" | "syncing" | "synced">(() =>
+    !connected.value ? "offline" : pending.value > 0 ? "syncing" : "synced",
+  );
   /** Highest seq this client has applied (its position in the shared log). */
   let lastSeq = 0;
   let opCounter = 0;
@@ -360,7 +367,9 @@ export const useCollabStore = defineStore("collab", () => {
       const clientOpId = uids?.[0] || `${meId}:${opCounter++}`;
       knownOpIds.add(clientOpId);
       const inverse = inverses?.[0];
+      pending.value++;
       socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
+        pending.value = Math.max(0, pending.value - 1);
         if (ack.ok && typeof ack.seq === "number") { lastSeq = Math.max(lastSeq, ack.seq); record(ack.seq, meId, op, true, inverse); }
         else console.warn("[collab] op rejected:", ack.reason); // eslint-disable-line no-console
       });
@@ -378,7 +387,9 @@ export const useCollabStore = defineStore("collab", () => {
     });
     const flatInverse = inverses ? inverses.slice().reverse().flatMap((iv) => iv) : []; // newest-first
     const entry = recordBatchRow(lastSeq + 1, meId, ops, flatInverse, batchId, true);
+    pending.value++;
     socket.emit("edit:ops", { mapId: id, batchId, baseSeq: lastSeq, ops: opsWithIds }, (ack) => {
+      pending.value = Math.max(0, pending.value - 1);
       if (ack.ok) { lastSeq = Math.max(lastSeq, ack.seqEnd); entry.seq = ack.seqStart; }
       else console.warn("[collab] batch rejected:", ack.reason); // eslint-disable-line no-console
     });
@@ -651,6 +662,7 @@ export const useCollabStore = defineStore("collab", () => {
     history.value = [];
     batchAgg.clear();
     lastSeq = 0;
+    pending.value = 0;
     mapId.value = null;
     channel.value = null; // the next map joins its own channel (no cross-map channel leaks)
   }
@@ -676,6 +688,7 @@ export const useCollabStore = defineStore("collab", () => {
     channel,
     me,
     connected,
+    syncState,
     peerList,
     history,
     userName,

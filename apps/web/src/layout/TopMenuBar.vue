@@ -23,7 +23,7 @@ const editStore = useEditStore();
 const collabStore = useCollabStore();
 
 const { scenarios, currentScenarioId, status } = storeToRefs(mapStore);
-const { peerList } = storeToRefs(collabStore);
+const { peerList, syncState } = storeToRefs(collabStore);
 
 /** Copy a share link (?map=<id>&room=<channel>): the guest opens the same map AND joins
  *  THIS session's collab channel (rooms are private per visitor otherwise). */
@@ -43,7 +43,18 @@ async function shareLink(): Promise<void> {
 /** Two-letter initials for a peer avatar. */
 const initials = (name: string): string =>
   name.replace(/[^\p{L}\p{N}]/gu, " ").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
-const { dirty, undoable, redoable, report, busy } = storeToRefs(editStore);
+const { dirty, edited, undoable, redoable, report, busy } = storeToRefs(editStore);
+
+/** Honest sync badge (replaces the old always-on «есть правки»): only when the map actually
+ *  differs from base, and it reflects REAL sync — synced ✓ / saving ⟳ / not-synced ⚠. */
+const syncBadge = computed(() => {
+  if (!edited.value) return null;
+  switch (syncState.value) {
+    case "synced": return { text: "✓ синхронизировано", type: "success" as const };
+    case "syncing": return { text: "⟳ сохранение…", type: "info" as const };
+    default: return { text: "⚠ не синхронизировано", type: "warning" as const };
+  }
+});
 
 /** Current map name for the bar: liveDoc (base + applied edits — reflects a setScenarioInfo
  *  rename immediately) with the BASE file's name as fallback before a project exists. */
@@ -335,7 +346,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
 
     <span v-if="liveMapName" class="map-title">{{ liveMapName }}</span>
     <el-tag v-if="status === 'loading'" size="small" type="warning" effect="plain" round>Загрузка…</el-tag>
-    <el-tag v-if="dirty" size="small" type="warning" effect="plain" round>есть правки</el-tag>
+    <el-tag v-if="syncBadge" size="small" :type="syncBadge.type" effect="plain" round>{{ syncBadge.text }}</el-tag>
 
     <!-- Check button IS the status (no separate chip): the map auto-re-checks ~2.5s after
          the last edit; the button turns green (ok) / RED PULSING (won't save; click for the
