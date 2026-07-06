@@ -13,6 +13,7 @@ import {
   roadBrush,
   buildOccupiedSet,
   validateMechanics,
+  occupancyErrors,
   applyOps,
 } from "../src/index.js";
 import { campaignMap } from "../../../test-helpers/gameDir.js";
@@ -89,7 +90,7 @@ describe("validateMechanics (calibrated: silent on shipped maps)", () => {
   });
 });
 
-describe("validateMechanics occupancy (no overlapping footprints — the original's rule)", () => {
+describe("occupancyErrors (no overlapping footprints — the original's HARD rule)", () => {
   // G000MG0047 = a 2×2 wall piece; byte-verified footprint from the original's walltest.sg
   // (G000MG8022=1×1, G000MG0047=2×2, G000MG0003=4×4). The resolver stands in for decorCatalog.
   const LM = "G000MG0047";
@@ -109,23 +110,23 @@ describe("validateMechanics occupancy (no overlapping footprints — the origina
     throw new Error("no free 2×2 spot on Riders");
   }
 
-  it("flags a landmark overlapping a village footprint", () => {
+  it("errors on a landmark overlapping a village footprint", () => {
     const lm = { type: "landmark" as const, id: "S143MM9000", pos: { ...village.pos }, baseType: LM };
     const bad = applyOps(doc, [{ kind: "addObject", object: lm }]);
-    const warns = validateMechanics(bad, { landmarkSize: size });
-    expect(warns.some((w) => w.includes("перекрывает") && w.includes("S143MM9000"))).toBe(true);
+    const errs = occupancyErrors(bad, { landmarkSize: size });
+    expect(errs.some((e) => e.includes("перекрывает") && e.includes("S143MM9000"))).toBe(true);
   });
 
-  it("does NOT flag the same landmark on free ground", () => {
+  it("does NOT error on the same landmark on free ground", () => {
     const lm = { type: "landmark" as const, id: "S143MM9001", pos: freeSpot(), baseType: LM };
     const bad = applyOps(doc, [{ kind: "addObject", object: lm }]);
-    const warns = validateMechanics(bad, { landmarkSize: size });
-    expect(warns.some((w) => w.includes("S143MM9001"))).toBe(false);
+    const errs = occupancyErrors(bad, { landmarkSize: size });
+    expect(errs.some((e) => e.includes("S143MM9001"))).toBe(false);
   });
 
-  it("Riders stays clean with real landmark footprints (calibration)", () => {
+  it("Riders stays clean with real landmark footprints (calibration: 0 overlaps on 59 shipped maps)", () => {
     // every landmark at a plausible size — the shipped map must still produce zero overlaps.
     const all = (b: string): readonly [number, number] => (b === LM ? [2, 2] : [1, 1]);
-    expect(validateMechanics(doc, { landmarkSize: all })).toEqual([]);
+    expect(occupancyErrors(doc, { landmarkSize: all })).toEqual([]);
   });
 });

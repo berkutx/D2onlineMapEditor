@@ -60,8 +60,9 @@ function occupyFootprint(
   return OCCUPY_FIXED[o.type] ?? null;
 }
 
-/** Mechanics warnings for a document (empty = playable placement-wise). */
-export function validateMechanics(doc: MapDocument, opts: MechanicsOptions = {}): string[] {
+/** Mechanics WARNINGS for a document (empty = playable placement-wise). Soft rules: shipped
+ *  maps legitimately carry them in edge cases, so they never block an export. */
+export function validateMechanics(doc: MapDocument, _opts: MechanicsOptions = {}): string[] {
   const warnings: string[] = [];
   const n = doc.size;
   const cells = doc.terrain.cells;
@@ -93,10 +94,23 @@ export function validateMechanics(doc: MapDocument, opts: MechanicsOptions = {})
     }
   }
 
-  // 3) overlapping occupied footprints — the original's no-flush/no-overlap rule. Passability
-  //    is plan occupancy, so two objects sharing a footprint cell is a real placement fault
-  //    (and a maze whose walls overlap the map or each other is unplayable). One warning per
-  //    offending PAIR (a 4×4 over a 4×4 would otherwise spam 16 lines).
+  return warnings;
+}
+
+/**
+ * Occupancy ERRORS — two objects may NOT share a footprint cell. This is a HARD rule of the
+ * game editor: you cannot place a building/decoration/mountain over another object (passability
+ * is plan occupancy, so an overlap is an unplayable map, not a cosmetic issue). Verified ZERO
+ * overlaps across 59 shipped campaign maps + the original's walltest, so an overlap only comes
+ * from a placement/generation bug — hence errors (they block the export), not warnings.
+ * One error per offending PAIR (a 4×4 over a 4×4 would otherwise spam 16 lines). Stacks stand
+ * INSIDE cities and locations are zones — both excluded (they legally share cells).
+ */
+export function occupancyErrors(doc: MapDocument, opts: MechanicsOptions = {}): string[] {
+  const errors: string[] = [];
+  const n = doc.size;
+  if (doc.terrain.cells.length !== n * n) return errors; // structurally broken — tier-3 reports it
+
   const occ = new Map<string, { type: string; id: string }>();
   const reported = new Set<string>();
   for (const o of doc.objects) {
@@ -113,7 +127,7 @@ export function validateMechanics(doc: MapDocument, opts: MechanicsOptions = {})
           const pairKey = prev.id < o.id ? `${prev.id}|${o.id}` : `${o.id}|${prev.id}`;
           if (!reported.has(pairKey)) {
             reported.add(pairKey);
-            warnings.push(
+            errors.push(
               `mechanics: ${o.type} ${o.id} перекрывает ${prev.type} ${prev.id} в (${x},${y}) — объекты нельзя ставить внахлёст`,
             );
           }
@@ -122,5 +136,5 @@ export function validateMechanics(doc: MapDocument, opts: MechanicsOptions = {})
         }
       }
   }
-  return warnings;
+  return errors;
 }

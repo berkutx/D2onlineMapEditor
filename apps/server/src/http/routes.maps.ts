@@ -37,6 +37,7 @@ import {
   buildWallSet,
   buildDecorSet,
   validateMechanics,
+  occupancyErrors,
   DECODE_TABLES,
   type WallSet,
   type DecorSet,
@@ -93,9 +94,12 @@ function buildAndValidate(
     // refs): cities on water / roads under water. Calibrated to be SILENT on all 52
     // shipped campaign maps, so any hit is a real editing accident.
     const mech = validateMechanics(built, { landmarkSize });
+    // occupancy overlap = a HARD error (two objects on one cell is an unplayable map; the
+    // game editor forbids it — zero overlaps across all 59 shipped campaign maps).
+    const occErr = occupancyErrors(built, { landmarkSize });
     structural = {
-      ok: doc3.ok && integ.ok,
-      errors: [...doc3.errors, ...integ.errors],
+      ok: doc3.ok && integ.ok && occErr.length === 0,
+      errors: [...doc3.errors, ...integ.errors, ...occErr],
       warnings: [...doc3.warnings, ...integ.warnings, ...mech],
     };
   } else {
