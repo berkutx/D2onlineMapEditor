@@ -120,27 +120,9 @@ export const RECIPES: Record<string, Recipe> = {
     notes: "Dense forest broken by organic glades/clearings.",
   },
 
-  // --- mazes (MarkovJunior MazeGrowth) --------------------------------------
-  // Same MazeGrowth grid (B=barrier, W/A=passage), three barrier materials. hedge/mountain
-  // read MUCH better than wall objects (continuous terrain vs. ~16 iso wall sprites).
-  hedge_maze: {
-    id: "hedge_maze",
-    kind: "mj",
-    xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
-    alphabet: "BWA",
-    sealMaze: true,
-    inputMode: "zone",
-    notes: "A hedge maze — corridors between forest walls (sealed, two entrances).",
-  },
-  mountain_maze: {
-    id: "mountain_maze",
-    kind: "mj",
-    xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
-    alphabet: "BWA",
-    sealMaze: true,
-    inputMode: "zone",
-    notes: "A stone labyrinth — corridors between mountain walls (sealed, two entrances).",
-  },
+  // --- maze (MarkovJunior MazeGrowth) ---------------------------------------
+  // The ONE maze: coarse (scale 2) stone-wall labyrinth. Walls are 2×2 stone pieces (auto-tiled),
+  // junctions get a tower/corner. B=barrier, W/A=passage; the perimeter is sealed with two doors.
   wall_maze: {
     id: "wall_maze",
     kind: "mj",
@@ -149,19 +131,7 @@ export const RECIPES: Record<string, Recipe> = {
     alphabet: "BWA",
     sealMaze: true,
     inputMode: "zone",
-    notes: "Крупный лабиринт из каменных стен 2×2, углы завёрнуты (запечатан, два входа).",
-  },
-  // Fine variant: scale 1 → 1×1 wall pieces + a 1×1 turret at each junction. A 1×1 tower fills
-  // its single cell, so unlike the coarse 2×2 maze it leaves NO gap — and keeps the little
-  // castle turrets on the corners. Denser + more pieces (≈4× the coarse maze).
-  wall_maze_fine: {
-    id: "wall_maze_fine",
-    kind: "mj",
-    xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
-    alphabet: "BWA",
-    sealMaze: true,
-    inputMode: "zone",
-    notes: "Мелкий лабиринт из 1×1 стен с башенками на стыках (плотнее, с колоннами).",
+    notes: "Лабиринт из каменных стен 2×2 с башнями на стыках (запечатан, два входа).",
   },
 
   // --- mountains & hills (decoded to 1×1 mountain objects) -------------------

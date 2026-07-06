@@ -234,12 +234,22 @@ export async function runGenerationSteps(
     // density < 1 = sprinkled along the stroke) instead of running MJ on the bounding box and
     // keeping only the fragments that cross the stroke. No mask → normal MJ in the region.
     const maskFill = !!mask && typeof recipe.maskSymbol === "string";
+    // Snap a scaled maze to the scale grid: align origin + size to a multiple of `scale` so the
+    // 2×2 walls sit on even world cells and tile cleanly to the edge («кратно двум по стенам»).
+    let genRegion = step.region;
+    if (scale > 1 && !maskFill) {
+      const sx = Math.floor(genRegion.x / scale) * scale;
+      const sy = Math.floor(genRegion.y / scale) * scale;
+      const sw = Math.max(scale, Math.floor((genRegion.x + genRegion.w - sx) / scale) * scale);
+      const sh = Math.max(scale, Math.floor((genRegion.y + genRegion.h - sy) / scale) * scale);
+      genRegion = { ...genRegion, x: sx, y: sy, w: sw, h: sh };
+    }
     const grid = maskFill
-      ? maskFillGrid(step.region, recipe.maskSymbol!, recipe.maskDensity ?? 1, seed)
-      : await buildGrid(recipe, step.region, seed, scale);
+      ? maskFillGrid(genRegion, recipe.maskSymbol!, recipe.maskDensity ?? 1, seed)
+      : await buildGrid(recipe, genRegion, seed, scale);
     // occupancy rebuilt per step: a later step must respect the objects an earlier one placed
     const occupied = buildOccupiedSet(work, landmarkSizes);
-    const ops = decodeGrid(work, grid, table, step.region, walls, mask, protect, decor, maskFill ? 1 : scale, occupied);
+    const ops = decodeGrid(work, grid, table, genRegion, walls, mask, protect, decor, maskFill ? 1 : scale, occupied);
     all.push(...ops);
     work = applyOps(work, ops);
   }

@@ -44,12 +44,8 @@ export type DecodeTable = Record<string, DecodeAction>;
 
 /** Decode tables per recipe id (the symbol grid is engine-agnostic; this maps to OUR tiles). */
 export const DECODE_TABLES: Record<string, DecodeTable> = {
-  // Mazes: B = the wall/barrier symbol; W/A = carved passage. Same MazeGrowth grid,
-  // three different barrier materials (decoration walls / forest hedges / mountains).
+  // The maze: B = the wall/barrier symbol → 2×2 stone wall pieces; W/A = carved passage.
   wall_maze: { B: { kind: "wall" }, W: { kind: "skip" }, A: { kind: "skip" } },
-  wall_maze_fine: { B: { kind: "wall" }, W: { kind: "skip" }, A: { kind: "skip" } },
-  hedge_maze: { B: { kind: "forest" }, W: { kind: "skip" }, A: { kind: "skip" } },
-  mountain_maze: { B: { kind: "mountain" }, W: { kind: "skip" }, A: { kind: "skip" } },
   // Organic water (MJ growth): W = water, B = untouched land.
   water_lake: { W: { kind: "water" } },
   water_isles: { W: { kind: "water" } },
