@@ -49,11 +49,7 @@ export interface ClientToServerEvents {
   "edit:ops": (
     p: { mapId: string; batchId: string; baseSeq: number; ops: { clientOpId: string; op: EditOp }[] },
     ack: (
-      r:
-        // `assignedIds` (v0.7, M4): temp→server id remap for any addObject the server had to
-        // reassign to avoid a collision — the author reconciles those objects.
-        | { ok: true; seqStart: number; seqEnd: number; assignedIds?: Record<string, string> }
-        | { ok: false; reason: string },
+      r: { ok: true; seqStart: number; seqEnd: number } | { ok: false; reason: string },
     ) => void,
   ) => void;
 

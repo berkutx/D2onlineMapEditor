@@ -378,33 +378,6 @@ export const useEditStore = defineStore("edit", () => {
     commitStroke(ops);
   }
 
-  /**
-   * M4 reconcile: the server REASSIGNED a colliding addObject from `tempId` (what we optimistically
-   * placed) to `serverId` (what peers received). Rename it in liveDoc + the journal so our state
-   * matches the room AND survives a reload (the journal op must carry the same id as the log).
-   */
-  function reconcileObjectId(tempId: string, serverId: string): void {
-    if (!project.value || !tempId || tempId === serverId) return;
-    if (liveDoc.value) {
-      liveDoc.value = {
-        ...liveDoc.value,
-        objects: liveDoc.value.objects.map((o) => (o.id === tempId ? ({ ...o, id: serverId } as typeof o) : o)),
-      };
-      rev.value++;
-      objectsRev.value++;
-    }
-    const journal = project.value.journal.map((commit) =>
-      commit.map((op): EditOp => {
-        if (op.kind === "addObject" && op.object.id === tempId) return { ...op, object: { ...op.object, id: serverId } };
-        if ((op.kind === "moveObject" || op.kind === "patchObject" || op.kind === "deleteObject") && op.id === tempId)
-          return { ...op, id: serverId };
-        return op;
-      }),
-    );
-    project.value = { ...project.value, journal };
-    persist();
-  }
-
   /** Backfill per-op uids for commits made before uid tracking, so the collab join can
    *  dedup room-log replays against the WHOLE journal. Called by collabStore on join. */
   function ensureJournalUids(): void {
@@ -838,7 +811,6 @@ export const useEditStore = defineStore("edit", () => {
     commit,
     ensureJournalUids,
     applyIncoming,
-    reconcileObjectId,
     takeTerrainDirty,
     setCollab,
     roomConnected,
