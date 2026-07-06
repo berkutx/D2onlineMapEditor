@@ -118,6 +118,24 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
     }
   }
 
+  it("wall_maze: every wall AND junction column is 2×2 — no 1×1 tower leaves a walk-through gap", async () => {
+    // The maze was passable through corners: a 1×1 tower filled only ¼ of the 2×2 junction
+    // block, so the other 3 cells stayed open. Every placed piece must now be a full 2×2
+    // (straight, corner, or a 2×2 column) so each junction block is sealed and the arms connect.
+    for (const seed of SEEDS) {
+      const { ops } = await run("wall_maze", seed);
+      const walls = ops.filter(
+        (o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject" && o.object.type === "landmark",
+      );
+      expect(walls.length, `seed=${seed}: maze placed no walls`).toBeGreaterThan(0);
+      for (const op of walls) {
+        const bt = String((op.object as { baseType?: string }).baseType ?? "").toUpperCase();
+        const [w, h] = landmarkSizes[bt] ?? [1, 1];
+        expect(`${w}×${h}`, `seed=${seed}: piece ${bt} is ${w}×${h}, not 2×2 (1×1 = gap)`).toBe("2×2");
+      }
+    }
+  });
+
   it("river / road_path / relief_ridge cross the zone (span over many seeds)", async () => {
     for (const recipeId of ["river", "road_path", "relief_ridge"]) {
       for (const seed of [1, 7, 13, 21, 42]) {
