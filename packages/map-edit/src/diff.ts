@@ -34,6 +34,17 @@ function diffFields(
   return any ? out : null;
 }
 
+/** True if `b` REMOVES a field that `a` had (present→absent). A patchObject cannot express
+ *  this over the wire: `{field: undefined}` is dropped by JSON.stringify (log + socket), so
+ *  applyOp receives `{}` and the field survives. Such a change must go through delete+add. */
+function clearsAField(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  for (const k of Object.keys(a)) {
+    if (k === "id" || k === "type" || k === "pos") continue;
+    if (a[k] !== undefined && b[k] === undefined) return true;
+  }
+  return false;
+}
+
 const SCENARIO_INFO_KEYS = [
   "name", "description", "author", "objective", "story", "winText", "loseText",
   "suggestedLevel", "difficulty", "limits",
@@ -68,14 +79,20 @@ export function diffDocs(a: MapDocument, b: MapDocument): EditOp[] {
       ops.push({ kind: "addObject", object: ob });
       continue;
     }
+    const ra = oa as unknown as Record<string, unknown>;
+    const rb = ob as unknown as Record<string, unknown>;
+    // A discriminant TYPE change (patchObject can't alter `type`) or a field REMOVAL (JSON
+    // drops `{field: undefined}` on the wire/journal) can't be a clean patch — replace the
+    // whole object with delete+add so the round-trip is EXACT after JSON serialization.
+    if (oa.type !== ob.type || clearsAField(ra, rb)) {
+      ops.push({ kind: "deleteObject", id });
+      ops.push({ kind: "addObject", object: ob });
+      continue;
+    }
     if (oa.pos.x !== ob.pos.x || oa.pos.y !== ob.pos.y) {
       ops.push({ kind: "moveObject", id, x: ob.pos.x, y: ob.pos.y });
     }
-    const fields = diffFields(
-      oa as unknown as Record<string, unknown>,
-      ob as unknown as Record<string, unknown>,
-      ["id", "type", "pos"],
-    );
+    const fields = diffFields(ra, rb, ["id", "type", "pos"]);
     if (fields) ops.push({ kind: "patchObject", id, fields });
   }
   for (const id of aObj.keys()) if (!bObj.has(id)) ops.push({ kind: "deleteObject", id });

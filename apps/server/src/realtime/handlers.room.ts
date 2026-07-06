@@ -308,15 +308,20 @@ export function registerRoomHandlers(
           for (const e of all) {
             if (e.seq > p.fromSeq && e.author !== me) for (const k of opKeys(e.op)) peerKeys.add(k);
           }
-          // my ops after fromSeq, newest→oldest; include until one hits a peer-owned key.
+          // Revert every one of MY ops after fromSeq whose cell/object NO peer has touched
+          // since; SKIP (keep) the ones a peer edited — those are the conflict boundary. Walk
+          // newest→oldest so `conflictAt` reports the most recent blocked op. Skipping rather
+          // than stopping dead means one recent conflict does not block reverting older,
+          // independent edits (they touch different cells/objects, so the target stays
+          // consistent — every reverted key is fully mine).
           const mine = all.filter((e) => e.seq > p.fromSeq && e.author === me).sort((a, b) => b.seq - a.seq);
           const revertSeqs = new Set<number>();
           let conflictAt: { seq: number; keys: string[] } | null = null;
           for (const e of mine) {
             const clash = opKeys(e.op).filter((k) => peerKeys.has(k));
             if (clash.length) {
-              conflictAt = { seq: e.seq, keys: clash };
-              break;
+              if (!conflictAt) conflictAt = { seq: e.seq, keys: clash }; // report the newest conflict
+              continue; // keep this peer-touched op; roll back the others
             }
             revertSeqs.add(e.seq);
           }

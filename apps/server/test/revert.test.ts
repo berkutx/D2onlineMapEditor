@@ -120,4 +120,31 @@ describe("edit:revertRange", () => {
     expect(doc.terrain.cells[10]!.value).toBe(0); // (2,2) reverted (mine, peer-free)
     expect(doc.terrain.cells[0]!.value).toBe(9);  // (0,0) KEPT — the peer's edit survives
   });
+
+  it("a NEWER peer-conflicted op does not block reverting my OLDER independent op", async () => {
+    const rooms = new RoomManager();
+    const log = new EditLog();
+    const snaps = new RoomSnapshots();
+    const A = fakeSocket("sockA", "clientA");
+    const B = fakeSocket("sockB", "clientB");
+    registerRoomHandlers(fakeIo, A.socket, rooms, log, fakeStore, snaps);
+    registerRoomHandlers(fakeIo, B.socket, rooms, log, fakeStore, snaps);
+    A.invoke("room:join", { mapId: MAP, channel: CH, user: { name: "A" } }, () => undefined);
+    B.invoke("room:join", { mapId: MAP, channel: CH, user: { name: "B" } }, () => undefined);
+
+    opAt(A.invoke, setCell(3, 3, 1), "a1"); // seq 1: mine on (3,3) — older, independent
+    opAt(A.invoke, setCell(0, 0, 5), "a2"); // seq 2: mine on (0,0)
+    opAt(B.invoke, setCell(0, 0, 9), "b1"); // seq 3: PEER overwrites (0,0) — conflicts my newer a2
+
+    const res = await ackP<{ ok: boolean; revertedCount: number; conflictAt: { seq: number } | null }>(
+      A.invoke, "edit:revertRange", { mapId: MAP, fromSeq: 0 },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.revertedCount).toBe(1);      // my older (3,3) reverts despite the newer conflict
+    expect(res.conflictAt?.seq).toBe(2);    // the blocked op is reported
+
+    const { doc } = snaps.materialize(KEY, baseDoc(), log);
+    expect(doc.terrain.cells[15]!.value).toBe(0); // (3,3) reverted (peer-free)
+    expect(doc.terrain.cells[0]!.value).toBe(9);  // (0,0) kept (peer's)
+  });
 });
