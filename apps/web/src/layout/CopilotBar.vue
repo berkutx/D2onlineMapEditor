@@ -776,7 +776,9 @@ watch(
   left: 50%;
   bottom: 34px; /* lifted off the very bottom (status bar) — was 16 */
   transform: translateX(-50%);
-  width: min(560px, 90%);
+  /* size to the VIEWPORT, not the (panel-shrunk) canvas parent — otherwise a narrow canvas
+   * crushes the 11-control row and leaves no room for the input. */
+  width: min(680px, 92vw);
   z-index: 31; /* above the minimap dock (26) — the copilot is the front-most floater */
   display: flex;
   flex-direction: column;
@@ -860,12 +862,15 @@ watch(
 .copilot-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   padding: 5px 8px;
   border-radius: 999px;
 }
 .cp-input {
-  flex: 1;
+  /* the input is the PRIMARY control — always keep it usable, never let the row of
+   * icon toggles squeeze it to nothing (grows to fill, but never below 100px). */
+  flex: 1 1 120px;
+  min-width: 100px;
 }
 .cp-input :deep(.el-input__wrapper) {
   background: transparent;
@@ -878,6 +883,11 @@ watch(
 .cp-ico,
 .cp-send {
   flex: 0 0 auto;
+  /* compact the icon-only toggles: EP's default 15px side padding × 11 buttons is what
+   * crowded the input out. Tighten to reclaim the width for the input. */
+  min-width: 0;
+  padding-left: 5px;
+  padding-right: 5px;
   /* icon-only actions sit back until pointed at (calmer) */
   opacity: 0.6;
   transition: opacity 0.12s ease;
