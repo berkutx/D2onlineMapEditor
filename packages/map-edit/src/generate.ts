@@ -47,6 +47,7 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   // Mazes: B = the wall/barrier symbol; W/A = carved passage. Same MazeGrowth grid,
   // three different barrier materials (decoration walls / forest hedges / mountains).
   wall_maze: { B: { kind: "wall" }, W: { kind: "skip" }, A: { kind: "skip" } },
+  wall_maze_fine: { B: { kind: "wall" }, W: { kind: "skip" }, A: { kind: "skip" } },
   hedge_maze: { B: { kind: "forest" }, W: { kind: "skip" }, A: { kind: "skip" } },
   mountain_maze: { B: { kind: "mountain" }, W: { kind: "skip" }, A: { kind: "skip" } },
   // Organic water (MJ growth): W = water, B = untouched land.
@@ -91,11 +92,9 @@ export interface WallStyle {
   key: string;
   s1: WallPieces;
   s2: WallPieces;
-  /** a plain 1×1 stone turret of the same faction (legacy — 1×1 leaves a gap at a 2×2 junction). */
+  /** a 1×1 stone turret of the faction — placed at scale-1 junctions (fills its single cell,
+   *  no gap). At scale 2 a 1×1 tower left ¾ of the block open, so the 2×2 wall corner is used. */
   tower?: string;
-  /** a 2×2 column/turret that SEALS a scale-2 junction block (a 1×1 tower filled only ¼ of it,
-   *  so units slipped through). Cylindrical stone tower (G000MG826x «Маяк») when present. */
-  tower2?: string;
 }
 /** Available wall styles. A maze uses ONE so the art doesn't mix; the 2×2 stone set wins. */
 export interface WallSet {
@@ -149,22 +148,8 @@ export function buildWallSet(
     if (!cur || score > cur.score) towerByFaction.set(fac, { id: e.id, score });
   }
 
-  // a 2×2 column/turret to SEAL scale-2 junctions (the 1×1 tower left ¾ of the block open →
-  // walk-through holes). 2×2 towers are all neutral G000 (a cylindrical stone «Маяк»), so ONE
-  // global pick is shared by every faction's wall set. Prefer tone neutral > earth.
-  let tower2: string | undefined;
-  let t2score = -1;
-  for (const e of arr) {
-    if (e.shape !== "tower" || (e.cx ?? 1) !== 2 || (e.cy ?? 1) !== 2) continue;
-    const score = e.tone === "neutral" ? 2 : e.tone === "earth" ? 1 : 0;
-    if (score > t2score) { t2score = score; tower2 = e.id; }
-  }
-
   const styles = [...byKey.values()].filter((s) => wallComplete(s.s1) || wallComplete(s.s2));
-  for (const s of styles) {
-    s.tower = towerByFaction.get(s.key.split("|")[1] ?? "")?.id;
-    s.tower2 = tower2;
-  }
+  for (const s of styles) s.tower = towerByFaction.get(s.key.split("|")[1] ?? "")?.id;
   // prefer "wall" (stone) over "fence", then faction desc, so the stone sets sort first.
   styles.sort((a, b) =>
     (a.key.startsWith("wall|") ? 0 : 1) - (b.key.startsWith("wall|") ? 0 : 1) || (a.key < b.key ? 1 : -1));
@@ -376,14 +361,11 @@ export function decodeGrid(
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
       const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
-      // Corner / junction / isolated: it must fill its WHOLE scale×scale block or units slip
-      // through the unfilled cells. Scale 2 → a 2×2 column (tower2) SEALS the block AND reads as
-      // the castle junction column — a 1×1 tower filled only ¼ of it (the walk-through gap the
-      // maze had). Scale 1 → the 1×1 tower already fills its single cell. No 2×2 column → the
-      // 2×2 wall corner piece seals it. All branches place a full-footprint piece at the anchor.
-      if (!straight && wantS2 && style?.tower2) {
-        place(x, y, style.tower2);
-      } else if (!straight && !wantS2 && style?.tower) {
+      // A corner/junction/isolated cell must fill its WHOLE scale×scale block or units slip
+      // through the unfilled cells. Scale 1 → a 1×1 turret fills its single cell (no gap, keeps
+      // the tower look). Scale 2 → the 2×2 wall CORNER piece turns the wall and fully seals the
+      // block (a 1×1 tower filled only ¼ of a 2×2 junction — the walk-through gap the maze had).
+      if (!straight && !wantS2 && style?.tower) {
         place(x, y, style.tower);
       } else {
         const wallType = wallPiece(m, pieces);

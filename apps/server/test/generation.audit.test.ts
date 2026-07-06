@@ -118,20 +118,27 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
     }
   }
 
-  it("wall_maze: every wall AND junction column is 2×2 — no 1×1 tower leaves a walk-through gap", async () => {
-    // The maze was passable through corners: a 1×1 tower filled only ¼ of the 2×2 junction
-    // block, so the other 3 cells stayed open. Every placed piece must now be a full 2×2
-    // (straight, corner, or a 2×2 column) so each junction block is sealed and the arms connect.
-    for (const seed of SEEDS) {
-      const { ops } = await run("wall_maze", seed);
-      const walls = ops.filter(
-        (o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject" && o.object.type === "landmark",
-      );
-      expect(walls.length, `seed=${seed}: maze placed no walls`).toBeGreaterThan(0);
-      for (const op of walls) {
-        const bt = String((op.object as { baseType?: string }).baseType ?? "").toUpperCase();
-        const [w, h] = landmarkSizes[bt] ?? [1, 1];
-        expect(`${w}×${h}`, `seed=${seed}: piece ${bt} is ${w}×${h}, not 2×2 (1×1 = gap)`).toBe("2×2");
+  it("wall mazes seal every junction — each piece fills its whole block (no walk-through gap)", async () => {
+    // A wall/junction piece must fill its whole scale×scale block or units slip through the
+    // unfilled cells. Coarse wall_maze (scale 2) → every piece is 2×2 (straight OR wall corner;
+    // a 1×1 tower filled only ¼ of the block — the old gap). Fine wall_maze_fine (scale 1) →
+    // every piece is 1×1 (straight OR 1×1 turret, each fills its single cell).
+    const cases = [
+      { recipe: "wall_maze", size: "2×2" },
+      { recipe: "wall_maze_fine", size: "1×1" },
+    ];
+    for (const c of cases) {
+      for (const seed of SEEDS) {
+        const { ops } = await run(c.recipe, seed);
+        const walls = ops.filter(
+          (o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject" && o.object.type === "landmark",
+        );
+        expect(walls.length, `${c.recipe} seed=${seed}: placed no walls`).toBeGreaterThan(0);
+        for (const op of walls) {
+          const bt = String((op.object as { baseType?: string }).baseType ?? "").toUpperCase();
+          const [w, h] = landmarkSizes[bt] ?? [1, 1];
+          expect(`${w}×${h}`, `${c.recipe} seed=${seed}: piece ${bt} is ${w}×${h}, not ${c.size}`).toBe(c.size);
+        }
       }
     }
   });

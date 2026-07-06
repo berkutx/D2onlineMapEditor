@@ -377,9 +377,10 @@ function routeRecipe(text: string): string | null {
   // mazes — branch by material (Cyrillic-safe: \w doesn't match Cyrillic without /u).
   // plain «лабиринт» = stone walls (auto-tiled); «горный» = mountains; «живая изгородь» = forest.
   if (/лабиринт|maze|изгород/.test(t)) {
-    if (/горн|гора|гор\b/.test(t)) return "mountain_maze";
+    if (/горн|гора|гор\b|камен|скал/.test(t)) return "mountain_maze"; // «горный/каменный/скальный» — рельеф-барьер
     if (/изгород|живая|жив\b/.test(t)) return "hedge_maze";
-    return "wall_maze";
+    if (/мелк|башен|башн|колонн|тонк/.test(t)) return "wall_maze_fine"; // 1×1 стены + башенки на стыках
+    return "wall_maze"; // крупные 2×2 каменные стены, углы завёрнуты
   }
   if (/забор|частокол|стен/.test(t)) return "wall_maze";
   // mountains & hills (before generic checks; «гряда гор», «разбросай холмы», «горы по краю»)
