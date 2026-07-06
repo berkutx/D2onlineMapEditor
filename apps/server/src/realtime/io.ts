@@ -44,7 +44,9 @@ export function createIo(httpServer: HttpServer, store: MapStore): IoBundle {
   });
 
   const rooms = new RoomManager();
-  const log = new EditLog();
+  // durable per-room op-logs (var/rooms) — the server is the authoritative source of truth,
+  // so a restart no longer forces clients to re-seed their whole journal.
+  const log = new EditLog(config.ROOMS_DIR);
 
   io.on("connection", (socket) => {
     socket.data.userId = randomUUID();

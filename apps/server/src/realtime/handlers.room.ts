@@ -72,34 +72,54 @@ export function registerRoomHandlers(
   const keyFor = (mapId: string): string | null =>
     socket.data.mapId === mapId && socket.data.roomKey ? socket.data.roomKey : null;
 
-  socket.on("room:join", (p, ack) => {
-    try {
-      if (!p || typeof p.mapId !== "string" || !p.user?.name) {
-        ack({ ok: false, error: "invalid room:join payload" });
-        return;
-      }
-      const channel = typeof p.channel === "string" && p.channel ? p.channel.slice(0, 128) : undefined;
-      const key = roomKey(p.mapId, channel);
-      const presence = rooms.join(
-        key,
-        socket.id,
-        socket.data.userId,
-        p.user.name,
-        p.user.color,
-      );
-      socket.data.mapId = p.mapId;
-      socket.data.roomKey = key;
-      void socket.join(roomId(key));
-
-      const peers = rooms.peers(key, socket.id);
-      // tell existing peers about the newcomer
-      socket.to(roomId(key)).emit("presence:update", presence);
-
-      // late joiner gets the current head; if >0 they should snapshot:request to catch up
-      ack({ ok: true, you: presence, peers, snapshotSeq: log.head(key) });
-    } catch (err) {
-      ack({ ok: false, error: (err as Error).message });
+  /** Run `fn` once the room's durable log is in memory — SYNCHRONOUSLY on the fast path
+   *  (no dataDir, or already loaded) so the handler acks in the same tick; else after the
+   *  one-time async disk load. Only the first touch of a room after a restart is async. */
+  const withRoom = (key: string, fn: () => void): void => {
+    if (log.needsLoad(key)) {
+      void log.ensureLoaded(key).then(fn).catch((e) => console.error("[room] load failed:", (e as Error).message));
+    } else {
+      fn();
     }
+  };
+
+  socket.on("room:join", (p, ack) => {
+    if (!p || typeof p.mapId !== "string" || !p.user?.name) {
+      ack({ ok: false, error: "invalid room:join payload" });
+      return;
+    }
+    const channel = typeof p.channel === "string" && p.channel ? p.channel.slice(0, 128) : undefined;
+    const key = roomKey(p.mapId, channel);
+    // load the durable log BEFORE reading head, so a late joiner after a server restart
+    // sees the persisted head (>0) and catches up instead of re-seeding its whole journal.
+    // The body runs after that one-time async load, so its try/catch + connected-guard live
+    // INSIDE the deferred fn (an error here must still ack, not hang the client).
+    withRoom(key, () => {
+      try {
+        // the socket may have disconnected DURING the async disk load — leave/disconnect
+        // already ran (before rooms.join), so joining now would leak a permanent ghost peer.
+        if (socket.disconnected) return;
+        const presence = rooms.join(
+          key,
+          socket.id,
+          socket.data.userId,
+          p.user.name,
+          p.user.color,
+        );
+        socket.data.mapId = p.mapId;
+        socket.data.roomKey = key;
+        void socket.join(roomId(key));
+
+        const peers = rooms.peers(key, socket.id);
+        // tell existing peers about the newcomer
+        socket.to(roomId(key)).emit("presence:update", presence);
+
+        // late joiner gets the current head; if >0 they should snapshot:request to catch up
+        ack({ ok: true, you: presence, peers, snapshotSeq: log.head(key) });
+      } catch (err) {
+        ack({ ok: false, error: (err as Error).message });
+      }
+    });
   });
 
   socket.on("room:leave", (p) => {
@@ -153,11 +173,14 @@ export function registerRoomHandlers(
       ack({ ok: false, reason: "invalid op: " + parsed.error.issues[0]?.message });
       return;
     }
-    const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now(), p.batchId);
-    ack({ ok: true, seq: entry.seq });
-    socket
-      .to(roomId(key))
-      .emit("edit:applied", { seq: entry.seq, by: socket.id, clientOpId: p.clientOpId, op: parsed.data, batchId: p.batchId });
+    withRoom(key, () => {
+      const author = socket.data.clientId ?? socket.id;
+      const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now(), p.batchId, author);
+      ack({ ok: true, seq: entry.seq });
+      socket
+        .to(roomId(key))
+        .emit("edit:applied", { seq: entry.seq, by: socket.id, author, clientOpId: p.clientOpId, op: parsed.data, batchId: p.batchId });
+    });
   });
 
   // BATCHED apply: a whole commit (brush stroke / Copilot generation, up to thousands of
@@ -191,12 +214,16 @@ export function registerRoomHandlers(
       }
       validated.push({ clientOpId: String(item?.clientOpId ?? ""), op: parsed.data });
     }
-    const entries = log.appendBatch(key, validated, socket.id, p.batchId, Date.now());
-    ack({ ok: true, seqStart: entries[0]!.seq, seqEnd: entries[entries.length - 1]!.seq });
-    socket.to(roomId(key)).emit("edit:opsApplied", {
-      batchId: p.batchId,
-      by: socket.id,
-      ops: entries.map((e) => ({ seq: e.seq, clientOpId: e.clientOpId, op: e.op })),
+    withRoom(key, () => {
+      const author = socket.data.clientId ?? socket.id;
+      const entries = log.appendBatch(key, validated, socket.id, p.batchId, Date.now(), author);
+      ack({ ok: true, seqStart: entries[0]!.seq, seqEnd: entries[entries.length - 1]!.seq });
+      socket.to(roomId(key)).emit("edit:opsApplied", {
+        batchId: p.batchId,
+        by: socket.id,
+        author,
+        ops: entries.map((e) => ({ seq: e.seq, clientOpId: e.clientOpId, op: e.op })),
+      });
     });
   });
 
@@ -206,6 +233,7 @@ export function registerRoomHandlers(
     void (async () => {
       const key = keyFor(p.mapId) ?? p.mapId;
       try {
+        await log.ensureLoaded(key);
         const loaded = await store.getMap(p.mapId);
         if (!loaded) {
           ack({ seq: log.head(key), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
@@ -232,10 +260,12 @@ export function registerRoomHandlers(
       ack({ ok: false, seq: 0, entries: [] });
       return;
     }
-    const entries = log
-      .since(key, p.afterSeq)
-      .map((e) => ({ seq: e.seq, by: e.by, clientOpId: e.clientOpId, op: e.op, batchId: e.batchId }));
-    ack({ ok: true, seq: log.head(key), entries });
+    withRoom(key, () => {
+      const entries = log
+        .since(key, p.afterSeq)
+        .map((e) => ({ seq: e.seq, by: e.by, author: e.author, clientOpId: e.clientOpId, op: e.op, batchId: e.batchId }));
+      ack({ ok: true, seq: log.head(key), entries });
+    });
   });
 
   socket.on("disconnect", () => {

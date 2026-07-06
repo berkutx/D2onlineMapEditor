@@ -13,7 +13,7 @@ async function main(): Promise<void> {
 
   // Ensure the HTTP server exists before socket.io attaches to it.
   await app.ready();
-  const { io } = createIo(app.server, store);
+  const { io, log } = createIo(app.server, store);
 
   await app.listen({ port: config.PORT, host: config.HOST });
 
@@ -44,6 +44,14 @@ async function main(): Promise<void> {
     clearInterval(sweeper);
     io.close();
     await app.close();
+    // Flush pending durable op-log writes BEFORE exit — otherwise a just-acked edit whose
+    // appendFile is still queued is lost on restart (the very event the log must survive).
+    try {
+      await log.flush();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("[@d2/server] EditLog flush failed on shutdown:", e);
+    }
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));

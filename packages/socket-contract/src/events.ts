@@ -70,7 +70,9 @@ export interface ClientToServerEvents {
       ok: boolean;
       /** current log head (authoritative seq to resume from) */
       seq: number;
-      entries: { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }[];
+      /** `author` (additive, v0.7): the DURABLE clientId of each op's author (falls back to
+       *  the socket id) — stable across reconnects, for per-user attribution / rollback. */
+      entries: { seq: number; by: string; author?: string; clientOpId: string; op: EditOp; batchId?: string }[];
     }) => void,
   ) => void;
 }
@@ -82,13 +84,16 @@ export interface ServerToClientEvents {
 
   /** v0.4: carries the author's `clientOpId` (= the op's stable uid, persisted in the
    *  author's journal) so receivers sharing that journal (a second tab of the same
-   *  browser) can skip ops they already hold instead of double-applying them. */
-  "edit:applied": (p: { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }) => void;
+   *  browser) can skip ops they already hold instead of double-applying them.
+   *  v0.7: `author` = the DURABLE clientId (falls back to `by`) for per-user rollback. */
+  "edit:applied": (p: { seq: number; by: string; author?: string; clientOpId: string; op: EditOp; batchId?: string }) => void;
   /** Broadcast of a whole batched commit (see `edit:ops`): the receiver applies every op and
    *  records ONE history row keyed by `batchId`. */
   "edit:opsApplied": (p: {
     batchId: string;
     by: string;
+    /** v0.7: durable clientId author (falls back to `by`). */
+    author?: string;
     ops: { seq: number; clientOpId: string; op: EditOp }[];
   }) => void;
   "edit:rejected": (p: { clientOpId: string; reason: string }) => void;

@@ -98,6 +98,11 @@ export const config = {
   PROJECTS_DIR:
     process.env.PROJECTS_DIR ?? resolve(REPO_ROOT, "var", "projects"),
 
+  /** Durable per-room collaboration op-logs (EditLog): var/rooms/<sha1(roomKey)>.jsonl.
+   *  Makes the server the source of truth so it survives a restart (no client re-seeding). */
+  ROOMS_DIR:
+    process.env.ROOMS_DIR ?? resolve(REPO_ROOT, "var", "rooms"),
+
   /** Copilot LLM file-bridge dir (Phase-4 POC): requests/ + responses/ + archive/. */
   LLM_DIR:
     process.env.LLM_DIR ?? resolve(REPO_ROOT, "var", "llm"),
