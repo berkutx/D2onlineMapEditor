@@ -463,6 +463,32 @@ export const useCollabStore = defineStore("collab", () => {
     }
   }
 
+  /**
+   * Server-authoritative, conflict-aware revert (M5): roll back MY ops from history entry
+   * `seq` onward, KEEPING every peer's edits and stopping at any cell/object a peer has since
+   * touched (the conflict boundary). The server appends the inverse as a forward batch and
+   * broadcasts it — we apply it via the normal edit:opsApplied path. Returns how many of MY
+   * ops rolled back + the boundary, for UI feedback. Offline / not-in-a-room falls back to the
+   * client-computed revert (there all entries are mine, so it is equivalent).
+   */
+  function revertRangeServer(
+    seq: number,
+  ): Promise<{ ok: boolean; revertedCount: number; conflictAt: { seq: number; keys: string[] } | null }> {
+    const id = mapId.value;
+    if (!connected.value || !id) {
+      const n = history.value.filter((e) => e.seq >= seq).length;
+      return Promise.resolve({ ok: revertFrom(seq), revertedCount: n, conflictAt: null });
+    }
+    // fromSeq is EXCLUSIVE server-side (reverts my ops with seq > fromSeq), so pass seq-1 to
+    // include the clicked entry and everything newer.
+    return new Promise((resolve) => {
+      getSocket().emit("edit:revertRange", { mapId: id, fromSeq: seq - 1 }, (r) => {
+        if (r.ok) resolve({ ok: true, revertedCount: r.revertedCount, conflictAt: r.conflictAt });
+        else resolve({ ok: false, revertedCount: 0, conflictAt: null });
+      });
+    });
+  }
+
   /** Adopt a share link's channel for the given map (before it is opened/joined). */
   function setPendingShare(forMapId: string, chan: string): void {
     pendingShare = { mapId: forMapId, channel: chan };
@@ -661,5 +687,6 @@ export const useCollabStore = defineStore("collab", () => {
     sendSelection,
     revertOne,
     revertFrom,
+    revertRangeServer,
   };
 });

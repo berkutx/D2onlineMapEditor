@@ -66,8 +66,6 @@ function toggle(seq: number): void {
 }
 
 // --- revert actions (per expanded row) ------------------------------------------------------
-/** Entries the given entry's chain revert would cover (it + everything newer). */
-const newerCount = (seq: number): number => history.value.filter((e) => e.seq >= seq).length;
 /** No captured inverse → nothing to revert (mid-stroke entry: its stroke's last row has it). */
 const revertable = (e: HistoryEntry): boolean => (e.inverse?.length ?? 0) > 0;
 
@@ -77,16 +75,25 @@ function revertOne(e: HistoryEntry): void {
   else ElMessage.warning("Не удалось откатить — запись конфликтует с более поздними правками");
 }
 function revertFrom(e: HistoryEntry): void {
-  const n = newerCount(e.seq);
   void ElMessageBox.confirm(
-    `Откатить ${n} ${n === 1 ? "правку" : n < 5 ? "правки" : "правок"} (#${e.seq} и новее)? Откат — обычная правка: попадёт в историю и отменяется Ctrl+Z.`,
-    "Откатить отсюда",
+    `Откатить ВАШИ правки с #${e.seq} и новее? Чужие правки останутся; откат остановится на первой клетке/объекте, которые изменил другой участник. Это обычная правка (в историю, Ctrl+Z отменяет).`,
+    "Откатить моё отсюда",
     { confirmButtonText: "Откатить", cancelButtonText: "Отмена", type: "warning" },
   )
-    .then(() => {
-      const ok = collab.revertFrom(e.seq);
-      if (ok) ElMessage.success(`Откачено правок: ${n}`);
-      else ElMessage.warning("Не удалось откатить — нет обратимых записей или конфликт");
+    .then(async () => {
+      const r = await collab.revertRangeServer(e.seq);
+      if (!r.ok) {
+        ElMessage.warning("Не удалось откатить");
+        return;
+      }
+      const boundary = r.conflictAt
+        ? ` Дальше конфликт — изменил другой участник (${r.conflictAt.keys.slice(0, 4).join(", ")}${r.conflictAt.keys.length > 4 ? "…" : ""}).`
+        : "";
+      if (r.revertedCount === 0) {
+        ElMessage.warning(`Нечего откатывать${r.conflictAt ? " — сразу конфликт." + boundary : "."}`);
+      } else {
+        ElMessage.success(`Откачено ваших правок: ${r.revertedCount}.${boundary}`);
+      }
     })
     .catch(() => { /* отмена */ });
 }
@@ -124,9 +131,9 @@ function revertFrom(e: HistoryEntry): void {
               <button
                 type="button"
                 class="hist-act"
-                title="Откатить эту запись и всё, что новее (точными инверсиями, новые - первыми)"
+                title="Откатить ВАШИ правки с этой записи и новее; чужие сохранятся, откат остановится на конфликте"
                 @click.stop="revertFrom(e)"
-              >⎌ отсюда ({{ newerCount(e.seq) }})</button>
+              >⎌ откатить моё отсюда</button>
             </div>
           </template>
         </li>
