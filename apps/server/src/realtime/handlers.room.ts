@@ -24,7 +24,7 @@ import type {
   UserPresence,
 } from "@d2/socket-contract";
 import { EditOp } from "@d2/socket-contract";
-import { applyOps } from "@d2/map-edit";
+import { applyOps, diffDocs, opKeys } from "@d2/map-edit";
 import type { MapStore } from "../maps/mapStore.js";
 import { RoomManager, roomId, roomKey } from "./RoomManager.js";
 import type { EditLog } from "./EditLog.js";
@@ -274,6 +274,84 @@ export function registerRoomHandlers(
         .since(key, p.afterSeq)
         .map((e) => ({ seq: e.seq, by: e.by, author: e.author, clientOpId: e.clientOpId, op: e.op, batchId: e.batchId }));
       ack({ ok: true, seq: log.head(key), entries });
+    });
+  });
+
+  // Conflict-aware revert (M5): roll back MY ops after `fromSeq`, keeping every other author's
+  // edits. Walk my ops newest→oldest and stop at the first whose cell/object a peer has since
+  // touched (the conflict boundary — "откат только до конфликта"). The rollback is computed as
+  // the diff from HEAD to a re-simulation WITHOUT my reverted ops, then APPENDED as a normal
+  // forward batch (git revert; the log never rewinds) and broadcast to the whole room.
+  socket.on("edit:revertRange", (p, ack) => {
+    if (!p || typeof p.mapId !== "string" || typeof p.fromSeq !== "number") {
+      ack({ ok: false, reason: "invalid edit:revertRange payload" });
+      return;
+    }
+    const key = keyFor(p.mapId);
+    if (!key) {
+      ack({ ok: false, reason: "not joined to this map's room" });
+      return;
+    }
+    const me = socket.data.clientId ?? socket.id;
+    withRoom(key, () => {
+      void (async () => {
+        try {
+          const loaded = await store.getMap(p.mapId);
+          if (!loaded) {
+            ack({ ok: false, reason: "map not found" });
+            return;
+          }
+          const all = log.all(key);
+          // keys any OTHER author wrote after fromSeq — reverting one of mine on such a key
+          // would clobber their live edit (a conflict).
+          const peerKeys = new Set<string>();
+          for (const e of all) {
+            if (e.seq > p.fromSeq && e.author !== me) for (const k of opKeys(e.op)) peerKeys.add(k);
+          }
+          // my ops after fromSeq, newest→oldest; include until one hits a peer-owned key.
+          const mine = all.filter((e) => e.seq > p.fromSeq && e.author === me).sort((a, b) => b.seq - a.seq);
+          const revertSeqs = new Set<number>();
+          let conflictAt: { seq: number; keys: string[] } | null = null;
+          for (const e of mine) {
+            const clash = opKeys(e.op).filter((k) => peerKeys.has(k));
+            if (clash.length) {
+              conflictAt = { seq: e.seq, keys: clash };
+              break;
+            }
+            revertSeqs.add(e.seq);
+          }
+          if (revertSeqs.size === 0) {
+            ack({ ok: true, revertedCount: 0, conflictAt });
+            return;
+          }
+          // target = the map with MY reverted ops removed (everyone else's kept); the revert is
+          // diffDocs(HEAD, target) — minimal and only on the (peer-free) reverted keys.
+          const keepOps = all.filter((e) => !revertSeqs.has(e.seq)).map((e) => e.op);
+          const target = applyOps(loaded.doc, keepOps);
+          const headDoc = snapshots
+            ? snapshots.materialize(key, loaded.doc, log).doc
+            : applyOps(loaded.doc, all.map((e) => e.op));
+          const revertOps = diffDocs(headDoc, target);
+          if (revertOps.length === 0) {
+            ack({ ok: true, revertedCount: revertSeqs.size, conflictAt });
+            return;
+          }
+          const batchId = `revert:${me}:${log.head(key)}`;
+          const withIds = revertOps.map((op, i) => ({ clientOpId: `${batchId}:${i}`, op }));
+          const entries = log.appendBatch(key, withIds, socket.id, batchId, Date.now(), me);
+          ack({ ok: true, revertedCount: revertSeqs.size, conflictAt });
+          // broadcast to the WHOLE room INCLUDING the author — the revert is server-computed,
+          // so the author applies it via edit:opsApplied like any incoming batch.
+          io.to(roomId(key)).emit("edit:opsApplied", {
+            batchId,
+            by: socket.id,
+            author: me,
+            ops: entries.map((e) => ({ seq: e.seq, clientOpId: e.clientOpId, op: e.op })),
+          });
+        } catch (err) {
+          ack({ ok: false, reason: (err as Error).message });
+        }
+      })();
     });
   });
 

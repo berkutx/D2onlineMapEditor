@@ -59,6 +59,23 @@ export interface ClientToServerEvents {
   ) => void;
 
   /**
+   * Conflict-aware revert (additive, v0.7): roll back THIS client's own ops made after
+   * `fromSeq`, KEEPING every other author's edits (git-revert style — the server appends the
+   * inverse as a new forward commit; the log never rewinds). Walks my ops newest→oldest and
+   * stops at the first one whose cell/object another author has since edited (the conflict
+   * boundary) — "откат только до конфликта". The reverted ops are broadcast to the room as a
+   * normal `edit:opsApplied` batch; the ack reports how many were rolled back and the boundary.
+   */
+  "edit:revertRange": (
+    p: { mapId: string; fromSeq: number },
+    ack: (
+      r:
+        | { ok: true; revertedCount: number; conflictAt: { seq: number; keys: string[] } | null }
+        | { ok: false; reason: string },
+    ) => void,
+  ) => void;
+
+  /**
    * Reconnect catch-up (additive, v0.3): the room-log entries STRICTLY AFTER `afterSeq`.
    * A reconnecting client must NOT take a full snapshot — its journal already holds every
    * op it saw, so rebasing on a snapshot double-applies them (addObject/deleteObject throw).
@@ -125,6 +142,7 @@ export const EVENTS = {
   presenceSelect: "presence:select",
   editOp: "edit:op",
   editOps: "edit:ops",
+  editRevertRange: "edit:revertRange",
   snapshotRequest: "snapshot:request",
   opsSince: "ops:since",
   roomPeers: "room:peers",
