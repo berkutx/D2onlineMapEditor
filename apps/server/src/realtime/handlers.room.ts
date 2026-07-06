@@ -28,6 +28,7 @@ import { applyOps } from "@d2/map-edit";
 import type { MapStore } from "../maps/mapStore.js";
 import { RoomManager, roomId, roomKey } from "./RoomManager.js";
 import type { EditLog } from "./EditLog.js";
+import type { RoomSnapshots } from "./RoomSnapshots.js";
 
 type IO = Server<
   ClientToServerEvents,
@@ -57,6 +58,7 @@ export function registerRoomHandlers(
   rooms: RoomManager,
   log: EditLog,
   store: MapStore,
+  snapshots?: RoomSnapshots,
 ): void {
   const last: Throttle = { cursor: 0, viewport: 0, select: 0 };
 
@@ -239,8 +241,15 @@ export function registerRoomHandlers(
           ack({ seq: log.head(key), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
           return;
         }
-        const ops = log.all(key).map((e) => e.op);
-        ack({ seq: log.head(key), doc: applyOps(loaded.doc, ops) });
+        // materialise the HEAD doc via the cache (folds only the tail since the last snapshot),
+        // falling back to a full fold when no cache is wired (unit tests).
+        if (snapshots) {
+          const snap = snapshots.materialize(key, loaded.doc, log);
+          ack({ seq: snap.seq, doc: snap.doc });
+        } else {
+          const ops = log.all(key).map((e) => e.op);
+          ack({ seq: log.head(key), doc: applyOps(loaded.doc, ops) });
+        }
       } catch {
         ack({ seq: log.head(key), doc: { name: "", size: 0, players: 0, terrain: [], objects: [] } as never });
       }

@@ -16,6 +16,7 @@ import type {
 import { RoomManager } from "./RoomManager.js";
 import { registerRoomHandlers } from "./handlers.room.js";
 import { EditLog } from "./EditLog.js";
+import { RoomSnapshots } from "./RoomSnapshots.js";
 import { config } from "../config.js";
 import type { MapStore } from "../maps/mapStore.js";
 
@@ -47,13 +48,15 @@ export function createIo(httpServer: HttpServer, store: MapStore): IoBundle {
   // durable per-room op-logs (var/rooms) — the server is the authoritative source of truth,
   // so a restart no longer forces clients to re-seed their whole journal.
   const log = new EditLog(config.ROOMS_DIR);
+  // materialised-document cache so catch-up folds only the tail, not the whole log.
+  const snapshots = new RoomSnapshots();
 
   io.on("connection", (socket) => {
     socket.data.userId = randomUUID();
     // persistent anonymous browser identity (v0.2) — optional, for future attribution
     const auth = (socket.handshake.auth ?? {}) as Record<string, unknown>;
     socket.data.clientId = typeof auth.clientId === "string" ? auth.clientId.slice(0, 128) : undefined;
-    registerRoomHandlers(io, socket, rooms, log, store);
+    registerRoomHandlers(io, socket, rooms, log, store, snapshots);
   });
 
   return { io, rooms, log };
