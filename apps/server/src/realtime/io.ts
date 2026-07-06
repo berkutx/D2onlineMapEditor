@@ -15,7 +15,7 @@ import type {
 } from "@d2/socket-contract";
 import { RoomManager } from "./RoomManager.js";
 import { registerRoomHandlers } from "./handlers.room.js";
-import { EditLog } from "./EditLog.js";
+import type { EditLog } from "./EditLog.js";
 import { RoomSnapshots } from "./RoomSnapshots.js";
 import { config } from "../config.js";
 import type { MapStore } from "../maps/mapStore.js";
@@ -33,7 +33,7 @@ export interface IoBundle {
   log: EditLog;
 }
 
-export function createIo(httpServer: HttpServer, store: MapStore): IoBundle {
+export function createIo(httpServer: HttpServer, store: MapStore, log: EditLog): IoBundle {
   const io: TypedIO = new Server(httpServer, {
     // Namespaced under the deploy base in prod ("/map/socket.io"); default in dev. The tunnel
     // forwards /map/* unchanged, so the path must carry the prefix (rewriteUrl does not touch
@@ -45,9 +45,7 @@ export function createIo(httpServer: HttpServer, store: MapStore): IoBundle {
   });
 
   const rooms = new RoomManager();
-  // durable per-room op-logs (var/rooms) — the server is the authoritative source of truth,
-  // so a restart no longer forces clients to re-seed their whole journal.
-  const log = new EditLog(config.ROOMS_DIR);
+  // `log` is shared with the REST layer (the export-at route reads the same durable op-log).
   // materialised-document cache so catch-up folds only the tail, not the whole log.
   const snapshots = new RoomSnapshots();
 

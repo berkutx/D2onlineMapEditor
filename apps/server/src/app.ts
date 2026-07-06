@@ -9,6 +9,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import { config } from "./config.js";
 import { MapStore } from "./maps/mapStore.js";
+import { EditLog } from "./realtime/EditLog.js";
 import { registerStatic } from "./http/static.js";
 import { registerSpa } from "./http/spa.js";
 import { registerHealthRoutes } from "./http/routes.health.js";
@@ -37,6 +38,8 @@ function makeRewriteUrl(base: string): ((req: { url?: string }) => string) | und
 export interface BuiltApp {
   app: FastifyInstance;
   store: MapStore;
+  /** The durable per-room op-log — shared between the REST routes (export-at) and socket.io. */
+  log: EditLog;
 }
 
 export async function buildApp(): Promise<BuiltApp> {
@@ -60,15 +63,18 @@ export async function buildApp(): Promise<BuiltApp> {
   });
 
   const store = new MapStore();
+  // durable per-room op-log (var/rooms): the server is the source of truth. Created here so it
+  // is shared by the REST export-at route AND socket.io (createIo receives this same instance).
+  const log = new EditLog(config.ROOMS_DIR);
 
   await registerStatic(app);
   await registerHealthRoutes(app);
   await registerScenarioRoutes(app, store);
-  await registerMapRoutes(app, store);
+  await registerMapRoutes(app, store, log);
   await registerAssetRoutes(app);
   await registerUploadRoute(app, store);
   // SPA last: serves apps/web/dist + history fallback in production (no-op in dev).
   await registerSpa(app);
 
-  return { app, store };
+  return { app, store, log };
 }

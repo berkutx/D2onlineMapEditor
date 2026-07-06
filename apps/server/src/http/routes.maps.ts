@@ -28,6 +28,7 @@ import {
 } from "@d2/sg-parser";
 import {
   EditorProject,
+  emptyProject,
   activeOps,
   foldOps,
   applyOps,
@@ -46,6 +47,8 @@ import { getRecipe } from "@d2/mapgen";
 import { clientIdOf } from "./routes.scenarios.js";
 import { runGenerationSteps, type PlanStep } from "../maps/generation.js";
 import { config } from "../config.js";
+import { roomKey } from "../realtime/RoomManager.js";
+import type { EditLog } from "../realtime/EditLog.js";
 import type { MapDocument } from "@d2/map-schema";
 import type { MapStore } from "../maps/mapStore.js";
 
@@ -301,6 +304,7 @@ const COPILOT_RESPONSE_SPEC = {
 export async function registerMapRoutes(
   app: FastifyInstance,
   store: MapStore,
+  log: EditLog,
 ): Promise<void> {
   app.get<{ Params: { id: string } }>(REST.map(":id"), async (req, reply) => {
     const { id } = req.params;
@@ -479,6 +483,47 @@ export async function registerMapRoutes(
         .send(Buffer.from(bytes));
     });
   }
+
+  // GET /api/maps/:id/export-at?channel&seq -> the .sg of the ROOM's durable op-log applied to
+  // the base map up to `seq` ("выкачать промежуток": download the map as it was at a history
+  // point). Uses the server log (the shared timeline), not the caller's journal. Validated
+  // like /export; a non-clean point 422s with the report.
+  app.get<{ Params: { id: string }; Querystring: { channel?: string; seq?: string } }>(
+    REST.mapExportAt(":id"),
+    async (req, reply) => {
+      const { id } = req.params;
+      try {
+        const channel = typeof req.query.channel === "string" && req.query.channel ? req.query.channel : undefined;
+        const key = roomKey(id, channel);
+        await log.ensureLoaded(key);
+        const head = log.head(key);
+        const seqRaw = req.query.seq;
+        const seq = seqRaw !== undefined && seqRaw !== "" ? Math.floor(Number(seqRaw)) : head;
+        if (!Number.isFinite(seq) || seq < 0) {
+          return reply.code(400).send({ error: "bad seq" });
+        }
+        const base = await store.getRawBytes(id);
+        if (!base) {
+          return reply.code(404).send({ error: "map not found" });
+        }
+        // ops with seq <= target (the log is seq-ordered; a preserved gap just means fewer ops)
+        const ops = log.all(key).filter((e) => e.seq <= seq).map((e) => e.op);
+        const proj: EditorProject = { ...emptyProject(id), journal: ops.length ? [ops] : [], cursor: ops.length ? 1 : 0 };
+        const { report, bytes } = buildAndValidate(base.bytes, proj, await loadTalismanTemplates(), await loadLandmarkSizeFn());
+        if (!report.ok || !bytes) {
+          return reply.code(422).send(report);
+        }
+        const fileName = `${id}-seq${seq}.sg`;
+        return reply
+          .header("content-type", "application/octet-stream")
+          .header("content-disposition", `attachment; filename="${encodeURIComponent(fileName)}"`)
+          .header("x-validation-ok", "1")
+          .send(Buffer.from(bytes));
+      } catch (e) {
+        return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+  );
 
   // POST /api/maps/:id/generate -> run a MarkovJunior recipe over a region, decode to
   // EditOps against the current project, validate, return { ops, report }. The client

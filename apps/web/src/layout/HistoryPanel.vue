@@ -13,6 +13,7 @@ import { ElButton, ElMessage, ElMessageBox } from "element-plus";
 import { Clock, ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import { useCollabStore, type HistoryEntry } from "../stores/collabStore";
 import { useFloatingDock } from "../composables/useFloatingDock";
+import { exportAt } from "../services/api";
 
 const collab = useCollabStore();
 const { history, connected, peerList } = storeToRefs(collab);
@@ -97,6 +98,30 @@ function revertFrom(e: HistoryEntry): void {
     })
     .catch(() => { /* отмена */ });
 }
+
+/** «Выкачать промежуток»: download the .sg of the map AS IT WAS at this history point. */
+async function download(e: HistoryEntry): Promise<void> {
+  const id = collab.mapId;
+  if (!id) return;
+  try {
+    const r = await exportAt(id, collab.channel, e.seq);
+    if (!r.ok || !r.blob) {
+      ElMessage.warning(`Не удалось выкачать точку #${e.seq}${r.report && !r.report.ok ? " — карта на этой точке невалидна" : ""}`);
+      return;
+    }
+    const url = URL.createObjectURL(r.blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = r.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    ElMessage.success(`Выкачано состояние на точке #${e.seq}`);
+  } catch (err) {
+    ElMessage.warning("Не удалось выкачать: " + (err as Error).message);
+  }
+}
 </script>
 
 <template>
@@ -134,6 +159,12 @@ function revertFrom(e: HistoryEntry): void {
                 title="Откатить ВАШИ правки с этой записи и новее; чужие сохранятся, откат остановится на конфликте"
                 @click.stop="revertFrom(e)"
               >⎌ откатить моё отсюда</button>
+              <button
+                type="button"
+                class="hist-act"
+                title="Скачать .sg карты в состоянии на этой записи («выкачать промежуток»)"
+                @click.stop="download(e)"
+              >⭳ выкачать</button>
             </div>
           </template>
         </li>

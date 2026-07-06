@@ -121,6 +121,28 @@ export async function exportProject(id: string, project: EditorProject): Promise
 }
 
 /**
+ * GET /api/maps/:id/export-at — the `.sg` of the shared room log applied up to `seq`
+ * ("выкачать промежуток": download the map as it was at a history point). Same 200/422
+ * contract as /export.
+ */
+export async function exportAt(id: string, channel: string | null, seq: number): Promise<ExportResult> {
+  const q = new URLSearchParams({ seq: String(seq) });
+  if (channel) q.set("channel", channel);
+  const res = await fetch(`${u(REST.mapExportAt(id))}?${q.toString()}`);
+  if (res.status === 422) {
+    return { ok: false, report: (await res.json()) as ValidationReport };
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`export-at failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+  }
+  const disp = res.headers.get("content-disposition") ?? "";
+  const m = /filename="?([^"]+)"?/.exec(disp);
+  const filename = m ? decodeURIComponent(m[1]!) : `${id}-seq${seq}.sg`;
+  return { ok: true, blob: await res.blob(), filename };
+}
+
+/**
  * POST /api/maps/:id/generate — run a Copilot recipe over `region` against the current
  * project. Returns the new EditOps + their validation report; the caller commits the ops.
  */

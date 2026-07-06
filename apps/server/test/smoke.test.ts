@@ -120,3 +120,21 @@ describe("static /assets/*", () => {
     expect(String(res.headers.vary ?? "")).not.toMatch(/origin/i);
   });
 });
+
+describe("GET /api/maps/:id/export-at (download the map at a history point)", () => {
+  it("seq=0 (empty room log) returns the base map .sg — valid, byte-identical to /raw", async () => {
+    const list = await app.inject({ method: "GET", url: REST.scenarios });
+    const riders = (list.json() as ScenarioEntry[]).find((e) => /^Riders\.sg$/i.test(e.fileName))!;
+
+    const res = await app.inject({ method: "GET", url: REST.mapExportAt(riders.id) + "?seq=0" });
+    expect(res.statusCode).toBe(200);
+    expect(String(res.headers["content-type"])).toContain("application/octet-stream");
+    const buf = res.rawPayload;
+    expect(buf.length).toBeGreaterThan(1000);
+    expect(buf.subarray(0, 10).toString("latin1")).toBe("D2EESFISIG"); // .sg magic
+    // no room ops => the export equals the untouched base bytes
+    const raw = await app.inject({ method: "GET", url: REST.mapRaw(riders.id) });
+    expect(buf.length).toBe(raw.rawPayload.length);
+  });
+});
+

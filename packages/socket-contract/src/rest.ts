@@ -130,6 +130,7 @@ export const REST = {
   mapRaw: (id: string) => `/api/maps/${id}/raw`, // GET -> original .sg bytes
   mapValidate: (id: string) => `/api/maps/${id}/validate`, // POST EditorProject -> ValidationReport
   mapExport: (id: string) => `/api/maps/${id}/export`, // POST EditorProject -> .sg bytes (or 422 + report)
+  mapExportAt: (id: string) => `/api/maps/${id}/export-at`, // GET ?channel&seq -> .sg bytes of the room log up to seq ("выкачать промежуток")
   mapGenerate: (id: string) => `/api/maps/${id}/generate`, // POST { project, recipeId, region, seed? } -> { ops, report }
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
   mapNew: "/api/maps/new", // POST { size, fill?, name? } -> { id } (from-scratch blank terrain)
