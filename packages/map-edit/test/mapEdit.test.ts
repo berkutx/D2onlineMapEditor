@@ -249,28 +249,37 @@ describe("@d2/map-edit landmark footprint plan (passability = plan occupancy)", 
     return count;
   }
 
-  it("a 2×2 wall claims all 4 footprint cells in the plan (1×1 without a resolver)", () => {
-    const { doc, raw } = parseScenarioRaw(bytes);
-    // free 2×2 corner (footprint (2..3,2..3) in-bounds on 72×72 Riders)
-    const lm = {
-      kind: "addObject" as const,
-      object: { type: "landmark" as const, id: "S143MM9000", pos: { x: 2, y: 2 }, baseType: "G000MG0047" },
-    };
-    // G000MG0047 = 2×2 (byte-verified on the original's walltest.sg).
-    const size = (b: string): readonly [number, number] | undefined => (b === "G000MG0047" ? [2, 2] : undefined);
+  // Every landmark — walls AND decorations — claims its full GLmark CX×CY in the plan. The
+  // resolver reads the real per-baseType size, so 1×1 stays 1×1 and a 4×4 decoration claims
+  // all 16 cells. Byte-verified sizes from the original's walltest.sg + decorCatalog (GLmark).
+  const CASES = [
+    { base: "G000MG8022", w: 1, h: 1, what: "1×1 tower/clutter" },
+    { base: "G000MG0047", w: 2, h: 2, what: "2×2 wall" },
+    { base: "G000MG0003", w: 4, h: 4, what: "4×4 ruin-building decoration" },
+  ];
+  const sizeOf = (b: string): readonly [number, number] | undefined => {
+    const c = CASES.find((x) => x.base === b);
+    return c ? [c.w, c.h] : undefined;
+  };
 
-    // legacy path (no resolver): only the anchor cell → a maze wall would be ¾ passable.
-    expect(planRefCount(applyEditsToBytes(raw, [lm]), "S143MM9000")).toBe(1);
-
-    // with the GLmark footprint: all 4 cells occupied — the wall actually blocks.
-    const out = applyEditsToBytes(raw, [lm], { landmarkSize: size });
-    expect(planRefCount(out, "S143MM9000")).toBe(4);
-
-    // footprint is byte-plan only (never on the object model) — the semantic tier stays green.
-    const res = roundTripSemantic(doc, out, [lm]);
-    expect(res.reason).toBeUndefined();
-    expect(res.ok).toBe(true);
-  });
+  for (const c of CASES) {
+    it(`landmark plan footprint = full ${c.what} (1×1 without a resolver)`, () => {
+      const { doc, raw } = parseScenarioRaw(bytes);
+      const lm = {
+        kind: "addObject" as const,
+        object: { type: "landmark" as const, id: "S143MM9000", pos: { x: 2, y: 2 }, baseType: c.base },
+      };
+      // legacy path (no resolver): only the anchor cell — a bigger piece would be mostly passable.
+      expect(planRefCount(applyEditsToBytes(raw, [lm]), "S143MM9000")).toBe(1);
+      // with the GLmark footprint: exactly w×h cells occupied.
+      const out = applyEditsToBytes(raw, [lm], { landmarkSize: sizeOf });
+      expect(planRefCount(out, "S143MM9000")).toBe(c.w * c.h);
+      // footprint is byte-plan only (never on the object model) — the semantic tier stays green.
+      const res = roundTripSemantic(doc, out, [lm]);
+      expect(res.reason).toBeUndefined();
+      expect(res.ok).toBe(true);
+    });
+  }
 });
 
 describe("@d2/map-edit road segment selection", () => {
