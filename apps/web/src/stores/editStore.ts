@@ -21,6 +21,7 @@ import {
   applyOp,
   applyOps,
   activeOps,
+  opKeys,
   canUndo as canUndoFn,
   canRedo as canRedoFn,
   tileZone,
@@ -29,6 +30,26 @@ import {
   type EditOp,
 } from "@d2/map-edit";
 import type { MapDocument } from "@d2/map-schema";
+
+/** A structural signature of the CURRENT state at an op-key ("x,y" cell / "O:id" object / …),
+ *  read from the live doc — for the redo guard (compare state at undo-time vs redo-time). */
+function keySig(doc: MapDocument, key: string): string {
+  if (key.startsWith("O:")) return JSON.stringify(doc.objects.find((o) => o.id === key.slice(2)) ?? null);
+  if (key.startsWith("E:")) return JSON.stringify((doc.events ?? []).find((e) => e.id === key.slice(2)) ?? null);
+  if (key.startsWith("T:")) return JSON.stringify((doc.templates ?? []).find((t) => t.id === key.slice(2)) ?? null);
+  if (key === "VARS") return JSON.stringify(doc.variables ?? []);
+  if (key === "DIPLOMACY") return JSON.stringify(doc.diplomacy ?? []);
+  if (key === "SCENARIO") return JSON.stringify(doc.header ?? {});
+  const [x, y] = key.split(",").map(Number);
+  const c = doc.terrain.cells[y * doc.size + x];
+  return c ? JSON.stringify([c.value, c.roadType, c.roadVar]) : "";
+}
+/** Signature of every key a set of ops touches (their combined footprint) in `doc`. */
+function sigOfKeys(doc: MapDocument, ops: readonly EditOp[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const op of ops) for (const k of opKeys(op)) out[k] = keySig(doc, k);
+  return out;
+}
 import type { ValidationReport, Region, GenDebug } from "@d2/socket-contract";
 import {
   validateProject,
@@ -97,9 +118,14 @@ export const useEditStore = defineStore("edit", () => {
   /** Forward + INVERSE for each of MY commits (newest last). Only mine are undoable; the
    *  inverse is captured at apply time (applyOp's exact inverse) so collab undo is correct
    *  even after peers' ops land in between. */
-  type UndoEntry = { forward: EditOp[]; inverse: EditOp[] };
+  //  `expect` (set when the entry moves onto the redo stack) = the state signature of the
+  //  forward op's keys right AFTER the undo, so redo can detect a peer having changed them.
+  type UndoEntry = { forward: EditOp[]; inverse: EditOp[]; expect?: Record<string, string> };
   const myUndo = ref<UndoEntry[]>([]);
   const myRedo = ref<UndoEntry[]>([]);
+  /** Bumped when a redo is REFUSED because the state it targets changed (a peer edited those
+   *  cells/objects since the undo) — the UI watches this to toast «перенакат отменён». */
+  const redoBlockedTick = ref(0);
   /** Inverse ops accumulated for the in-progress (un-committed) preview, in undo order. */
   let pendingInverses: EditOp[] = [];
   /** Same inverses in APPLY order (pendingPerOp[i] undoes the i-th previewed op) — aligns
@@ -372,7 +398,10 @@ export const useEditStore = defineStore("edit", () => {
       persist();
       outgoing?.(entry.inverse, inv.slice().reverse().map((o) => [o]), uids);
       myUndo.value = myUndo.value.slice(0, -1);
-      myRedo.value = [...myRedo.value, entry];
+      // capture the post-undo state of the forward op's keys, so redo can detect a peer having
+      // since changed them (the redo guard). liveDoc now reflects the inverse just applied.
+      const expect = liveDoc.value ? sigOfKeys(liveDoc.value, entry.forward) : {};
+      myRedo.value = [...myRedo.value, { ...entry, expect }];
       report.value = null;
       scheduleAutoValidate();
       return;
@@ -389,6 +418,17 @@ export const useEditStore = defineStore("edit", () => {
     if (roomConnected.value) {
       const entry = myRedo.value[myRedo.value.length - 1];
       if (!entry) return;
+      // REDO GUARD: refuse if the state the forward op would overwrite changed since the undo
+      // (a peer edited those cells/objects) — «перенакатить нельзя, если состояние изменилось».
+      // The whole redo chain is then void (a peer edit breaks the linear redo).
+      if (entry.expect && liveDoc.value) {
+        const now = sigOfKeys(liveDoc.value, entry.forward);
+        if (Object.keys(entry.expect).some((k) => now[k] !== entry.expect![k])) {
+          myRedo.value = [];
+          redoBlockedTick.value++;
+          return;
+        }
+      }
       const inv = applyToLive(entry.forward);
       const uids = entry.forward.map(() => newOpUid());
       project.value = pushCommit(project.value, entry.forward, uids);
@@ -758,6 +798,7 @@ export const useEditStore = defineStore("edit", () => {
     undoable,
     redoable,
     dirty,
+    redoBlockedTick,
     ensureProject,
     setBaseDoc,
     applyPreview,

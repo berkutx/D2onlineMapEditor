@@ -6,8 +6,9 @@
  * Vue owns this DOM chrome; the <MapCanvasHost> is the only seam where PixiJS
  * takes over a div and renders the map.
  */
-import { computed, onMounted, onBeforeUnmount } from "vue";
+import { computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { storeToRefs } from "pinia";
+import { ElMessage } from "element-plus";
 import { useRoadActions } from "../composables/roadActions";
 import { useSelectionActions } from "../composables/selectionActions";
 import { useViewStore } from "../stores/viewStore";
@@ -41,6 +42,12 @@ const mapStore = useMapStore();
 const { currentScenarioId } = storeToRefs(mapStore);
 const roadActions = useRoadActions();
 const selActions = useSelectionActions();
+
+// Redo guard (collab): the store refuses a redo whose target a peer changed since the undo.
+watch(
+  () => editStore.redoBlockedTick,
+  () => ElMessage.warning("Перенакат отменён: эти клетки/объекты изменил другой участник."),
+);
 
 /** Cities/capitals show a double garrison (2 vertical formations) — give them a wider rail.
  *  Widths are clamp()'d so rails SHRINK on narrow windows instead of pushing off-screen. */
