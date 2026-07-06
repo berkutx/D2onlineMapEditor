@@ -562,11 +562,15 @@ export async function registerMapRoutes(
     const seed = Number.isInteger(body.seed) ? Number(body.seed) : Date.now() & 0x7fffffff;
     const mask = parseMask(body.cells);
     const protect = body.protect === true;
+    // Collab id slot (M4): the client sends the slot the room assigned it, so landmark ids
+    // this generation mints fall in that slot's disjoint band (no collision with a peer's
+    // concurrent generation). nextTypedId clamps an out-of-range/absent slot to 0.
+    const genSlot = Number.isInteger(body.slot) ? Number(body.slot) : 0;
     const t0 = Date.now();
     let ops;
     try {
       const { walls, decor, landmarkSizes } = await loadCatalogSets();
-      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect, decor, landmarkSizes);
+      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect, decor, landmarkSizes, genSlot);
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -675,10 +679,11 @@ export async function registerMapRoutes(
     const seed = Date.now() & 0x7fffffff;
     const mask = parseMask(body.cells);
     const protect = body.protect === true;
+    const genSlot = Number.isInteger(body.slot) ? Number(body.slot) : 0;
     const t0 = Date.now();
     let ops;
     try {
-      ops = await runGenerationSteps(liveDoc, steps, walls, seed, mask, protect, decor, landmarkSizes);
+      ops = await runGenerationSteps(liveDoc, steps, walls, seed, mask, protect, decor, landmarkSizes, genSlot);
     } catch (e) {
       return reply.code(400).send({ error: e instanceof Error ? e.message : String(e), requestId });
     }

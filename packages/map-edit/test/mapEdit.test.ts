@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { parseScenarioRaw, parseScenario, validateMap, ByteBuffer, iterateObjects, ruinFrame } from "@d2/sg-parser";
+import type { MapDocument, MapObject } from "@d2/map-schema";
 import {
   setTerrain,
   setGround,
@@ -34,6 +35,9 @@ import {
   placeStackOps,
   placeRuinOps,
   placeSiteOps,
+  nextTypedId,
+  ID_BAND,
+  ID_SLOTS,
   emptyProject,
   pushOp,
   undo,
@@ -375,6 +379,117 @@ describe("@d2/map-edit place mountains + landmarks (addObject export)", () => {
     const re = parseScenario(out);
     const moved = re.objects.find((o) => o.type === "mountains" && o.pos.x === 25 && o.pos.y === 26);
     expect(moved).toBeTruthy();
+  });
+});
+
+describe("@d2/map-edit M4 id-namespacing (collab slots)", () => {
+  const CODES = ["FT", "KC", "RU", "SI", "MM", "BG", "LO"] as const;
+
+  it("distinct slots draw from disjoint bands → concurrent mint never collides", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    for (const code of CODES) {
+      // two editors seeing the SAME doc, different slots → different ids in different bands
+      const a = nextTypedId(doc, "S143", code, 0);
+      const b = nextTypedId(doc, "S143", code, 1);
+      expect(a).not.toBe(b);
+      const idxA = parseInt(a.slice(-4), 16);
+      const idxB = parseInt(b.slice(-4), 16);
+      expect(idxA).toBeLessThan(ID_BAND); // slot 0 → low band
+      expect(idxB).toBeGreaterThanOrEqual(ID_BAND); // slot 1 → its own band
+      expect(idxB).toBeLessThan(2 * ID_BAND);
+    }
+  });
+
+  it("all 16 slots mint pairwise-distinct ids from one doc state", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    const ids = new Set<string>();
+    for (let s = 0; s < ID_SLOTS; s++) ids.add(nextTypedId(doc, "S143", "FT", s));
+    expect(ids.size).toBe(ID_SLOTS); // no two slots agree
+  });
+
+  it("slot 0 is behaviour-preserving: == the old max+1 for a real map", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    // reproduce the pre-M4 formula (scan every id carrying the code, take max+1)
+    const oldMaxPlusOne = (code: string): string => {
+      let max = -1;
+      const re = new RegExp(`${code}([0-9a-fA-F]{4})$`);
+      for (const o of doc.objects) { const m = re.exec(o.id); if (m) max = Math.max(max, parseInt(m[1]!, 16)); }
+      return `S143${code}${(max + 1).toString(16).padStart(4, "0")}`;
+    };
+    for (const code of CODES) expect(nextTypedId(doc, "S143", code, 0)).toBe(oldMaxPlusOne(code));
+  });
+
+  it("type↔code is 1:1 — no foreign-type object carries a place code (regex == old type filter)", () => {
+    // nextTypedId scans by the id regex, NOT by o.type as most old place* functions did. That is
+    // only equivalent if a place code is carried ONLY by objects of its expected type-set — else
+    // the count (and the minted id) would diverge from the pre-M4 behaviour. Assert the invariant.
+    const { doc } = parseScenarioRaw(bytes);
+    const CODE_TYPES: Record<string, string[]> = {
+      FT: ["village", "capital", "fort"], KC: ["stack"], RU: ["ruin"],
+      SI: ["merchant", "mage", "trainer", "mercenary"], MM: ["landmark"],
+      BG: ["treasure"], LO: ["location"],
+    };
+    for (const code of CODES) {
+      const re = new RegExp(`${code}([0-9a-fA-F]{4})$`);
+      for (const o of doc.objects) {
+        if (re.exec(o.id)) expect(CODE_TYPES[code]).toContain(o.type);
+      }
+    }
+  });
+
+  it("mints ABOVE a pre-existing high count within the band (maze simulation)", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    // simulate a maze that already put ~2500 landmarks in slot 0's band
+    const work: MapDocument = {
+      ...doc,
+      objects: [...doc.objects, { type: "landmark", id: "S143MM09c4", pos: { x: 1, y: 1 }, baseType: "X" } as MapObject],
+    };
+    const s0 = nextTypedId(work, "S143", "MM", 0);
+    expect(parseInt(s0.slice(-4), 16)).toBe(0x09c4 + 1); // continues in band 0, above the maze
+    const s1 = nextTypedId(work, "S143", "MM", 1);
+    expect(parseInt(s1.slice(-4), 16)).toBe(ID_BAND); // slot 1 unaffected by band-0 fill
+  });
+
+  it("band overflow borrows the lowest FREE gap, never a neighbour's next-mint id", () => {
+    // slot 0's band [0,4096) is FULL; slot 1 (a live peer) has minted 4096 and 5000, leaving a
+    // gap 4097..4999. The old `globalMax+1` fallback would return 5001 == slot 1's NEXT mint
+    // (bandMax 5000 + 1) → a cross-slot collision. The fix returns the lowest free gap (4097),
+    // which no active band-minter will ever pick (they mint above their own max).
+    const mk = (i: number): MapObject =>
+      ({ type: "landmark", id: `S143MM${(i >>> 0).toString(16).padStart(4, "0")}`, pos: { x: 0, y: 0 }, baseType: "X" } as MapObject);
+    const objects: MapObject[] = [];
+    for (let i = 0; i < ID_BAND; i++) objects.push(mk(i)); // fill band 0
+    objects.push(mk(ID_BAND)); // 4096, slot 1
+    objects.push(mk(5000)); // 5000, slot 1 (gap 4097..4999)
+    const doc = { header: { version: "S143" }, objects } as unknown as MapDocument;
+    const overflow = nextTypedId(doc, "S143", "MM", 0);
+    expect(parseInt(overflow.slice(-4), 16)).toBe(ID_BAND + 1); // 4097 (the gap), NOT 5001
+    // and it must not equal what slot 1 would mint next
+    expect(nextTypedId(doc, "S143", "MM", 1)).not.toBe(overflow);
+  });
+
+  it("out-of-range slot is clamped to 0 (no overflow into an invalid band)", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    expect(nextTypedId(doc, "S143", "FT", 999)).toBe(nextTypedId(doc, "S143", "FT", 0));
+    expect(nextTypedId(doc, "S143", "FT", -1)).toBe(nextTypedId(doc, "S143", "FT", 0));
+  });
+
+  it("two clients place the SAME object type concurrently → distinct ids, both round-trip", () => {
+    const { doc, raw } = parseScenarioRaw(bytes);
+    // BOTH read the same base doc (true concurrency): slot 0 and slot 1
+    const a = placeVillageOps(doc, 30, 30, "A", 1, 0);
+    const b = placeVillageOps(doc, 32, 32, "B", 1, 1);
+    const idA = (a[0] as Extract<EditOp, { kind: "addObject" }>).object.id;
+    const idB = (b[0] as Extract<EditOp, { kind: "addObject" }>).object.id;
+    expect(idA).not.toBe(idB); // the whole point — no collision, no drop
+    const ops = [...a, ...b];
+    const out = applyEditsToBytes(raw, ops);
+    const re = parseScenario(out);
+    expect(re.objects.find((o) => o.id === idA)).toBeTruthy();
+    expect(re.objects.find((o) => o.id === idB)).toBeTruthy();
+    const res = roundTripSemantic(doc, out, ops);
+    expect(res.reason).toBeUndefined();
+    expect(res.ok).toBe(true);
   });
 });
 

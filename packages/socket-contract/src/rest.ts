@@ -68,6 +68,9 @@ export const GenerateRequest = z.object({
   recipeId: z.string(),
   region: Region,
   seed: z.number().int().optional(),
+  /** collab id slot (M4): landmark ids mint in this slot's disjoint band so a peer's
+   *  concurrent generation never collides. Absent/0 = solo. */
+  slot: z.number().int().optional(),
   /** the current EditorProject (validated separately by @d2/map-edit). */
   project: z.unknown(),
 });
@@ -106,6 +109,8 @@ export const CopilotRequest = z.object({
   text: z.string(),
   /** optional current zone selection (the Copilot ⛶ region), as a hint for the LLM. */
   selection: Region.nullish(),
+  /** collab id slot (M4): see GenerateRequest.slot. */
+  slot: z.number().int().optional(),
   /** the current EditorProject (validated separately by @d2/map-edit). */
   project: z.unknown(),
 });

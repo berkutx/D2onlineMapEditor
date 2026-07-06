@@ -154,10 +154,14 @@ export async function generateRegion(
   seed?: number,
   cells?: [number, number][] | null,
   protect?: boolean,
+  slot?: number,
 ): Promise<GenerateResult> {
-  // pure computation (ops are only committed client-side afterwards) — retry-safe
+  // pure computation (ops are only committed client-side afterwards) — retry-safe.
+  // `slot` = my collab id band (M4): landmark ids mint in it so a peer's concurrent
+  // generation never collides. Omitted/0 = solo.
   return postJsonRetry<GenerateResult>(u(REST.mapGenerate(id)), {
     project, recipeId, region, seed, cells: cells ?? undefined, protect: protect || undefined,
+    slot: slot || undefined,
   });
 }
 
@@ -175,6 +179,7 @@ export async function copilotLlm(
   cells?: [number, number][] | null,
   protect?: boolean,
   timeoutMs = 175_000,
+  slot?: number,
 ): Promise<CopilotResult> {
   // Abort if the bridge is unreachable/unresponsive (server long-polls ~150s for the agent).
   const ctrl = new AbortController();
@@ -184,7 +189,7 @@ export async function copilotLlm(
     res = await fetch(u(REST.mapCopilot(id)), {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ project, text, selection: selection ?? null, cells: cells ?? undefined, protect: protect || undefined }),
+      body: JSON.stringify({ project, text, selection: selection ?? null, cells: cells ?? undefined, protect: protect || undefined, slot: slot || undefined }),
       signal: ctrl.signal,
     });
   } catch (e) {

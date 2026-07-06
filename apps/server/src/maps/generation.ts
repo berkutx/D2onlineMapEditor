@@ -208,6 +208,9 @@ export async function runGenerationSteps(
   /** Landmark footprints by UPPERCASE baseType (catalog cx/cy) — feeds the occupancy
    *  guard so generation never writes under/over existing objects. */
   landmarkSizes?: Record<string, readonly [number, number]>,
+  /** Collab id slot (M4): landmark ids mint in this slot's disjoint band so two clients
+   *  generating concurrently never collide. 0 = solo (the caller passes the socket's slot). */
+  slot = 0,
 ): Promise<EditOp[]> {
   let work = liveDoc;
   const all: EditOp[] = [];
@@ -249,7 +252,7 @@ export async function runGenerationSteps(
       : await buildGrid(recipe, genRegion, seed, scale);
     // occupancy rebuilt per step: a later step must respect the objects an earlier one placed
     const occupied = buildOccupiedSet(work, landmarkSizes);
-    const ops = decodeGrid(work, grid, table, genRegion, walls, mask, protect, decor, maskFill ? 1 : scale, occupied);
+    const ops = decodeGrid(work, grid, table, genRegion, walls, mask, protect, decor, maskFill ? 1 : scale, occupied, slot);
     all.push(...ops);
     work = applyOps(work, ops);
   }

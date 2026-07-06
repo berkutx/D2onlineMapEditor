@@ -20,7 +20,20 @@ export interface ClientToServerEvents {
     },
     ack: (
       r:
-        | { ok: true; you: UserPresence; peers: UserPresence[]; snapshotSeq: number }
+        | {
+            ok: true;
+            you: UserPresence;
+            peers: UserPresence[];
+            snapshotSeq: number;
+            /**
+             * Collab id slot (additive, v0.8): a distinct index ∈ [0,16) the room assigns this
+             * socket. The client mints new-object hex4 ids in this slot's DISJOINT band
+             * (`nextTypedId`), so two editors placing the same object type concurrently never
+             * collide — no server round-trip, no temp-id, no reconcile. Absent (legacy client
+             * / no room) → slot 0.
+             */
+            slot: number;
+          }
         | { ok: false; error: string },
     ) => void,
   ) => void;

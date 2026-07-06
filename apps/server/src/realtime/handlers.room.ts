@@ -116,8 +116,9 @@ export function registerRoomHandlers(
         // tell existing peers about the newcomer
         socket.to(roomId(key)).emit("presence:update", presence);
 
-        // late joiner gets the current head; if >0 they should snapshot:request to catch up
-        ack({ ok: true, you: presence, peers, snapshotSeq: log.head(key) });
+        // late joiner gets the current head; if >0 they should snapshot:request to catch up.
+        // `slot` is this socket's disjoint id band for concurrent-safe object minting (M4).
+        ack({ ok: true, you: presence, peers, snapshotSeq: log.head(key), slot: rooms.slotOf(key, socket.id) });
       } catch (err) {
         ack({ ok: false, error: (err as Error).message });
       }

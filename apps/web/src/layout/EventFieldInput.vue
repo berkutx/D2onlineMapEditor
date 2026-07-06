@@ -15,6 +15,7 @@ import { getScene } from "../canvas/sceneHolder";
 import { useEditStore } from "../stores/editStore";
 import { useToolStore } from "../stores/toolStore";
 import { useViewStore } from "../stores/viewStore";
+import { useCollabStore } from "../stores/collabStore";
 import { useItemStore, ITEM_CAT_LABELS } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
 import { useDecorStore } from "../stores/decorStore";
@@ -42,6 +43,7 @@ const emit = defineEmits<{
 const edit = useEditStore();
 const toolStore = useToolStore();
 const viewStore = useViewStore();
+const collabStore = useCollabStore();
 const itemStore = useItemStore();
 const spellStore = useSpellStore();
 const decorStore = useDecorStore();
@@ -307,7 +309,7 @@ function newLocation(): void {
   const clampC = (v: number): number => Math.max(0, Math.min(doc.size - 1, v));
   const cx = clampC(vc ? Math.round(vc.x + vc.w / 2) : Math.floor(doc.size / 2));
   const cy = clampC(vc ? Math.round(vc.y + vc.h / 2) : Math.floor(doc.size / 2));
-  const ops = placeLocationOps(doc, cx, cy, 2, "Новая локация");
+  const ops = placeLocationOps(doc, cx, cy, 2, "Новая локация", collabStore.idSlot);
   const first = ops[0] as { object?: { id: string } } | undefined;
   if (!first?.object) return;
   edit.commit(ops);

@@ -132,10 +132,16 @@ export const useEditStore = defineStore("edit", () => {
    *  1:1 with the committed stroke when every previewed op is committed (the brush path). */
   let pendingPerOp: EditOp[] = [];
 
-  /** Called by collabStore on join/leave to enable/disable the broadcast + inverse-undo path. */
-  function setCollab(connected: boolean, onOutgoing: OutgoingHook | null): void {
+  /** Collab id slot (M4): the room's disjoint id band for this socket, snapshotted here so
+   *  server-side generation (which mints landmark ids) can pass it. 0 = solo / offline. */
+  let collabSlot = 0;
+
+  /** Called by collabStore on join/leave to enable/disable the broadcast + inverse-undo path.
+   *  `slot` is my room-assigned id band (M4), used when generation mints object ids. */
+  function setCollab(connected: boolean, onOutgoing: OutgoingHook | null, slot = 0): void {
     roomConnected.value = connected;
     outgoing = connected ? onOutgoing : null;
+    collabSlot = connected ? slot : 0;
     myUndo.value = [];
     myRedo.value = [];
     pendingInverses = [];
@@ -741,7 +747,7 @@ export const useEditStore = defineStore("edit", () => {
     if (!project.value) return null;
     busy.value = true;
     try {
-      const res = await generateRegion(project.value.baseScenarioId, project.value, recipeId, region, seed, cells, protect);
+      const res = await generateRegion(project.value.baseScenarioId, project.value, recipeId, region, seed, cells, protect, collabSlot);
       report.value = res.report;
       genDebug.value = res.debug ?? null;
       if (res.report.ok && res.ops.length) commit(res.ops);
@@ -765,7 +771,7 @@ export const useEditStore = defineStore("edit", () => {
     if (!project.value) return null;
     busy.value = true;
     try {
-      const res = await copilotLlm(project.value.baseScenarioId, project.value, text, selection ?? null, cells, protect);
+      const res = await copilotLlm(project.value.baseScenarioId, project.value, text, selection ?? null, cells, protect, undefined, collabSlot);
       report.value = res.report;
       genDebug.value = res.debug ?? null;
       if (res.report.ok && res.ops.length) commit(res.ops);

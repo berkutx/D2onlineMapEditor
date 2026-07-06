@@ -637,7 +637,7 @@ function decorPlaceOps(entry: DecorEntry, cx: number, cy: number): EditOp[] {
     const image = parseInt(entry.id.slice(7, 9), 10) || 0;
     return placeMountainOps(doc, cx, cy, w, w, image);
   }
-  return placeLandmarkOps(doc, cx, cy, entry.id);
+  return placeLandmarkOps(doc, cx, cy, entry.id, collabStore.idSlot);
 }
 
 // --- object move (move tool) -------------------------------------------------
@@ -964,12 +964,13 @@ function onContextMenu(e: MouseEvent): void {
 function buildPlaceOps(kind: PlaceObjectKind, x: number, y: number): EditOp[] {
   const doc = editStore.liveDoc;
   if (!doc) return [];
+  const slot = collabStore.idSlot; // mint the new object's id in my disjoint band (M4)
   switch (kind) {
-    case "village": return placeVillageOps(doc, x, y, "Новая деревня", 1);
-    case "treasure": return placeChestOps(doc, x, y, 0, []);
-    case "ruin": return placeRuinOps(doc, x, y, 0);
+    case "village": return placeVillageOps(doc, x, y, "Новая деревня", 1, slot);
+    case "treasure": return placeChestOps(doc, x, y, 0, [], slot);
+    case "ruin": return placeRuinOps(doc, x, y, 0, slot);
     case "merchant": case "mage": case "trainer": case "mercenary":
-      return placeSiteOps(doc, x, y, kind);
+      return placeSiteOps(doc, x, y, kind, 0, slot);
     case "stack": {
       // leader = the tool's picked leader, else the first hero (L_LEADER) from the catalog
       const picked = toolStore.stackLeaderId ? unitStore.get(toolStore.stackLeaderId) : undefined;
@@ -980,7 +981,7 @@ function buildPlaceOps(kind: PlaceObjectKind, x: number, y: number): EditOp[] {
       return placeStackOps(doc, x, y, {
         units: [null, null, { unit: hero.id, level: hero.level, hp: hero.hp }, null, null, null],
         leaderCell: 2,
-      });
+      }, slot);
     }
   }
 }

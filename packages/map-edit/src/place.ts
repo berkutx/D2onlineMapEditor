@@ -22,6 +22,72 @@ export const MOUNTAIN_RESTORE = 5;
 
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
 
+/**
+ * Collab id-namespacing (M4). A minted hex4 object id is partitioned by SLOT: a client draws
+ * ids from `[slot*ID_BAND, (slot+1)*ID_BAND)`, a band DISJOINT from every other slot's. So two
+ * clients minting the same object type CONCURRENTLY (both seeing the same doc, both computing the
+ * same max) still get different ids — collision-free BY CONSTRUCTION, with no server round-trip,
+ * no temp-id and no reconcile (the model that made M4 v1 net-negative). The server hands each
+ * socket in a room a distinct slot on join; solo / offline / tests use slot 0.
+ *
+ * 16 slots × 4096 ids/band = 65536 = the whole 4-hex space. A band holds a full maze generation
+ * (~2500 landmarks). Slot 0's band is the LOW range [0,4096), so for any map with <4096 objects
+ * of one type the mint is identical to the old `max+1` — behaviour-preserving for solo edits.
+ *
+ * Bands apply only to the 7 hex4 type codes (FT/KC/RU/SI/MM/BG/LO). Mountains (ML) carry a
+ * POSITIONAL `#index` and are NOT namespaced — concurrent mountain placement stays a known rare
+ * limit (a drop+warn, as before M4).
+ */
+export const ID_BAND_BITS = 12;
+export const ID_BAND = 1 << ID_BAND_BITS; // 4096 ids per slot per type
+export const ID_SLOTS = 0x10000 >> ID_BAND_BITS; // 16 slots fill the 0x0000..0xFFFF space
+
+/**
+ * Mint the next free hex4 id of `typeCode` in `slot`'s band. Scans EVERY object whose id carries
+ * the 2-char code (matching on the id, not `o.type` — FT is shared by village/fort/capital, SI by
+ * the four site kinds), takes the max index inside the slot's band and returns band-max + 1.
+ *
+ * If the band is full (>4096 of one type in one slot — e.g. repeated landmark-heavy generation),
+ * it falls back to the LOWEST GLOBALLY-FREE index, NOT `globalMax + 1`. This matters: `globalMax+1`
+ * is by definition a NEIGHBOUR band's next-mint value, so it collides with that neighbour the next
+ * time they place — resurrecting the very silent-drop bug M4 kills. The lowest-free index instead
+ * prefers an INTERIOR GAP (a hole below some band's max, e.g. left by a deletion), which no active
+ * band-minter will pick — they always mint ABOVE their own band max. It NEVER collides with a
+ * committed id. Residual (accepted): with a fully CONTIGUOUS fill (no interior gaps), the lowest
+ * free index is the lowest non-full band's own next-mint, so a solo overflow is safe (borrows an
+ * empty band) but a concurrent peer minting the same type in that band could still clash — rare,
+ * and preferable to aborting a whole generation with a throw. Throws only when all 65536 ids of
+ * the type are truly taken. (True zero-collision at overflow would need server id arbitration.)
+ */
+export function nextTypedId(
+  doc: MapDocument,
+  version: string,
+  typeCode: string,
+  slot = 0,
+): string {
+  const s = Number.isInteger(slot) && slot >= 0 && slot < ID_SLOTS ? slot : 0;
+  const bandStart = s * ID_BAND;
+  const bandEnd = bandStart + ID_BAND;
+  const re = new RegExp(`${typeCode}([0-9a-fA-F]{4})$`);
+  let bandMax = bandStart - 1;
+  const used = new Set<number>();
+  for (const o of doc.objects) {
+    const m = re.exec(o.id);
+    if (!m) continue;
+    const idx = parseInt(m[1]!, 16);
+    used.add(idx);
+    if (idx >= bandStart && idx < bandEnd && idx > bandMax) bandMax = idx;
+  }
+  let next = bandMax + 1;
+  if (next >= bandEnd) {
+    // band exhausted → lowest globally-free index (a gap no active minter will pick)
+    next = -1;
+    for (let i = 0; i <= 0xffff; i++) if (!used.has(i)) { next = i; break; }
+    if (next < 0) throw new Error(`${version}${typeCode}: id space exhausted (65536 objects)`);
+  }
+  return `${version}${typeCode}${hex4(next)}`;
+}
+
 /** True iff a w×h footprint anchored at (cx,cy) fits on the map (no overlap check yet). */
 export function canPlaceAt(doc: MapDocument, cx: number, cy: number, w: number, h: number): boolean {
   return cx >= 0 && cy >= 0 && cx + w <= doc.size && cy + h <= doc.size;
@@ -123,16 +189,10 @@ export function deleteMountainOps(doc: MapDocument, id: string): EditOp[] {
 export function placeVisitorOps(
   doc: MapDocument,
   city: { id: string; pos: { x: number; y: number }; owner?: string },
+  slot = 0,
 ): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const o of doc.objects) {
-    if (o.type === "stack") {
-      const m = /KC([0-9a-fA-F]{4})$/.exec(o.id);
-      if (m) max = Math.max(max, parseInt(m[1]!, 16));
-    }
-  }
-  const id = `${version}KC${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "KC", slot);
   const visitor = {
     type: "stack" as const,
     id,
@@ -157,16 +217,9 @@ export function placeVisitorOps(
 }
 
 /** Ops to place a landmark: one addObject. id = a fresh S143MM#### (matches the block). */
-export function placeLandmarkOps(doc: MapDocument, cx: number, cy: number, lmarkKey: string): EditOp[] {
+export function placeLandmarkOps(doc: MapDocument, cx: number, cy: number, lmarkKey: string, slot = 0): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const o of doc.objects) {
-    if (o.type === "landmark") {
-      const m = /MM([0-9a-fA-F]{4})$/.exec(o.id);
-      if (m) max = Math.max(max, parseInt(m[1]!, 16));
-    }
-  }
-  const id = `${version}MM${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "MM", slot);
   return [{ kind: "addObject", object: { type: "landmark", id, pos: { x: cx, y: cy }, baseType: lmarkKey } }];
 }
 
@@ -180,16 +233,10 @@ export function placeChestOps(
   cy: number,
   image = 0,
   items: readonly string[] = [],
+  slot = 0,
 ): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const o of doc.objects) {
-    if (o.type === "treasure") {
-      const m = /BG([0-9a-fA-F]{4})$/.exec(o.id);
-      if (m) max = Math.max(max, parseInt(m[1]!, 16));
-    }
-  }
-  const id = `${version}BG${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "BG", slot);
   return [{
     kind: "addObject",
     object: { type: "treasure", id, pos: { x: cx, y: cy }, image, priority: 0, items: items.slice() },
@@ -208,14 +255,10 @@ export function placeVillageOps(
   cy: number,
   name: string,
   tier = 1,
+  slot = 0,
 ): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const o of doc.objects) {
-    const m = /FT([0-9a-fA-F]{4})$/.exec(o.id);
-    if (m) max = Math.max(max, parseInt(m[1]!, 16));
-  }
-  const id = `${version}FT${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "FT", slot);
   const village = {
     type: "village" as const,
     id,
@@ -246,16 +289,10 @@ export function placeStackOps(
     units: readonly ({ unit: string; level?: number; hp?: number } | null)[];
     leaderCell: number;
   },
+  slot = 0,
 ): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const obj of doc.objects) {
-    if (obj.type === "stack") {
-      const m = /KC([0-9a-fA-F]{4})$/.exec(obj.id);
-      if (m) max = Math.max(max, parseInt(m[1]!, 16));
-    }
-  }
-  const id = `${version}KC${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "KC", slot);
   const garrison = Array.from({ length: 6 }, (_, i) => {
     const gu = o.units[i];
     return gu ? { unit: gu.unit, level: gu.level ?? 1, hp: gu.hp ?? 0 } : null;
@@ -287,16 +324,9 @@ export function placeStackOps(
  *  the assemble post-pass for a fresh ruinFrame exactly: TITLE "", IMAGE always written,
  *  LOOTER = the nil ref kept as the raw string (looted=false), CASH ""/ITEM nil → omitted,
  *  empty 6-cell guardian formation. The inspector edits everything after placement. */
-export function placeRuinOps(doc: MapDocument, cx: number, cy: number, image = 0): EditOp[] {
+export function placeRuinOps(doc: MapDocument, cx: number, cy: number, image = 0, slot = 0): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const o of doc.objects) {
-    if (o.type === "ruin") {
-      const m = /RU([0-9a-fA-F]{4})$/.exec(o.id);
-      if (m) max = Math.max(max, parseInt(m[1]!, 16));
-    }
-  }
-  const id = `${version}RU${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "RU", slot);
   const ruin = {
     type: "ruin" as const,
     id,
@@ -324,16 +354,10 @@ export function placeSiteOps(
   cy: number,
   kind: PlaceSiteKind,
   image = 0,
+  slot = 0,
 ): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const o of doc.objects) {
-    if (o.type === "merchant" || o.type === "mage" || o.type === "trainer" || o.type === "mercenary") {
-      const m = /SI([0-9a-fA-F]{4})$/.exec(o.id);
-      if (m) max = Math.max(max, parseInt(m[1]!, 16));
-    }
-  }
-  const id = `${version}SI${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "SI", slot);
   const stock =
     kind === "merchant" ? { items: [] as { id: string; count: number }[] } :
     kind === "mage" ? { spells: [] as string[] } :
@@ -351,15 +375,9 @@ export function placeLocationOps(
   cy: number,
   radius: number,
   name: string,
+  slot = 0,
 ): EditOp[] {
   const version = doc.header.version || "S143";
-  let max = -1;
-  for (const o of doc.objects) {
-    if (o.type === "location") {
-      const m = /LO([0-9a-fA-F]{4})$/.exec(o.id);
-      if (m) max = Math.max(max, parseInt(m[1]!, 16));
-    }
-  }
-  const id = `${version}LO${hex4(max + 1)}`;
+  const id = nextTypedId(doc, version, "LO", slot);
   return [{ kind: "addObject", object: { type: "location", id, pos: { x: cx, y: cy }, name, radius } }];
 }

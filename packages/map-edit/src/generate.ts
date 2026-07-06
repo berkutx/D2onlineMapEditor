@@ -269,6 +269,9 @@ export function decodeGrid(
    *  there, and wall/mountain/decor placements must fit entirely outside. Unconditional
    *  (not gated by `protect`): overwriting objects is never a legitimate generation. */
   occupied?: ReadonlySet<string>,
+  /** Collab id slot (M4): landmark ids are minted in this slot's disjoint band so two clients
+   *  generating CONCURRENTLY never collide. 0 = solo / offline (the low band). */
+  slot = 0,
 ): EditOp[] {
   const n = doc.size;
   const inb = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < n && y < n;
@@ -351,7 +354,7 @@ export function decodeGrid(
   const pieces = style ? (wantS2 && wallComplete(style.s2) ? style.s2 : style.s1) : undefined;
   if (pieces && wallComplete(pieces)) {
     const place = (x: number, y: number, type: string): void => {
-      const op = placeLandmarkOps(work, x, y, type);
+      const op = placeLandmarkOps(work, x, y, type, slot);
       ops.push(...op);
       work = applyOps(work, op);
     };
@@ -416,7 +419,7 @@ export function decodeGrid(
       const list = decor[shape];
       if (!list || !list.length) continue;
       const id = list[(((x * 31 + y * 17) % list.length) + list.length) % list.length]!;
-      const placeOps = placeLandmarkOps(work, x, y, id);
+      const placeOps = placeLandmarkOps(work, x, y, id, slot);
       ops.push(...placeOps);
       work = applyOps(work, placeOps);
     }

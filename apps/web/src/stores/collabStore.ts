@@ -195,6 +195,10 @@ export const useCollabStore = defineStore("collab", () => {
   const connected = computed(() => me.value !== null);
   /** Ops emitted but not yet acked by the server (in flight) — drives the honest sync badge. */
   const pending = ref(0);
+  /** Collab id slot (M4): the room assigns this socket a distinct index ∈ [0,16). New-object
+   *  ids are minted in this slot's DISJOINT band (`nextTypedId`), so two editors placing the
+   *  same object type concurrently never collide. 0 = solo / offline / pre-join. */
+  const idSlot = ref(0);
   /** offline (no room) · syncing (ops in flight) · synced (everything acked). Replaces the old
    *  «есть правки» flag, which meant "journal non-empty" and never reflected actual sync. */
   const syncState = computed<"offline" | "syncing" | "synced">(() =>
@@ -577,9 +581,10 @@ export const useCollabStore = defineStore("collab", () => {
           return;
         }
         me.value = r.you;
+        idSlot.value = typeof r.slot === "number" ? r.slot : 0; // my disjoint id band (M4)
         peers.clear();
         for (const p of r.peers) peers.set(p.socketId, p);
-        edit.setCollab(true, sendOps);
+        edit.setCollab(true, sendOps, idSlot.value);
         const serverHead = r.snapshotSeq;
         // Catch-up (fresh join AND reconnect): replay the room log as OPS with uid dedup —
         // never a snapshot. A snapshot doc already CONTAINS the results of ops sitting in
@@ -663,6 +668,7 @@ export const useCollabStore = defineStore("collab", () => {
     batchAgg.clear();
     lastSeq = 0;
     pending.value = 0;
+    idSlot.value = 0; // back to solo band
     mapId.value = null;
     channel.value = null; // the next map joins its own channel (no cross-map channel leaks)
   }
@@ -689,6 +695,7 @@ export const useCollabStore = defineStore("collab", () => {
     me,
     connected,
     syncState,
+    idSlot,
     peerList,
     history,
     userName,

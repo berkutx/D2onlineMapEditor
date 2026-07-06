@@ -19,6 +19,7 @@ import { useSpellStore } from "../stores/spellStore";
 import { useDecorStore } from "../stores/decorStore";
 import { useEventStore } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
+import { useCollabStore } from "../stores/collabStore";
 import { computeObjectRoles, ROLE_META, type ObjectRole } from "../services/scenarioRoles";
 import DecorThumb from "./DecorThumb.vue";
 import ThumbPreview from "./ThumbPreview.vue";
@@ -46,6 +47,7 @@ const spellStore = useSpellStore();
 const decorStore = useDecorStore();
 const eventStore = useEventStore();
 const viewStore = useViewStore();
+const collabStore = useCollabStore();
 void itemStore.load();
 const spriteStore = useSpriteStore();
 const { selectedId } = storeToRefs(toolStore);
@@ -426,7 +428,7 @@ function openVisitor(): void {
 function addVisitor(): void {
   const o = obj.value;
   if (!o || (o.type !== "capital" && o.type !== "village") || !editStore.liveDoc) return;
-  editStore.commit(placeVisitorOps(editStore.liveDoc, { id: o.id, pos: o.pos, owner: o.owner }));
+  editStore.commit(placeVisitorOps(editStore.liveDoc, { id: o.id, pos: o.pos, owner: o.owner }, collabStore.idSlot));
 }
 function equipVal(slot: string): string {
   const eq = obj.value?.type === "stack" ? (obj.value.equip as Record<string, string | undefined> | undefined) : undefined;
