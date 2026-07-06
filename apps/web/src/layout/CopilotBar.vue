@@ -306,10 +306,11 @@ const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: bool
   ] },
   { group: "🧱 Лабиринты и стены", items: [
     { text: "лабиринт", mj: true },
-    { text: "лабиринт 28x28", mj: true },
-    { text: "каменный лабиринт", mj: true },
+    { text: "лабиринт с башнями", mj: true },
+    { text: "мелкий лабиринт", mj: true },
+    { text: "скальный лабиринт", mj: true },
     { text: "живая изгородь лабиринт", mj: true },
-    { text: "горный лабиринт", mj: true },
+    { text: "лабиринт 28x28", mj: true },
     { text: "забор 24x24", mj: true },
     { text: "лабиринт вокруг этой точки 22x22", mj: true },
   ] },
@@ -377,7 +378,7 @@ function routeRecipe(text: string): string | null {
   // mazes — branch by material (Cyrillic-safe: \w doesn't match Cyrillic without /u).
   // plain «лабиринт» = stone walls (auto-tiled); «горный» = mountains; «живая изгородь» = forest.
   if (/лабиринт|maze|изгород/.test(t)) {
-    if (/горн|гора|гор\b|камен|скал/.test(t)) return "mountain_maze"; // «горный/каменный/скальный» — рельеф-барьер
+    if (/горн|гора|гор\b|скал/.test(t)) return "mountain_maze"; // «горный/скальный» — рельеф-барьер (скала)
     if (/изгород|живая|жив\b/.test(t)) return "hedge_maze";
     if (/мелк|башен|башн|колонн|тонк/.test(t)) return "wall_maze_fine"; // 1×1 стены + башенки на стыках
     return "wall_maze"; // крупные 2×2 каменные стены, углы завёрнуты
