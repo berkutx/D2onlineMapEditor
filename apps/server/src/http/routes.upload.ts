@@ -9,10 +9,10 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { REST } from "@d2/socket-contract";
 import { config } from "../config.js";
-import { idForPath } from "../ingest/idCodec.js";
 import { clientIdOf } from "./routes.scenarios.js";
 import type { MapStore } from "../maps/mapStore.js";
 
@@ -40,18 +40,15 @@ export async function registerUploadRoute(
 
     const owner = clientIdOf(req);
     await mkdir(config.UPLOAD_DIR, { recursive: true });
-    // id is content-addressed via its eventual realpath; pre-compute by target
-    const target = join(config.UPLOAD_DIR, "pending.sg");
-    await writeFile(target, buf);
-    const rec = await store.registerUpload(target, owner);
-
-    // rename to the stable id-based name so future scans are deterministic
-    const finalPath = join(config.UPLOAD_DIR, `${idForPath(rec.realPath)}.sg`);
-    if (finalPath !== rec.realPath) {
-      await writeFile(finalPath, buf);
-      const finalRec = await store.registerUpload(finalPath, owner);
-      return reply.code(201).send({ id: finalRec.id });
-    }
+    // Deterministic per (owner, content) filename → ONE write, ONE registration. Re-uploading the
+    // same file by the same visitor is idempotent (same id, no duplicate); a different visitor gets
+    // their OWN copy (owner keyed into the hash → no cross-user ownership collision on identical
+    // content). Content+owner hash is a server-private filename; the public id stays base32(sha1
+    // (realpath)). (Replaces the old pending.sg two-step, which left a ghost duplicate entry.)
+    const key = createHash("sha1").update(owner ?? "").update("\0").update(buf).digest("hex").slice(0, 32);
+    const finalPath = join(config.UPLOAD_DIR, `${key}.sg`);
+    await writeFile(finalPath, buf);
+    const rec = await store.registerUpload(finalPath, owner);
     return reply.code(201).send({ id: rec.id });
   });
 }

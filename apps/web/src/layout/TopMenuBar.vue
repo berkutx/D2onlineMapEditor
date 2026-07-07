@@ -10,7 +10,7 @@ import { storeToRefs } from "pinia";
 import { ElMessage, ElNotification } from "element-plus";
 import { Check, Moon, Sunny, Share, CircleCheck, WarningFilled } from "@element-plus/icons-vue";
 import type { ScenarioEntry, ValidationReport } from "@d2/socket-contract";
-import { createNewMap } from "../services/api";
+import { createNewMap, uploadMap } from "../services/api";
 import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
@@ -232,11 +232,46 @@ async function doCreateNewMap(): Promise<void> {
   }
 }
 
+// --- Upload .sg --------------------------------------------------------------
+// Registers a user's own .sg as a PRIVATE map: listed only to this browser (owner-scoped by
+// x-client-id), permanent (the temporary-copy sweeper never touches it), shareable only via its
+// id link. Native file picker (hidden input) — one open per pick; the input is reset so re-picking
+// the same file fires `change` again.
+const uploadInput = ref<HTMLInputElement | null>(null);
+const uploadBusy = ref(false);
+function triggerUpload(): void {
+  uploadInput.value?.click();
+}
+async function onUploadFile(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ""; // allow re-picking the same file
+  if (!file || uploadBusy.value) return;
+  uploadBusy.value = true;
+  try {
+    const id = await uploadMap(file);
+    await mapStore.openMap(id);
+    editStore.ensureProject(id);
+    dialogVisible.value = false;
+    ElMessage.success(`Загружена «${file.name}» — карта приватная (видят только по вашей ссылке)`);
+  } catch (err) {
+    ElNotification({
+      title: "Загрузка не удалась",
+      message: err instanceof Error ? err.message : String(err),
+      type: "error",
+      duration: 0,
+    });
+  } finally {
+    uploadBusy.value = false;
+  }
+}
+
 /** el-menu dispatcher — one place routes every menu-item index to its action. */
 function onSelect(index: string): void {
   switch (index) {
     case "file:open": return void openDialog();
     case "file:new": newMapVisible.value = true; return;
+    case "file:upload": return triggerUpload();
     case "file:export": return void doExport();
     case "edit:undo": return editStore.undoEdit();
     case "edit:redo": return editStore.redoEdit();
@@ -274,6 +309,7 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <template #title>Файл</template>
         <el-menu-item index="file:open">Открыть карту…<span class="mkbd">Ctrl+O</span></el-menu-item>
         <el-menu-item index="file:new">Новая карта…</el-menu-item>
+        <el-menu-item index="file:upload">Загрузить .sg…</el-menu-item>
         <el-menu-item index="file:export">Экспорт .sg…</el-menu-item>
       </el-sub-menu>
 
@@ -409,9 +445,16 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         </el-table-column>
       </el-table>
       <template #footer>
-        <span class="dialog-hint">Кликните строку, чтобы загрузить карту.</span>
+        <div class="open-footer">
+          <span class="dialog-hint">Кликните строку, чтобы открыть карту.</span>
+          <el-button size="small" :loading="uploadBusy" @click="triggerUpload">Загрузить свою .sg…</el-button>
+        </div>
       </template>
     </el-dialog>
+
+    <!-- Native file picker for «Загрузить .sg…» (menu + Open-map dialog). Uploaded maps are private
+         (owner-scoped, shareable only by their id link) and never swept by the temporary-copy watcher. -->
+    <input ref="uploadInput" type="file" accept=".sg" style="display: none" @change="onUploadFile" />
 
     <el-dialog v-model="newMapVisible" title="Новая карта" width="380px">
       <el-form label-width="90px" label-position="left">
@@ -567,6 +610,12 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
 .dialog-hint {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.open-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .nm-races {
   display: grid;

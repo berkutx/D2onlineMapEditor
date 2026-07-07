@@ -262,6 +262,33 @@ export async function cloneMap(id: string): Promise<string> {
   return (await postJsonRetry<{ id: string }>(u(REST.mapClone(id)), {})).id;
 }
 
+/**
+ * POST /api/maps/upload (multipart) -> { id }: register a user-provided `.sg` as a PRIVATE map.
+ * It is owner-scoped to this browser (x-client-id) — LISTED only to you, never to other visitors —
+ * and permanent (the temporary-copy sweeper never touches it). Shareable only if you hand out its
+ * id link (?map=<id>). Multipart, so it bypasses the JSON helpers; NOT retried (non-idempotent
+ * write — though re-uploading the same file is server-side idempotent). Throws on reject
+ * (413 too big / 415 not a .sg).
+ */
+export async function uploadMap(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  // NB: do NOT set content-type — the browser adds multipart/form-data with the boundary itself.
+  const res = await fetch(u(REST.upload), { method: "POST", headers: idHeaders(), body: form });
+  if (!res.ok) {
+    // surface the server's clean message (413 "file exceeds 32MiB cap" / 415 "not a … .sg scenario")
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j?.error) msg = j.error;
+    } catch {
+      /* non-JSON body — keep the status */
+    }
+    throw new Error(msg);
+  }
+  return ((await res.json()) as { id: string }).id;
+}
+
 /** GET /api/maps/:id/project — this browser's server-saved EditorProject, or null. */
 export async function fetchProjectRemote(id: string): Promise<EditorProject | null> {
   const res = await fetch(u(REST.mapProject(id)), {
