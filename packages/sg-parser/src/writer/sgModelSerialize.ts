@@ -12,7 +12,7 @@
 
 import type { MapDocument, MapObject } from "@d2/map-schema";
 import { landmarkFrame, locationFrame } from "./sgRebuild.js";
-import type { ScenarioBlock, ScenarioBlocks } from "./sgBlocks.js";
+import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 
 /** The numeric `second` (uid) a frame-writer needs = the 4-hex tail of the compound id. */
 function secondOf(id: string): number {
@@ -62,4 +62,27 @@ export function rebuildFromModel(
     return frame ? { ...b, bytes: frame } : b;
   });
   return { ...s, blocks };
+}
+
+/**
+ * STEP 4 — the block types that reproduce the original frame BYTE-FOR-BYTE from the model (proven
+ * by the STEP-3 round-trip: 0 diffs). Only these are model-serialized in a full-rebuild export;
+ * every other type stays raw (TagDataBlock). Grows one entry at a time as each type is gold-checked.
+ */
+export const REBUILD_TYPES: ReadonlySet<string> = new Set(["MidLocation", "MidLandmark"]);
+
+/**
+ * STEP 4 — full-rebuild export: decompose `bytes`, re-serialize the proven block types from `doc`'s
+ * model (rest raw), and re-assemble with a re-stamped OB0000 count. `doc` MUST be the parse of the
+ * SAME `bytes` (or an edit of it whose object ids/fields align). Since every type in `types` is
+ * byte-perfect, the result is byte-identical to the patch-in-place output for those types — this is
+ * the safe, incremental rebuild path (it diverges from patch only as more types are added). This is
+ * the "export from the JSON state" the reference does, scoped to what our model fully captures.
+ */
+export function rebuildBytes(
+  bytes: Uint8Array,
+  doc: MapDocument,
+  types: ReadonlySet<string> = REBUILD_TYPES,
+): Uint8Array {
+  return rebuildScenario(rebuildFromModel(splitScenario(bytes), doc, types));
 }

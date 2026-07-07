@@ -21,6 +21,7 @@ import {
   validateMap,
   verifyBlockIntegrity,
   parsePlanEntries,
+  rebuildBytes,
   createBlankMap,
   TERRAIN_FILLS,
   RACE_KEYS,
@@ -454,7 +455,7 @@ export async function registerMapRoutes(
   // POST /validate and /export share the same build+validate pipeline.
   for (const action of ["validate", "export"] as const) {
     const url = action === "validate" ? REST.mapValidate(":id") : REST.mapExport(":id");
-    app.post<{ Params: { id: string } }>(url, async (req, reply) => {
+    app.post<{ Params: { id: string }; Querystring: { rebuild?: string } }>(url, async (req, reply) => {
       const { id } = req.params;
 
       const parsed = EditorProject.safeParse(req.body);
@@ -482,12 +483,27 @@ export async function registerMapRoutes(
       if (!report.ok || !bytes) {
         return reply.code(422).send(report);
       }
+      // EXPERIMENT (?rebuild=1): full-rebuild export — re-serialize the proven block types from the
+      // model (rest raw) instead of returning the patch-in-place bytes. Currently byte-identical
+      // (only 0-diff types are model-serialized); the toggle exists so the rebuild path grows
+      // type-by-type without disturbing the default patch export. Falls back to patch on any error.
+      let out = bytes;
+      let rebuilt = false;
+      if (req.query.rebuild === "1") {
+        try {
+          out = rebuildBytes(bytes, parseScenario(bytes));
+          rebuilt = true;
+        } catch {
+          out = bytes; // rebuild failed — ship the safe patch-in-place bytes
+        }
+      }
       const fileName = `${project.meta.name ?? id}-edited.sg`;
       return reply
         .header("content-type", "application/octet-stream")
         .header("content-disposition", `attachment; filename="${encodeURIComponent(fileName)}"`)
         .header("x-validation-ok", "1")
-        .send(Buffer.from(bytes));
+        .header("x-export-mode", rebuilt ? "rebuild" : "patch")
+        .send(Buffer.from(out));
     });
   }
 

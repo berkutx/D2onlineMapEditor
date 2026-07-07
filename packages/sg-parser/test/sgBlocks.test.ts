@@ -15,9 +15,11 @@ import {
   rebuildScenario,
   patchBlockCount,
   rebuildFromModel,
+  rebuildBytes,
   parseScenario,
   validateMap,
 } from "../src/index";
+import type { MapObject } from "@d2/map-schema";
 import { campaignDir, campaignMap } from "../../../test-helpers/gameDir";
 
 const RIDERS = campaignMap(join("The Power of Eldunari-v1-2 maps", "Riders.sg"));
@@ -151,4 +153,40 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
       expect(diffs, `${decl} model-rebuild should reproduce the original byte-for-byte`).toBe(0);
     });
   }
+});
+
+describe("@d2/sg-parser block-list STEP 4 — full-rebuild export path (rebuildBytes)", () => {
+  const bytes = read(RIDERS);
+
+  it("rebuildBytes(map, parse(map)) is byte-identical for every campaign map (safe default)", () => {
+    const files = findSgFiles(campaignDir(), [], 40);
+    let checked = 0;
+    for (const f of files) {
+      const b = read(f);
+      let out: Uint8Array;
+      try {
+        out = rebuildBytes(b, parseScenario(b)); // proven types from model + rest raw
+      } catch {
+        continue;
+      }
+      expect(eq(out, b), `rebuild changed bytes for ${f}`).toBe(true);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(5);
+  });
+
+  it("carries a MODEL edit into the rebuilt bytes (a location rename flows through, stays valid)", () => {
+    const doc = parseScenario(bytes);
+    const loc = doc.objects.find((o) => o.type === "location")!;
+    const edited = {
+      ...doc,
+      objects: doc.objects.map((o): MapObject => (o.id === loc.id ? ({ ...o, name: "Переименовано" } as MapObject) : o)),
+    };
+    const out = rebuildBytes(bytes, edited);
+    const re = parseScenario(out);
+    const reLoc = re.objects.find((o) => o.id === loc.id);
+    expect(reLoc?.type).toBe("location");
+    expect((reLoc as { name?: string }).name).toBe("Переименовано");
+    expect(validateMap(re).ok).toBe(true);
+  });
 });
