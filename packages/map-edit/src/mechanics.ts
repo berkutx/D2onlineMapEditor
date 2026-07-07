@@ -138,3 +138,67 @@ export function occupancyErrors(doc: MapDocument, opts: MechanicsOptions = {}): 
   }
   return errors;
 }
+
+/** One parsed MidgardPlan occupancy record: cell + the owning object's compound id. */
+export interface PlanCell {
+  x: number;
+  y: number;
+  element: string;
+}
+
+/**
+ * Plan↔footprint gate — the check the GAME editor runs and ours did not, so a stale/partial
+ * MidgardPlan slipped through us but was rejected on save. Reversed from ScenEdit:
+ * CMidLandmark::isValid(objectMap) (vtable idx 2, sub_4F30CB) iterates EVERY cell of the
+ * landmark's footprint and, via the map's CMidgardPlan, requires a plan entry at that cell
+ * OWNED BY this landmark (`entry && *ownerId == *thisId`). A single uncovered cell → the game
+ * flags the object invalid and REFUSES to save the scenario ("Scenario object <id> is invalid",
+ * only the id logged). That is why a 2×2 wall written into the plan as a lone 1×1 cell (the
+ * pre-`landmarkSize` writer bug) bricks the whole map.
+ *
+ * HARD errors (block export/snapshot). Owner-matched on purpose: a cell may legally carry
+ * several owners' entries (the game finds ITS own), so we require only that the landmark's own
+ * id is present at each of its footprint cells — no false positives on shipped maps or walltest,
+ * whose landmarks are all fully+correctly registered. One error per object (no per-cell spam).
+ * Off-map plan entries are reported once each (the game never writes them).
+ */
+export function planCoverageErrors(
+  doc: MapDocument,
+  plan: readonly PlanCell[],
+  opts: MechanicsOptions = {},
+): string[] {
+  const errors: string[] = [];
+  const n = doc.size;
+  const ownedCells = new Map<string, Set<string>>(); // element id → its plan cells "x,y"
+  for (const e of plan) {
+    let s = ownedCells.get(e.element);
+    if (!s) ownedCells.set(e.element, (s = new Set()));
+    s.add(`${e.x},${e.y}`);
+    if (e.x < 0 || e.y < 0 || e.x >= n || e.y >= n) {
+      errors.push(`plan: entry for ${e.element} at (${e.x},${e.y}) is outside the ${n}×${n} map`);
+    }
+  }
+  for (const o of doc.objects) {
+    if (o.type !== "landmark") continue; // the byte-verified case that matches the game's isValid
+    const [w, h] = opts.landmarkSize?.(o.baseType ?? "") ?? [1, 1];
+    const mine = ownedCells.get(o.id);
+    const missing: string[] = [];
+    for (let dy = 0; dy < h; dy++)
+      for (let dx = 0; dx < w; dx++) {
+        const x = o.pos.x + dx;
+        const y = o.pos.y + dy;
+        if (x < 0 || y < 0 || x >= n || y >= n) continue; // out-of-map footprint cell isn't planned
+        if (!mine?.has(`${x},${y}`)) missing.push(`${x},${y}`);
+      }
+    if (missing.length > 0) {
+      const total = w * h;
+      errors.push(
+        `plan: landmark ${o.id} (${o.baseType ?? "?"}, ${w}×${h}) at (${o.pos.x},${o.pos.y}) — ` +
+          `MidgardPlan covers ${total - missing.length}/${total} footprint cells, missing ${missing.slice(0, 4).join(" ")}` +
+          (missing.length > 4 ? " …" : "") +
+          " — the game's isValid rejects this object (map won't save)",
+      );
+    }
+  }
+  return errors;
+}

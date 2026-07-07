@@ -39,6 +39,7 @@ export {
   replaceBlock,
   deleteBlocks,
   addPlanEntries,
+  parsePlanEntries,
   addTalismanCharges,
   DEFAULT_TALISMAN_CHARGES,
   spliceStringFields,

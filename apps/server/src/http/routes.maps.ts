@@ -20,6 +20,7 @@ import {
   roundTripIdentity,
   validateMap,
   verifyBlockIntegrity,
+  parsePlanEntries,
   createBlankMap,
   TERRAIN_FILLS,
   RACE_KEYS,
@@ -39,6 +40,7 @@ import {
   buildDecorSet,
   validateMechanics,
   occupancyErrors,
+  planCoverageErrors,
   DECODE_TABLES,
   type WallSet,
   type DecorSet,
@@ -100,9 +102,14 @@ function buildAndValidate(
     // occupancy overlap = a HARD error (two objects on one cell is an unplayable map; the
     // game editor forbids it — zero overlaps across all 59 shipped campaign maps).
     const occErr = occupancyErrors(built, { landmarkSize });
+    // plan↔footprint = a HARD error: mirrors the GAME's native landmark isValid (reversed from
+    // ScenEdit CMidLandmark::isValid @0x4F30CB). A landmark whose footprint isn't fully owned in
+    // the MidgardPlan makes the real editor refuse to save ("Scenario object <id> is invalid").
+    // Catches the pre-landmarkSize 1×1-plan bug even on maps loaded with a stale plan.
+    const planErr = planCoverageErrors(built, parsePlanEntries(bytes), { landmarkSize });
     structural = {
-      ok: doc3.ok && integ.ok && occErr.length === 0,
-      errors: [...doc3.errors, ...integ.errors, ...occErr],
+      ok: doc3.ok && integ.ok && occErr.length === 0 && planErr.length === 0,
+      errors: [...doc3.errors, ...integ.errors, ...occErr, ...planErr],
       warnings: [...doc3.warnings, ...integ.warnings, ...mech],
     };
   } else {

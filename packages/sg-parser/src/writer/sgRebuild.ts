@@ -604,6 +604,40 @@ function locatePlanEntries(
   return { countAt, count, entries };
 }
 
+/**
+ * Read every MidgardPlan entry as {x, y, element}. Fail-SOFT (returns what parsed, or []):
+ * this feeds the plan↔footprint gold-check, so a layout surprise must never throw and abort
+ * a save — the worst case is an incomplete parse, and the gate errs toward not blocking.
+ */
+export function parsePlanEntries(bytes: Uint8Array): { x: number; y: number; element: string }[] {
+  const buf = new ByteBuffer(bytes);
+  const avc = buf.indexOf(".?AVCMidgardPlan@@");
+  if (avc < 0) return [];
+  const beg = buf.indexOf("BEGOBJECT", avc);
+  if (beg < 0) return [];
+  let p = beg + 9;
+  if (buf.bytes[p] === 0) p++;
+  const tag = buf.asciiSlice(p, p + 10); // block's own compound id doubles as the field tag
+  p += 10 + 4; // + int32 map size
+  if (buf.asciiSlice(p, p + 10) !== tag) return [];
+  const count = buf.readInt32LE(p + 10);
+  let q = p + 14;
+  const out: { x: number; y: number; element: string }[] = [];
+  for (let i = 0; i < count; i++) {
+    if (buf.asciiSlice(q, q + 5) !== "POS_X") break;
+    const x = buf.readInt32LE(q + 5);
+    q += 5 + 4;
+    if (buf.asciiSlice(q, q + 5) !== "POS_Y") break;
+    const y = buf.readInt32LE(q + 5);
+    q += 5 + 4;
+    if (buf.asciiSlice(q, q + 7) !== "ELEMENT") break;
+    q += 7 + 4; // tag + the [0B 00 00 00] ref length
+    out.push({ x, y, element: buf.asciiSlice(q, q + 10) });
+    q += 10 + 1; // id + NUL
+  }
+  return out;
+}
+
 /** One MidgardPlan entry to add: an occupied cell + the occupying object's compound id. */
 export interface PlanEntry {
   x: number;
@@ -618,6 +652,12 @@ export interface PlanEntry {
  * plan's entry count. Same fail-loud locator/walk as the delete-side purge. A map without
  * a plan block is left unchanged (mirrors purge; the reference editor rebuilds the whole
  * plan from footprints on save — we patch it in place).
+ *
+ * TODO (deferred, low priority): optional export-time FULL plan rebuild-from-objects, like
+ * the reference D2MapEditor::addPlanObject (clear MidgardPlan, re-emit one entry per footprint
+ * cell of every object). Would auto-heal a LOADED map carrying a stale/partial plan (e.g. made
+ * by an old build before the landmarkSize writer fix). We currently assume loaded maps are
+ * correct; `planCoverageErrors` is the gate that rejects them and asks the author to fix.
  */
 export function addPlanEntries(bytes: Uint8Array, entries: readonly PlanEntry[]): Uint8Array {
   if (entries.length === 0) return bytes;
