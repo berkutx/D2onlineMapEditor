@@ -9,7 +9,15 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { splitScenario, joinScenario, parseScenario } from "../src/index";
+import {
+  splitScenario,
+  joinScenario,
+  rebuildScenario,
+  patchBlockCount,
+  rebuildFromModel,
+  parseScenario,
+  validateMap,
+} from "../src/index";
 import { campaignDir, campaignMap } from "../../../test-helpers/gameDir";
 
 const RIDERS = campaignMap(join("The Power of Eldunari-v1-2 maps", "Riders.sg"));
@@ -42,6 +50,13 @@ const eq = (a: Uint8Array, b: Uint8Array): boolean => {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
+};
+
+const countDiffs = (a: Uint8Array, b: Uint8Array): number => {
+  const n = Math.min(a.length, b.length);
+  let d = Math.abs(a.length - b.length);
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) d++;
+  return d;
 };
 
 describe("@d2/sg-parser block-list (experiment/full-rebuild — split/join spine)", () => {
@@ -85,4 +100,56 @@ describe("@d2/sg-parser block-list (experiment/full-rebuild — split/join spine
     }
     expect(checked).toBeGreaterThan(5);
   });
+});
+
+describe("@d2/sg-parser block-list STEP 2 — header OB0000 count", () => {
+  const bytes = read(RIDERS);
+
+  it("rebuildScenario(split(Riders)) is byte-identical (unchanged block set → same count)", () => {
+    expect(eq(rebuildScenario(splitScenario(bytes)), bytes)).toBe(true);
+  });
+
+  it("patchBlockCount re-stamps only the count int32 (real count == original header)", () => {
+    const s = splitScenario(bytes);
+    // patching to the REAL count reproduces the header exactly
+    expect(eq(patchBlockCount(s.header, s.blocks.length), s.header)).toBe(true);
+    // patching to a different count changes exactly the 4-byte count field, nothing else
+    const wrong = patchBlockCount(s.header, s.blocks.length + 42);
+    expect(wrong.length).toBe(s.header.length);
+    expect(countDiffs(wrong, s.header)).toBeLessThanOrEqual(4);
+    expect(countDiffs(wrong, s.header)).toBeGreaterThan(0);
+  });
+});
+
+describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () => {
+  const bytes = read(RIDERS);
+
+  function rebuiltFor(types: string[]): Uint8Array {
+    const s = rebuildFromModel(splitScenario(bytes), parseScenario(bytes), new Set(types));
+    return rebuildScenario(s);
+  }
+
+  for (const [decl, type] of [["MidLandmark", "landmark"], ["MidLocation", "location"]] as const) {
+    it(`${decl}: model-rebuild reparses, preserves objects, validates (byte-diff reported)`, () => {
+      const before = parseScenario(bytes);
+      const out = rebuiltFor([decl]);
+      const after = parseScenario(out); // must not throw
+
+      const of = (d: typeof before) => d.objects.filter((o) => o.type === type);
+      expect(of(after).length).toBe(of(before).length); // no object lost
+      for (const b of of(before)) {
+        const a = after.objects.find((o) => o.id === b.id);
+        expect(a?.type).toBe(type);
+        expect(a?.pos).toEqual(b.pos); // position round-trips through the model
+      }
+      expect(validateMap(after).ok).toBe(true); // the rebuilt map is structurally valid
+
+      const diffs = countDiffs(bytes, out);
+      const n = of(before).length;
+      // informational: 0 = perfect byte reproduction from the model; >0 = model gap (e.g.
+      // landmark DESC_TXT not in the schema). The semantic assertions above are the real gate.
+      // eslint-disable-next-line no-console
+      console.log(`[STEP3] ${decl}: ${n} blocks, ${diffs} byte diffs, len ${bytes.length}->${out.length} (Δ${out.length - bytes.length}, ${((out.length - bytes.length) / (n || 1)).toFixed(1)}/block)`);
+    });
+  }
 });

@@ -88,3 +88,29 @@ export function joinScenario(s: ScenarioBlocks): Uint8Array {
   out.set(s.trailer, at);
   return out;
 }
+
+const OB = "OB0000";
+
+/**
+ * STEP 2 — patch the header's `OB0000` block-count int32 to `count` (returns a fresh header). The
+ * count lives in the header before the first block frame (`<version>OB0000<int32 LE>`); the game
+ * trusts it and refuses to load a map whose count ≠ the number of frames present. Mirrors the
+ * reference's `header.data(m_blocks.count())`. A header with no OB0000 is returned unchanged.
+ */
+export function patchBlockCount(header: Uint8Array, count: number): Uint8Array {
+  const buf = new ByteBuffer(header);
+  const ob = buf.lastIndexOf(OB, header.length);
+  if (ob < 0) return header;
+  const out = header.slice();
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(ob + OB.length, count, true);
+  return out;
+}
+
+/**
+ * STEP 2 — re-assemble a scenario, re-stamping the header's OB0000 count to match the CURRENT block
+ * list. Use this instead of `joinScenario` once blocks are added/removed/replaced (the reference's
+ * `save` = `header.data(count) + Σ block.data`). With an unchanged block list it equals `join`.
+ */
+export function rebuildScenario(s: ScenarioBlocks): Uint8Array {
+  return joinScenario({ ...s, header: patchBlockCount(s.header, s.blocks.length) });
+}

@@ -9,9 +9,13 @@
 export {
   splitScenario,
   joinScenario,
+  rebuildScenario,
+  patchBlockCount,
   type ScenarioBlock,
   type ScenarioBlocks,
 } from "./sgBlocks.js";
+
+export { serializeTypedBlock, rebuildFromModel } from "./sgModelSerialize.js";
 
 export {
   parseScenarioRaw,
