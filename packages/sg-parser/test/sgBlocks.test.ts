@@ -20,7 +20,7 @@ import {
   validateMap,
 } from "../src/index";
 import type { MapObject } from "@d2/map-schema";
-import { campaignDir, campaignMap } from "../../../test-helpers/gameDir";
+import { campaignDir, campaignMap, exportsDir } from "../../../test-helpers/gameDir";
 
 const RIDERS = campaignMap(join("The Power of Eldunari-v1-2 maps", "Riders.sg"));
 const read = (p: string): Uint8Array => new Uint8Array(readFileSync(p));
@@ -46,6 +46,28 @@ function findSgFiles(dir: string, out: string[] = [], limit = 60): string[] {
     else if (/\.sg$/i.test(name)) out.push(full);
   }
   return out;
+}
+
+/**
+ * The PRISTINE authored-map originals (Game/Exports - Copy), BIGGEST FIRST so the rebuild gate
+ * always stresses the largest scenarios (2.4 MB Relentless etc.). Excludes `.bak` backups. These
+ * carry no playthrough state, so a full model rebuild reproduces them byte-for-byte — unlike the
+ * Game/Campaign copies (which hold visited-site lists our model intentionally doesn't capture).
+ */
+function pristineSgFiles(limit = 40): string[] {
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(exportsDir());
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((n) => /\.sg$/i.test(n) && !/\.bak$/i.test(n))
+    .map((n) => join(exportsDir(), n))
+    .map((p) => ({ p, size: (() => { try { return statSync(p).size; } catch { return 0; } })() }))
+    .sort((a, b) => b.size - a.size)
+    .slice(0, limit)
+    .map((x) => x.p);
 }
 
 const eq = (a: Uint8Array, b: Uint8Array): boolean => {
@@ -131,7 +153,15 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
     return rebuildScenario(s);
   }
 
-  for (const [decl, type] of [["MidLandmark", "landmark"], ["MidLocation", "location"]] as const) {
+  for (const [decl, type] of [
+    ["MidLandmark", "landmark"],
+    ["MidLocation", "location"],
+    ["MidCrystal", "crystal"],
+    ["MidSiteMerchant", "merchant"],
+    ["MidSiteMage", "mage"],
+    ["MidSiteTrainer", "trainer"],
+    ["MidSiteMercs", "mercenary"],
+  ] as const) {
     it(`${decl}: model-rebuild reparses, preserves objects, validates (byte-diff reported)`, () => {
       const before = parseScenario(bytes);
       const out = rebuiltFor([decl]);
@@ -147,9 +177,10 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
       expect(validateMap(after).ok).toBe(true); // the rebuilt map is structurally valid
 
       const diffs = countDiffs(bytes, out);
-      // BYTE-PERFECT: both MidLocation and (after the DESC_TXT fix) MidLandmark reproduce the
-      // original frame exactly from the model — the model captures every persisted field. This is
-      // the "close the gap → 0 diffs" proof; a regression (a dropped field) would make it non-zero.
+      // BYTE-PERFECT: each proven type reproduces the original frame exactly from the model — the
+      // model captures every persisted field (landmark DESC_TXT, crystal AIPRIORITY, the site stock
+      // lists, …). This is the "close the gap → 0 diffs" proof; a regression (a dropped field) would
+      // make it non-zero.
       expect(diffs, `${decl} model-rebuild should reproduce the original byte-for-byte`).toBe(0);
     });
   }
@@ -158,8 +189,9 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
 describe("@d2/sg-parser block-list STEP 4 — full-rebuild export path (rebuildBytes)", () => {
   const bytes = read(RIDERS);
 
-  it("rebuildBytes(map, parse(map)) is byte-identical for every campaign map (safe default)", () => {
-    const files = findSgFiles(campaignDir(), [], 40);
+  it("rebuildBytes(map, parse(map)) is byte-identical for every PRISTINE original (incl. the biggest)", () => {
+    const files = pristineSgFiles(40); // biggest-first: stresses the 2.4 MB scenarios
+    expect(files.length).toBeGreaterThan(10);
     let checked = 0;
     for (const f of files) {
       const b = read(f);
@@ -172,7 +204,7 @@ describe("@d2/sg-parser block-list STEP 4 — full-rebuild export path (rebuildB
       expect(eq(out, b), `rebuild changed bytes for ${f}`).toBe(true);
       checked++;
     }
-    expect(checked).toBeGreaterThan(5);
+    expect(checked).toBeGreaterThan(10);
   });
 
   it("carries a MODEL edit into the rebuilt bytes (a location rename flows through, stays valid)", () => {

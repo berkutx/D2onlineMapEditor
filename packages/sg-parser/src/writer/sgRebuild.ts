@@ -52,21 +52,26 @@ export function roadFrame(
   });
 }
 
-/** A MidLandmark block frame (code 0x13, short MM): LMARK_ID, TYPE, POS_X, POS_Y, DESC_TXT. */
+/**
+ * A MidLandmark block frame (code 0x13, short MM): LMARK_ID, TYPE, POS_X, POS_Y, [DESC_TXT].
+ * `desc` is optional: pass `undefined` to OMIT the DESC_TXT field entirely (RMG-generated
+ * landmarks never carry it); pass `""` or a name to write it (editor-authored landmarks always
+ * do — the reference editor writes DESC_TXT on every landmark it saves).
+ */
 export function landmarkFrame(
   version: string,
   second: number,
   x: number,
   y: number,
   lmarkId: string,
-  desc = "",
+  desc?: string,
 ): Uint8Array {
   return emitBlock(version, "MidLandmark", 0x13, "MM", second, (w, full) => {
     w.refField("LMARK_ID", full);
     w.stringField("TYPE", lmarkId);
     w.defaultInt("POS_X", x);
     w.defaultInt("POS_Y", y);
-    w.stringField("DESC_TXT", desc);
+    if (desc !== undefined) w.stringField("DESC_TXT", desc);
   });
 }
 
@@ -86,6 +91,28 @@ export function locationFrame(
     w.defaultInt("POS_Y", y);
     w.stringField("NAME_TXT", name);
     w.defaultInt("RADIUS", radius);
+  });
+}
+
+/**
+ * MidCrystal frame (code 0x12, short CR): CRYSTAL_ID(self) · RESOURCE · POS_X · POS_Y · AIPRIORITY.
+ * Field order + code byte + short verified against Riders (`CR0000`: RESOURCE/POS_X/POS_Y/AIPRIORITY,
+ * priority defaults to 3). resource packs mana school+amount; priority = AI collection priority.
+ */
+export function crystalFrame(
+  version: string,
+  second: number,
+  x: number,
+  y: number,
+  resource: number,
+  priority = 3,
+): Uint8Array {
+  return emitBlock(version, "MidCrystal", 0x12, "CR", second, (w, full) => {
+    w.refField("CRYSTAL_ID", full);
+    w.defaultInt("RESOURCE", resource);
+    w.defaultInt("POS_X", x);
+    w.defaultInt("POS_Y", y);
+    w.defaultInt("AIPRIORITY", priority);
   });
 }
 
@@ -348,7 +375,10 @@ export function siteFrame(
     name?: string;
     desc?: string;
     image?: number;
+    aiPriority?: number;
     items?: readonly { id: string; count: number }[];
+    buy?: readonly boolean[];
+    mission?: boolean;
     spells?: readonly string[];
     units?: readonly { id: string; level: number; unique: boolean }[];
   },
@@ -363,17 +393,17 @@ export function siteFrame(
     w.defaultInt("POS_X", o.posX);
     w.defaultInt("POS_Y", o.posY);
     w.refField("VISITER", "G000000000");
-    w.defaultInt("AIPRIORITY", 0);
+    w.defaultInt("AIPRIORITY", o.aiPriority ?? 0);
     if (kind === "merchant") {
-      for (const f of ["BUY_ARMOR", "BUY_JEWEL", "BUY_WEAPON", "BUY_BANNER", "BUY_POTION", "BUY_SCROLL", "BUY_WAND", "BUY_VALUE"])
-        w.bool(f, true); // uniform 01 on every shipped merchant
+      const buyTags = ["BUY_ARMOR", "BUY_JEWEL", "BUY_WEAPON", "BUY_BANNER", "BUY_POTION", "BUY_SCROLL", "BUY_WAND", "BUY_VALUE"];
+      buyTags.forEach((f, i) => w.bool(f, o.buy?.[i] ?? true)); // default: buys every category
       const items = o.items ?? [];
       w.defaultInt("QTY_ITEM", items.length);
       for (const it of items) {
         w.refField("ITEM_ID", it.id);
         w.defaultInt("ITEM_COUNT", it.count);
       }
-      w.bool("MISSION", false); // 00 on every shipped merchant
+      w.bool("MISSION", o.mission ?? false);
     } else if (kind === "mage") {
       const spells = o.spells ?? [];
       w.defaultInt("QTY_SPELL", spells.length);

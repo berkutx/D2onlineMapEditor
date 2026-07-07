@@ -846,6 +846,12 @@
                   "image": {
                     "type": "integer"
                   },
+                  "desc": {
+                    "type": "string"
+                  },
+                  "aiPriority": {
+                    "type": "integer"
+                  },
                   "type": {
                     "type": "string",
                     "const": "merchant"
@@ -868,6 +874,17 @@
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "buy": {
+                    "type": "array",
+                    "items": {
+                      "type": "boolean"
+                    },
+                    "minItems": 8,
+                    "maxItems": 8
+                  },
+                  "mission": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -928,6 +945,12 @@
                     "default": ""
                   },
                   "image": {
+                    "type": "integer"
+                  },
+                  "desc": {
+                    "type": "string"
+                  },
+                  "aiPriority": {
                     "type": "integer"
                   },
                   "type": {
@@ -1001,6 +1024,12 @@
                   "image": {
                     "type": "integer"
                   },
+                  "desc": {
+                    "type": "string"
+                  },
+                  "aiPriority": {
+                    "type": "integer"
+                  },
                   "type": {
                     "type": "string",
                     "const": "trainer"
@@ -1064,6 +1093,12 @@
                     "default": ""
                   },
                   "image": {
+                    "type": "integer"
+                  },
+                  "desc": {
+                    "type": "string"
+                  },
+                  "aiPriority": {
                     "type": "integer"
                   },
                   "type": {
@@ -1223,6 +1258,9 @@
                   },
                   "resource": {
                     "type": "integer"
+                  },
+                  "priority": {
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -1283,6 +1321,9 @@
                     "const": "landmark"
                   },
                   "baseType": {
+                    "type": "string"
+                  },
+                  "desc": {
                     "type": "string"
                   }
                 },

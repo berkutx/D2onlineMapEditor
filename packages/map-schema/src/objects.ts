@@ -152,6 +152,8 @@ const SiteCommon = {
   image: z.number().int().optional(),
   /** TXT_DESC — the visit-dialog text; read so a delete's undo re-adds it verbatim. */
   desc: z.string().optional(),
+  /** AIPRIORITY — AI visit priority (default 0; some shipped sites carry 3). */
+  aiPriority: z.number().int().optional(),
 };
 // Site STOCK lists carry GLOBAL template ids (NOT MidItem/MidUnit instances), count-prefixed
 // by a literal QTY_* tag. Merchant sells items (+qty), mage sells spells, mercs hire units
@@ -160,6 +162,11 @@ export const MerchantObject = z.object({
   ...SiteCommon,
   type: z.literal("merchant"),
   items: z.array(z.object({ id: z.string(), count: z.number().int() })).optional(),
+  /** BUY_* toggles [armor, jewel, weapon, banner, potion, scroll, wand, value] — which item
+   *  categories the merchant buys back. Omitted (all true) on the vast majority of maps. */
+  buy: z.array(z.boolean()).length(8).optional(),
+  /** MISSION — non-default (true) on a handful of shipped merchants. Omitted when false. */
+  mission: z.boolean().optional(),
 });
 export const MageObject = z.object({
   ...SiteCommon,
@@ -187,6 +194,7 @@ export const CrystalObject = z.object({
   ...base,
   type: z.literal("crystal"),
   resource: z.number().int().optional(), // mana type+amount packed
+  priority: z.number().int().optional(), // AIPRIORITY — AI collection priority (default 3)
 });
 export const LandmarkObject = z.object({
   ...base,

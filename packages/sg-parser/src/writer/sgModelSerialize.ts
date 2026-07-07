@@ -11,7 +11,7 @@
  */
 
 import type { MapDocument, MapObject } from "@d2/map-schema";
-import { landmarkFrame, locationFrame } from "./sgRebuild.js";
+import { landmarkFrame, locationFrame, crystalFrame, siteFrame } from "./sgRebuild.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 
 /** The numeric `second` (uid) a frame-writer needs = the 4-hex tail of the compound id. */
@@ -33,10 +33,37 @@ export function serializeTypedBlock(
   switch (typeName) {
     case "MidLandmark":
       if (obj.type !== "landmark") return null;
-      return landmarkFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.baseType ?? "", obj.desc ?? "");
+      // obj.desc is undefined when the source landmark had NO DESC_TXT (RMG) — pass it straight
+      // through so landmarkFrame omits the field; "" (present-empty) and names are written.
+      return landmarkFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.baseType ?? "", obj.desc);
     case "MidLocation":
       if (obj.type !== "location") return null;
       return locationFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.name ?? "", obj.radius ?? 0);
+    case "MidCrystal":
+      if (obj.type !== "crystal") return null;
+      return crystalFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.resource ?? 0, obj.priority ?? 3);
+    // MidSite* — 4 object types share the site blocks; obj.type IS the SiteKind discriminant.
+    // Stock lists (items/spells/units) carry GLOBAL template ids, so array order == file order —
+    // no instance-ref/ordering loss. IMG_INTF/VISITER/AIPRIORITY/BUY_*/MISSION are invariant on
+    // shipped maps and reproduced by siteFrame's hardcoded constants (0-diff verified on Riders).
+    case "MidSiteMerchant":
+    case "MidSiteMage":
+    case "MidSiteTrainer":
+    case "MidSiteMercs": {
+      if (obj.type !== "merchant" && obj.type !== "mage" && obj.type !== "trainer" && obj.type !== "mercenary")
+        return null;
+      return siteFrame(version, secondOf(obj.id), obj.type, {
+        posX: obj.pos.x,
+        posY: obj.pos.y,
+        name: obj.name,
+        desc: obj.desc,
+        image: obj.image,
+        aiPriority: obj.aiPriority,
+        ...(obj.type === "merchant" ? { items: obj.items, buy: obj.buy, mission: obj.mission } : {}),
+        ...(obj.type === "mage" ? { spells: obj.spells } : {}),
+        ...(obj.type === "mercenary" ? { units: obj.units } : {}),
+      });
+    }
     default:
       return null;
   }
@@ -69,7 +96,15 @@ export function rebuildFromModel(
  * by the STEP-3 round-trip: 0 diffs). Only these are model-serialized in a full-rebuild export;
  * every other type stays raw (TagDataBlock). Grows one entry at a time as each type is gold-checked.
  */
-export const REBUILD_TYPES: ReadonlySet<string> = new Set(["MidLocation", "MidLandmark"]);
+export const REBUILD_TYPES: ReadonlySet<string> = new Set([
+  "MidLocation",
+  "MidLandmark",
+  "MidCrystal",
+  "MidSiteMerchant",
+  "MidSiteMage",
+  "MidSiteTrainer",
+  "MidSiteMercs",
+]);
 
 /**
  * STEP 4 — full-rebuild export: decompose `bytes`, re-serialize the proven block types from `doc`'s

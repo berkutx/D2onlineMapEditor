@@ -79,13 +79,55 @@ writers (`applyBytes` landmark append + the experiment `serializeTypedBlock`). R
 decode the delta → find the dropped field → add to schema+reader+writer → 0 diffs. Two types
 (location, landmark) are now byte-perfect from the model.
 
+## Round 2 — the remaining object types (stack/village/ruin/site/crystal/treasure/mountains)
+
+A 7-agent analysis + per-type byte measurement split the requested types into **achievable now**
+vs **blocked by the instance-ref gap**:
+
+| type | verdict | why |
+|---|---|---|
+| **MidCrystal** | ✅ byte-perfect | one dropped scalar (`AIPRIORITY`) — added like `DESC_TXT`. Self-ref id, no instances. |
+| **MidSiteMage / Trainer / Mercs** | ✅ byte-perfect | stock lists are GLOBAL template ids (order == file order), no instance graph. |
+| **MidSiteMerchant** | ✅ byte-perfect | same, after capturing `BUY_*` (8 bools) + `MISSION` (value-carrying bools, omit-when-default). |
+| **MidStack / MidVillage / MidRuin** | ❌ blocked | garrison = sibling `MidUnit` **instance** blocks; the model RESOLVES them (unit+level+hp) and `assemble.ts` deletes the raw ids/ordering. Byte-exact rebuild needs the raw instance graph preserved — a deep model change that conflicts with the resolved model the editor UI depends on. |
+| **MidBag (treasure)** | ❌ blocked | `items` = `MidItem` **instance** refs (same instance-ref/ordering gap). Empty bags are 0-diff; non-empty diverge. |
+| **MidMountains** | ⚠ deferred | ONE block holds ALL mountains (`byId.get(block-id)` fails — children are `${blockId}#n`); needs a dispatcher special-case + `ID_MOUNT` per-entry id. Not an instance-ref gap, just a different shape. |
+
+**The honest limit:** compound objects (stack/village/ruin/treasure) can't rebuild byte-exact
+without the model preserving the raw `MidUnit`/`MidItem` instance graph + ordering. That's a
+separate sub-project (it fights the *resolved* garrison/inventory model the whole UI relies on),
+reported rather than forced.
+
+### Two residual gaps, closed against the PRISTINE corpus
+
+A per-type sweep over **80 pristine originals** (`Game/Exports - Copy`, incl. the 2.4 MB giants —
+NOT the `Game/Campaign` copies, which carry playthrough state) surfaced two deviations Riders never
+exercised:
+
+1. **Merchant `MISSION` / `BUY_*`** — a handful of merchants set `MISSION=1` or toggle a `BUY_*`
+   category off. `readDefaultBool` is presence-only (wrong for value-carrying bools); added
+   `readBoolValue` + `readMerchantFlags` (omit-when-default) → `siteFrame` writes them.
+2. **Landmark `DESC_TXT` presence** — RMG-generated maps (`Random scenario.sg`) omit `DESC_TXT`
+   entirely; editor-authored maps always write it. The model collapsed "absent" and "present-empty"
+   into `undefined`. Fix: `readLandmark` preserves the distinction (`desc !== null`), `landmarkFrame`
+   OMITS the field when `desc === undefined`, `placeLandmarkOps` sets `desc: ""` (эталон parity),
+   and `applyBytes` passes `o.desc` through — so **the model's `desc` presence IS the DESC_TXT
+   presence**, consistently across patch AND rebuild.
+
+Also surfaced (campaign-only, not modeled): a **site VISITER visited-players list** (`SITE_ID`+
+player-ref records) appended after the stock — dynamic playthrough state that pristine exports never
+carry. Intentionally left raw; it's why the corpus is `Exports - Copy`, not `Campaign`.
+
 ## Status
 
-STEP 1 (spine) + STEP 2 (OB0000 count) + STEP 3 (typed serialize; **location + landmark both
-byte-perfect from the model** after closing the DESC_TXT gap) done + tested (`sgBlocks.test.ts`,
-7 tests, asserting 0 diffs). Landmark `desc` fix also lands in the main writer/reader (a real
-bug fix). Not pushed — local branch only.
+`REBUILD_TYPES` = **MidLocation, MidLandmark, MidCrystal, MidSiteMerchant, MidSiteMage,
+MidSiteTrainer, MidSiteMercs** — all **byte-perfect** (`rebuildBytes(x, parse(x)) === x`) on ALL 80
+pristine originals, largest included. Gates: `sgBlocks.test.ts` (STEP-3 per-type 0-diff on Riders;
+STEP-4 full-rebuild byte-identity over the biggest-first pristine corpus). Full suite green:
+sg-parser 71, map-edit 139, server 96, map-schema 5. The DESC_TXT + merchant-flag + landmark-
+presence fixes also harden the production patch/reader paths (real round-trip bugs). Not pushed —
+local branch only.
 
-Next: repeat the loop for the remaining object types (stack/village/ruin/site/…), then the
-non-object blocks, then STEP 4 (`rebuildScenario` export path + patch-vs-rebuild toggle) with a
-ScenEdit gold-check on the fully model-rebuilt map.
+Next: MidMountains dispatcher special-case (one-block-holds-all + `ID_MOUNT`); then the
+instance-graph sub-project for the compound types (stack/village/ruin/treasure); then the
+non-object blocks + STEP 5 ScenEdit gold-check on a fully model-rebuilt map.

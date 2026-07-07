@@ -40,3 +40,12 @@ export function campaignDir(): string {
 export function campaignMap(rel: string): string {
   return join(campaignDir(), rel);
 }
+
+/**
+ * `<game>/Game/Exports - Copy` — the PRISTINE authored map originals (the editor's own exports).
+ * Unlike `Game/Campaign`, these carry no playthrough state (visited-site lists, etc.), so a
+ * full model rebuild reproduces them byte-for-byte. Preferred corpus for the rebuild gate.
+ */
+export function exportsDir(): string {
+  return join(gameDir(), "Game", "Exports - Copy");
+}

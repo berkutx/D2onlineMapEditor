@@ -574,7 +574,10 @@ export function applyEditsToBytes(
       const m = /MM([0-9a-fA-F]{4})$/.exec(o.id);
       const second = m ? parseInt(m[1]!, 16) : nextMM++;
       const full = `${raw.version}MM${hex4(second)}`;
-      appends.push(landmarkFrame(raw.version, second, o.pos.x, o.pos.y, o.baseType ?? "G000000000", o.desc ?? ""));
+      // Pass o.desc THROUGH (not `?? ""`): the model's desc presence IS the DESC_TXT presence.
+      // Editor-placed landmarks carry desc:"" (placeLandmarkOps) → empty DESC_TXT written (эталон
+      // parity); a desc-less op → field omitted, so it reparses identically (no phantom "").
+      appends.push(landmarkFrame(raw.version, second, o.pos.x, o.pos.y, o.baseType ?? "G000000000", o.desc));
       // plan = the landmark's FULL GLmark footprint (from the injected resolver; 1×1 if absent).
       // The original editor registers every footprint cell (byte-verified on walltest.sg), and
       // passability is plan occupancy — a 2×2 wall MUST claim all 4 cells or units walk through

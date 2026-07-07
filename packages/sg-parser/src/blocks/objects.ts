@@ -65,6 +65,19 @@ function readBoolAt(buf: ByteBuffer, p: number, tag: string): { value: boolean; 
   return { value: buf.bytes[p + tag.length] !== 0, next: p + tag.length + 1 };
 }
 
+/** Find `tag` in [from, end) and read its 1-byte value (bool). null if the tag is absent. */
+function readBoolValue(buf: ByteBuffer, tag: string, from: number, end: number): boolean | null {
+  const i = buf.indexOf(tag, from);
+  if (i < 0 || i >= end) return null;
+  return buf.bytes[i + tag.length] !== 0;
+}
+
+/** Merchant BUY_* toggle tags, in the block's field order. */
+const MERCHANT_BUY_TAGS = [
+  "BUY_ARMOR", "BUY_JEWEL", "BUY_WEAPON", "BUY_BANNER",
+  "BUY_POTION", "BUY_SCROLL", "BUY_WAND", "BUY_VALUE",
+] as const;
+
 /** Merchant stock: QTY_ITEM count, then [ITEM_ID(global) + ITEM_COUNT] × N. */
 function readMerchantItems(buf: ByteBuffer, f: number, e: number): { id: string; count: number }[] {
   const at = buf.indexOf("QTY_ITEM", f);
@@ -81,6 +94,20 @@ function readMerchantItems(buf: ByteBuffer, f: number, e: number): { id: string;
     out.push({ id: id.value, count: qty.value });
     p = qty.next;
   }
+  return out;
+}
+
+/**
+ * Merchant BUY_* toggles + MISSION, omitted when at their defaults (all BUY on, MISSION off) so
+ * the common merchant stays a clean `{ }` — only deviating merchants carry the fields. Byte-exact
+ * rebuild needs these: a merchant with MISSION=1 (or a BUY_* off) diffs otherwise.
+ */
+function readMerchantFlags(buf: ByteBuffer, f: number, e: number): { buy?: boolean[]; mission?: boolean } {
+  const out: { buy?: boolean[]; mission?: boolean } = {};
+  const buy = MERCHANT_BUY_TAGS.map((t) => readBoolValue(buf, t, f, e) ?? true);
+  if (buy.some((b) => !b)) out.buy = buy; // omit when every category is bought (the default)
+  const mission = readBoolValue(buf, "MISSION", f, e) ?? false;
+  if (mission) out.mission = true; // omit when false (the default)
   return out;
 }
 
@@ -273,9 +300,10 @@ export function readSite(type: SiteType) {
     const name = readDefaultString(buf, "TXT_TITLE", f, e) ?? "";
     const desc = readDefaultString(buf, "TXT_DESC", f, e);
     const image = readDefaultInt(buf, "IMG_ISO", f, e);
+    const aiPriority = readDefaultInt(buf, "AIPRIORITY", f, e);
     // stock list (global template ids) — merchant items, mage spells, mercenary units.
     const stock =
-      type === "merchant" ? { items: readMerchantItems(buf, f, e) } :
+      type === "merchant" ? { items: readMerchantItems(buf, f, e), ...readMerchantFlags(buf, f, e) } :
       type === "mage" ? { spells: readMageSpells(buf, f, e) } :
       type === "mercenary" ? { units: readMercUnits(buf, f, e) } :
       {};
@@ -286,6 +314,8 @@ export function readSite(type: SiteType) {
       name,
       ...(desc ? { desc } : {}),
       ...(image !== null ? { image } : {}),
+      // omit when 0 (siteFrame's default) so a placed/default site round-trips without a phantom field
+      ...(aiPriority ? { aiPriority } : {}),
       ...stock,
     };
   };
@@ -295,11 +325,13 @@ export function readSite(type: SiteType) {
 export function readCrystal(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const resource = readDefaultInt(buf, "RESOURCE", f, e);
+  const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   return {
     type: "crystal",
     id: obj.id,
     pos: pos(buf, obj),
     ...(resource !== null ? { resource } : {}),
+    ...(priority !== null ? { priority } : {}),
   };
 }
 
@@ -321,13 +353,16 @@ export function readLocation(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readLandmark(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const baseType = refOrUndef(readDefaultString(buf, "TYPE", f, e));
-  const desc = readDefaultString(buf, "DESC_TXT", f, e); // author's decoration name (CP1251), or ""
+  const desc = readDefaultString(buf, "DESC_TXT", f, e); // author's decoration name (CP1251), "" if empty, null if ABSENT
   return {
     type: "landmark",
     id: obj.id,
     pos: pos(buf, obj),
     ...(baseType ? { baseType } : {}),
-    ...(desc ? { desc } : {}), // omit when empty — empty == absent, so unnamed landmarks round-trip
+    // Preserve DESC_TXT *presence*: "" (empty-but-present, editor-authored) vs undefined (field
+    // ABSENT, RMG-generated). Byte-exact rebuild needs the distinction — always-writing an empty
+    // DESC_TXT onto an RMG landmark that never had one adds bytes (see full-rebuild experiment).
+    ...(desc !== null ? { desc } : {}),
   };
 }
 
