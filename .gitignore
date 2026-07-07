@@ -13,10 +13,13 @@ game-dir.local
 # runtime data (server uploads / temp maps)
 var/
 
+# python bytecode (any tool: asset-pipeline, scen-tester, …) — regenerable, never in the repo
+__pycache__/
+*.pyc
+
 # generated assets (large; regenerate via tools/asset-pipeline)
 public/assets/
 tools/asset-pipeline/spikes/out/
-tools/asset-pipeline/**/__pycache__/
 tools/asset-pipeline/.venv/
 
 # editor/OS
