@@ -11,7 +11,10 @@
  */
 
 import type { MapDocument, MapObject, ItemInstance, UnitInstance } from "@d2/map-schema";
-import { landmarkFrame, locationFrame, crystalFrame, siteFrame, itemFrame, unitFrame, stackFrame } from "./sgRebuild.js";
+import {
+  landmarkFrame, locationFrame, crystalFrame, siteFrame, itemFrame, unitFrame, stackFrame,
+  villageFrame, ruinFrame, bagFrame, mountainsFrame,
+} from "./sgRebuild.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 
 /** The numeric `second` (uid) a frame-writer needs = the 4-hex tail of the compound id. */
@@ -97,6 +100,54 @@ export function serializeTypedBlock(
         ...(obj.type === "mercenary" ? { units: obj.units } : {}),
       });
     }
+    case "MidVillage": {
+      if (obj.type !== "village") return null;
+      // garrison slots + captured-loot ITEM_ID from the load-only `raw` snapshot; RIOT_T/PROTECT_B/
+      // P_O_* are invariant on shipped maps (villageFrame's hardcoded constants reproduce them).
+      return villageFrame(version, secondOf(obj.id), {
+        posX: obj.pos.x,
+        posY: obj.pos.y,
+        name: obj.name,
+        desc: obj.desc,
+        owner: obj.owner,
+        subRace: obj.subRace,
+        stackRef: obj.stackRef,
+        tier: obj.tier,
+        priority: obj.priority,
+        regen: obj.regen,
+        morale: obj.morale,
+        growth: obj.growth,
+        unitSlots: obj.raw?.unitSlots,
+        posOfCell: obj.raw?.posOfCell,
+        itemIds: obj.raw?.itemIds,
+      });
+    }
+    case "MidRuin": {
+      if (obj.type !== "ruin") return null;
+      return ruinFrame(version, secondOf(obj.id), {
+        posX: obj.pos.x,
+        posY: obj.pos.y,
+        name: obj.name,
+        desc: obj.desc,
+        image: obj.image,
+        reward: obj.reward,
+        item: obj.item,
+        looter: obj.looter,
+        priority: obj.priority,
+        unitSlots: obj.raw?.unitSlots,
+        posOfCell: obj.raw?.posOfCell,
+      });
+    }
+    case "MidBag": {
+      if (obj.type !== "treasure") return null;
+      return bagFrame(version, secondOf(obj.id), {
+        posX: obj.pos.x,
+        posY: obj.pos.y,
+        image: obj.image ?? 0,
+        priority: obj.priority,
+        itemIds: obj.raw?.itemIds,
+      });
+    }
     default:
       return null;
   }
@@ -155,12 +206,43 @@ export function rebuildFromModel(
       const frame = b.id ? serializeInstanceBlock(b.typeName, b.id, items, units, version) : null;
       return frame ? { ...b, bytes: frame } : b;
     }
+    // ONE MidMountains block holds N mountains — read as `${blockId}#n` children. Gather them all
+    // back into a single block (no 1:1 object for the block id).
+    if (b.typeName === "MidMountains") {
+      const frame = b.id ? serializeMountainsBlock(b.id, doc, version) : null;
+      return frame ? { ...b, bytes: frame } : b;
+    }
     const obj = b.id ? byId.get(b.id) : undefined;
     if (!obj) return b;
     const frame = serializeTypedBlock(b.typeName, obj, version);
     return frame ? { ...b, bytes: frame } : b;
   });
   return { ...s, blocks };
+}
+
+/**
+ * Gather every `${blockId}#n` mountains child (in index order) back into ONE MidMountains block.
+ * Returns null if the block has no children in the model (keep it raw).
+ */
+function serializeMountainsBlock(blockId: string, doc: MapDocument, version: string): Uint8Array | null {
+  const prefix = `${blockId}#`;
+  const children = doc.objects
+    .filter((o): o is Extract<MapObject, { type: "mountains" }> => o.type === "mountains" && o.id.startsWith(prefix))
+    .sort((a, b) => parseInt(a.id.slice(prefix.length), 10) - parseInt(b.id.slice(prefix.length), 10));
+  if (!children.length) return null;
+  return mountainsFrame(
+    version,
+    secondOf(blockId),
+    children.map((m) => ({
+      x: m.pos.x,
+      y: m.pos.y,
+      w: m.w ?? 0,
+      h: m.h ?? 0,
+      image: m.image ?? 0,
+      race: m.race ?? 0,
+      idMount: m.idMount,
+    })),
+  );
 }
 
 /**
@@ -179,6 +261,10 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
   "MidItem",
   "MidUnit",
   "MidStack",
+  "MidVillage",
+  "MidRuin",
+  "MidBag",
+  "MidMountains",
 ]);
 
 /**

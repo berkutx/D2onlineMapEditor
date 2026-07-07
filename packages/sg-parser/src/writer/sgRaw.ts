@@ -49,6 +49,9 @@ export interface SgMountainRaw {
   h: number;
   image: number;
   race: number;
+  /** ID_MOUNT — per-entry id (non-sequential on loaded maps); preserved so a mountain edit doesn't
+   *  renumber the survivors. Undefined for a freshly placed entry (gets its index at export). */
+  idMount?: number;
 }
 
 /** Byte-offset index over the original `.sg`, the canonical base for editing. */
@@ -121,6 +124,7 @@ function buildIndex(buf: ByteBuffer, doc: MapDocument): SgRaw {
         x: o.pos.x, y: o.pos.y,
         w: o.w ?? 1, h: o.h ?? 1,
         image: o.image ?? 0, race: o.race ?? 0,
+        ...(o.idMount !== undefined ? { idMount: o.idMount } : {}),
       });
     }
   }

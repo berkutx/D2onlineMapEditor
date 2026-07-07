@@ -173,7 +173,7 @@ export function villageFrame(
     morale?: number;
     growth?: number;
     riot?: number;
-    unitSlots?: readonly string[];
+    unitSlots?: readonly (string | null)[];
     posOfCell?: readonly number[];
     itemIds?: readonly string[];
   },
@@ -346,7 +346,7 @@ export function ruinFrame(
     item?: string;
     looter?: string;
     priority?: number;
-    unitSlots?: readonly string[];
+    unitSlots?: readonly (string | null)[];
     posOfCell?: readonly number[];
   },
 ): Uint8Array {
@@ -449,6 +449,8 @@ export interface MountainEntry {
   h: number;
   image: number;
   race: number;
+  /** ID_MOUNT — the per-entry id from a loaded block (non-sequential); falls back to the index. */
+  idMount?: number;
 }
 
 /** The single MidMountains block frame (code 0x14, short ML): count + per-entry fields. */
@@ -460,7 +462,7 @@ export function mountainsFrame(
   return emitBlock(version, "MidMountains", 0x14, "ML", second, (w, full) => {
     w.defaultInt(full, mountains.length);
     mountains.forEach((m, i) => {
-      w.defaultInt("ID_MOUNT", i);
+      w.defaultInt("ID_MOUNT", m.idMount ?? i);
       w.defaultInt("SIZE_X", m.w);
       w.defaultInt("SIZE_Y", m.h);
       w.defaultInt("POS_X", m.x);

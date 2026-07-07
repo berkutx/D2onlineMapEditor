@@ -162,6 +162,10 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
     ["MidSiteTrainer", "trainer"],
     ["MidSiteMercs", "mercenary"],
     ["MidStack", "stack"],
+    ["MidVillage", "village"],
+    ["MidRuin", "ruin"],
+    ["MidBag", "treasure"],
+    ["MidMountains", "mountains"],
   ] as const) {
     it(`${decl}: model-rebuild reparses, preserves objects, validates (byte-diff reported)`, () => {
       const before = parseScenario(bytes);

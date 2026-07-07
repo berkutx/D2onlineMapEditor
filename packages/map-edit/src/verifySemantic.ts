@@ -10,16 +10,19 @@ import { applyOps } from "./ops.js";
 import type { EditOp } from "./ops.js";
 
 /**
- * A stack's load-only `raw` snapshot (minted UNIT_/POS_/LEADER_ID/ITEM_ID refs) is an EXPORT
- * artifact, not semantic content: a PLACED stack mints fresh instance ids at export, so its
- * reparse can never match the pre-export op. Drop it before the id-keyed comparison — the resolved
- * garrison/leader/inventory/scalars still compare exactly.
+ * A compound object's load-only `raw` snapshot (minted UNIT_/POS_/LEADER_ID/ITEM_ID refs) is an
+ * EXPORT artifact, not semantic content: a PLACED/edited stack/village/ruin/bag mints fresh
+ * instance ids at export, so its reparse can never match the pre-export op. Drop it before the
+ * id-keyed comparison — the resolved garrison/leader/inventory/scalars still compare exactly.
  */
 function stripStackRaw(objs: readonly MapObject[]): MapObject[] {
   return objs.map((o) => {
-    if (o.type !== "stack" || !("raw" in o)) return o;
+    // `idMount` on a mountains entry is the same kind of export artifact (a placed entry is
+    // numbered at export), so drop it alongside `raw`.
+    if (!("raw" in o) && !(o.type === "mountains" && "idMount" in o)) return o;
     const clone: Record<string, unknown> = { ...o };
     delete clone.raw;
+    delete clone.idMount;
     return clone as unknown as MapObject;
   });
 }

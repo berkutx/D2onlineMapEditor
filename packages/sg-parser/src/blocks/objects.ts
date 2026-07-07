@@ -35,13 +35,23 @@ function refOrUndef(s: string | null): string | undefined {
  *  (Verified verbatim vs D2RSG group.cpp serialize() + D2ModdingToolset unitslotview: even cell =
  *  front line, odd = back; column = cell/2.) Returns a 6-element array indexed by FORMATION CELL ->
  *  instance id (null = empty cell). */
+/** The RAW embedded-group slots: UNIT_0..5 (slot instance ids) + POS_0..5 (which slot fills cell i).
+ *  The byte-exact snapshot for a stack/village/ruin garrison — reused by all three. */
+function readSlots(buf: ByteBuffer, f: number, e: number): { unitSlots: (string | null)[]; posOfCell: number[] } {
+  const unitSlots: (string | null)[] = [];
+  for (let i = 0; i < 6; i++) unitSlots.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
+  const posOfCell: number[] = [];
+  for (let i = 0; i < 6; i++) posOfCell.push(readDefaultInt(buf, `POS_${i}`, f, e) ?? -1);
+  return { unitSlots, posOfCell };
+}
+
+/** Resolve the raw slots to by-formation-cell instance ids (cell i = unitSlots[posOfCell[i]]). */
 function readGarrison(buf: ByteBuffer, f: number, e: number): (string | null)[] {
-  const units: (string | null)[] = [];
-  for (let i = 0; i < 6; i++) units.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
+  const { unitSlots, posOfCell } = readSlots(buf, f, e);
   const cells: (string | null)[] = [null, null, null, null, null, null];
   for (let i = 0; i < 6; i++) {
-    const pos = readDefaultInt(buf, `POS_${i}`, f, e);
-    if (pos !== null && pos >= 0 && pos < 6) cells[i] = units[pos] ?? null;
+    const p = posOfCell[i]!;
+    if (p >= 0 && p < 6) cells[i] = unitSlots[p] ?? null;
   }
   return cells;
 }
@@ -193,12 +203,9 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     if (s && s !== NULL_ID && s !== "000000") equip[k] = s;
   }
   // Formation: UNIT_0..5 = the slot instance ids; POS_i = which slot fills formation CELL i
-  // (cell i = unitSlots[POS_i]; -1 = empty). The raw slots + pos are the byte-exact snapshot; the
-  // editor works with the by-cell `garrisonRaw` (resolved to `garrison` in the post-pass).
-  const unitSlots: (string | null)[] = [];
-  for (let i = 0; i < 6; i++) unitSlots.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
-  const posOfCell: number[] = [];
-  for (let i = 0; i < 6; i++) posOfCell.push(readDefaultInt(buf, `POS_${i}`, f, e) ?? -1);
+  // (cell i = unitSlots[POS_i]). The raw slots + pos are the byte-exact snapshot; the editor works
+  // with the by-cell `garrisonRaw` (resolved to `garrison` in the post-pass).
+  const { unitSlots, posOfCell } = readSlots(buf, f, e);
   const cells: (string | null)[] = [null, null, null, null, null, null];
   for (let i = 0; i < 6; i++) {
     const p = posOfCell[i]!;
@@ -268,6 +275,8 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(growth !== null ? { growth } : {}),
     garrisonRaw: readGarrison(buf, f, e), // embedded instance ids; resolved in assemble post-pass
     ...(stackRef ? { stackRef } : {}),
+    // load-only byte-exact snapshot: the raw garrison slots + captured-loot ITEM_ID instance refs.
+    raw: { ...readSlots(buf, f, e), itemIds: readAllStrings(buf, "ITEM_ID", f, e) },
   };
 }
 
@@ -325,6 +334,7 @@ export function readRuin(buf: ByteBuffer, obj: FramedObject): MapObject {
     // the ruin's guardians (GROUP_ID + UNIT_0..5/POS_0..5 — same embedded-group layout as
     // a fort's defense); resolved instance→impl in the assemble post-pass
     garrisonRaw: readGarrison(buf, f, e),
+    raw: readSlots(buf, f, e), // load-only byte-exact snapshot (guardian garrison slots)
   };
 }
 
@@ -409,14 +419,16 @@ export function readTreasure(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const image = readDefaultInt(buf, "IMAGE", f, e);
   const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
-  const items = readAllStrings(buf, "ITEM_ID", f, e).filter((s) => s && s !== NULL_ID && s !== "000000");
+  const itemIds = readAllStrings(buf, "ITEM_ID", f, e); // exact ITEM_ID list on disk (MidItem instances)
   return {
     type: "treasure",
     id: obj.id,
     pos: pos(buf, obj),
     ...(image !== null ? { image } : {}),
     ...(priority !== null ? { priority } : {}),
-    items, // always present (possibly empty) so add/clear round-trips have a stable shape
+    // resolved to templates in the post-pass; always present (possibly empty) for a stable shape
+    items: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    raw: { itemIds }, // load-only byte-exact snapshot (ITEM_ID instance refs)
   };
 }
 
@@ -492,6 +504,9 @@ export function readMountains(buf: ByteBuffer, obj: FramedObject): MapObject[] {
     const next = buf.indexOf("ID_MOUNT", idm + 1);
     const entryEnd = next >= 0 && next < e ? next : e;
 
+    // ID_MOUNT is a per-entry id, NOT the sequential index (83/93 shipped blocks are non-sequential,
+    // e.g. 4151,4157,…). Capture it so the rebuild reproduces the block byte-for-byte.
+    const idMount = buf.readInt32LE(idm + "ID_MOUNT".length);
     const w = readDefaultInt(buf, "SIZE_X", idm, entryEnd);
     const h = readDefaultInt(buf, "SIZE_Y", idm, entryEnd);
     const px = buf.indexOf("POS_X", idm);
@@ -505,6 +520,7 @@ export function readMountains(buf: ByteBuffer, obj: FramedObject): MapObject[] {
       type: "mountains",
       id: `${obj.id}#${n}`,
       pos: { x, y },
+      idMount,
       ...(w !== null ? { w } : {}),
       ...(h !== null ? { h } : {}),
       ...(image !== null ? { image } : {}),

@@ -152,15 +152,33 @@ A rebuild export of an edited map would need snapshot invalidation + re-mint —
 client ignores them and the server rebuild re-parses stored bytes, so stripping them from the
 client-facing response is a safe future optimization.
 
+## Round 4 — Village / Ruin / Bag + Mountains (the mechanism generalized)
+
+The `raw`-snapshot + `doc.instances` pattern now covers the rest of the compound objects, and the
+one-block-holds-all mountains shape:
+
+- **`InstanceRawSnapshot`** extracted to a shared schema; **MidVillage** (garrison slots +
+  captured-loot `ITEM_ID`, 71% of villages carry loot), **MidRuin** (guardian garrison, 87%), and
+  **MidBag** (`ITEM_ID` contents, 98%) each get a load-only `raw`. `verifySemantic` strips `raw`
+  from ANY compound. Latent scalars (`RIOT_T`/`PROTECT_B`/`P_O_*`, ruin visiter-count) are invariant
+  on shipped maps — hardcoded.
+- **MidMountains** — the ONE-block-holds-all case: `rebuildFromModel` special-cases it, GATHERING
+  every `${blockId}#n` child back into a single block via `mountainsFrame`. `ID_MOUNT` is a per-entry
+  id (**83/93 blocks non-sequential**, e.g. 4151,4157,…), now captured on the object + preserved by
+  BOTH paths (`sgRaw` for patch, the model for rebuild); it's an export artifact for placed entries,
+  so `verifySemantic` strips it like `raw`.
+
 ## Status
 
-`REBUILD_TYPES` = **MidLocation, MidLandmark, MidCrystal, MidSite{Merchant,Mage,Trainer,Mercs},
-MidItem, MidUnit, MidStack** (10 types) — all **byte-perfect** (`rebuildBytes(x, parse(x)) === x`)
-on ALL 80 pristine originals, largest (2.4 MB) included. Gates: `sgBlocks.test.ts` + the pristine
-sweep. Full suite green: sg-parser 71, map-edit 139, server 96, map-schema 5. The DESC_TXT +
-merchant-flag + landmark-presence + full-stack fixes also harden the production patch/reader paths.
-Not pushed — local branch only.
+`REBUILD_TYPES` = **14 types**: MidLocation, MidLandmark, MidCrystal, MidSite{Merchant,Mage,Trainer,
+Mercs}, MidItem, MidUnit, MidStack, MidVillage, MidRuin, MidBag, MidMountains — i.e. **every object
+block type**. All **byte-perfect** (`rebuildBytes(x, parse(x)) === x`) on ALL 80 pristine originals,
+largest (2.4 MB) included. Gates: `sgBlocks.test.ts` (STEP-3 per-type 0-diff + STEP-4 pristine
+sweep). Full suite green: sg-parser 76, map-edit 139, server 96, map-schema 5. The DESC_TXT +
+merchant-flag + landmark-presence + full-stack + mountains-`ID_MOUNT` fixes also harden the
+production patch/reader paths. Not pushed — local branch only.
 
-Next: MidMountains dispatcher special-case (one-block-holds-all + `ID_MOUNT`); MidVillage/MidRuin
-garrison via the same `raw` snapshot + `doc.instances` (now that the mechanism exists); then the
-non-object blocks + STEP 5 ScenEdit gold-check on a fully model-rebuilt map.
+Next: the NON-object blocks (ScenarioInfo, MidgardMapBlock terrain, MidRoad, MidPlayer, MidSubRace,
+MidgardPlan, events/variables/templates/diplomacy) — many already round-trip raw byte-exact; a full
+model rebuild would fold them into the model too. Then STEP 5: a ScenEdit gold-check that a fully
+model-rebuilt map LOADS in the game editor.

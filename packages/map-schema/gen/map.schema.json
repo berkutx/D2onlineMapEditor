@@ -718,6 +718,36 @@
                   },
                   "stackRef": {
                     "type": "string"
+                  },
+                  "raw": {
+                    "type": "object",
+                    "properties": {
+                      "unitSlots": {
+                        "type": "array",
+                        "items": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "posOfCell": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        }
+                      },
+                      "leaderId": {
+                        "type": "string"
+                      },
+                      "itemIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -841,6 +871,36 @@
                         "null"
                       ]
                     }
+                  },
+                  "raw": {
+                    "type": "object",
+                    "properties": {
+                      "unitSlots": {
+                        "type": "array",
+                        "items": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "posOfCell": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        }
+                      },
+                      "leaderId": {
+                        "type": "string"
+                      },
+                      "itemIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -1243,6 +1303,9 @@
                     "type": "string",
                     "const": "mountains"
                   },
+                  "idMount": {
+                    "type": "integer"
+                  },
                   "image": {
                     "type": "integer"
                   },
@@ -1585,6 +1648,36 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "raw": {
+                    "type": "object",
+                    "properties": {
+                      "unitSlots": {
+                        "type": "array",
+                        "items": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "posOfCell": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer"
+                        }
+                      },
+                      "leaderId": {
+                        "type": "string"
+                      },
+                      "itemIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [

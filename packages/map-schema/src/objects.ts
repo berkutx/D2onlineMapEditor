@@ -60,6 +60,20 @@ export const StackEquip = z.object({
 });
 export type StackEquip = z.infer<typeof StackEquip>;
 
+/**
+ * Load-only byte-exact snapshot of a compound object's instance graph (the minted-id refs:
+ * UNIT_0..5 / POS_0..5 / LEADER_ID / ITEM_ID). Editor-transparent; the semantic round-trip STRIPS
+ * it — a PLACED/edited object mints fresh instance ids at export, so this can't match the
+ * pre-export op. The resolved garrison/leader/inventory/scalars still compare exactly.
+ */
+export const InstanceRawSnapshot = z.object({
+  unitSlots: z.array(z.string().nullable()).optional(),
+  posOfCell: z.array(z.number().int()).optional(),
+  leaderId: z.string().optional(),
+  itemIds: z.array(z.string()).optional(),
+});
+export type InstanceRawSnapshot = z.infer<typeof InstanceRawSnapshot>;
+
 export const StackObject = z.object({
   ...base,
   type: z.literal("stack"),
@@ -96,17 +110,8 @@ export const StackObject = z.object({
   aiIgnore: z.boolean().optional(), // AI_IGNORE
   upgCount: z.number().int().optional(), // UPGCOUNT
   nbBattle: z.number().int().optional(), // NBBATTLE
-  /** Load-only byte-exact snapshot of the instance graph (minted-id refs: UNIT_0..5 / POS_0..5 /
-   *  LEADER_ID / ITEM_ID inventory). Editor-transparent; the semantic round-trip STRIPS it (a
-   *  placed stack mints fresh ids at export, so these can't match the pre-export op). */
-  raw: z
-    .object({
-      unitSlots: z.array(z.string().nullable()).optional(),
-      posOfCell: z.array(z.number().int()).optional(),
-      leaderId: z.string().optional(),
-      itemIds: z.array(z.string()).optional(),
-    })
-    .optional(),
+  /** Load-only byte-exact snapshot of the instance graph (UNIT_/POS_/LEADER_ID/ITEM_ID). */
+  raw: InstanceRawSnapshot.optional(),
 });
 
 export const FortObject = z.object({
@@ -149,6 +154,7 @@ export const VillageObject = z.object({
   garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit (see CapitalObject)
   garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   stackRef: z.string().optional(),
+  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (garrison + captured-loot ITEM_ID)
 });
 
 export const RuinObject = z.object({
@@ -166,6 +172,7 @@ export const RuinObject = z.object({
   // byte-verified: every Riders ruin carries 2-5 MidUnit guards
   garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit
   garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
+  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (guardian garrison)
 });
 
 const SiteCommon = {
@@ -205,6 +212,7 @@ export const MercenaryObject = z.object({
 export const MountainsObject = z.object({
   ...base,
   type: z.literal("mountains"),
+  idMount: z.number().int().optional(), // ID_MOUNT — per-entry id (NOT sequential); kept for byte-exact rebuild
   image: z.number().int().optional(),
   race: z.number().int().optional(),
   // SIZE_X / SIZE_Y from the .sg entry. The editor's image key is
@@ -245,7 +253,8 @@ export const TreasureObject = z.object({
   type: z.literal("treasure"),
   image: z.number().int().optional(), // MidBag IMAGE -> G000BG0000{0|1}{image}
   priority: z.number().int().optional(), // AIPRIORITY 0..6
-  items: z.array(z.string()).optional(), // ITEM_ID list — the bag's contents
+  items: z.array(z.string()).optional(), // ITEM_ID list — the bag's contents (resolved to templates)
+  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (ITEM_ID instance refs)
 });
 
 export const RodObject = z.object({
