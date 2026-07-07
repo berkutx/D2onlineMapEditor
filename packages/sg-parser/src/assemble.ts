@@ -36,7 +36,7 @@ import { readDefaultInt, readDefaultString } from "./bytebuffer.js";
 import { readEvent, readScenVariables, readStackTemplate } from "./blocks/events.js";
 import type {
   MapDocument, MapObject, PlayerInfo, MapHeader, GarrisonUnit, MapEvent, ScenarioVariable,
-  StackTemplate, DiplomacyEntry,
+  StackTemplate, DiplomacyEntry, UnitInstance,
 } from "@d2/map-schema";
 
 const DEFAULT_SG_VERSION = "S143";
@@ -78,9 +78,11 @@ interface Accumulated {
   subraceBanners: Map<number, number>;
   /** MidItem instance id -> ITEM_TYPE global template id (for chest item resolution). */
   itemInstances: Record<string, string>;
-  /** MidUnit instance id -> {impl Gunit id, level, hp} (for garrison + stack-leader resolution).
-   *  Units are NOT placed objects (they live inside stacks/forts), so they stay out of objects. */
-  unitInstances: Record<string, { implId?: string; level?: number; hp?: number }>;
+  /** MidUnit instance id -> its FULL record (impl/level/hp/xp/creation/name/modifiers). Used for
+   *  garrison + stack-leader resolution (impl/level/hp) AND the byte-exact model rebuild (all
+   *  fields). Units are NOT placed objects (they live inside stacks/forts), so they stay out of
+   *  objects. */
+  unitInstances: Record<string, Omit<UnitInstance, "id">>;
 }
 
 /** Single-object readers keyed by TypeName. */
@@ -151,10 +153,9 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       return;
     }
     case "MidUnit": {
-      // a scenario unit instance (inside a stack/fort, not a placed object). Collect its
-      // impl/level/hp for garrison + stack-leader resolution; do NOT add to objects.
-      const u = readUnit(buf, obj);
-      if (u.type === "unit") acc.unitInstances[obj.id] = { implId: u.implId, level: u.level, hp: u.hp };
+      // a scenario unit instance (inside a stack/fort, not a placed object). Collect its FULL
+      // record (garrison/leader resolution reads impl/level/hp; the rebuild re-emits every field).
+      acc.unitInstances[obj.id] = readUnit(buf, obj);
       return;
     }
     case "MidEvent":
@@ -323,6 +324,12 @@ export function assembleDocument(
   const cells = buildGrid(size, acc.blocks);
   applyRoads(cells, size, acc.roads);
 
+  // Instance graph (MidItem, later MidUnit): kept so a full model rebuild can re-emit these blocks
+  // byte-exact. Editor-transparent — the resolved garrison/inventory on the objects is what the UI
+  // uses. Order is irrelevant (the rebuild looks them up by block id).
+  const items = Object.entries(acc.itemInstances).map(([id, itemType]) => ({ id, itemType }));
+  const units = Object.entries(acc.unitInstances).map(([id, u]) => ({ id, ...u }));
+
   return {
     schemaVersion,
     parserVersion,
@@ -335,6 +342,7 @@ export function assembleDocument(
     variables: acc.variables,
     templates: acc.templates,
     diplomacy: acc.diplomacy,
+    instances: { units, items },
   };
 }
 

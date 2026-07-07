@@ -216,14 +216,24 @@ export function unitFrame(
   level: number,
   hp: number,
   xp = 0,
+  opts?: {
+    /** MODIF_ID list — level-up / equipment modifiers (global Gmodif refs, order + dupes as-is). */
+    modifiers?: readonly string[];
+    /** CREATION field (0 for a freshly minted unit). */
+    creation?: number;
+    /** NAME_TXT — custom unit name (empty for an unnamed unit). */
+    name?: string;
+  },
 ): Uint8Array {
   return emitBlock(version, "MidUnit", 0x0f, "UN", second, (w, full) => {
     w.refField("UNIT_ID", full);
     w.refField("TYPE", typeId);
     w.defaultInt("LEVEL", level);
-    w.defaultInt(full, 0); // MODIF_ID list count (count tag = the unit's own id) = no modifiers
-    w.defaultInt("CREATION", 0);
-    w.stringField("NAME_TXT", ""); // default name
+    const mods = opts?.modifiers ?? [];
+    w.defaultInt(full, mods.length); // MODIF_ID list count (count tag = the unit's own id)
+    for (const m of mods) w.refField("MODIF_ID", m);
+    w.defaultInt("CREATION", opts?.creation ?? 0);
+    w.stringField("NAME_TXT", opts?.name ?? "");
     w.bool("TRANSF", false);
     w.bool("DYNLEVEL", false);
     w.defaultInt("HP", hp);
@@ -249,7 +259,7 @@ export function stackFrame(
     subRace?: string;
     posX: number;
     posY: number;
-    unitSlots?: readonly string[];
+    unitSlots?: readonly (string | null)[];
     posOfCell?: readonly number[];
     leaderId?: string;
     itemIds?: readonly string[];
@@ -264,6 +274,16 @@ export function stackFrame(
     order?: number;
     priority?: number;
     creatLvl?: number;
+    // ---- full-parse scalars (defaults reproduce a fresh stack) ----
+    srcTemplate?: string;
+    leaderAlive?: boolean;
+    invisible?: boolean;
+    aiIgnore?: boolean;
+    upgCount?: number;
+    orderTarget?: string;
+    aiOrder?: number;
+    aiOrderTarget?: string;
+    nbBattle?: number;
   },
 ): Uint8Array {
   const NIL = "G000000000";
@@ -275,9 +295,9 @@ export function stackFrame(
     w.defaultInt(full, items.length); // carried-items count (tag = own id)
     for (const id of items) w.refField("ITEM_ID", id);
     w.refField("STACK_ID", full);
-    w.refField("SRCTMPL_ID", NIL);
+    w.refField("SRCTMPL_ID", o.srcTemplate || NIL);
     w.refField("LEADER_ID", o.leaderId ?? NIL);
-    w.bool("LEADR_ALIV", true);
+    w.bool("LEADR_ALIV", o.leaderAlive ?? true);
     w.defaultInt("POS_X", o.posX);
     w.defaultInt("POS_Y", o.posY);
     w.defaultInt("MORALE", o.morale ?? 0);
@@ -293,16 +313,16 @@ export function stackFrame(
     w.refField("OWNER", o.owner);
     w.refField("INSIDE", o.inside);
     w.refField("SUBRACE", o.subRace || NIL);
-    w.bool("INVISIBLE", false);
-    w.bool("AI_IGNORE", false);
-    w.defaultInt("UPGCOUNT", 0);
+    w.bool("INVISIBLE", o.invisible ?? false);
+    w.bool("AI_IGNORE", o.aiIgnore ?? false);
+    w.defaultInt("UPGCOUNT", o.upgCount ?? 0);
     w.defaultInt("ORDER", o.order ?? 1); // 1 = Normal
-    w.refField("ORDER_TARG", NIL);
-    w.defaultInt("AIORDER", 2); // Stand
-    w.refField("AIORDERTAR", NIL);
+    w.refField("ORDER_TARG", o.orderTarget || NIL);
+    w.defaultInt("AIORDER", o.aiOrder ?? 2); // 2 = Stand
+    w.refField("AIORDERTAR", o.aiOrderTarget || NIL);
     w.defaultInt("AIPRIORITY", o.priority ?? 3);
     w.defaultInt("CREAT_LVL", o.creatLvl ?? 1);
-    w.defaultInt("NBBATTLE", 0);
+    w.defaultInt("NBBATTLE", o.nbBattle ?? 0);
   });
 }
 

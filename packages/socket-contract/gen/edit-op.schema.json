@@ -212,6 +212,63 @@
                           "null"
                         ]
                       }
+                    },
+                    "aiOrder": {
+                      "type": "integer"
+                    },
+                    "aiOrderTarget": {
+                      "type": "string"
+                    },
+                    "orderTarget": {
+                      "type": "string"
+                    },
+                    "srcTemplate": {
+                      "type": "string"
+                    },
+                    "leaderAlive": {
+                      "type": "boolean"
+                    },
+                    "invisible": {
+                      "type": "boolean"
+                    },
+                    "aiIgnore": {
+                      "type": "boolean"
+                    },
+                    "upgCount": {
+                      "type": "integer"
+                    },
+                    "nbBattle": {
+                      "type": "integer"
+                    },
+                    "raw": {
+                      "type": "object",
+                      "properties": {
+                        "unitSlots": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "posOfCell": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        },
+                        "leaderId": {
+                          "type": "string"
+                        },
+                        "itemIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "required": [

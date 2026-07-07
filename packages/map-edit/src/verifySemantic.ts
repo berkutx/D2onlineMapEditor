@@ -5,9 +5,24 @@
  */
 
 import { parseScenario } from "@d2/sg-parser";
-import type { MapDocument } from "@d2/map-schema";
+import type { MapDocument, MapObject } from "@d2/map-schema";
 import { applyOps } from "./ops.js";
 import type { EditOp } from "./ops.js";
+
+/**
+ * A stack's load-only `raw` snapshot (minted UNIT_/POS_/LEADER_ID/ITEM_ID refs) is an EXPORT
+ * artifact, not semantic content: a PLACED stack mints fresh instance ids at export, so its
+ * reparse can never match the pre-export op. Drop it before the id-keyed comparison — the resolved
+ * garrison/leader/inventory/scalars still compare exactly.
+ */
+function stripStackRaw(objs: readonly MapObject[]): MapObject[] {
+  return objs.map((o) => {
+    if (o.type !== "stack" || !("raw" in o)) return o;
+    const clone: Record<string, unknown> = { ...o };
+    delete clone.raw;
+    return clone as unknown as MapObject;
+  });
+}
 
 /** Key-order-insensitive structural equality (documents are plain JSON values). */
 export function deepEqual(a: unknown, b: unknown): boolean {
@@ -68,7 +83,7 @@ export function roundTripSemantic(
   // Objects compared by id, ORDER-INSENSITIVELY: re-emitted blocks (e.g. an
   // appended landmark, or a rebuilt single MidMountains block) can land at a
   // different array index than applyOp's in-memory order, but the set must match.
-  if (!equalById(reparsed.objects, expected.objects)) {
+  if (!equalById(stripStackRaw(reparsed.objects), stripStackRaw(expected.objects))) {
     return { ok: false, reason: "objects differ after round-trip" };
   }
   // Events compared by id, order-insensitively (an appended/re-emitted MidEvent can land at a

@@ -14,7 +14,7 @@ import {
   readAllStrings,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
-import type { MapObject } from "@d2/map-schema";
+import type { MapObject, UnitInstance } from "@d2/map-schema";
 
 const NULL_ID = "G000000000"; // sentinel "no reference" compound id
 
@@ -166,6 +166,20 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
   const move = readDefaultInt(buf, "MOVE", f, e);
   const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   const creatLvl = readDefaultInt(buf, "CREAT_LVL", f, e);
+  // ---- full-parse scalars: captured for a byte-exact model rebuild, OMITTED at their disk
+  // defaults (so a placed/default stack carries no phantom field). Defaults mirror stackFrame. ----
+  const aiOrderRaw = readDefaultInt(buf, "AIORDER", f, e);
+  const aiOrder = aiOrderRaw !== null && aiOrderRaw !== 2 ? aiOrderRaw : undefined; // default 2 (Stand)
+  const upgCountRaw = readDefaultInt(buf, "UPGCOUNT", f, e);
+  const upgCount = upgCountRaw ? upgCountRaw : undefined; // default 0
+  const nbBattleRaw = readDefaultInt(buf, "NBBATTLE", f, e);
+  const nbBattle = nbBattleRaw ? nbBattleRaw : undefined; // default 0
+  const srcTemplate = refOrUndef(readDefaultString(buf, "SRCTMPL_ID", f, e)); // default NIL
+  const orderTarget = refOrUndef(readDefaultString(buf, "ORDER_TARG", f, e));
+  const aiOrderTarget = refOrUndef(readDefaultString(buf, "AIORDERTAR", f, e));
+  const leaderAliveRaw = readBoolValue(buf, "LEADR_ALIV", f, e); // default true
+  const invisible = readBoolValue(buf, "INVISIBLE", f, e) === true; // default false
+  const aiIgnore = readBoolValue(buf, "AI_IGNORE", f, e) === true; // default false
   // Leader equipment slots — each a global item ref; empty = the "000000"/"G000000000"
   // sentinel. TOME = spellbook, BATTLE1/2 = battle items, ARTIFACT1/2 = artifacts, BOOTS = boots.
   // Only FILLED slots are kept (empty omitted) so the object survives JSON transport (which drops
@@ -178,6 +192,19 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     const s = readDefaultString(buf, tag, f, e);
     if (s && s !== NULL_ID && s !== "000000") equip[k] = s;
   }
+  // Formation: UNIT_0..5 = the slot instance ids; POS_i = which slot fills formation CELL i
+  // (cell i = unitSlots[POS_i]; -1 = empty). The raw slots + pos are the byte-exact snapshot; the
+  // editor works with the by-cell `garrisonRaw` (resolved to `garrison` in the post-pass).
+  const unitSlots: (string | null)[] = [];
+  for (let i = 0; i < 6; i++) unitSlots.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
+  const posOfCell: number[] = [];
+  for (let i = 0; i < 6; i++) posOfCell.push(readDefaultInt(buf, `POS_${i}`, f, e) ?? -1);
+  const cells: (string | null)[] = [null, null, null, null, null, null];
+  for (let i = 0; i < 6; i++) {
+    const p = posOfCell[i]!;
+    if (p >= 0 && p < 6) cells[i] = unitSlots[p] ?? null;
+  }
+  const itemIds = readAllStrings(buf, "ITEM_ID", f, e); // MidItem instance refs — the exact list on disk
   return {
     type: "stack",
     id: obj.id,
@@ -193,11 +220,21 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(move !== null ? { move } : {}),
     ...(priority !== null ? { priority } : {}),
     ...(creatLvl !== null ? { creatLvl } : {}),
+    ...(aiOrder !== undefined ? { aiOrder } : {}),
+    ...(upgCount !== undefined ? { upgCount } : {}),
+    ...(nbBattle !== undefined ? { nbBattle } : {}),
+    ...(srcTemplate ? { srcTemplate } : {}),
+    ...(orderTarget ? { orderTarget } : {}),
+    ...(aiOrderTarget ? { aiOrderTarget } : {}),
+    ...(leaderAliveRaw === false ? { leaderAlive: false } : {}), // keep only when NOT the default (true)
+    ...(invisible ? { invisible: true } : {}),
+    ...(aiIgnore ? { aiIgnore: true } : {}),
     equip,
     // Carried inventory: an ITEM_ID list (MidItem instances → resolved to templates in the
     // post-pass, like a chest). All shipped Riders stacks carry 0, but the structure is real.
-    inventory: readAllStrings(buf, "ITEM_ID", f, e).filter((s) => s && s !== NULL_ID && s !== "000000"),
-    garrisonRaw: readGarrison(buf, f, e), // by-cell instance ids; resolved to garrison in post-pass
+    inventory: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    garrisonRaw: cells, // by-cell instance ids; resolved to garrison in post-pass
+    raw: { unitSlots, posOfCell, ...(leaderUnitId ? { leaderId: leaderUnitId } : {}), itemIds },
   };
 }
 
@@ -405,21 +442,34 @@ export function readTomb(buf: ByteBuffer, obj: FramedObject): MapObject {
   };
 }
 
-/** MidUnit: a unit definition (referenced by stacks/cities). TYPE = impl id. */
-export function readUnit(buf: ByteBuffer, obj: FramedObject): MapObject {
+/**
+ * MidUnit: a scenario unit instance (referenced by stacks/cities). Full field capture (for a
+ * byte-exact model rebuild): TYPE(impl) · LEVEL · MODIF_ID list · CREATION · NAME_TXT · TRANSF ·
+ * HP · XP. Returns the instance record MINUS its id (the caller keys by the block id). `transformed`
+ * (TRANSF=true) flags a polymorph carrying a 5-field nested block we don't model — 0 of 34k on
+ * shipped maps, kept raw in the rebuild.
+ */
+export function readUnit(buf: ByteBuffer, obj: FramedObject): Omit<UnitInstance, "id"> {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const implId = refOrUndef(readDefaultString(buf, "TYPE", f, e));
   // LEVEL precedes DYNLEVEL in the body so the first "LEVEL" match is the real one; HP is the
   // current hit points (== max for a freshly placed unit).
   const level = readDefaultInt(buf, "LEVEL", f, e);
+  const modifiers = readAllStrings(buf, "MODIF_ID", f, e); // level-up/equip modifiers (order + dupes preserved)
+  const creation = readDefaultInt(buf, "CREATION", f, e);
+  const name = readDefaultString(buf, "NAME_TXT", f, e); // custom name; "" when unnamed
+  const transformed = readBoolValue(buf, "TRANSF", f, e) === true;
   const hp = readDefaultInt(buf, "HP", f, e);
+  const xp = readDefaultInt(buf, "XP", f, e);
   return {
-    type: "unit",
-    id: obj.id,
-    pos: { x: 0, y: 0 }, // units carry no map position; placed via their stack/city
     ...(implId ? { implId } : {}),
     ...(level !== null ? { level } : {}),
     ...(hp !== null ? { hp } : {}),
+    ...(xp !== null ? { xp } : {}),
+    ...(creation !== null ? { creation } : {}),
+    ...(name ? { name } : {}), // omit when empty; the writer re-emits an empty NAME_TXT
+    ...(modifiers.length ? { modifiers } : {}),
+    ...(transformed ? { transformed } : {}),
   };
 }
 

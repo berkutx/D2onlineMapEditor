@@ -85,6 +85,28 @@ export const StackObject = z.object({
   // For a garrisoned/visiting stack this IS the city's "visitor" garrison (edited via the stack id).
   garrison: z.array(GarrisonUnit.nullable()).optional(),
   garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
+  // ---- full-parse scalars (byte-exact model rebuild). Omitted at their defaults so a placed/
+  // default stack round-trips without a phantom field. ----
+  aiOrder: z.number().int().optional(), // AIORDER (default 2 = Stand; ≠2 on ~99.8% of shipped stacks)
+  aiOrderTarget: z.string().optional(), // AIORDERTAR ref
+  orderTarget: z.string().optional(), // ORDER_TARG ref
+  srcTemplate: z.string().optional(), // SRCTMPL_ID ref (the MidStackTemplate this was spawned from)
+  leaderAlive: z.boolean().optional(), // LEADR_ALIV (default true)
+  invisible: z.boolean().optional(), // INVISIBLE
+  aiIgnore: z.boolean().optional(), // AI_IGNORE
+  upgCount: z.number().int().optional(), // UPGCOUNT
+  nbBattle: z.number().int().optional(), // NBBATTLE
+  /** Load-only byte-exact snapshot of the instance graph (minted-id refs: UNIT_0..5 / POS_0..5 /
+   *  LEADER_ID / ITEM_ID inventory). Editor-transparent; the semantic round-trip STRIPS it (a
+   *  placed stack mints fresh ids at export, so these can't match the pre-export op). */
+  raw: z
+    .object({
+      unitSlots: z.array(z.string().nullable()).optional(),
+      posOfCell: z.array(z.number().int()).optional(),
+      leaderId: z.string().optional(),
+      itemIds: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export const FortObject = z.object({

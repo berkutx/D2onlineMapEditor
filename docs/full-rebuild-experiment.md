@@ -122,16 +122,45 @@ Also surfaced (campaign-only, not modeled): a **site VISITER visited-players lis
 player-ref records) appended after the stock — dynamic playthrough state that pristine exports never
 carry. Intentionally left raw; it's why the corpus is `Exports - Copy`, not `Campaign`.
 
+## Round 3 — the instance graph modeled (MidStack / MidUnit / MidItem)
+
+The "instance-ref gap" is now CLOSED (user chose the full model-serialize over leaving it raw). The
+graph that lives inside stacks/forts/chests is fully parsed and re-emitted from the model:
+
+- **`doc.instances`** (additive, optional, editor-transparent) carries the full `MidUnit` +
+  `MidItem` records (impl/level/hp/xp/creation/name/`MODIF_ID` list; item = ITEM_TYPE). `assemble`
+  populates it; `rebuildFromModel` serializes `MidItem`/`MidUnit` blocks from it (looked up by block
+  id — they're not `MapObject`s).
+- **`MidUnit`** full-parse: verified encoding `LEVEL · <own-id>count · MODIF_ID×n · CREATION ·
+  NAME_TXT · TRANSF · DYNLEVEL · HP · XP`. `MODIF_ID` list on **14%** of 34k units, `NAME_TXT` on
+  **27%** — both reproduced. `TRANSF=true` (a polymorph's 5-field nested block) is 0/34k; such a
+  unit is flagged `transformed` and kept RAW as a safety net.
+- **`MidStack`** full-parse: all 32 fields. The minted-id graph (`UNIT_0..5`/`POS_0..5`/`LEADER_ID`/
+  `ITEM_ID`) is captured as a **load-only `raw` snapshot** on the stack object; scalars
+  (`AIORDER`≠2 on **99.8%** of 9k stacks, `SRCTMPL_ID`, `INVISIBLE`, `AI_IGNORE`, `UPGCOUNT`, …) as
+  omit-when-default fields. `roundTripSemantic` STRIPS `raw` before comparing (a PLACED stack mints
+  fresh ids, so it can't match the pre-export op — the resolved garrison/leader/scalars still do).
+
+Reference parity confirmed: toolsqt `D2Stack`/`D2Unit`/`D2Item` `read()`/`data()` field order
+matches the byte dumps 1:1.
+
+**Known limitation (rebuild of an EDITED compound):** the `raw` snapshot is captured at LOAD and goes
+stale if a garrison/inventory is edited (the ids are minted at export). The rebuild path is not the
+default export; the production edit path is `applyBytes` (patch-in-place), which re-mints correctly.
+A rebuild export of an edited map would need snapshot invalidation + re-mint — deferred.
+**Perf note:** `doc.instances` adds the instance records to every doc (big maps: ~1.5k units); the
+client ignores them and the server rebuild re-parses stored bytes, so stripping them from the
+client-facing response is a safe future optimization.
+
 ## Status
 
-`REBUILD_TYPES` = **MidLocation, MidLandmark, MidCrystal, MidSiteMerchant, MidSiteMage,
-MidSiteTrainer, MidSiteMercs** — all **byte-perfect** (`rebuildBytes(x, parse(x)) === x`) on ALL 80
-pristine originals, largest included. Gates: `sgBlocks.test.ts` (STEP-3 per-type 0-diff on Riders;
-STEP-4 full-rebuild byte-identity over the biggest-first pristine corpus). Full suite green:
-sg-parser 71, map-edit 139, server 96, map-schema 5. The DESC_TXT + merchant-flag + landmark-
-presence fixes also harden the production patch/reader paths (real round-trip bugs). Not pushed —
-local branch only.
+`REBUILD_TYPES` = **MidLocation, MidLandmark, MidCrystal, MidSite{Merchant,Mage,Trainer,Mercs},
+MidItem, MidUnit, MidStack** (10 types) — all **byte-perfect** (`rebuildBytes(x, parse(x)) === x`)
+on ALL 80 pristine originals, largest (2.4 MB) included. Gates: `sgBlocks.test.ts` + the pristine
+sweep. Full suite green: sg-parser 71, map-edit 139, server 96, map-schema 5. The DESC_TXT +
+merchant-flag + landmark-presence + full-stack fixes also harden the production patch/reader paths.
+Not pushed — local branch only.
 
-Next: MidMountains dispatcher special-case (one-block-holds-all + `ID_MOUNT`); then the
-instance-graph sub-project for the compound types (stack/village/ruin/treasure); then the
+Next: MidMountains dispatcher special-case (one-block-holds-all + `ID_MOUNT`); MidVillage/MidRuin
+garrison via the same `raw` snapshot + `doc.instances` (now that the mechanism exists); then the
 non-object blocks + STEP 5 ScenEdit gold-check on a fully model-rebuilt map.
