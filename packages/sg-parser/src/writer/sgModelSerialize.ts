@@ -33,7 +33,7 @@ export function serializeTypedBlock(
   switch (typeName) {
     case "MidLandmark":
       if (obj.type !== "landmark") return null;
-      return landmarkFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.baseType ?? "", "");
+      return landmarkFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.baseType ?? "", obj.desc ?? "");
     case "MidLocation":
       if (obj.type !== "location") return null;
       return locationFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.name ?? "", obj.radius ?? 0);

@@ -321,11 +321,13 @@ export function readLocation(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readLandmark(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const baseType = refOrUndef(readDefaultString(buf, "TYPE", f, e));
+  const desc = readDefaultString(buf, "DESC_TXT", f, e); // author's decoration name (CP1251), or ""
   return {
     type: "landmark",
     id: obj.id,
     pos: pos(buf, obj),
     ...(baseType ? { baseType } : {}),
+    ...(desc ? { desc } : {}), // omit when empty — empty == absent, so unnamed landmarks round-trip
   };
 }
 

@@ -145,11 +145,10 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
       expect(validateMap(after).ok).toBe(true); // the rebuilt map is structurally valid
 
       const diffs = countDiffs(bytes, out);
-      const n = of(before).length;
-      // informational: 0 = perfect byte reproduction from the model; >0 = model gap (e.g.
-      // landmark DESC_TXT not in the schema). The semantic assertions above are the real gate.
-      // eslint-disable-next-line no-console
-      console.log(`[STEP3] ${decl}: ${n} blocks, ${diffs} byte diffs, len ${bytes.length}->${out.length} (Δ${out.length - bytes.length}, ${((out.length - bytes.length) / (n || 1)).toFixed(1)}/block)`);
+      // BYTE-PERFECT: both MidLocation and (after the DESC_TXT fix) MidLandmark reproduce the
+      // original frame exactly from the model — the model captures every persisted field. This is
+      // the "close the gap → 0 diffs" proof; a regression (a dropped field) would make it non-zero.
+      expect(diffs, `${decl} model-rebuild should reproduce the original byte-for-byte`).toBe(0);
     });
   }
 });

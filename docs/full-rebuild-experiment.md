@@ -53,31 +53,39 @@ differ). So the full-rebuild export will NOT be byte-equal to a loaded map — t
 fine (the game re-reads it). The byte-exact property belongs to patch-in-place, which stays the
 default. Full-rebuild is the opt-in path toward reference parity.
 
-## Measured findings (Riders, STEP 3)
+## Measured findings (Riders, STEP 3) + the close-the-gap loop
 
 Rebuild every block of ONE type from the model (rest raw), then count byte diffs vs the original:
 
-| type | blocks | byte diffs | Δlen | per block | verdict |
-|---|---|---|---|---|---|
-| **MidLocation** | 418 | **0** | 0 | 0 | **byte-perfect** — model + `locationFrame` fully capture the block (LOC_ID/POS/NAME_TXT/RADIUS). |
-| **MidLandmark** | 673 | 1,125,825 | −6680 | **−9.9** | semantically valid (reparses, all survive, `validateMap` ok) but **~10 bytes/block SHORT**. |
+| type | blocks | byte diffs | verdict |
+|---|---|---|---|
+| **MidLocation** | 418 | **0** | byte-perfect — model + `locationFrame` fully capture the block. |
+| **MidLandmark** (before) | 673 | 1,125,825 (−9.9 B/block) | valid but SHORT — model dropped a field. |
+| **MidLandmark** (after fix) | 673 | **0** | byte-perfect — the gap is closed. |
 
-**What the landmark gap is:** `readLandmark` keeps only `{id, pos, baseType}` — it does NOT read
-`DESC_TXT`, and `LandmarkObject` has no field for it. `landmarkFrame` then writes `DESC_TXT("")`.
-The real blocks carry ~10 more bytes/landmark (a non-empty description and/or a real `TYPE` where
-the model dropped a nil `baseType`). So the model is LOSSY for landmarks by ~10 bytes each — the
-exact "unmodeled field" failure the reference avoids by keeping such blocks as `TagDataBlock` raw.
+**The landmark gap, diagnosed from the bytes:** the −9.9 B/block lived entirely in `DESC_TXT`.
+HEX decode of real landmark descriptions: `d2 ee ef fc 00` = **"Топь"** (marsh), `Фонтан`
+(fountain), `Яма` (pit) — CP1251. `DESC_TXT` is the **author's name/label for the decoration**.
+`readLandmark` never read it and `LandmarkObject` had no field, so the model dropped it (a real
+data-loss bug — even a re-added/undone landmark lost its name through the patch-in-place writer).
+The reference DOES model it: its factory registers `D2LandMark` (typed), not `TagDataBlock`.
 
-**Takeaway:** the full-rebuild MECHANISM works (location proves byte-perfect reproduction is
-possible). Parity is now a per-type job of closing model gaps — for landmark: add `DESC_TXT` to the
-schema + reader + frame, or (cheaper, reference-style) keep landmark blocks RAW until the model is
-proven complete. Every type gets this treatment, gold-checked, before it's switched from raw to
-model-serialized.
+**The fix (the close-the-gap loop in miniature):** add `desc` (optional, CP1251) to
+`LandmarkObject` → read `DESC_TXT` in `readLandmark` (omit when empty) → thread it through BOTH
+writers (`applyBytes` landmark append + the experiment `serializeTypedBlock`). Re-measured:
+**landmark 0 diffs**. No disassembly needed — the bytes + the reference source were enough.
+
+**Takeaway:** the mechanism works AND the per-type gap-closing is cheap & mechanical: diff → HEX-
+decode the delta → find the dropped field → add to schema+reader+writer → 0 diffs. Two types
+(location, landmark) are now byte-perfect from the model.
 
 ## Status
 
-STEP 1 (spine) + STEP 2 (OB0000 count) + STEP 3 (typed serialize: location byte-perfect, landmark
-gap measured) done + tested (`sgBlocks.test.ts`, 7 tests). Not pushed — local branch only.
+STEP 1 (spine) + STEP 2 (OB0000 count) + STEP 3 (typed serialize; **location + landmark both
+byte-perfect from the model** after closing the DESC_TXT gap) done + tested (`sgBlocks.test.ts`,
+7 tests, asserting 0 diffs). Landmark `desc` fix also lands in the main writer/reader (a real
+bug fix). Not pushed — local branch only.
 
-Next: STEP 3 increments per type (close model gaps, keep unproven types raw), then STEP 4
-(`rebuildScenario` export path + patch-vs-rebuild toggle) with a ScenEdit gold-check.
+Next: repeat the loop for the remaining object types (stack/village/ruin/site/…), then the
+non-object blocks, then STEP 4 (`rebuildScenario` export path + patch-vs-rebuild toggle) with a
+ScenEdit gold-check on the fully model-rebuilt map.

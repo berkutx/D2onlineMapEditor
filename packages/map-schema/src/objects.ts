@@ -192,6 +192,10 @@ export const LandmarkObject = z.object({
   ...base,
   type: z.literal("landmark"),
   baseType: z.string().optional(), // resolves footprint+image from SLmark.dbf
+  /** DESC_TXT — the author's CP1251 name/label for this decoration (e.g. "Топь", "Фонтан").
+   *  Modeled by the reference's D2LandMark; our parser used to drop it (lossy re-serialize).
+   *  Optional + omitted when empty (like baseType) so an unnamed landmark round-trips cleanly. */
+  desc: z.string().optional(),
 });
 export const LocationObject = z.object({
   ...base,
