@@ -89,14 +89,18 @@ vs **blocked by the instance-ref gap**:
 | **MidCrystal** | ✅ byte-perfect | one dropped scalar (`AIPRIORITY`) — added like `DESC_TXT`. Self-ref id, no instances. |
 | **MidSiteMage / Trainer / Mercs** | ✅ byte-perfect | stock lists are GLOBAL template ids (order == file order), no instance graph. |
 | **MidSiteMerchant** | ✅ byte-perfect | same, after capturing `BUY_*` (8 bools) + `MISSION` (value-carrying bools, omit-when-default). |
-| **MidStack / MidVillage / MidRuin** | ❌ blocked | garrison = sibling `MidUnit` **instance** blocks; the model RESOLVES them (unit+level+hp) and `assemble.ts` deletes the raw ids/ordering. Byte-exact rebuild needs the raw instance graph preserved — a deep model change that conflicts with the resolved model the editor UI depends on. |
-| **MidBag (treasure)** | ❌ blocked | `items` = `MidItem` **instance** refs (same instance-ref/ordering gap). Empty bags are 0-diff; non-empty diverge. |
+| **MidStack / MidVillage / MidRuin** | ✅ raw / ❌ model-serialize | ALREADY byte-exact via **raw passthrough** (not in REBUILD_TYPES → TagDataBlock, like the reference). Only MODEL-serializing them from the resolved model is blocked: garrison = sibling `MidUnit` instance blocks that `assemble.ts` resolves (unit+level+hp) and whose raw ids/ordering it drops. |
+| **MidBag (treasure)** | ✅ raw / ❌ model-serialize | same: `items` = `MidItem` instance refs, resolved to global templates. Raw passthrough is byte-exact; model-serialize isn't. |
 | **MidMountains** | ⚠ deferred | ONE block holds ALL mountains (`byId.get(block-id)` fails — children are `${blockId}#n`); needs a dispatcher special-case + `ID_MOUNT` per-entry id. Not an instance-ref gap, just a different shape. |
 
-**The honest limit:** compound objects (stack/village/ruin/treasure) can't rebuild byte-exact
-without the model preserving the raw `MidUnit`/`MidItem` instance graph + ordering. That's a
-separate sub-project (it fights the *resolved* garrison/inventory model the whole UI relies on),
-reported rather than forced.
+**The honest limit (corrected):** compound objects (stack/village/ruin/treasure) DO rebuild
+byte-exact today — as **raw passthrough** (proven: Relentless.sg, 370 stacks / 1548 MidUnit /
+577 MidItem, is in the 80/80 byte-identical sweep). What's blocked is only *model-serializing an
+EDITED compound object byte-exactly* from the flat/resolved model. That is (a) not needed for the
+export-unedited goal, (b) impossible by definition (edited ≠ byte-identical), and (c) already done
+by `applyBytes` (patch-in-place) for the production edit path. Preserving the raw `MidUnit`/`MidItem`
+instance graph as an object sidecar would only matter if the REBUILD path (vs patch) had to carry
+compound edits too — modest payoff, so deferred rather than forced.
 
 ### Two residual gaps, closed against the PRISTINE corpus
 
