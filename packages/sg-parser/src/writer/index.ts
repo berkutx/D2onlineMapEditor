@@ -7,6 +7,13 @@
  */
 
 export {
+  splitScenario,
+  joinScenario,
+  type ScenarioBlock,
+  type ScenarioBlocks,
+} from "./sgBlocks.js";
+
+export {
   parseScenarioRaw,
   stackDeleteCascade,
   villageDeleteCascade,
