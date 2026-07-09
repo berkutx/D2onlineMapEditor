@@ -25,6 +25,14 @@ That snapshot + the `doc.instances` carrier are a deliberate shortcut, and they 
 > id strings. On export, allocate the on-disk id space deterministically and **rebuild every ref +
 > the MidgardPlan from the graph** — no snapshot, no "resolve on load / re-mint on save" dance.
 
+**DECISION (user, 2026-07-10): the model stores NO raw bytes, period.** Byte-exactness is achieved
+by *exactly replicating the format* — every field known and typed. Measurement (§1b) proves this is
+sufficient: even the non-derivable "historical" residue is just a handful of orderings and entity
+keys, all expressible as ordinary typed attributes (`unit.slot`, list positions, an ordered
+block-reference list). Raw passthrough survives ONLY as migration scaffolding for blocks whose
+fields aren't fully reverse-engineered yet (§1b class 4), with a per-type exit criterion: all
+fields modeled → serializer proven byte-exact → raw path deleted for that type.
+
 Everything in §1–§4 is a step away from that target; §5 is the target's own checklist.
 
 ---
@@ -50,9 +58,56 @@ edits; `raw` is the byte-faithful shadow for unedited round-trips.
 | **Two sources of truth** | The same units live twice: resolved (`garrison`) AND raw (`raw.unitSlots` + `doc.instances`). They can drift; nothing enforces consistency. |
 | **`doc.instances` bloat** | Full `MidUnit`/`MidItem` records ride on every doc (Relentless: ~1548 units + 577 items). The client ignores them; the server rebuild re-parses stored bytes anyway. Safe to strip from the client-facing response — not yet done. |
 
-**The fix (target §5):** make instances first-class with stable local handles + explicit relations;
-allocate ids + rebuild refs deterministically on export. Then `raw`, `idMount`, `doc.instances`, the
-`verifySemantic` strip, and the resolve/re-mint split all disappear.
+**The fix (per the no-raw-bytes decision, §0):** dissolve the snapshot INTO the entities — a
+garrison member is an entity with `key` (its on-disk id; null for new, allocated at export) and
+`slot: int` (§1b class 3); a bag holds an ordered list of item entities. Byte-exactness then falls
+out of the typed model with nothing stored "on the side". `raw`, `idMount`-as-artifact,
+`doc.instances`-as-carrier, the `verifySemantic` strip, and the resolve/re-mint split all disappear.
+
+---
+
+## 1b. Recoverability classification — what regenerates 100% from a pure model (MEASURED)
+
+The question behind the no-raw-bytes decision: *which parts of the file are a pure function of the
+map's meaning, and which carry a non-derivable "editing-history trace"?* Nothing is random — the
+original editor's output is `f(edit history)`, ours is `g(final state)`; both deterministic, but
+`f ≠ g` and the history is gone. Measured across the 80-map pristine corpus:
+
+**Class 1 — pure function of the model TODAY (proven 0-diff, no trace of any kind):**
+`MidLocation`, `MidLandmark`, `MidCrystal`, 4×`MidSite` (stock-list order is semantic — the editor
+edits the list as-is); terrain `MidgardMapBlock` (cells fully modeled, chunk grid AND chunk block
+ids derivable — uid.second encodes the origin `(by<<8)|bx`); `MidDiplomacy` (pure table);
+events/variables/templates bodies.
+
+**Class 2 — pure given ONE natural condition: the entity keeps its on-disk id as its key.** This is
+ordinary persistence (a primary key), NOT raw bytes. `MidItem`/`MidUnit` bodies (proven);
+`MidBag` (list order is semantic, item refs = entity keys); `MidRoad` (body = roadType/roadVar/pos;
+but ids are creation-order — measured: only **4/87** maps have sequential road ids, 2-3 match any
+scan order); `MidMountains` (`ID_MOUNT` **is** the entry's entity key — 83/93 blocks non-sequential);
+all object block ids in general (MM/KC/FT/… — creation-order keys, already stored as `MapObject.id`,
+and they're the relational glue events/OWNER/INSIDE/STACK point at).
+
+**Class 3 — the GENUINE non-derivable residue (the complete list — it is short), each expressible
+as a typed attribute, no bytes:**
+
+| what | measurement | typed-model home |
+|---|---|---|
+| garrison slot packing (`UNIT_`/`POS_` order) | non-canonical on **79%** stacks / **41%** villages / **92%** ruins / **68%** capitals (9082/598/1238/215 groups) | `slot: int` on the garrison-member entity (~10 bits/compound) |
+| `MidgardPlan` entry order | **93/93** maps: insertion order, sorted by nothing | keep entries as an ordered list (the SET is derivable from footprints; the ORDER is not) |
+| file block order | **84 distinct type-run sequences** across 93 maps, types interleaved | the spine, degenerated: once every type model-serializes, the spine IS just an ordered list of entity references — no bytes left in it |
+
+(Duplicate `POS_` values — e.g. `pos=[0,0,…]` — are big units occupying two cells with one slot;
+that part is semantic and already modeled.)
+
+**Class 4 — not entropy but INCOMPLETE KNOWLEDGE (fixable by finishing the reverse-engineering):**
+unread `ScenarioInfo` fields, `MidPlayer` extras, `MidSubRace` table, `_playersData`, `MidFog` —
+plus block types the scan surfaced that we don't model at all yet: **`MidStackDestroyed`,
+`MidQuestLog`, `PlayerBuildings`, `MidSpellCast`** (raw/Generic today). These are the ONLY reason
+raw passthrough still exists; each one exits the raw path the moment its fields are fully modeled.
+
+**Bottom line:** by data volume, virtually the whole file is class 1–2. The irreducible trace is
+three orderings + entity keys — a few bits per object, all typed. The no-raw-bytes target costs
+almost nothing.
 
 ---
 
@@ -181,9 +236,14 @@ editor's place-ops → `applyBytes`, using the same frames. Concrete from-scratc
    events/variables/templates/diplomacy — their frames exist; wire into `rebuildFromModel`.
 3. **Model `MidgardPlan` properly** (regenerate from object footprints) — unlocks a truly
    model-driven export AND removes the fragile hand-maintained plan in `applyBytes`.
-4. **Complete `ScenarioInfo` + `MidSubRace` + `_playersData`** field models (retire the verbatim ports).
-5. **The relation-model refactor (§0):** first-class instances + explicit refs + deterministic id
-   allocation on export → delete `raw`, `idMount`, `doc.instances`, and the `verifySemantic` strip.
+4. **Complete `ScenarioInfo` + `MidSubRace` + `_playersData`** field models (retire the verbatim
+   ports), and reverse the class-4 stragglers the scan surfaced: `MidStackDestroyed`, `MidQuestLog`,
+   `PlayerBuildings`, `MidSpellCast`, `MidFog`.
+5. **The relation-model refactor (§0 decision):** first-class entities carrying `key` + `slot`
+   (§1b), explicit refs, deterministic id allocation for NEW entities on export, plan + spine as
+   ordered lists → delete `raw`, `idMount`-as-artifact, `doc.instances`-as-carrier, and the
+   `verifySemantic` strip. End state: **zero raw bytes anywhere in the model**; the byte-gate keeps
+   passing because the typed model replicates the format exactly (§1b proves the residue is tiny).
 6. **ScenEdit gold-check:** the byte-gate proves `rebuildBytes(x, parse(x)) === x`, but the ultimate
    test of a *fully model-rebuilt* map (esp. once terrain/plan/scenario are model-driven and diverge
    from the original bytes) is that **ScenEdit / the game editor LOADS it** — reuse the from-scratch
