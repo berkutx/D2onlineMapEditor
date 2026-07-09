@@ -98,7 +98,16 @@ export function roundTripSemantic(
   if (!deepEqual(reparsed.variables ?? [], expected.variables ?? [])) {
     return { ok: false, reason: "variables differ after round-trip" };
   }
-  if (!equalById(reparsed.templates ?? [], expected.templates ?? [])) {
+  // templates: strip the load-only verbatim slot layout (an edited template re-packs canonically,
+  // so its reparse can't match the pre-edit raw — same artifact class as a stack's `raw`).
+  const stripTmplRaw = <T extends { raw?: unknown }>(a: readonly T[]): T[] =>
+    a.map((t) => {
+      if (!("raw" in t)) return t;
+      const clone = { ...t } as Record<string, unknown>;
+      delete clone.raw;
+      return clone as unknown as T;
+    });
+  if (!equalById(stripTmplRaw(reparsed.templates ?? []), stripTmplRaw(expected.templates ?? []))) {
     return { ok: false, reason: "templates differ after round-trip" };
   }
   if (!deepEqual(reparsed.diplomacy ?? [], expected.diplomacy ?? [])) {

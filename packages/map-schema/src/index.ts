@@ -17,6 +17,7 @@ export {
   MageObject,
   TrainerObject,
   MercenaryObject,
+  ResourceMarketObject,
   MountainsObject,
   CrystalObject,
   LandmarkObject,
@@ -28,6 +29,7 @@ export {
   MapDocument, MapHeader, PlayerInfo, DiplomacyEntry, ItemInstance, UnitInstance, SubRaceInfo,
   FogInfo, FogRow, PlayerSpellsInfo, PlayerBuildingsInfo, TalismanChargesInfo, StackDestroyedInfo,
   QuestLogInfo, SpellCastInfo, SpellEffectsInfo, TurnSummaryEntry, TurnSummaryInfo,
+  MapPlan, RoadInfo,
 } from "./document.js";
 export {
   MapEvent,

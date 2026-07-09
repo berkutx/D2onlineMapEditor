@@ -13,7 +13,7 @@ import { ByteBuffer, stripTrailingNul } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import type {
   FogInfo, PlayerSpellsInfo, PlayerBuildingsInfo, TalismanChargesInfo, StackDestroyedInfo,
-  QuestLogInfo, SpellCastInfo, SpellEffectsInfo, TurnSummaryInfo, TurnSummaryEntry,
+  QuestLogInfo, SpellCastInfo, SpellEffectsInfo, TurnSummaryInfo, TurnSummaryEntry, MapPlan,
 } from "@d2/map-schema";
 
 /** A strict sequential cursor: every read expects its tag AT the current position. */
@@ -146,6 +146,27 @@ export function readSpellEffects(buf: ByteBuffer, obj: FramedObject): SpellEffec
   const i = buf.indexOf(obj.id, obj.fieldsFrom);
   const v = i >= 0 && i < obj.fieldsEnd ? buf.readInt32LE(i + obj.id.length) : 0;
   return { id: obj.id, v };
+}
+
+/**
+ * MidgardPlan: the placement/passability index — `<ownId>`(size int) · `<ownId>`(count int) ·
+ * N×{POS_X · POS_Y · ELEMENT(ref)}. Entries stay an ORDERED list (insertion order = on-disk
+ * history; 93/93 maps are sorted by nothing).
+ */
+export function readPlan(buf: ByteBuffer, obj: FramedObject): MapPlan {
+  const i = buf.indexOf(obj.id, obj.fieldsFrom);
+  if (i < 0 || i >= obj.fieldsEnd) return { id: obj.id, size: 0, entries: [] };
+  const size = buf.readInt32LE(i + obj.id.length);
+  const cur = new Cursor(buf, i + obj.id.length + 4, obj.fieldsEnd);
+  const count = cur.peek(obj.id) ? cur.int(obj.id) : 0;
+  const entries: MapPlan["entries"] = [];
+  for (let k = 0; k < count; k++) {
+    const x = cur.int("POS_X");
+    const y = cur.int("POS_Y");
+    const element = cur.str("ELEMENT");
+    entries.push({ x, y, element });
+  }
+  return { id: obj.id, size, entries };
 }
 
 /**

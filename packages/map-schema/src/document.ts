@@ -199,6 +199,26 @@ export type TurnSummaryEntry = z.infer<typeof TurnSummaryEntry>;
 export const TurnSummaryInfo = z.object({ id: z.string(), entries: z.array(TurnSummaryEntry) });
 export type TurnSummaryInfo = z.infer<typeof TurnSummaryInfo>;
 
+/** One MidgardPlan occupancy entry: a cell + the compound id of the object standing on it.
+ *  Entries are an ORDERED list (insertion order on disk = editing history, 93/93 measured). */
+export const MapPlan = z.object({
+  id: z.string(), // the plan block's own compound id (e.g. "S143PN0000")
+  size: z.number().int(), // the map size int the block repeats
+  entries: z.array(z.object({ x: z.number().int(), y: z.number().int(), element: z.string() })),
+});
+export type MapPlan = z.infer<typeof MapPlan>;
+
+/** One MidRoad block, keyed by its own id (the per-cell overlay also lives on terrain cells —
+ *  this record preserves the block identity + INDEX/VAR for the byte-exact rebuild). */
+export const RoadInfo = z.object({
+  id: z.string(),
+  x: z.number().int(),
+  y: z.number().int(),
+  index: z.number().int(), // INDEX (roadType)
+  variant: z.number().int(), // VAR (roadVar)
+});
+export type RoadInfo = z.infer<typeof RoadInfo>;
+
 /** The neutral, render-ready map document. Produced by @d2/sg-parser; consumed by
  *  the server, the Vue store, and the PixiJS renderer. The single source of truth. */
 export const MapDocument = z.object({
@@ -224,6 +244,10 @@ export const MapDocument = z.object({
     .optional(),
   /** MidSubRace table — full records (bannerIndex resolution reads from here). Additive. */
   subraces: z.array(SubRaceInfo).optional(),
+  /** The MidgardPlan (placement/passability index) — fully typed, entries in file order. */
+  plan: MapPlan.optional(),
+  /** MidRoad blocks keyed by id (the rendering overlay stays on terrain cells). */
+  roads: z.array(RoadInfo).optional(),
   /** Per-player satellite blocks + playthrough logs — fully typed (Stage D of the no-raw-bytes
    *  program). Editor-transparent; the rebuild re-emits each block from these records. */
   satellites: z

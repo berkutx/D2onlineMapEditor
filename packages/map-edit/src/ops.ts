@@ -134,8 +134,13 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
         i < 0
           ? { kind: "deleteTemplate", id: op.template.id }
           : { kind: "upsertTemplate", template: templates[i]! };
-      if (i < 0) templates.push(op.template);
-      else templates[i] = op.template;
+      // Drop the load-only verbatim slot layout: an EDITED template re-packs canonically — a
+      // stale `raw` replayed by the frame would silently overwrite the edit (the raw-staleness
+      // class of bug).
+      const next = { ...op.template };
+      delete (next as { raw?: unknown }).raw;
+      if (i < 0) templates.push(next);
+      else templates[i] = next;
       return { doc: { ...doc, templates }, inverse };
     }
 

@@ -320,6 +320,36 @@ export function mapFrame(version: string, second: number, size: number): Uint8Ar
   });
 }
 
+/** The MidgardPlan frame (code 0x13, short PN, singleton): `<ownId>`(map size) · `<ownId>`(count)
+ *  · N×{POS_X · POS_Y · ELEMENT}. Entries in list order (insertion order = on-disk history). */
+export function planFrame(
+  version: string,
+  second: number,
+  size: number,
+  entries: readonly { x: number; y: number; element: string }[],
+): Uint8Array {
+  return emitBlock(version, "MidgardPlan", 0x13, "PN", second, (w, full) => {
+    w.defaultInt(full, size);
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.defaultInt("POS_X", e.x);
+      w.defaultInt("POS_Y", e.y);
+      w.refField("ELEMENT", e.element);
+    }
+  });
+}
+
+/** A MidgardMapBlock terrain chunk frame (code 0x17, short MB): BLOCKID(self) · BLOCKDATA ·
+ *  int32 byteLen(128) · 32×int32 raw cell values (8 cols × 4 rows, row-major). The chunk's
+ *  cell origin is encoded in the uid: second = (rowOrigin << 8) | colOrigin. */
+export function mapBlockFrame(version: string, second: number, values: readonly number[]): Uint8Array {
+  return emitBlock(version, "MidgardMapBlock", 0x17, "MB", second, (w, full) => {
+    w.refField("BLOCKID", full);
+    w.defaultInt("BLOCKDATA", values.length * 4);
+    for (const v of values) w.i32(v);
+  });
+}
+
 // ---- satellite-block frames (Stage D): per-player state + playthrough logs. All lists use the
 // count-tag = the block's own full id; string/ref values are written VERBATIM as captured. ----
 
@@ -751,12 +781,13 @@ export function ruinFrame(
  * every shipped merchant) and a MISSION byte AFTER it (= 00 everywhere). Stock lists are
  * GLOBAL template ids (no MidItem/MidUnit instances → no delete cascade).
  */
-export type SiteKind = "merchant" | "mage" | "trainer" | "mercenary";
+export type SiteKind = "merchant" | "mage" | "trainer" | "mercenary" | "resourceMarket";
 const SITE_BLOCK: Record<SiteKind, { typeName: string; code: number }> = {
   merchant: { typeName: "MidSiteMerchant", code: 0x17 },
   mage: { typeName: "MidSiteMage", code: 0x13 },
   trainer: { typeName: "MidSiteTrainer", code: 0x16 },
   mercenary: { typeName: "MidSiteMercs", code: 0x14 },
+  resourceMarket: { typeName: "MidSiteResourceMarket", code: 0x1d },
 };
 export function siteFrame(
   version: string,
@@ -774,6 +805,10 @@ export function siteFrame(
     mission?: boolean;
     spells?: readonly string[];
     units?: readonly { id: string; level: number; unique: boolean }[];
+    custom?: boolean;
+    code?: string;
+    bank?: string;
+    inf?: number;
   },
 ): Uint8Array {
   const { typeName, code } = SITE_BLOCK[kind];
@@ -809,6 +844,14 @@ export function siteFrame(
         w.defaultInt("UNIT_LEVEL", u.level);
         w.bool("UNIT_UNIQ", u.unique);
       }
+    } else if (kind === "resourceMarket") {
+      w.bool("CUSTOM", o.custom ?? false);
+      if (o.code !== undefined) {
+        w.defaultInt("CODE_LEN", encodeCp1251(o.code).length); // char count sans NUL
+        w.stringField("CODE", o.code);
+      }
+      w.stringField("BANK", o.bank ?? "G0000:R0000:Y0000:E0000:W0000:B0000");
+      w.defaultInt("INF", o.inf ?? 0);
     }
     w.defaultInt(full, 0); // visiter count (tag = the site's own compound id)
   });

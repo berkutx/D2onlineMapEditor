@@ -37,11 +37,11 @@ import { readDefaultInt, readDefaultString } from "./bytebuffer.js";
 import { readEvent, readScenVariables, readStackTemplate } from "./blocks/events.js";
 import {
   readFog, readPlayerSpells, readPlayerBuildings, readTalismanCharges, readStackDestroyed,
-  readQuestLog, readSpellCast, readSpellEffects, readTurnSummary,
+  readQuestLog, readSpellCast, readSpellEffects, readTurnSummary, readPlan,
 } from "./blocks/satellites.js";
 import type {
   MapDocument, MapObject, PlayerInfo, MapHeader, GarrisonUnit, MapEvent, ScenarioVariable,
-  StackTemplate, DiplomacyEntry, UnitInstance, SubRaceInfo,
+  StackTemplate, DiplomacyEntry, UnitInstance, SubRaceInfo, MapPlan, RoadInfo,
 } from "@d2/map-schema";
 
 const DEFAULT_SG_VERSION = "S143";
@@ -85,6 +85,10 @@ interface Accumulated {
   subraces: SubRaceInfo[];
   /** Satellite blocks (per-player state + playthrough logs) — fully typed (Stage D). */
   satellites: NonNullable<MapDocument["satellites"]>;
+  /** The MidgardPlan, fully typed (Stage E). */
+  plan: MapPlan | null;
+  /** MidRoad block records with ids (Stage E; the cell overlay stays in `roads`). */
+  roadBlocks: RoadInfo[];
   /** MidItem instance id -> ITEM_TYPE global template id (for chest item resolution). */
   itemInstances: Record<string, string>;
   /** MidUnit instance id -> its FULL record (impl/level/hp/xp/creation/name/modifiers). Used for
@@ -107,6 +111,7 @@ const SINGLE_READERS: Record<
   MidSiteMage: readSite("mage"),
   MidSiteTrainer: readSite("trainer"),
   MidSiteMercs: readSite("mercenary"),
+  MidSiteResourceMarket: readSite("resourceMarket"),
   MidCrystal: readCrystal,
   MidLocation: readLocation,
   MidLandmark: readLandmark,
@@ -140,7 +145,11 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
     }
     case "MidRoad": {
       const road = readRoad(buf, obj);
-      if (road) acc.roads.push(road);
+      if (road) {
+        acc.roads.push(road); // per-cell overlay for rendering
+        // block record for the byte-exact rebuild (id preserved — 4/87 maps have sequential ids)
+        acc.roadBlocks.push({ id: obj.id, x: road.x, y: road.y, index: road.roadType, variant: road.roadVar });
+      }
       return;
     }
     case "MidSubRace": {
@@ -209,11 +218,9 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       acc.satellites.turnSummaries.push(readTurnSummary(buf, obj));
       return;
     case "MidgardPlan": {
-      // The placement plan: per-cell {POS_X, POS_Y, ELEMENT->object} entries. NOT a placed
-      // object — readGeneric would grab the FIRST entry's POS_X/POS_Y as its "position",
-      // coupling the doc to whichever entry happens to be first (deleting an object purges
-      // its plan entries, which could shift that). Keep a stable generic stub instead.
-      acc.objects.push({ type: "generic", id: obj.id, pos: { x: 0, y: 0 }, blockType: obj.typeName, raw: {} });
+      // The placement/passability index — fully typed now (Stage E): size + ordered entries.
+      // NOT a placed object (the old generic stub in doc.objects is gone).
+      acc.plan = readPlan(buf, obj);
       return;
     }
     default: {
@@ -264,6 +271,8 @@ export function assembleDocument(
       fogs: [], playerSpells: [], playerBuildings: [], talismanCharges: [],
       stackDestroyed: [], questLogs: [], spellCasts: [], spellEffects: [], turnSummaries: [],
     },
+    plan: null,
+    roadBlocks: [],
     itemInstances: {},
     unitInstances: {},
   };
@@ -391,6 +400,8 @@ export function assembleDocument(
     instances: { units, items },
     subraces: acc.subraces,
     satellites: acc.satellites,
+    ...(acc.plan ? { plan: acc.plan } : {}),
+    roads: acc.roadBlocks,
   };
 }
 

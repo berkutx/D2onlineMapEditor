@@ -1211,6 +1211,89 @@
                     "z": {
                       "type": "integer"
                     },
+                    "name": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "image": {
+                      "type": "integer"
+                    },
+                    "desc": {
+                      "type": "string"
+                    },
+                    "aiPriority": {
+                      "type": "integer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "resourceMarket"
+                    },
+                    "custom": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "bank": {
+                      "type": "string"
+                    },
+                    "inf": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "pos",
+                    "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "pos": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "footprint": {
+                      "type": "object",
+                      "properties": {
+                        "w": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "h": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "w",
+                        "h"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "imageName": {
+                      "type": "string"
+                    },
+                    "z": {
+                      "type": "integer"
+                    },
                     "type": {
                       "type": "string",
                       "const": "mountains"
@@ -3289,6 +3372,35 @@
                     "additionalProperties": false
                   },
                   "default": []
+                },
+                "raw": {
+                  "type": "object",
+                  "properties": {
+                    "unitSlots": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "levels": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    },
+                    "posOfCell": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "required": [
+                    "unitSlots",
+                    "levels",
+                    "posOfCell"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [

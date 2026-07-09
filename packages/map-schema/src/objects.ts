@@ -46,6 +46,16 @@ export const StackTemplate = z.object({
   aiPriority: z.number().int().default(0),
   /** Unit-modifier list (preserved; advanced-edit later): per entry {unitPos, modifId Gmodif}. */
   modifiers: z.array(z.object({ unitPos: z.number().int(), modifId: z.string() })).default([]),
+  /** Load-only VERBATIM slot layout (UNIT_i / UNIT_i_LVL / POS_i as on disk — the slot packing is
+   *  editing history, non-canonical like a stack's). The frame replays it when present; edited/
+   *  fresh templates re-pack canonically. The semantic round-trip strips it. */
+  raw: z
+    .object({
+      unitSlots: z.array(z.string()),
+      levels: z.array(z.number().int()),
+      posOfCell: z.array(z.number().int()),
+    })
+    .optional(),
 });
 export type StackTemplate = z.infer<typeof StackTemplate>;
 
@@ -207,6 +217,18 @@ export const MageObject = z.object({
   spells: z.array(z.string()).optional(),
 });
 export const TrainerObject = z.object({ ...SiteCommon, type: z.literal("trainer") });
+/** MidSiteResourceMarket (mod-era 5th site kind): a resource-exchange market.
+ *  CUSTOM(bool) + BANK resource-string + INF(int) after the common site head. */
+export const ResourceMarketObject = z.object({
+  ...SiteCommon,
+  type: z.literal("resourceMarket"),
+  custom: z.boolean().optional(), // CUSTOM
+  /** CODE - the embedded Lua exchange script (present when CUSTOM=1). A typed string: the
+   *  script IS the value. CODE_LEN on disk is derived (char count, sans NUL). */
+  code: z.string().optional(),
+  bank: z.string().optional(), // BANK "G####:R####:Y####:E####:W####:B####"
+  inf: z.number().int().optional(), // INF
+});
 export const MercenaryObject = z.object({
   ...SiteCommon,
   type: z.literal("mercenary"),
@@ -303,6 +325,7 @@ export const MapObject = z.discriminatedUnion("type", [
   MageObject,
   TrainerObject,
   MercenaryObject,
+  ResourceMarketObject,
   MountainsObject,
   CrystalObject,
   LandmarkObject,

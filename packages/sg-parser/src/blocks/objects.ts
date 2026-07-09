@@ -13,6 +13,7 @@ import {
   readDefaultString,
   readAllStrings,
   readBoolValue,
+  stripTrailingNul,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import type { MapObject, UnitInstance } from "@d2/map-schema";
@@ -112,6 +113,38 @@ function readMerchantFlags(buf: ByteBuffer, f: number, e: number): { buy?: boole
   if (buy.some((b) => !b)) out.buy = buy; // omit when every category is bought (the default)
   const mission = readBoolValue(buf, "MISSION", f, e) ?? false;
   if (mission) out.mission = true; // omit when false (the default)
+  return out;
+}
+
+/**
+ * Mod-era resource-market tail, read POSITIONALLY from the CUSTOM tag onward: CUSTOM(value bool) -
+ * [CODE_LEN(int) - CODE(len-prefixed Lua) when custom] - BANK(resource string) - INF(int). The Lua
+ * source can contain tag-like substrings ("BANK", "INF"), so indexOf scanning is unsafe here.
+ */
+function readResourceMarketExtras(
+  buf: ByteBuffer,
+  f: number,
+  e: number,
+): { custom?: boolean; code?: string; bank?: string; inf?: number } {
+  const cu = buf.indexOf("CUSTOM", f);
+  if (cu < 0 || cu >= e) return {};
+  const custom = buf.bytes[cu + "CUSTOM".length] !== 0;
+  let p = cu + "CUSTOM".length + 1;
+  const out: { custom?: boolean; code?: string; bank?: string; inf?: number } = { custom };
+  if (custom && buf.asciiSlice(p, p + 8) === "CODE_LEN") {
+    p += 8 + 4; // the char count is derived from the CODE value length on write
+    if (buf.asciiSlice(p, p + 4) === "CODE") {
+      const sl = buf.readInt32LE(p + 4);
+      out.code = stripTrailingNul(buf.cp1251Slice(p + 8, p + 8 + sl));
+      p += 8 + sl;
+    }
+  }
+  if (buf.asciiSlice(p, p + 4) === "BANK") {
+    const sl = buf.readInt32LE(p + 4);
+    out.bank = stripTrailingNul(buf.cp1251Slice(p + 8, p + 8 + sl));
+    p += 8 + sl;
+  }
+  if (buf.asciiSlice(p, p + 3) === "INF") out.inf = buf.readInt32LE(p + 3);
   return out;
 }
 
@@ -336,7 +369,7 @@ export function readRuin(buf: ByteBuffer, obj: FramedObject): MapObject {
   };
 }
 
-type SiteType = "merchant" | "mage" | "trainer" | "mercenary";
+type SiteType = "merchant" | "mage" | "trainer" | "mercenary" | "resourceMarket";
 
 /** MidSite*: shared layout. TXT_TITLE = name, IMG_ISO = image. */
 export function readSite(type: SiteType) {
@@ -351,6 +384,7 @@ export function readSite(type: SiteType) {
       type === "merchant" ? { items: readMerchantItems(buf, f, e), ...readMerchantFlags(buf, f, e) } :
       type === "mage" ? { spells: readMageSpells(buf, f, e) } :
       type === "mercenary" ? { units: readMercUnits(buf, f, e) } :
+      type === "resourceMarket" ? readResourceMarketExtras(buf, f, e) :
       {};
     return {
       type,

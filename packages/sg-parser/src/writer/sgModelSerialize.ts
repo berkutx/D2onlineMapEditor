@@ -17,7 +17,9 @@ import {
   playerFrame, subraceFrame, scenarioInfoFrame, mapFrame,
   fogFrame, playerSpellsFrame, playerBuildingsFrame, talismanChargesFrame, stackDestroyedFrame,
   questLogFrame, spellCastFrame, spellEffectsFrame, turnSummaryFrame,
+  planFrame, mapBlockFrame, roadFrame,
 } from "./sgRebuild.js";
+import { eventFrame, scenVariablesFrame, stackTemplateFrame, diplomacyFrame } from "./eventFrame.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 
 /** The numeric `second` (uid) a frame-writer needs = the 4-hex tail of the compound id. */
@@ -88,8 +90,9 @@ export function serializeTypedBlock(
     case "MidSiteMerchant":
     case "MidSiteMage":
     case "MidSiteTrainer":
-    case "MidSiteMercs": {
-      if (obj.type !== "merchant" && obj.type !== "mage" && obj.type !== "trainer" && obj.type !== "mercenary")
+    case "MidSiteMercs":
+    case "MidSiteResourceMarket": {
+      if (obj.type !== "merchant" && obj.type !== "mage" && obj.type !== "trainer" && obj.type !== "mercenary" && obj.type !== "resourceMarket")
         return null;
       return siteFrame(version, secondOf(obj.id), obj.type, {
         posX: obj.pos.x,
@@ -101,6 +104,7 @@ export function serializeTypedBlock(
         ...(obj.type === "merchant" ? { items: obj.items, buy: obj.buy, mission: obj.mission } : {}),
         ...(obj.type === "mage" ? { spells: obj.spells } : {}),
         ...(obj.type === "mercenary" ? { units: obj.units } : {}),
+        ...(obj.type === "resourceMarket" ? { custom: obj.custom, code: obj.code, bank: obj.bank, inf: obj.inf } : {}),
       });
     }
     case "MidVillage": {
@@ -251,6 +255,37 @@ export function rebuildFromModel(
       return { ...b, bytes: scenarioInfoFrame(version, secondOf(b.id), doc.header, doc.size) };
     if (b.typeName === "MidgardMap")
       return { ...b, bytes: mapFrame(version, secondOf(b.id), doc.size) };
+    // Terrain chunks: origin from the uid (second = rowOrigin<<8 | colOrigin), 32 raw cell values.
+    if (b.typeName === "MidgardMapBlock") {
+      const s = secondOf(b.id);
+      const bx = s & 0xff;
+      const by = (s >> 8) & 0xff;
+      const values: number[] = [];
+      for (let i = 0; i < 32; i++) {
+        const x = bx + (i % 8);
+        const y = by + Math.floor(i / 8);
+        values.push(doc.terrain.cells[y * doc.size + x]?.value ?? 0);
+      }
+      return { ...b, bytes: mapBlockFrame(version, s, values) };
+    }
+    if (b.typeName === "MidRoad") {
+      const r = (doc.roads ?? []).find((x) => x.id === b.id);
+      return r ? { ...b, bytes: roadFrame(version, secondOf(b.id), r.x, r.y, r.index, r.variant) } : b;
+    }
+    if (b.typeName === "MidgardPlan" && doc.plan && doc.plan.id === b.id)
+      return { ...b, bytes: planFrame(version, secondOf(b.id), doc.plan.size, doc.plan.entries) };
+    if (b.typeName === "MidEvent") {
+      const ev = (doc.events ?? []).find((x) => x.id === b.id);
+      return ev ? { ...b, bytes: eventFrame(version, ev) } : b;
+    }
+    if (b.typeName === "MidScenVariables")
+      return { ...b, bytes: scenVariablesFrame(version, b.id, doc.variables ?? []) };
+    if (b.typeName === "MidStackTemplate") {
+      const t = (doc.templates ?? []).find((x) => x.id === b.id);
+      return t ? { ...b, bytes: stackTemplateFrame(version, t) } : b;
+    }
+    if (b.typeName === "MidDiplomacy")
+      return { ...b, bytes: diplomacyFrame(version, b.id, doc.diplomacy ?? []) };
     // Satellite blocks (per-player state + playthrough logs), keyed by block id.
     const sat = doc.satellites;
     if (sat) {
@@ -340,6 +375,7 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
   "MidSiteMage",
   "MidSiteTrainer",
   "MidSiteMercs",
+  "MidSiteResourceMarket",
   "MidItem",
   "MidUnit",
   "MidStack",
@@ -363,6 +399,13 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
   "MidSpellCast",
   "MidSpellEffects",
   "TurnSummary",
+  "MidgardMapBlock",
+  "MidRoad",
+  "MidgardPlan",
+  "MidEvent",
+  "MidScenVariables",
+  "MidStackTemplate",
+  "MidDiplomacy",
 ]);
 
 /**

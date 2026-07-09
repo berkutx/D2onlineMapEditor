@@ -151,10 +151,13 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
   const orderTarget = refNorm(c.str("ORDER_TARG"));
   const subRace = refNorm(c.str("SUBRACE"));
   const order = c.int("ORDER");
+  const rawSlotUnits: string[] = []; // VERBATIM (incl. nil sentinel) — the on-disk slot layout
   const slotUnits: string[] = [];
   const slotLevels: number[] = [];
   for (let i = 0; i < 6; i++) {
-    slotUnits.push(refNorm(c.str(`UNIT_${i}`)));
+    const v = c.str(`UNIT_${i}`);
+    rawSlotUnits.push(v);
+    slotUnits.push(refNorm(v));
     slotLevels.push(c.int(`UNIT_${i}_LVL`));
   }
   const pos: number[] = [];
@@ -176,7 +179,12 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
       units[cell] = { unit: slotUnits[slot]!, level: slotLevels[slot] ?? 1 };
     }
   }
-  return { id: obj.id, name, owner, leader, leaderLevel, orderTarget, subRace, order, units, useFacing, facing, aiPriority, modifiers };
+  return {
+    id: obj.id, name, owner, leader, leaderLevel, orderTarget, subRace, order, units,
+    useFacing, facing, aiPriority, modifiers,
+    // load-only verbatim slot layout — the packing is editing history (non-canonical, like stacks)
+    raw: { unitSlots: rawSlotUnits, levels: slotLevels, posOfCell: pos },
+  };
 }
 
 /** Parse a single MidEvent block into a MapEvent. `isEES` gates the elf-expansion race flags. */

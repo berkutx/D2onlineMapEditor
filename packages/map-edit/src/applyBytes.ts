@@ -447,9 +447,14 @@ export function applyEditsToBytes(
       case "setVariables":
         variablesFinal = op.variables.slice();
         break;
-      case "upsertTemplate":
-        templateOps.set(op.template.id, op.template);
+      case "upsertTemplate": {
+        // drop the load-only verbatim slot layout: an edited template re-packs canonically
+        // (a stale raw replayed into the frame would overwrite the edit)
+        const tmpl = { ...op.template };
+        delete (tmpl as { raw?: unknown }).raw;
+        templateOps.set(tmpl.id, tmpl);
         break;
+      }
       case "deleteTemplate":
         templateOps.set(op.id, null);
         break;
