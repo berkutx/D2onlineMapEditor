@@ -24,7 +24,11 @@ export {
   UnitObject,
   GenericObject,
 } from "./objects.js";
-export { MapDocument, MapHeader, PlayerInfo, DiplomacyEntry, ItemInstance, UnitInstance, SubRaceInfo } from "./document.js";
+export {
+  MapDocument, MapHeader, PlayerInfo, DiplomacyEntry, ItemInstance, UnitInstance, SubRaceInfo,
+  FogInfo, FogRow, PlayerSpellsInfo, PlayerBuildingsInfo, TalismanChargesInfo, StackDestroyedInfo,
+  QuestLogInfo, SpellCastInfo, SpellEffectsInfo, TurnSummaryEntry, TurnSummaryInfo,
+} from "./document.js";
 export {
   MapEvent,
   ScenarioVariable,

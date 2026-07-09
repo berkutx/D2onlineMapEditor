@@ -35,6 +35,10 @@ import {
 } from "./blocks/index.js";
 import { readDefaultInt, readDefaultString } from "./bytebuffer.js";
 import { readEvent, readScenVariables, readStackTemplate } from "./blocks/events.js";
+import {
+  readFog, readPlayerSpells, readPlayerBuildings, readTalismanCharges, readStackDestroyed,
+  readQuestLog, readSpellCast, readSpellEffects, readTurnSummary,
+} from "./blocks/satellites.js";
 import type {
   MapDocument, MapObject, PlayerInfo, MapHeader, GarrisonUnit, MapEvent, ScenarioVariable,
   StackTemplate, DiplomacyEntry, UnitInstance, SubRaceInfo,
@@ -79,6 +83,8 @@ interface Accumulated {
   subraceBanners: Map<number, number>;
   /** Full MidSubRace records — the typed table the rebuild re-emits. */
   subraces: SubRaceInfo[];
+  /** Satellite blocks (per-player state + playthrough logs) — fully typed (Stage D). */
+  satellites: NonNullable<MapDocument["satellites"]>;
   /** MidItem instance id -> ITEM_TYPE global template id (for chest item resolution). */
   itemInstances: Record<string, string>;
   /** MidUnit instance id -> its FULL record (impl/level/hp/xp/creation/name/modifiers). Used for
@@ -174,6 +180,34 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
     case "MidDiplomacy":
       acc.diplomacy = readDiplomacy(buf, obj);
       return;
+    // ---- satellite blocks: per-player state + playthrough logs (typed, Stage D) ----
+    case "MidgardMapFog":
+      acc.satellites.fogs.push(readFog(buf, obj));
+      return;
+    case "PlayerKnownSpells":
+      acc.satellites.playerSpells.push(readPlayerSpells(buf, obj));
+      return;
+    case "PlayerBuildings":
+      acc.satellites.playerBuildings.push(readPlayerBuildings(buf, obj));
+      return;
+    case "MidTalismanCharges":
+      acc.satellites.talismanCharges.push(readTalismanCharges(buf, obj));
+      return;
+    case "MidStackDestroyed":
+      acc.satellites.stackDestroyed.push(readStackDestroyed(buf, obj));
+      return;
+    case "MidQuestLog":
+      acc.satellites.questLogs.push(readQuestLog(buf, obj));
+      return;
+    case "MidSpellCast":
+      acc.satellites.spellCasts.push(readSpellCast(buf, obj));
+      return;
+    case "MidSpellEffects":
+      acc.satellites.spellEffects.push(readSpellEffects(buf, obj));
+      return;
+    case "TurnSummary":
+      acc.satellites.turnSummaries.push(readTurnSummary(buf, obj));
+      return;
     case "MidgardPlan": {
       // The placement plan: per-cell {POS_X, POS_Y, ELEMENT->object} entries. NOT a placed
       // object — readGeneric would grab the FIRST entry's POS_X/POS_Y as its "position",
@@ -226,6 +260,10 @@ export function assembleDocument(
     roads: [],
     subraceBanners: new Map(),
     subraces: [],
+    satellites: {
+      fogs: [], playerSpells: [], playerBuildings: [], talismanCharges: [],
+      stackDestroyed: [], questLogs: [], spellCasts: [], spellEffects: [], turnSummaries: [],
+    },
     itemInstances: {},
     unitInstances: {},
   };
@@ -352,6 +390,7 @@ export function assembleDocument(
     diplomacy: acc.diplomacy,
     instances: { units, items },
     subraces: acc.subraces,
+    satellites: acc.satellites,
   };
 }
 

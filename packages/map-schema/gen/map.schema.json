@@ -3574,6 +3574,337 @@
             ],
             "additionalProperties": false
           }
+        },
+        "satellites": {
+          "type": "object",
+          "properties": {
+            "fogs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "y": {
+                          "type": "integer"
+                        },
+                        "mask": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        }
+                      },
+                      "required": [
+                        "y",
+                        "mask"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "rows"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "playerSpells": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "spells": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "spells"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "playerBuildings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "buildings": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "buildings"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "talismanCharges": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "talisman": {
+                          "type": "string"
+                        },
+                        "charges": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "talisman",
+                        "charges"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "entries"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "stackDestroyed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "stack": {
+                          "type": "string"
+                        },
+                        "killer": {
+                          "type": "string"
+                        },
+                        "srcTemplate": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "stack",
+                        "killer",
+                        "srcTemplate"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "entries"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "questLogs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "player": {
+                          "type": "string"
+                        },
+                        "seqNum": {
+                          "type": "integer"
+                        },
+                        "curTurn": {
+                          "type": "integer"
+                        },
+                        "type": {
+                          "type": "integer"
+                        },
+                        "event": {
+                          "type": "string"
+                        },
+                        "effNum": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "player",
+                        "seqNum",
+                        "curTurn",
+                        "type",
+                        "event",
+                        "effNum"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "entries"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "spellCasts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "v1": {
+                    "type": "integer"
+                  },
+                  "v2": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "v1",
+                  "v2"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "spellEffects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "v": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "v"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "turnSummaries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "player": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "integer"
+                        },
+                        "x": {
+                          "type": "integer"
+                        },
+                        "y": {
+                          "type": "integer"
+                        },
+                        "player2": {
+                          "type": "string"
+                        },
+                        "spell": {
+                          "type": "string"
+                        },
+                        "stackA": {
+                          "type": "string"
+                        },
+                        "strStackA": {
+                          "type": "string"
+                        },
+                        "stackD": {
+                          "type": "string"
+                        },
+                        "strStackD": {
+                          "type": "string"
+                        },
+                        "city": {
+                          "type": "string"
+                        },
+                        "acquire": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "player",
+                        "type",
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "id",
+                  "entries"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

@@ -134,6 +134,71 @@ export const UnitInstance = z.object({
 });
 export type UnitInstance = z.infer<typeof UnitInstance>;
 
+// ---- satellite blocks: per-player state + playthrough logs (full ports of the reference's
+// D2MapFog / D2PlayerSpells / D2PlayerBuildings / D2TalismanCharges / D2StackDestroyed /
+// D2QuestLog / D2SpellCast / D2SpellEffects / D2TurnSummary). All typed, no raw bytes. ----
+
+/** One MidgardMapFog row: the row's visibility bitmask (1 bit per cell, packed bytes — the
+ *  mask bytes ARE the semantic value, like the packed terrain cell ints). */
+export const FogRow = z.object({ y: z.number().int(), mask: z.array(z.number().int()) });
+export const FogInfo = z.object({ id: z.string(), rows: z.array(FogRow) });
+export type FogInfo = z.infer<typeof FogInfo>;
+
+export const PlayerSpellsInfo = z.object({ id: z.string(), spells: z.array(z.string()) });
+export type PlayerSpellsInfo = z.infer<typeof PlayerSpellsInfo>;
+
+export const PlayerBuildingsInfo = z.object({ id: z.string(), buildings: z.array(z.string()) });
+export type PlayerBuildingsInfo = z.infer<typeof PlayerBuildingsInfo>;
+
+export const TalismanChargesInfo = z.object({
+  id: z.string(),
+  entries: z.array(z.object({ talisman: z.string(), charges: z.number().int() })), // ID_TALIS (MidItem instance) + CHARGES
+});
+export type TalismanChargesInfo = z.infer<typeof TalismanChargesInfo>;
+
+export const StackDestroyedInfo = z.object({
+  id: z.string(),
+  entries: z.array(z.object({ stack: z.string(), killer: z.string(), srcTemplate: z.string() })),
+});
+export type StackDestroyedInfo = z.infer<typeof StackDestroyedInfo>;
+
+export const QuestLogInfo = z.object({
+  id: z.string(),
+  entries: z.array(z.object({
+    player: z.string(), seqNum: z.number().int(), curTurn: z.number().int(),
+    type: z.number().int(), event: z.string(), effNum: z.number().int(),
+  })),
+});
+export type QuestLogInfo = z.infer<typeof QuestLogInfo>;
+
+/** MidSpellCast: two ints, both tagged with the block's own id on disk. Semantics unknown
+ *  (0 on every authored map) — captured faithfully. */
+export const SpellCastInfo = z.object({ id: z.string(), v1: z.number().int(), v2: z.number().int() });
+export type SpellCastInfo = z.infer<typeof SpellCastInfo>;
+
+export const SpellEffectsInfo = z.object({ id: z.string(), v: z.number().int() });
+export type SpellEffectsInfo = z.infer<typeof SpellEffectsInfo>;
+
+/** One TurnSummary log entry. TYPE (0..6) selects which optional payload fields exist —
+ *  presence mirrors the on-disk variant exactly (refs/texts captured verbatim). */
+export const TurnSummaryEntry = z.object({
+  player: z.string(),
+  type: z.number().int(),
+  x: z.number().int(),
+  y: z.number().int(),
+  player2: z.string().optional(), // TYPE 0,1
+  spell: z.string().optional(), // TYPE 0
+  stackA: z.string().optional(), // TYPE 1
+  strStackA: z.string().optional(), // TYPE 1
+  stackD: z.string().optional(), // TYPE 0,1,2,5,6
+  strStackD: z.string().optional(), // TYPE 0,1,2,5,6
+  city: z.string().optional(), // TYPE 3 (the reference's data() forgets it — we write it)
+  acquire: z.boolean().optional(), // TYPE 6
+});
+export type TurnSummaryEntry = z.infer<typeof TurnSummaryEntry>;
+export const TurnSummaryInfo = z.object({ id: z.string(), entries: z.array(TurnSummaryEntry) });
+export type TurnSummaryInfo = z.infer<typeof TurnSummaryInfo>;
+
 /** The neutral, render-ready map document. Produced by @d2/sg-parser; consumed by
  *  the server, the Vue store, and the PixiJS renderer. The single source of truth. */
 export const MapDocument = z.object({
@@ -159,5 +224,20 @@ export const MapDocument = z.object({
     .optional(),
   /** MidSubRace table — full records (bannerIndex resolution reads from here). Additive. */
   subraces: z.array(SubRaceInfo).optional(),
+  /** Per-player satellite blocks + playthrough logs — fully typed (Stage D of the no-raw-bytes
+   *  program). Editor-transparent; the rebuild re-emits each block from these records. */
+  satellites: z
+    .object({
+      fogs: z.array(FogInfo).default([]),
+      playerSpells: z.array(PlayerSpellsInfo).default([]),
+      playerBuildings: z.array(PlayerBuildingsInfo).default([]),
+      talismanCharges: z.array(TalismanChargesInfo).default([]),
+      stackDestroyed: z.array(StackDestroyedInfo).default([]),
+      questLogs: z.array(QuestLogInfo).default([]),
+      spellCasts: z.array(SpellCastInfo).default([]),
+      spellEffects: z.array(SpellEffectsInfo).default([]),
+      turnSummaries: z.array(TurnSummaryInfo).default([]),
+    })
+    .optional(),
 });
 export type MapDocument = z.infer<typeof MapDocument>;

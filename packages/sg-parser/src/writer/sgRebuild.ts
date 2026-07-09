@@ -320,6 +320,153 @@ export function mapFrame(version: string, second: number, size: number): Uint8Ar
   });
 }
 
+// ---- satellite-block frames (Stage D): per-player state + playthrough logs. All lists use the
+// count-tag = the block's own full id; string/ref values are written VERBATIM as captured. ----
+
+/** MidgardMapFog (code 0x15, short FG): count + N×{POS_Y · FOG(byteCount) · untagged mask}. */
+export function fogFrame(
+  version: string,
+  second: number,
+  rows: readonly { y: number; mask: readonly number[] }[],
+): Uint8Array {
+  return emitBlock(version, "MidgardMapFog", 0x15, "FG", second, (w, full) => {
+    w.defaultInt(full, rows.length);
+    for (const r of rows) {
+      w.defaultInt("POS_Y", r.y);
+      w.defaultInt("FOG", r.mask.length);
+      w.raw([...r.mask]);
+    }
+  });
+}
+
+/** PlayerKnownSpells (code 0x19, short KS): count + N×SPELL_ID. */
+export function playerSpellsFrame(version: string, second: number, spells: readonly string[]): Uint8Array {
+  return emitBlock(version, "PlayerKnownSpells", 0x19, "KS", second, (w, full) => {
+    w.defaultInt(full, spells.length);
+    for (const s of spells) w.stringField("SPELL_ID", s);
+  });
+}
+
+/** PlayerBuildings (code 0x17, short PB): count + N×BUILD_ID. */
+export function playerBuildingsFrame(version: string, second: number, buildings: readonly string[]): Uint8Array {
+  return emitBlock(version, "PlayerBuildings", 0x17, "PB", second, (w, full) => {
+    w.defaultInt(full, buildings.length);
+    for (const b of buildings) w.stringField("BUILD_ID", b);
+  });
+}
+
+/** MidTalismanCharges (code 0x1a, short TC): count + N×{ID_TALIS · CHARGES}. */
+export function talismanChargesFrame(
+  version: string,
+  second: number,
+  entries: readonly { talisman: string; charges: number }[],
+): Uint8Array {
+  return emitBlock(version, "MidTalismanCharges", 0x1a, "TC", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_TALIS", e.talisman);
+      w.defaultInt("CHARGES", e.charges);
+    }
+  });
+}
+
+/** MidStackDestroyed (code 0x19, short SD): count + N×{ID_STACK · ID_KILLER · SRCTMPL_ID}. */
+export function stackDestroyedFrame(
+  version: string,
+  second: number,
+  entries: readonly { stack: string; killer: string; srcTemplate: string }[],
+): Uint8Array {
+  return emitBlock(version, "MidStackDestroyed", 0x19, "SD", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_STACK", e.stack);
+      w.stringField("ID_KILLER", e.killer);
+      w.stringField("SRCTMPL_ID", e.srcTemplate);
+    }
+  });
+}
+
+/** MidQuestLog (code 0x13, short QL): count + N×{ID_PLAYER · SEQ_NUM · CUR_TURN · TYPE ·
+ *  ID_EVENT · EFF_NUM}. */
+export function questLogFrame(
+  version: string,
+  second: number,
+  entries: readonly { player: string; seqNum: number; curTurn: number; type: number; event: string; effNum: number }[],
+): Uint8Array {
+  return emitBlock(version, "MidQuestLog", 0x13, "QL", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_PLAYER", e.player);
+      w.defaultInt("SEQ_NUM", e.seqNum);
+      w.defaultInt("CUR_TURN", e.curTurn);
+      w.defaultInt("TYPE", e.type);
+      w.stringField("ID_EVENT", e.event);
+      w.defaultInt("EFF_NUM", e.effNum);
+    }
+  });
+}
+
+/** MidSpellCast (code 0x14, short ST): TWO ints, both tagged with the block's own id. */
+export function spellCastFrame(version: string, second: number, v1: number, v2: number): Uint8Array {
+  return emitBlock(version, "MidSpellCast", 0x14, "ST", second, (w, full) => {
+    w.defaultInt(full, v1);
+    w.defaultInt(full, v2);
+  });
+}
+
+/** MidSpellEffects (code 0x17, short ET): ONE int tagged with the block's own id. */
+export function spellEffectsFrame(version: string, second: number, v: number): Uint8Array {
+  return emitBlock(version, "MidSpellEffects", 0x17, "ET", second, (w, full) => {
+    w.defaultInt(full, v);
+  });
+}
+
+/**
+ * TurnSummary (code 0x13, short TS): count + N variant entries — head {ID_PLAYER · TYPE · POS_X ·
+ * POS_Y} then the TYPE-selected payload. Type 3's ID_CITY is written (the reference's data()
+ * forgets it — its own read() would then desync; we keep the on-disk truth).
+ */
+export function turnSummaryFrame(
+  version: string,
+  second: number,
+  entries: readonly {
+    player: string; type: number; x: number; y: number;
+    player2?: string; spell?: string; stackA?: string; strStackA?: string;
+    stackD?: string; strStackD?: string; city?: string; acquire?: boolean;
+  }[],
+): Uint8Array {
+  return emitBlock(version, "TurnSummary", 0x13, "TS", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_PLAYER", e.player);
+      w.defaultInt("TYPE", e.type);
+      w.defaultInt("POS_X", e.x);
+      w.defaultInt("POS_Y", e.y);
+      if (e.type === 0) {
+        w.stringField("ID_PLAYER2", e.player2 ?? "G000000000");
+        w.stringField("ID_SPELL", e.spell ?? "G000000000");
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+      } else if (e.type === 1) {
+        w.stringField("ID_PLAYER2", e.player2 ?? "G000000000");
+        w.stringField("ID_STK_A", e.stackA ?? "G000000000");
+        w.stringField("STR_STK_A", e.strStackA ?? "");
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+      } else if (e.type === 2 || e.type === 5) {
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+      } else if (e.type === 3) {
+        w.stringField("ID_CITY", e.city ?? "G000000000");
+      } else if (e.type === 6) {
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+        w.bool("ACQUIRE", e.acquire ?? false);
+      } // type 4: no payload
+    }
+  });
+}
+
 /**
  * A MidPlayer block frame (code 0x11, short PL) — FULL D2Player.h field order, byte-verified:
  * PLAYER_ID(self) · NAME_TXT · DESC_TXT · LORD_ID · RACE_ID · FOG_ID · KNOWN_ID · BUILDS_ID ·

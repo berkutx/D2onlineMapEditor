@@ -192,6 +192,31 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
     });
   }
 
+  it("satellites: variant playthrough logs rebuild byte-for-byte on a campaign save", () => {
+    // TurnSummary/StackDestroyed/QuestLog entries are EMPTY on authored maps — gate the variant
+    // codecs on a campaign save that carries a real log (15 entries incl. battle/spell variants).
+    const saveMap = campaignMap(join("Возвращение Галлеана", "Орды Нежити", "3. THE FULCRUM R.SG"));
+    let b: Uint8Array;
+    try {
+      b = read(saveMap);
+    } catch {
+      return; // that campaign isn't part of this install
+    }
+    const doc = parseScenario(b);
+    const sat = doc.satellites!;
+    const richness =
+      sat.turnSummaries.reduce((a, t) => a + t.entries.length, 0) +
+      sat.stackDestroyed.reduce((a, t) => a + t.entries.length, 0) +
+      sat.questLogs.reduce((a, t) => a + t.entries.length, 0);
+    expect(richness).toBeGreaterThan(0); // the gate must actually exercise non-empty logs
+    const SAT = new Set([
+      "MidgardMapFog", "PlayerKnownSpells", "PlayerBuildings", "MidTalismanCharges",
+      "MidStackDestroyed", "MidQuestLog", "MidSpellCast", "MidSpellEffects", "TurnSummary",
+    ]);
+    const out = rebuildScenario(rebuildFromModel(splitScenario(b), doc, SAT));
+    expect(countDiffs(b, out), "satellite model-rebuild should be byte-exact").toBe(0);
+  });
+
   it("MidTomb: epitaph list rebuilds byte-for-byte (tombs = playthrough state, campaign save only)", () => {
     // Tombs never appear on authored maps (0 in the pristine corpus) — gate on a campaign save
     // that carries real epitaphs (an S132-format map; the frame derives the version from the doc).

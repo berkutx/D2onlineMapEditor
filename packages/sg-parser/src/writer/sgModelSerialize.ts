@@ -15,6 +15,8 @@ import {
   landmarkFrame, locationFrame, crystalFrame, siteFrame, itemFrame, unitFrame, stackFrame,
   villageFrame, ruinFrame, bagFrame, mountainsFrame, capitalFrame, rodFrame, tombFrame,
   playerFrame, subraceFrame, scenarioInfoFrame, mapFrame,
+  fogFrame, playerSpellsFrame, playerBuildingsFrame, talismanChargesFrame, stackDestroyedFrame,
+  questLogFrame, spellCastFrame, spellEffectsFrame, turnSummaryFrame,
 } from "./sgRebuild.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 
@@ -249,6 +251,49 @@ export function rebuildFromModel(
       return { ...b, bytes: scenarioInfoFrame(version, secondOf(b.id), doc.header, doc.size) };
     if (b.typeName === "MidgardMap")
       return { ...b, bytes: mapFrame(version, secondOf(b.id), doc.size) };
+    // Satellite blocks (per-player state + playthrough logs), keyed by block id.
+    const sat = doc.satellites;
+    if (sat) {
+      const s = secondOf(b.id);
+      switch (b.typeName) {
+        case "MidgardMapFog": {
+          const r = sat.fogs.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: fogFrame(version, s, r.rows) } : b;
+        }
+        case "PlayerKnownSpells": {
+          const r = sat.playerSpells.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: playerSpellsFrame(version, s, r.spells) } : b;
+        }
+        case "PlayerBuildings": {
+          const r = sat.playerBuildings.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: playerBuildingsFrame(version, s, r.buildings) } : b;
+        }
+        case "MidTalismanCharges": {
+          const r = sat.talismanCharges.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: talismanChargesFrame(version, s, r.entries) } : b;
+        }
+        case "MidStackDestroyed": {
+          const r = sat.stackDestroyed.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: stackDestroyedFrame(version, s, r.entries) } : b;
+        }
+        case "MidQuestLog": {
+          const r = sat.questLogs.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: questLogFrame(version, s, r.entries) } : b;
+        }
+        case "MidSpellCast": {
+          const r = sat.spellCasts.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: spellCastFrame(version, s, r.v1, r.v2) } : b;
+        }
+        case "MidSpellEffects": {
+          const r = sat.spellEffects.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: spellEffectsFrame(version, s, r.v) } : b;
+        }
+        case "TurnSummary": {
+          const r = sat.turnSummaries.find((x) => x.id === b.id);
+          return r ? { ...b, bytes: turnSummaryFrame(version, s, r.entries) } : b;
+        }
+      }
+    }
     const obj = b.id ? byId.get(b.id) : undefined;
     if (!obj) return b;
     const frame = serializeTypedBlock(b.typeName, obj, version);
@@ -309,6 +354,15 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
   "MidSubRace",
   "ScenarioInfo",
   "MidgardMap",
+  "MidgardMapFog",
+  "PlayerKnownSpells",
+  "PlayerBuildings",
+  "MidTalismanCharges",
+  "MidStackDestroyed",
+  "MidQuestLog",
+  "MidSpellCast",
+  "MidSpellEffects",
+  "TurnSummary",
 ]);
 
 /**
