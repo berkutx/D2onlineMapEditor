@@ -10,7 +10,7 @@
  * to ""). The block round-trip test reports the exact byte-diff, making the model gap concrete.
  */
 
-import type { MapDocument, MapObject, ItemInstance, UnitInstance } from "@d2/map-schema";
+import type { MapDocument, MapObject, GarrisonUnit } from "@d2/map-schema";
 import {
   landmarkFrame, locationFrame, crystalFrame, siteFrame, itemFrame, unitFrame, stackFrame,
   villageFrame, ruinFrame, bagFrame, mountainsFrame, capitalFrame, rodFrame, tombFrame,
@@ -26,6 +26,27 @@ import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks
 function secondOf(id: string): number {
   const m = /([0-9a-fA-F]{4})$/.exec(id);
   return m ? parseInt(m[1]!, 16) : 0;
+}
+
+const NIL = "G000000000";
+
+/** Derive the on-disk UNIT_/POS_ arrays from garrison members' entity identity (key+slot).
+ *  Returns null when any member lacks its identity (a placed/edited garrison — the rebuild
+ *  cannot mint ids; the prod export path, applyBytes, does). MEASURED safe: 0 orphan slots /
+ *  0 double refs on 13116 shipped garrisons, so members reproduce the packing exactly. */
+function slotsFromGarrison(
+  garrison: readonly (GarrisonUnit | null)[] | undefined,
+): { unitSlots: (string | null)[]; posOfCell: number[] } | null {
+  const unitSlots: (string | null)[] = [null, null, null, null, null, null];
+  const posOfCell = [-1, -1, -1, -1, -1, -1];
+  for (let i = 0; i < 6; i++) {
+    const m = garrison?.[i];
+    if (!m) continue;
+    if (m.key == null || m.slot == null || m.slot < 0 || m.slot > 5) return null;
+    unitSlots[m.slot] = m.key;
+    posOfCell[i] = m.slot;
+  }
+  return { unitSlots, posOfCell };
 }
 
 /**
@@ -52,18 +73,21 @@ export function serializeTypedBlock(
       return crystalFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.resource ?? 0, obj.priority ?? 3);
     case "MidStack": {
       if (obj.type !== "stack") return null;
-      // The instance-graph refs (UNIT_/POS_/LEADER_ID/ITEM_ID) come from the load-only `raw`
-      // snapshot; the scalars from the object (defaults reproduce a fresh stack).
+      // UNIT_/POS_/LEADER_ID/ITEM_ID are DERIVED from the entities themselves: garrison members
+      // carry key+slot, the leader is the leaderCell member's key, item lists carry their keys.
+      const slots = slotsFromGarrison(obj.garrison);
+      if (!slots) return null; // placed/edited garrison (no keys) — applyBytes mints, not us
+      const leaderId = obj.leaderCell != null ? obj.garrison?.[obj.leaderCell]?.key : undefined;
       return stackFrame(version, secondOf(obj.id), {
-        owner: obj.owner ?? "G000000000",
-        inside: obj.inside ?? "G000000000",
+        owner: obj.owner ?? NIL,
+        inside: obj.inside ?? NIL,
         subRace: obj.subRace,
         posX: obj.pos.x,
         posY: obj.pos.y,
-        unitSlots: obj.raw?.unitSlots,
-        posOfCell: obj.raw?.posOfCell,
-        leaderId: obj.raw?.leaderId,
-        itemIds: obj.raw?.itemIds,
+        unitSlots: slots.unitSlots,
+        posOfCell: slots.posOfCell,
+        leaderId,
+        itemIds: obj.inventoryKeys ?? [],
         morale: obj.morale,
         move: obj.move,
         facing: obj.facing,
@@ -109,8 +133,10 @@ export function serializeTypedBlock(
     }
     case "MidVillage": {
       if (obj.type !== "village") return null;
-      // garrison slots + captured-loot ITEM_ID from the load-only `raw` snapshot; RIOT_T/PROTECT_B/
-      // P_O_* are invariant on shipped maps (villageFrame's hardcoded constants reproduce them).
+      // garrison slots derived from the members (key+slot); captured-loot ITEM_ID = itemKeys.
+      // RIOT_T/PROTECT_B/P_O_* are invariant on shipped maps (villageFrame's constants).
+      const slots = slotsFromGarrison(obj.garrison);
+      if (!slots) return null;
       return villageFrame(version, secondOf(obj.id), {
         posX: obj.pos.x,
         posY: obj.pos.y,
@@ -124,13 +150,15 @@ export function serializeTypedBlock(
         regen: obj.regen,
         morale: obj.morale,
         growth: obj.growth,
-        unitSlots: obj.raw?.unitSlots,
-        posOfCell: obj.raw?.posOfCell,
-        itemIds: obj.raw?.itemIds,
+        unitSlots: slots.unitSlots,
+        posOfCell: slots.posOfCell,
+        itemIds: obj.itemKeys ?? [],
       });
     }
     case "MidRuin": {
       if (obj.type !== "ruin") return null;
+      const slots = slotsFromGarrison(obj.garrison);
+      if (!slots) return null;
       return ruinFrame(version, secondOf(obj.id), {
         posX: obj.pos.x,
         posY: obj.pos.y,
@@ -141,8 +169,8 @@ export function serializeTypedBlock(
         item: obj.item,
         looter: obj.looter,
         priority: obj.priority,
-        unitSlots: obj.raw?.unitSlots,
-        posOfCell: obj.raw?.posOfCell,
+        unitSlots: slots.unitSlots,
+        posOfCell: slots.posOfCell,
       });
     }
     case "MidBag": {
@@ -152,11 +180,13 @@ export function serializeTypedBlock(
         posY: obj.pos.y,
         image: obj.image ?? 0,
         priority: obj.priority,
-        itemIds: obj.raw?.itemIds,
+        itemIds: obj.itemKeys ?? [],
       });
     }
     case "Capital": {
       if (obj.type !== "capital") return null;
+      const slots = slotsFromGarrison(obj.garrison);
+      if (!slots) return null;
       return capitalFrame(version, secondOf(obj.id), {
         posX: obj.pos.x,
         posY: obj.pos.y,
@@ -166,9 +196,9 @@ export function serializeTypedBlock(
         subRace: obj.subRace,
         stackRef: obj.stackRef,
         priority: obj.priority,
-        unitSlots: obj.raw?.unitSlots,
-        posOfCell: obj.raw?.posOfCell,
-        itemIds: obj.raw?.itemIds,
+        unitSlots: slots.unitSlots,
+        posOfCell: slots.posOfCell,
+        itemIds: obj.itemKeys ?? [],
       });
     }
     case "MidRod":
@@ -183,35 +213,91 @@ export function serializeTypedBlock(
 }
 
 /**
- * Serialize an INSTANCE block (MidItem / MidUnit) from the doc's instance graph, or null to keep it
- * raw. These aren't placed objects — they live inside stacks/forts/chests and are looked up by the
- * block's own id. A unit flagged `transformed` (a polymorph carrying a nested block we don't model)
- * stays raw.
+ * Serialize an INSTANCE block (MidItem / MidUnit) from the entity graph, or null to keep it raw.
+ * These aren't placed objects — the entities live ON their owners (garrison members with key+slot,
+ * item lists with itemKeys); the indexes map block id → owning entity. Stray blocks (referenced by
+ * nothing) come from doc.strayInstances. A unit flagged `transformed` (a polymorph carrying a
+ * nested block we don't model) stays raw.
  */
 function serializeInstanceBlock(
   typeName: string,
   id: string,
-  items: ReadonlyMap<string, ItemInstance>,
-  units: ReadonlyMap<string, UnitInstance>,
+  itemsByKey: ReadonlyMap<string, string>,
+  unitsByKey: ReadonlyMap<string, GarrisonUnit>,
   version: string,
 ): Uint8Array | null {
   switch (typeName) {
     case "MidItem": {
-      const it = items.get(id);
-      return it ? itemFrame(version, secondOf(id), it.itemType) : null;
+      const template = itemsByKey.get(id);
+      return template ? itemFrame(version, secondOf(id), template) : null;
     }
     case "MidUnit": {
-      const u = units.get(id);
-      if (!u || u.transformed) return null; // transformed → un-modeled nested block → keep raw
-      return unitFrame(version, secondOf(id), u.implId ?? "G000000000", u.level ?? 1, u.hp ?? 0, u.xp ?? 0, {
-        modifiers: u.modifiers,
-        creation: u.creation,
-        name: u.name,
+      const m = unitsByKey.get(id);
+      if (!m || m.transformed) return null; // transformed → un-modeled nested block → keep raw
+      // `unit` == key means the record had no TYPE (see the assemble enrichment) → the nil ref.
+      const impl = m.unit === id ? NIL : m.unit;
+      return unitFrame(version, secondOf(id), impl, m.level ?? 1, m.hp ?? 0, m.xp ?? 0, {
+        modifiers: m.modifiers,
+        creation: m.creation,
+        name: m.name,
       });
     }
     default:
       return null;
   }
+}
+
+/** Build the block-id → entity indexes by walking the whole object graph once: every garrison
+ *  member with a key, every item list zipped with its keys, plus the stray instance blocks. */
+function buildEntityIndexes(doc: MapDocument): {
+  itemsByKey: Map<string, string>;
+  unitsByKey: Map<string, GarrisonUnit>;
+} {
+  const itemsByKey = new Map<string, string>();
+  const unitsByKey = new Map<string, GarrisonUnit>();
+  const takeGarrison = (g: readonly (GarrisonUnit | null)[] | undefined): void => {
+    for (const m of g ?? []) if (m?.key) unitsByKey.set(m.key, m);
+  };
+  const takeItems = (keys: readonly string[] | undefined, templates: readonly string[] | undefined): void => {
+    if (!keys) return;
+    // keys carry the exact on-disk list; templates are the resolved view. MEASURED index-aligned
+    // (0 sentinels in 8127 shipped lists); a sentinel key has no block, so skipping is safe.
+    let t = 0;
+    for (const k of keys) {
+      if (!k || k === NIL || k === "000000") continue;
+      const template = templates?.[t++];
+      if (template) itemsByKey.set(k, template);
+    }
+  };
+  for (const o of doc.objects) {
+    if (o.type === "stack") {
+      takeGarrison(o.garrison);
+      takeItems(o.inventoryKeys, o.inventory);
+    } else if (o.type === "village" || o.type === "capital") {
+      takeGarrison(o.garrison);
+      takeItems(o.itemKeys, o.items);
+    } else if (o.type === "ruin") {
+      takeGarrison(o.garrison);
+    } else if (o.type === "treasure") {
+      takeItems(o.itemKeys, o.items);
+    }
+  }
+  for (const it of doc.strayInstances?.items ?? []) itemsByKey.set(it.id, it.itemType);
+  for (const u of doc.strayInstances?.units ?? []) {
+    if (unitsByKey.has(u.id)) continue;
+    unitsByKey.set(u.id, {
+      unit: u.implId ?? u.id, // == id → serialized as the nil ref (no TYPE), like the enrichment
+      level: u.level ?? 1,
+      hp: u.hp ?? 0,
+      ...(u.xp ? { xp: u.xp } : {}),
+      ...(u.creation ? { creation: u.creation } : {}),
+      ...(u.name ? { name: u.name } : {}),
+      ...(u.modifiers?.length ? { modifiers: u.modifiers } : {}),
+      ...(u.transformed ? { transformed: true } : {}),
+      key: u.id,
+    });
+  }
+  return { itemsByKey, unitsByKey };
 }
 
 /**
@@ -225,14 +311,13 @@ export function rebuildFromModel(
   types: ReadonlySet<string>,
 ): ScenarioBlocks {
   const byId = new Map<string, MapObject>(doc.objects.map((o) => [o.id, o]));
-  const items = new Map<string, ItemInstance>((doc.instances?.items ?? []).map((i) => [i.id, i]));
-  const units = new Map<string, UnitInstance>((doc.instances?.units ?? []).map((u) => [u.id, u]));
+  const { itemsByKey, unitsByKey } = buildEntityIndexes(doc);
   const version = doc.header.version || "S143";
   const blocks: ScenarioBlock[] = s.blocks.map((b) => {
     if (!types.has(b.typeName)) return b;
-    // Instance blocks (MidItem/MidUnit) come from the instance graph, not doc.objects.
+    // Instance blocks (MidItem/MidUnit) come from the entity graph, not doc.objects directly.
     if (b.typeName === "MidItem" || b.typeName === "MidUnit") {
-      const frame = b.id ? serializeInstanceBlock(b.typeName, b.id, items, units, version) : null;
+      const frame = b.id ? serializeInstanceBlock(b.typeName, b.id, itemsByKey, unitsByKey, version) : null;
       return frame ? { ...b, bytes: frame } : b;
     }
     // ONE MidMountains block holds N mountains — read as `${blockId}#n` children. Gather them all

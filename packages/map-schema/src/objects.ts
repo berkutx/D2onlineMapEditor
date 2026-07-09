@@ -11,12 +11,30 @@ const base = {
   z: z.number().int().optional(),
 };
 
-/** One garrison/army slot's unit: a global Gunit id + its level and (max) HP. The .sg stores
- *  these as a MidUnit instance; the editor model carries the resolved global id + stats. */
+/** One garrison/army formation cell's unit — the FULL MidUnit entity, inlined on the member
+ *  (there is no separate instance carrier). `unit` is the global Gunit template; the rest are
+ *  the instance's own persisted fields, omitted at their disk defaults so a freshly placed
+ *  member is just {unit, level, hp}.
+ *
+ *  `key` + `slot` are the entity's persistent on-disk identity: key = the MidUnit block id
+ *  (e.g. "S143UN001a"), slot = its UNIT_ slot index (the slot packing is editing history —
+ *  measured non-canonical on most shipped garrisons). Both are absent on a freshly placed/
+ *  edited member (the export mints them); the semantic round-trip strips them. A big unit
+ *  occupies two cells → the SAME member (key+slot) appears at both indices. */
 export const GarrisonUnit = z.object({
   unit: z.string(), // global Gunit id (G###UU####)
   level: z.number().int().default(1),
   hp: z.number().int().default(0), // current HP (== max for a freshly placed unit)
+  xp: z.number().int().optional(), // XP (omitted when 0)
+  creation: z.number().int().optional(), // CREATION (omitted when 0)
+  name: z.string().optional(), // NAME_TXT — custom unit name (omitted when empty)
+  /** MODIF_ID list — level-up / equipment stat modifiers (global Gmodif refs), in file order. */
+  modifiers: z.array(z.string()).optional(),
+  /** TRANSF true → a polymorphed unit carrying a nested block we don't model (0 of 34k on
+   *  shipped maps); its MidUnit block is kept as raw bytes in the rebuild. */
+  transformed: z.boolean().optional(),
+  key: z.string().optional(), // on-disk MidUnit block id (persistent identity; minted at export)
+  slot: z.number().int().optional(), // on-disk UNIT_ slot index (layout identity)
 });
 export type GarrisonUnit = z.infer<typeof GarrisonUnit>;
 
@@ -46,16 +64,15 @@ export const StackTemplate = z.object({
   aiPriority: z.number().int().default(0),
   /** Unit-modifier list (preserved; advanced-edit later): per entry {unitPos, modifId Gmodif}. */
   modifiers: z.array(z.object({ unitPos: z.number().int(), modifId: z.string() })).default([]),
-  /** Load-only VERBATIM slot layout (UNIT_i / UNIT_i_LVL / POS_i as on disk — the slot packing is
-   *  editing history, non-canonical like a stack's). The frame replays it when present; edited/
-   *  fresh templates re-pack canonically. The semantic round-trip strips it. */
-  raw: z
-    .object({
-      unitSlots: z.array(z.string()),
-      levels: z.array(z.number().int()),
-      posOfCell: z.array(z.number().int()),
-    })
-    .optional(),
+  /** The on-disk SLOT entries (UNIT_s + UNIT_s_LVL, s = slot index; null = empty slot). This is
+   *  the template's true persisted layout — the reference's D2StackTemplate stores exactly this.
+   *  MEASURED: 919/2656 shipped templates carry ORPHAN slots (a filled UNIT_s no POS_i points at
+   *  — editing leftovers), so the cell view (`units`) alone cannot reproduce the bytes. `units`
+   *  is the DERIVED cell view the UI edits (cell i = slots[slotOfCell[i]]). An edit through
+   *  upsertTemplate DROPS slots+slotOfCell (canonical re-pack; orphans are unreachable data). */
+  slots: z.array(TemplateUnit.nullable()).optional(),
+  /** POS_i per formation cell: which slot fills cell i (-1 = empty). Dropped on edit with `slots`. */
+  slotOfCell: z.array(z.number().int()).optional(),
 });
 export type StackTemplate = z.infer<typeof StackTemplate>;
 
@@ -69,20 +86,6 @@ export const StackEquip = z.object({
   boots: z.string().optional(),
 });
 export type StackEquip = z.infer<typeof StackEquip>;
-
-/**
- * Load-only byte-exact snapshot of a compound object's instance graph (the minted-id refs:
- * UNIT_0..5 / POS_0..5 / LEADER_ID / ITEM_ID). Editor-transparent; the semantic round-trip STRIPS
- * it — a PLACED/edited object mints fresh instance ids at export, so this can't match the
- * pre-export op. The resolved garrison/leader/inventory/scalars still compare exactly.
- */
-export const InstanceRawSnapshot = z.object({
-  unitSlots: z.array(z.string().nullable()).optional(),
-  posOfCell: z.array(z.number().int()).optional(),
-  leaderId: z.string().optional(),
-  itemIds: z.array(z.string()).optional(),
-});
-export type InstanceRawSnapshot = z.infer<typeof InstanceRawSnapshot>;
 
 export const StackObject = z.object({
   ...base,
@@ -103,12 +106,14 @@ export const StackObject = z.object({
   creatLvl: z.number().int().optional(), // CREAT_LVL creature level
   equip: StackEquip.optional(), // leader equipment slots
   inventory: z.array(z.string()).optional(), // carried items (global GItem template ids)
+  /** On-disk MidItem ids of `inventory`, index-aligned (measured: 0 sentinels in 8127 shipped
+   *  ITEM_ID lists). Absent on a fresh/edited list — the export mints ids; round-trip strips. */
+  inventoryKeys: z.array(z.string()).optional(),
   units: z.array(z.string()).optional(), // legacy/unused (formation lives in `garrison` now)
   inside: z.string().optional(), // INSIDE: a city/fort uid this stack is stationed in (a "visitor")
-  // formation by cell (POS 0..5) -> {unit (global Gunit id), level, hp}; the stack's own army.
+  // formation by cell (POS 0..5) -> the full unit entity (see GarrisonUnit); the stack's own army.
   // For a garrisoned/visiting stack this IS the city's "visitor" garrison (edited via the stack id).
   garrison: z.array(GarrisonUnit.nullable()).optional(),
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   // ---- full-parse scalars (byte-exact model rebuild). Omitted at their defaults so a placed/
   // default stack round-trips without a phantom field. ----
   aiOrder: z.number().int().optional(), // AIORDER (default 2 = Stand; ≠2 on ~99.8% of shipped stacks)
@@ -120,8 +125,6 @@ export const StackObject = z.object({
   aiIgnore: z.boolean().optional(), // AI_IGNORE
   upgCount: z.number().int().optional(), // UPGCOUNT
   nbBattle: z.number().int().optional(), // NBBATTLE
-  /** Load-only byte-exact snapshot of the instance graph (UNIT_/POS_/LEADER_ID/ITEM_ID). */
-  raw: InstanceRawSnapshot.optional(),
 });
 
 export const FortObject = z.object({
@@ -141,15 +144,14 @@ export const CapitalObject = z.object({
   name: z.string().default(""),
   desc: z.string().optional(), // DESC_TXT
   priority: z.number().int().optional(), // AIPRIORITY 0..6
-  // garrison = the city's OWN DEFENSE: formation cell (POS 0..5) -> {unit (global Gunit id),
-  // level, hp}, resolved from the embedded UNIT_0..5/POS_0..5 MidUnit instances. null = empty.
+  // garrison = the city's OWN DEFENSE: formation cell (POS 0..5) -> the full unit entity
+  // (see GarrisonUnit), resolved from the embedded UNIT_0..5/POS_0..5 MidUnit instances.
   garrison: z.array(GarrisonUnit.nullable()).optional(),
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   stackRef: z.string().optional(), // STACK uid -> the visiting hero MidStack (the SECOND garrison)
   /** ITEM_ID list — the capital's stored items (addRace seeds 3× G000IG0006), resolved to GItem
    *  templates in the post-pass (like a chest). */
   items: z.array(z.string()).optional(),
-  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (garrison slots + item instances)
+  itemKeys: z.array(z.string()).optional(), // on-disk MidItem ids of `items`, index-aligned
 });
 export const VillageObject = z.object({
   ...base,
@@ -166,9 +168,10 @@ export const VillageObject = z.object({
   regen: z.number().int().optional(), // REGEN_B garrison regen
   growth: z.number().int().optional(), // GROWTH_T unit growth timer
   garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit (see CapitalObject)
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   stackRef: z.string().optional(),
-  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (garrison + captured-loot ITEM_ID)
+  /** ITEM_ID list — the village's captured loot, resolved to GItem templates (like a chest). */
+  items: z.array(z.string()).optional(),
+  itemKeys: z.array(z.string()).optional(), // on-disk MidItem ids of `items`, index-aligned
 });
 
 export const RuinObject = z.object({
@@ -185,8 +188,6 @@ export const RuinObject = z.object({
   // the ruin's GUARDIANS (embedded GROUP_ID + UNIT_0..5/POS_0..5, like a fort's defense) —
   // byte-verified: every Riders ruin carries 2-5 MidUnit guards
   garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
-  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (guardian garrison)
 });
 
 const SiteCommon = {
@@ -280,7 +281,7 @@ export const TreasureObject = z.object({
   image: z.number().int().optional(), // MidBag IMAGE -> G000BG0000{0|1}{image}
   priority: z.number().int().optional(), // AIPRIORITY 0..6
   items: z.array(z.string()).optional(), // ITEM_ID list — the bag's contents (resolved to templates)
-  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (ITEM_ID instance refs)
+  itemKeys: z.array(z.string()).optional(), // on-disk MidItem ids of `items`, index-aligned
 });
 
 export const RodObject = z.object({

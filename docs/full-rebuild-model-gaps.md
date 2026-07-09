@@ -39,6 +39,11 @@ Everything in §1–§4 is a step away from that target; §5 is the target's own
 
 ## 1. The `raw` snapshot & `idMount` — the compromise you want gone
 
+> **RESOLVED 2026-07-10 (§8 step 5).** The snapshot is gone: garrison members are full entities
+> with `key`+`slot`, item lists carry `itemKeys`, templates carry typed `slots`+`slotOfCell`,
+> unreferenced blocks live in `doc.strayInstances`, and `idMount` remains as the mountains
+> entry's own identity attribute. The section below is kept as the historical rationale.
+
 **What it is.** `StackObject`/`VillageObject`/`RuinObject`/`TreasureObject` carry an optional
 `raw: InstanceRawSnapshot` = the **minted-id graph** exactly as read: `UNIT_0..5` (slot instance
 ids), `POS_0..5` (formation-cell→slot map), `LEADER_ID`, and the `ITEM_ID` list. `MidMountains`
@@ -240,12 +245,31 @@ editor's place-ops → `applyBytes`, using the same frames. Concrete from-scratc
 
 ## 8. Remaining work (ordered) + the gold-check
 
-**STATUS 2026-07-10: steps 1-4 are DONE.** REBUILD_TYPES = 38 = every block type on the corpus;
+**STATUS 2026-07-10: steps 1-5 are DONE.** REBUILD_TYPES = 38 = every block type on the corpus;
 `rebuildBytes(x, parse(x)) === x` on all 80 pristine originals AND 55/55 campaign saves with
 **ZERO raw passthrough** (a census in the gate proves no block falls back to TagDataBlock-style
 copying). Newly modeled along the way: MidSiteResourceMarket (mod-era 5th site kind: CUSTOM +
 embedded Lua CODE + BANK + INF - the tail is read positionally because Lua text can contain
-tag-like substrings). Remaining: step 5 (the entity refactor) and step 6 (the ScenEdit gold-check).
+tag-like substrings).
+
+**Step 5 (the entity refactor) is DONE:** `InstanceRawSnapshot`, `doc.instances`, `garrisonRaw`
+and the template `raw` are all GONE. GarrisonUnit is the full MidUnit entity inlined on the
+formation cell (unit/level/hp/xp/creation/name/modifiers + `key` = block id, `slot` = UNIT_ slot);
+UNIT_/POS_/LEADER_ID are DERIVED from the members (measured safe: 0 orphan slots / 0 unreachable
+leaders / 0 double refs on 13116 shipped garrisons). Item lists carry `itemKeys`/`inventoryKeys`
+(index-aligned; 0 sentinels in 8127 lists); villages gained their loot list. Templates keep the
+on-disk layout as typed `slots` + `slotOfCell` — REQUIRED, not an artifact: 919/2656 shipped
+templates carry ORPHAN slots (a filled UNIT_s no POS_i references) that the cell view can't
+express; the reference's D2StackTemplate stores exactly these slots. Blocks referenced by nothing
+(62 MidUnit + 4 MidItem across the corpus — dangling editor leftovers) live in typed
+`doc.strayInstances`. `verifySemantic` now strips only the identity attributes (key/slot,
+itemKeys/inventoryKeys, idMount, template slots) — the DB-auto-key analogy, not a data blob.
+Bonus fix: applyBytes garrison re-mint now carries xp/creation/name/modifiers into the fresh
+MidUnit (before, editing a garrison silently reset a veteran's XP/name in the bytes).
+
+Remaining: step 6 (the ScenEdit gold-check). Known non-goal (unchanged): `rebuildBytes` of an
+object whose garrison was EDITED in-session returns the block raw-unchanged (members lose key/slot
+on edit; minting fresh ids is applyBytes' job — the production export path).
 
 1. **Close the object set:** add **Capital** (clone the village garrison path), then **Rod/Tomb**
    (trivial) → 100% of object blocks model-driven.
@@ -273,8 +297,8 @@ tag-like substrings). Remaining: step 5 (the entity refactor) and step 6 (the Sc
 - `REBUILD_TYPES` + dispatch: `packages/sg-parser/src/writer/sgModelSerialize.ts`
 - frames (hardcodes): `packages/sg-parser/src/writer/sgRebuild.ts`
 - readers (what's captured/dropped): `packages/sg-parser/src/blocks/objects.ts`, `.../scenario.ts`
-- `InstanceRawSnapshot` + object schemas: `packages/map-schema/src/objects.ts`; `doc.instances`: `.../document.ts`
-- `raw`/`idMount` strip: `packages/map-edit/src/verifySemantic.ts`
+- entity schemas (GarrisonUnit key/slot, itemKeys, template slots): `packages/map-schema/src/objects.ts`; `doc.strayInstances`: `.../document.ts`
+- identity-attribute strip (key/slot/itemKeys/idMount/template slots): `packages/map-edit/src/verifySemantic.ts`
 - patch-path plan/instance minting: `packages/map-edit/src/applyBytes.ts`
 - from-scratch: `packages/sg-parser/src/writer/createBlankMap.ts`
 - test corpus + gates: `packages/sg-parser/test/sgBlocks.test.ts`

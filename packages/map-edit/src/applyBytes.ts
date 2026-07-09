@@ -136,8 +136,13 @@ export function applyEditsToBytes(
   /** Site stock list edits (merchant/mage/mercs) — literal QTY_ tag, global ids. */
   const qtyListEdits: QtyListEdit[] = [];
   /** Garrison/formation edits, keyed by object id (last wins): the 6 formation cells, plus an
-   *  optional leaderCell (stacks only) → which cell's unit becomes LEADER_ID. */
-  type GarrCell = { unit: string; hp?: number; level?: number } | null;
+   *  optional leaderCell (stacks only) → which cell's unit becomes LEADER_ID. The optional
+   *  entity extras (xp/creation/name/modifiers) ride along so re-minting a garrison never
+   *  strips a veteran's stats (they are written into the fresh MidUnit). */
+  type GarrCell = {
+    unit: string; hp?: number; level?: number;
+    xp?: number; creation?: number; name?: string; modifiers?: readonly string[];
+  } | null;
   const garrisonOps = new Map<string, { cells: GarrCell[]; leaderCell?: number }>();
   /** M4 mid-stream deletes: PRE-EXISTING blocks to splice out at the very end. */
   const deletedIds: string[] = [];
@@ -448,10 +453,11 @@ export function applyEditsToBytes(
         variablesFinal = op.variables.slice();
         break;
       case "upsertTemplate": {
-        // drop the load-only verbatim slot layout: an edited template re-packs canonically
-        // (a stale raw replayed into the frame would overwrite the edit)
+        // drop the on-disk slot layout: an edited template re-packs canonically
+        // (a stale slot layout replayed into the frame would overwrite the edit)
         const tmpl = { ...op.template };
-        delete (tmpl as { raw?: unknown }).raw;
+        delete (tmpl as { slots?: unknown }).slots;
+        delete (tmpl as { slotOfCell?: unknown }).slotOfCell;
         templateOps.set(tmpl.id, tmpl);
         break;
       }
@@ -521,7 +527,9 @@ export function applyEditsToBytes(
       if (!gu || !gu.unit) continue;
       const second = nextUN++;
       const inst = `${raw.version}UN${hex4(second)}`;
-      appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0));
+      appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0, gu.xp ?? 0, {
+        modifiers: gu.modifiers, creation: gu.creation, name: gu.name,
+      }));
       w.setObjectString(fortId, `UNIT_${slot}`, inst);
       slotOfCell[cell] = slot;
       instOfCell[cell] = inst;
@@ -543,7 +551,7 @@ export function applyEditsToBytes(
    *  per-cell instance ids (for LEADER_ID resolution). Same encoding as the garrisonOps
    *  writer above, but into a fresh frame instead of fixed-width splices. */
   const packFormation = (
-    cells: readonly ({ unit: string; level?: number; hp?: number } | null)[] | undefined,
+    cells: readonly GarrCell[] | undefined,
   ): { unitSlots: string[]; posOfCell: number[]; instOfCell: (string | null)[] } => {
     const unitSlots: string[] = [];
     const posOfCell = [-1, -1, -1, -1, -1, -1];
@@ -553,7 +561,9 @@ export function applyEditsToBytes(
       if (!gu || !gu.unit) continue;
       const second = nextUN++;
       const inst = `${raw.version}UN${hex4(second)}`;
-      appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0));
+      appends.push(unitFrame(raw.version, second, gu.unit, gu.level ?? 1, gu.hp ?? 0, gu.xp ?? 0, {
+        modifiers: gu.modifiers, creation: gu.creation, name: gu.name,
+      }));
       posOfCell[cell] = unitSlots.length;
       instOfCell[cell] = inst;
       unitSlots.push(inst);

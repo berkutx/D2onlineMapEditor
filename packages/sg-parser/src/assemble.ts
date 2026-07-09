@@ -279,37 +279,48 @@ export function assembleDocument(
 
   for (const obj of iterateObjects(buf)) consume(buf, obj, acc);
 
-  // Resolve garrison formations from their by-cell MidUnit-instance ids to {global Gunit id,
-  // level, hp}. Two DISTINCT armies (verified vs toolsqt D2Capital/D2Village/D2Stack + Riders.sg):
+  // Enrich garrison members from their MidUnit records: the reader emitted the ENTITY identity
+  // (key = instance id, slot = UNIT_ slot) with `unit` as a placeholder; fill in the resolved
+  // global Gunit id + stats (omit-at-default like the record itself). Two DISTINCT armies
+  // (verified vs toolsqt D2Capital/D2Village/D2Stack + Riders.sg):
   //   • a city/capital's embedded UNIT_0..5/POS_0..5 = the city's OWN DEFENSE garrison;
   //   • a stack's UNIT_/POS_ = its own army — and when that stack is INSIDE a city (city.STACK →
   //     this stack, stack.INSIDE → the city), it IS the city's separate "visitor" garrison.
   // Do NOT fall back from an empty city defense to the linked visitor — they are different armies
   // (e.g. Riders village FT0002 has empty defense + a visitor; the old fallback merged them).
-  const resolveCells = (cells: (string | null)[] | null | undefined): (GarrisonUnit | null)[] =>
-    (cells ?? [null, null, null, null, null, null]).map((inst) => {
-      if (!inst) return null;
-      const u = acc.unitInstances[inst];
-      if (u) return { unit: u.implId ?? inst, level: u.level ?? 1, hp: u.hp ?? 0 };
-      return { unit: inst, level: 1, hp: 0 };
-    });
+  const referencedUnits = new Set<string>();
+  const referencedItems = new Set<string>();
+  const enrichMembers = (cells: (GarrisonUnit | null)[] | undefined): void => {
+    for (const m of cells ?? []) {
+      if (!m?.key) continue;
+      referencedUnits.add(m.key);
+      const u = acc.unitInstances[m.key];
+      if (!u) continue; // referenced instance without a block: keep the placeholder (unit = key)
+      // `unit` stays == key when the record has no TYPE (the rebuild writes the nil ref then)
+      if (u.implId) m.unit = u.implId;
+      m.level = u.level ?? 1;
+      m.hp = u.hp ?? 0;
+      if (u.xp) m.xp = u.xp;
+      if (u.creation) m.creation = u.creation;
+      if (u.name) m.name = u.name;
+      if (u.modifiers?.length) m.modifiers = u.modifiers;
+      if (u.transformed) m.transformed = true;
+    }
+  };
   for (const o of acc.objects) {
     if (o.type === "stack") {
-      const raw = o.garrisonRaw;
+      enrichMembers(o.garrison);
       // LEADER_ID names a MidUnit instance; map it to its formation CELL so the leader survives
-      // formation edits (instance ids aren't stable). leaderImage = that cell's unit impl —
+      // formation edits (a fresh export mints new ids). leaderImage = that cell's unit impl —
       // the editor's stack sprite is leaderImpl + "STOP" + facing (StackObjectAccessor).
-      if (o.leaderUnitId && raw) {
-        const lc = raw.indexOf(o.leaderUnitId);
+      if (o.leaderUnitId && o.garrison) {
+        const lc = o.garrison.findIndex((m) => m?.key === o.leaderUnitId);
         if (lc >= 0) o.leaderCell = lc;
       }
-      o.garrison = resolveCells(raw);
-      if (o.leaderCell !== undefined) o.leaderImage = o.garrison[o.leaderCell]?.unit;
-      delete o.garrisonRaw;
+      if (o.leaderCell !== undefined) o.leaderImage = o.garrison?.[o.leaderCell]?.unit;
       delete o.leaderUnitId;
     } else if (o.type === "village" || o.type === "capital" || o.type === "ruin") {
-      o.garrison = resolveCells(o.garrisonRaw);
-      delete o.garrisonRaw;
+      enrichMembers(o.garrison);
     }
   }
 
@@ -333,17 +344,19 @@ export function assembleDocument(
   }
 
   // Resolve item lists from MidItem instance ids to their global GItem template ids (e.g.
-  // "S143IM000a" -> "G000IG0006") so the editor works with stable catalog templates. The
-  // instance indirection is re-created on export (new MidItems). Chest contents + a stack's
-  // carried inventory both use this MidItem-instance ITEM_ID list.
+  // "S143IM000a" -> "G000IG0006") so the editor works with stable catalog templates; the on-disk
+  // ids stay index-aligned in itemKeys/inventoryKeys (the entity identity the rebuild re-emits).
+  // Chest/village/capital contents + a stack's carried inventory all use this ITEM_ID list.
+  const markItems = (keys: readonly string[] | undefined): void => {
+    for (const k of keys ?? []) referencedItems.add(k);
+  };
   for (const o of acc.objects) {
-    if (o.type === "treasure" && o.items) {
+    if ((o.type === "treasure" || o.type === "village" || o.type === "capital") && o.items) {
       o.items = o.items.map((inst) => acc.itemInstances[inst] ?? inst);
+      markItems(o.itemKeys);
     } else if (o.type === "stack" && o.inventory) {
       o.inventory = o.inventory.map((inst) => acc.itemInstances[inst] ?? inst);
-    } else if (o.type === "capital" && o.items) {
-      // the capital's stored items (addRace seeds 3× G000IG0006) — same instance→template resolve
-      o.items = o.items.map((inst) => acc.itemInstances[inst] ?? inst);
+      markItems(o.inventoryKeys);
     }
   }
 
@@ -379,11 +392,16 @@ export function assembleDocument(
   const cells = buildGrid(size, acc.blocks);
   applyRoads(cells, size, acc.roads);
 
-  // Instance graph (MidItem, later MidUnit): kept so a full model rebuild can re-emit these blocks
-  // byte-exact. Editor-transparent — the resolved garrison/inventory on the objects is what the UI
-  // uses. Order is irrelevant (the rebuild looks them up by block id).
-  const items = Object.entries(acc.itemInstances).map(([id, itemType]) => ({ id, itemType }));
-  const units = Object.entries(acc.unitInstances).map(([id, u]) => ({ id, ...u }));
+  // STRAY instance blocks: MidUnit/MidItem no object references (dangling data the game editor
+  // left — measured 62 units + 4 items across the corpus). Referenced instances live inline on
+  // their owners (key/slot on garrison members, itemKeys on lists); only the leftovers need a
+  // typed home so the rebuild can still re-emit their blocks byte-exact.
+  const strayItems = Object.entries(acc.itemInstances)
+    .filter(([id]) => !referencedItems.has(id))
+    .map(([id, itemType]) => ({ id, itemType }));
+  const strayUnits = Object.entries(acc.unitInstances)
+    .filter(([id]) => !referencedUnits.has(id))
+    .map(([id, u]) => ({ id, ...u }));
 
   return {
     schemaVersion,
@@ -397,7 +415,9 @@ export function assembleDocument(
     variables: acc.variables,
     templates: acc.templates,
     diplomacy: acc.diplomacy,
-    instances: { units, items },
+    ...(strayUnits.length || strayItems.length
+      ? { strayInstances: { units: strayUnits, items: strayItems } }
+      : {}),
     subraces: acc.subraces,
     satellites: acc.satellites,
     ...(acc.plan ? { plan: acc.plan } : {}),

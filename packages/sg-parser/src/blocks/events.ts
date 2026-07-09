@@ -151,13 +151,10 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
   const orderTarget = refNorm(c.str("ORDER_TARG"));
   const subRace = refNorm(c.str("SUBRACE"));
   const order = c.int("ORDER");
-  const rawSlotUnits: string[] = []; // VERBATIM (incl. nil sentinel) — the on-disk slot layout
   const slotUnits: string[] = [];
   const slotLevels: number[] = [];
   for (let i = 0; i < 6; i++) {
-    const v = c.str(`UNIT_${i}`);
-    rawSlotUnits.push(v);
-    slotUnits.push(refNorm(v));
+    slotUnits.push(refNorm(c.str(`UNIT_${i}`)));
     slotLevels.push(c.int(`UNIT_${i}_LVL`));
   }
   const pos: number[] = [];
@@ -171,7 +168,13 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
   }
   const aiPriority = c.int("AIPRIORITY");
 
-  // resolve the UNIT_/POS_ packing into 6 formation cells (cell i holds slot POS_i's unit)
+  // The SLOTS are the template's persisted layout (the reference's D2StackTemplate stores
+  // exactly unit[6]+pos[6]); `units` is the DERIVED cell view the UI edits (cell i = slot
+  // POS_i's unit). MEASURED: 919/2656 shipped templates carry ORPHAN slots (filled UNIT_s no
+  // POS_i points at — editing leftovers), so the cells alone cannot reproduce the layout.
+  const slots: (TemplateUnit | null)[] = slotUnits.map((u, s) =>
+    u ? { unit: u, level: slotLevels[s] ?? 0 } : null,
+  );
   const units: (TemplateUnit | null)[] = [null, null, null, null, null, null];
   for (let cell = 0; cell < 6; cell++) {
     const slot = pos[cell]!;
@@ -182,8 +185,7 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
   return {
     id: obj.id, name, owner, leader, leaderLevel, orderTarget, subRace, order, units,
     useFacing, facing, aiPriority, modifiers,
-    // load-only verbatim slot layout — the packing is editing history (non-canonical, like stacks)
-    raw: { unitSlots: rawSlotUnits, levels: slotLevels, posOfCell: pos },
+    slots, slotOfCell: pos,
   };
 }
 

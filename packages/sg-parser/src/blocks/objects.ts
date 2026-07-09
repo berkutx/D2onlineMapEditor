@@ -16,7 +16,7 @@ import {
   stripTrailingNul,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
-import type { MapObject, UnitInstance } from "@d2/map-schema";
+import type { GarrisonUnit, MapObject, UnitInstance } from "@d2/map-schema";
 
 const NULL_ID = "G000000000"; // sentinel "no reference" compound id
 
@@ -35,28 +35,25 @@ function refOrUndef(s: string | null): string | undefined {
  *  the units in INSERTION order (slot index, NOT cell), and POS_0..5 where POS_i = the index
  *  into UNIT_ of the unit occupying FORMATION CELL i (-1 = empty cell). So **cell i = UNIT_[POS_i]**.
  *  (Verified verbatim vs D2RSG group.cpp serialize() + D2ModdingToolset unitslotview: even cell =
- *  front line, odd = back; column = cell/2.) Returns a 6-element array indexed by FORMATION CELL ->
- *  instance id (null = empty cell). */
-/** The RAW embedded-group slots: UNIT_0..5 (slot instance ids) + POS_0..5 (which slot fills cell i).
- *  The byte-exact snapshot for a stack/village/ruin garrison — reused by all three. */
-function readSlots(buf: ByteBuffer, f: number, e: number): { unitSlots: (string | null)[]; posOfCell: number[] } {
+ *  front line, odd = back; column = cell/2.)
+ *
+ *  Returns the 6 formation cells as GarrisonUnit ENTITIES carrying their on-disk identity:
+ *  key = the MidUnit instance id, slot = the UNIT_ slot index (the packing is editing history —
+ *  MEASURED: 0 orphan slots / 0 unreachable leaders / 0 double refs on 13116 shipped garrisons,
+ *  so key+slot on the members reproduce UNIT_/POS_/LEADER_ID exactly). `unit` is a PLACEHOLDER
+ *  (= key) until the assemble post-pass enriches the member from its MidUnit record. */
+function readGarrisonMembers(buf: ByteBuffer, f: number, e: number): (GarrisonUnit | null)[] {
+  const cells: (GarrisonUnit | null)[] = [null, null, null, null, null, null];
   const unitSlots: (string | null)[] = [];
   for (let i = 0; i < 6; i++) unitSlots.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
-  const posOfCell: number[] = [];
-  for (let i = 0; i < 6; i++) posOfCell.push(readDefaultInt(buf, `POS_${i}`, f, e) ?? -1);
-  return { unitSlots, posOfCell };
-}
-
-/** Resolve the raw slots to by-formation-cell instance ids (cell i = unitSlots[posOfCell[i]]). */
-function readGarrison(buf: ByteBuffer, f: number, e: number): (string | null)[] {
-  const { unitSlots, posOfCell } = readSlots(buf, f, e);
-  const cells: (string | null)[] = [null, null, null, null, null, null];
   for (let i = 0; i < 6; i++) {
-    const p = posOfCell[i]!;
-    if (p >= 0 && p < 6) cells[i] = unitSlots[p] ?? null;
+    const p = readDefaultInt(buf, `POS_${i}`, f, e) ?? -1;
+    const key = p >= 0 && p < 6 ? unitSlots[p] : null;
+    if (key) cells[i] = { unit: key, level: 1, hp: 0, key, slot: p };
   }
   return cells;
 }
+
 
 /** A cursor over contiguous site-stock entries. After the literal QTY_* int32, the count
  *  entries are written back-to-back; we walk them by tag. Returns null if the tag mismatches. */
@@ -229,15 +226,6 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     const s = readDefaultString(buf, tag, f, e);
     if (s && s !== NULL_ID && s !== "000000") equip[k] = s;
   }
-  // Formation: UNIT_0..5 = the slot instance ids; POS_i = which slot fills formation CELL i
-  // (cell i = unitSlots[POS_i]). The raw slots + pos are the byte-exact snapshot; the editor works
-  // with the by-cell `garrisonRaw` (resolved to `garrison` in the post-pass).
-  const { unitSlots, posOfCell } = readSlots(buf, f, e);
-  const cells: (string | null)[] = [null, null, null, null, null, null];
-  for (let i = 0; i < 6; i++) {
-    const p = posOfCell[i]!;
-    if (p >= 0 && p < 6) cells[i] = unitSlots[p] ?? null;
-  }
   const itemIds = readAllStrings(buf, "ITEM_ID", f, e); // MidItem instance refs — the exact list on disk
   return {
     type: "stack",
@@ -265,10 +253,11 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(aiIgnore ? { aiIgnore: true } : {}),
     equip,
     // Carried inventory: an ITEM_ID list (MidItem instances → resolved to templates in the
-    // post-pass, like a chest). All shipped Riders stacks carry 0, but the structure is real.
+    // post-pass, like a chest); inventoryKeys keeps the on-disk instance ids, index-aligned.
     inventory: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
-    garrisonRaw: cells, // by-cell instance ids; resolved to garrison in post-pass
-    raw: { unitSlots, posOfCell, ...(leaderUnitId ? { leaderId: leaderUnitId } : {}), itemIds },
+    ...(itemIds.length ? { inventoryKeys: itemIds } : {}),
+    // formation members with on-disk identity (key+slot); enriched in the assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e),
   };
 }
 
@@ -287,6 +276,7 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
   const regen = readDefaultInt(buf, "REGEN_B", f, e);
   const growth = readDefaultInt(buf, "GROWTH_T", f, e);
   const stackRef = refOrUndef(readDefaultString(buf, "STACK", f, e));
+  const villageItemIds = readAllStrings(buf, "ITEM_ID", f, e); // captured loot — MidItem instance refs
   return {
     type: "village",
     id: obj.id,
@@ -300,10 +290,11 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(morale !== null ? { morale } : {}),
     ...(regen !== null ? { regen } : {}),
     ...(growth !== null ? { growth } : {}),
-    garrisonRaw: readGarrison(buf, f, e), // embedded instance ids; resolved in assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e), // enriched in the assemble post-pass
     ...(stackRef ? { stackRef } : {}),
-    // load-only byte-exact snapshot: the raw garrison slots + captured-loot ITEM_ID instance refs.
-    raw: { ...readSlots(buf, f, e), itemIds: readAllStrings(buf, "ITEM_ID", f, e) },
+    // captured-loot ITEM_ID list (instances → templates in the post-pass; keys index-aligned)
+    items: villageItemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    ...(villageItemIds.length ? { itemKeys: villageItemIds } : {}),
   };
 }
 
@@ -329,11 +320,11 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
     name,
     ...(desc !== null ? { desc } : {}), // present-but-empty -> editable; absent -> omit
     ...(priority !== null ? { priority } : {}),
-    garrisonRaw: readGarrison(buf, f, e), // city's OWN defense; resolved in assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e), // city's OWN defense; enriched in assemble post-pass
     ...(stackRef ? { stackRef } : {}),
     // resolved to GItem templates in the post-pass (like a chest); addRace seeds 3× G000IG0006
     items: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
-    raw: { ...readSlots(buf, f, e), itemIds }, // load-only byte-exact snapshot
+    ...(itemIds.length ? { itemKeys: itemIds } : {}),
   };
 }
 
@@ -363,9 +354,8 @@ export function readRuin(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(item ? { item } : {}),
     ...(priority !== null ? { priority } : {}),
     // the ruin's guardians (GROUP_ID + UNIT_0..5/POS_0..5 — same embedded-group layout as
-    // a fort's defense); resolved instance→impl in the assemble post-pass
-    garrisonRaw: readGarrison(buf, f, e),
-    raw: readSlots(buf, f, e), // load-only byte-exact snapshot (guardian garrison slots)
+    // a fort's defense); enriched instance→impl in the assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e),
   };
 }
 
@@ -460,7 +450,7 @@ export function readTreasure(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(priority !== null ? { priority } : {}),
     // resolved to templates in the post-pass; always present (possibly empty) for a stable shape
     items: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
-    raw: { itemIds }, // load-only byte-exact snapshot (ITEM_ID instance refs)
+    ...(itemIds.length ? { itemKeys: itemIds } : {}),
   };
 }
 
@@ -537,8 +527,11 @@ export function readUnit(buf: ByteBuffer, obj: FramedObject): Omit<UnitInstance,
     ...(implId ? { implId } : {}),
     ...(level !== null ? { level } : {}),
     ...(hp !== null ? { hp } : {}),
-    ...(xp !== null ? { xp } : {}),
-    ...(creation !== null ? { creation } : {}),
+    // XP/CREATION are omitted at their disk default (0) — like name/modifiers — so a freshly
+    // minted unit's reparse matches the bare {unit, level, hp} the op carried. unitFrame always
+    // writes `?? 0`, so the omission is byte-neutral.
+    ...(xp ? { xp } : {}),
+    ...(creation ? { creation } : {}),
     ...(name ? { name } : {}), // omit when empty; the writer re-emits an empty NAME_TXT
     ...(modifiers.length ? { modifiers } : {}),
     ...(transformed ? { transformed } : {}),

@@ -274,6 +274,7 @@ export function placeVillageOps(
     regen: 0,
     growth: 0,
     garrison: [null, null, null, null, null, null] as null[],
+    items: [] as string[], // captured loot — the reader always emits the (possibly empty) list
   };
   return [{ kind: "addObject", object: village as unknown as MapObject }];
 }

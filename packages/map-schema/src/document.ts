@@ -115,9 +115,9 @@ export const ItemInstance = z.object({
 });
 export type ItemInstance = z.infer<typeof ItemInstance>;
 
-/** A MidUnit instance block: a unit living inside a stack/fort garrison (NOT a placed object).
- *  Captured in FULL (impl/level/hp/xp/creation/name/modifiers) for a byte-exact model rebuild of
- *  the instance graph; the editor works with the resolved garrison and ignores this. */
+/** A MidUnit instance block record. Referenced units live INLINE on their garrison member
+ *  (GarrisonUnit carries the full entity + key/slot); this shape remains only for STRAY blocks
+ *  (see MapDocument.strayInstances) and internal parse plumbing. */
 export const UnitInstance = z.object({
   id: z.string(), // UNIT_ID (self, e.g. S143UN001a)
   implId: z.string().optional(), // TYPE — global Gunit template
@@ -233,10 +233,12 @@ export const MapDocument = z.object({
   variables: z.array(ScenarioVariable).default([]),
   templates: z.array(StackTemplate).default([]),
   diplomacy: z.array(DiplomacyEntry).default([]),
-  /** MidUnit / MidItem instance blocks — the graph that lives INSIDE stacks/forts/chests, kept for
-   *  a byte-exact model rebuild. Optional + editor-transparent (the resolved garrison/inventory on
-   *  the objects is what the UI uses). */
-  instances: z
+  /** STRAY MidUnit / MidItem blocks: instance blocks NO object references (dangling data the game
+   *  editor left behind — measured 62 units + 4 items across the 93-map corpus). Referenced
+   *  instances live inline on their owners (garrison members carry key+slot, item lists carry
+   *  itemKeys); only the unreachable leftovers need this typed home so the rebuild can re-emit
+   *  their blocks. Nothing edits these (they are unreachable by definition). */
+  strayInstances: z
     .object({
       units: z.array(UnitInstance).default([]),
       items: z.array(ItemInstance).default([]),

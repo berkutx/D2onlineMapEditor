@@ -72,7 +72,18 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       const obj = objects[i]! as Record<string, unknown>;
       const prevFields: Record<string, unknown> = {};
       for (const k of Object.keys(op.fields)) prevFields[k] = obj[k];
-      objects[i] = { ...(obj as object), ...op.fields } as MapObject;
+      const next = { ...(obj as object), ...op.fields } as Record<string, unknown>;
+      // Anti-stale invariant: itemKeys/inventoryKeys are index-aligned with items/inventory
+      // (on-disk entity ids). A patch that rewrites the list without providing fresh keys
+      // invalidates them — drop, and record the old keys so undo restores the alignment.
+      const fields = op.fields as Record<string, unknown>;
+      for (const [list, keys] of [["items", "itemKeys"], ["inventory", "inventoryKeys"]] as const) {
+        if (list in fields && !(keys in fields) && keys in next) {
+          prevFields[keys] = obj[keys];
+          delete next[keys];
+        }
+      }
+      objects[i] = next as unknown as MapObject;
       const inverse: EditOp = { kind: "patchObject", id: op.id, fields: prevFields };
       return { doc: replaceObjects(doc, objects), inverse };
     }
@@ -134,11 +145,12 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
         i < 0
           ? { kind: "deleteTemplate", id: op.template.id }
           : { kind: "upsertTemplate", template: templates[i]! };
-      // Drop the load-only verbatim slot layout: an EDITED template re-packs canonically — a
-      // stale `raw` replayed by the frame would silently overwrite the edit (the raw-staleness
-      // class of bug).
+      // Drop the on-disk slot layout: an EDITED template re-packs canonically — a stale
+      // slots/slotOfCell replayed by the frame would silently overwrite the edit (the
+      // staleness class of bug).
       const next = { ...op.template };
-      delete (next as { raw?: unknown }).raw;
+      delete (next as { slots?: unknown }).slots;
+      delete (next as { slotOfCell?: unknown }).slotOfCell;
       if (i < 0) templates.push(next);
       else templates[i] = next;
       return { doc: { ...doc, templates }, inverse };

@@ -10,19 +10,28 @@ import { applyOps } from "./ops.js";
 import type { EditOp } from "./ops.js";
 
 /**
- * A compound object's load-only `raw` snapshot (minted UNIT_/POS_/LEADER_ID/ITEM_ID refs) is an
- * EXPORT artifact, not semantic content: a PLACED/edited stack/village/ruin/bag mints fresh
- * instance ids at export, so its reparse can never match the pre-export op. Drop it before the
- * id-keyed comparison — the resolved garrison/leader/inventory/scalars still compare exactly.
+ * Strip the entities' PERSISTENT IDENTITY attributes before comparing: key/slot on garrison
+ * members, itemKeys/inventoryKeys on item lists, idMount on a mountains entry. These are minted
+ * at export (like DB auto-keys) — a PLACED/edited object's reparse carries fresh ones the
+ * pre-export op can't know. Everything semantic (units/levels/hp/xp/names/items/scalars) still
+ * compares exactly.
  */
-function stripStackRaw(objs: readonly MapObject[]): MapObject[] {
+function stripEntityIdentity(objs: readonly MapObject[]): MapObject[] {
   return objs.map((o) => {
-    // `idMount` on a mountains entry is the same kind of export artifact (a placed entry is
-    // numbered at export), so drop it alongside `raw`.
-    if (!("raw" in o) && !(o.type === "mountains" && "idMount" in o)) return o;
     const clone: Record<string, unknown> = { ...o };
-    delete clone.raw;
+    delete clone.itemKeys;
+    delete clone.inventoryKeys;
     delete clone.idMount;
+    const g = clone.garrison as ({ key?: string; slot?: number } | null)[] | undefined;
+    if (Array.isArray(g)) {
+      clone.garrison = g.map((m) => {
+        if (!m) return m;
+        const mc = { ...m };
+        delete mc.key;
+        delete mc.slot;
+        return mc;
+      });
+    }
     return clone as unknown as MapObject;
   });
 }
@@ -86,7 +95,7 @@ export function roundTripSemantic(
   // Objects compared by id, ORDER-INSENSITIVELY: re-emitted blocks (e.g. an
   // appended landmark, or a rebuilt single MidMountains block) can land at a
   // different array index than applyOp's in-memory order, but the set must match.
-  if (!equalById(stripStackRaw(reparsed.objects), stripStackRaw(expected.objects))) {
+  if (!equalById(stripEntityIdentity(reparsed.objects), stripEntityIdentity(expected.objects))) {
     return { ok: false, reason: "objects differ after round-trip" };
   }
   // Events compared by id, order-insensitively (an appended/re-emitted MidEvent can land at a
@@ -98,16 +107,18 @@ export function roundTripSemantic(
   if (!deepEqual(reparsed.variables ?? [], expected.variables ?? [])) {
     return { ok: false, reason: "variables differ after round-trip" };
   }
-  // templates: strip the load-only verbatim slot layout (an edited template re-packs canonically,
-  // so its reparse can't match the pre-edit raw — same artifact class as a stack's `raw`).
-  const stripTmplRaw = <T extends { raw?: unknown }>(a: readonly T[]): T[] =>
+  // templates: strip the on-disk slot layout (slots + slotOfCell) — an edited template re-packs
+  // canonically, so its reparse can't match the pre-edit layout (the same identity-attribute
+  // class as a garrison member's key/slot).
+  const stripTmplLayout = <T extends { slots?: unknown; slotOfCell?: unknown }>(a: readonly T[]): T[] =>
     a.map((t) => {
-      if (!("raw" in t)) return t;
+      if (!("slots" in t) && !("slotOfCell" in t)) return t;
       const clone = { ...t } as Record<string, unknown>;
-      delete clone.raw;
+      delete clone.slots;
+      delete clone.slotOfCell;
       return clone as unknown as T;
     });
-  if (!equalById(stripTmplRaw(reparsed.templates ?? []), stripTmplRaw(expected.templates ?? []))) {
+  if (!equalById(stripTmplLayout(reparsed.templates ?? []), stripTmplLayout(expected.templates ?? []))) {
     return { ok: false, reason: "templates differ after round-trip" };
   }
   if (!deepEqual(reparsed.diplomacy ?? [], expected.diplomacy ?? [])) {

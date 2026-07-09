@@ -139,14 +139,15 @@ export function stackTemplateFrame(version: string, tmpl: StackTemplate): Uint8A
     w.refField("ORDER_TARG", tmpl.orderTarget || EMPTY_REF);
     w.refField("SUBRACE", tmpl.subRace || EMPTY_REF);
     w.defaultInt("ORDER", tmpl.order);
-    // VERBATIM slot layout when captured at load (the packing is editing history — replaying it
-    // keeps the rebuild byte-exact); canonical re-pack for edited/fresh templates.
-    if (tmpl.raw && tmpl.raw.unitSlots.length === 6) {
+    // The typed SLOT layout when captured at load (slot packing is editing history + orphan
+    // slots are real on-disk data); canonical re-pack for edited/fresh templates (upsertTemplate
+    // drops slots/slotOfCell so a stale layout can never overwrite an edit).
+    if (tmpl.slots && tmpl.slots.length === 6 && tmpl.slotOfCell && tmpl.slotOfCell.length === 6) {
       for (let s = 0; s < 6; s++) {
-        w.refField(`UNIT_${s}`, tmpl.raw.unitSlots[s]!);
-        w.defaultInt(`UNIT_${s}_LVL`, tmpl.raw.levels[s] ?? 0);
+        w.refField(`UNIT_${s}`, tmpl.slots[s]?.unit || EMPTY_REF);
+        w.defaultInt(`UNIT_${s}_LVL`, tmpl.slots[s]?.level ?? 0);
       }
-      for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, tmpl.raw.posOfCell[i] ?? -1);
+      for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, tmpl.slotOfCell[i] ?? -1);
     } else {
       for (let s = 0; s < 6; s++) {
         const f = filled[s];
