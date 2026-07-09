@@ -249,6 +249,80 @@ export function capitalFrame(
   });
 }
 
+/**
+ * A MidPlayer block frame (code 0x11, short PL) — FULL D2Player.h field order, byte-verified:
+ * PLAYER_ID(self) · NAME_TXT · DESC_TXT · LORD_ID · RACE_ID · FOG_ID · KNOWN_ID · BUILDS_ID ·
+ * FACE · QTY_BREAKS · BANK · IS_HUMAN(value bool) · SPELL_BANK · ATTITUDE · RESEAR_T · CONSTR_T ·
+ * SPY_1..3 · CAPT_BY · [ALWAYSAI] · [EXMAPID/TURN 1..3]. The conditional tails are written iff
+ * the model captured them (presence == what was on disk; EES maps always carry both).
+ */
+export function playerFrame(
+  version: string,
+  second: number,
+  p: {
+    name?: string; desc?: string; lordId?: string; raceId?: string;
+    fogId?: string; knownId?: string; buildsId?: string;
+    face?: number; qtyBreaks?: number; bank?: string; isHuman?: boolean; spellBank?: string;
+    attitude?: number; researchT?: number; constructT?: number;
+    spy1?: string; spy2?: string; spy3?: string; capturedBy?: string;
+    alwaysAi?: boolean;
+    exMapId1?: string; exMapTurn1?: number;
+    exMapId2?: string; exMapTurn2?: number;
+    exMapId3?: string; exMapTurn3?: number;
+  },
+): Uint8Array {
+  const NIL = "G000000000";
+  const EMPTY_BANK = "G0000:R0000:Y0000:E0000:W0000:B0000";
+  return emitBlock(version, "MidPlayer", 0x11, "PL", second, (w, full) => {
+    w.refField("PLAYER_ID", full);
+    w.stringField("NAME_TXT", p.name ?? "");
+    w.stringField("DESC_TXT", p.desc ?? "");
+    w.refField("LORD_ID", p.lordId ?? "G000LR0001");
+    w.refField("RACE_ID", p.raceId ?? "G000RR0004");
+    w.refField("FOG_ID", p.fogId ?? NIL);
+    w.refField("KNOWN_ID", p.knownId ?? NIL);
+    w.refField("BUILDS_ID", p.buildsId ?? NIL);
+    w.defaultInt("FACE", p.face ?? 1);
+    w.defaultInt("QTY_BREAKS", p.qtyBreaks ?? 0);
+    w.stringField("BANK", p.bank ?? EMPTY_BANK);
+    w.bool("IS_HUMAN", p.isHuman ?? false);
+    w.stringField("SPELL_BANK", p.spellBank ?? EMPTY_BANK);
+    w.defaultInt("ATTITUDE", p.attitude ?? 1);
+    w.defaultInt("RESEAR_T", p.researchT ?? 0);
+    w.defaultInt("CONSTR_T", p.constructT ?? 0);
+    w.refField("SPY_1", p.spy1 ?? NIL);
+    w.refField("SPY_2", p.spy2 ?? NIL);
+    w.refField("SPY_3", p.spy3 ?? NIL);
+    w.refField("CAPT_BY", p.capturedBy ?? NIL);
+    if (p.alwaysAi !== undefined) w.bool("ALWAYSAI", p.alwaysAi);
+    if (p.exMapId1 !== undefined) {
+      w.refField("EXMAPID1", p.exMapId1 || NIL);
+      w.defaultInt("EXMAPTURN1", p.exMapTurn1 ?? 0);
+      w.refField("EXMAPID2", p.exMapId2 || NIL);
+      w.defaultInt("EXMAPTURN2", p.exMapTurn2 ?? 0);
+      w.refField("EXMAPID3", p.exMapId3 || NIL);
+      w.defaultInt("EXMAPTURN3", p.exMapTurn3 ?? 0);
+    }
+  });
+}
+
+/** A MidSubRace block frame (code 0x12, short SR): SUBRACE_ID(self) · SUBRACE · PLAYER_ID ·
+ *  NUMBER · NAME_TXT · BANNER — full D2SubRace.h port, byte-verified. */
+export function subraceFrame(
+  version: string,
+  second: number,
+  sr: { subrace: number; playerId: string; number: number; name: string; banner: number },
+): Uint8Array {
+  return emitBlock(version, "MidSubRace", 0x12, "SR", second, (w, full) => {
+    w.refField("SUBRACE_ID", full);
+    w.defaultInt("SUBRACE", sr.subrace);
+    w.refField("PLAYER_ID", sr.playerId || "G000000000");
+    w.defaultInt("NUMBER", sr.number);
+    w.stringField("NAME_TXT", sr.name);
+    w.defaultInt("BANNER", sr.banner);
+  });
+}
+
 /** A MidRod block frame (code 0x0e, short RD): ROD_ID(self) · OWNER · POS_X · POS_Y.
  *  Byte-verified on 33 pristine rods (ONE layout). */
 export function rodFrame(version: string, second: number, x: number, y: number, owner?: string): Uint8Array {

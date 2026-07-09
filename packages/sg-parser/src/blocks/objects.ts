@@ -12,6 +12,7 @@ import {
   readDefaultInt,
   readDefaultString,
   readAllStrings,
+  readBoolValue,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import type { MapObject, UnitInstance } from "@d2/map-schema";
@@ -73,13 +74,6 @@ function readIntAt(buf: ByteBuffer, p: number, tag: string): { value: number; ne
 function readBoolAt(buf: ByteBuffer, p: number, tag: string): { value: boolean; next: number } | null {
   if (buf.asciiSlice(p, p + tag.length) !== tag) return null;
   return { value: buf.bytes[p + tag.length] !== 0, next: p + tag.length + 1 };
-}
-
-/** Find `tag` in [from, end) and read its 1-byte value (bool). null if the tag is absent. */
-function readBoolValue(buf: ByteBuffer, tag: string, from: number, end: number): boolean | null {
-  const i = buf.indexOf(tag, from);
-  if (i < 0 || i >= end) return null;
-  return buf.bytes[i + tag.length] !== 0;
 }
 
 /** Merchant BUY_* toggle tags, in the block's field order. */

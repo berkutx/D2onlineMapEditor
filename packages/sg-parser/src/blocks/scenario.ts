@@ -11,11 +11,11 @@ import {
   ByteBuffer,
   readDefaultInt,
   readDefaultString,
-  readDefaultBool,
+  readBoolValue,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import { parseCompoundId } from "../framing.js";
-import type { MapHeader, PlayerInfo, DiplomacyEntry } from "@d2/map-schema";
+import type { MapHeader, PlayerInfo, DiplomacyEntry, SubRaceInfo } from "@d2/map-schema";
 
 export interface ScenarioInfo {
   size: number;
@@ -113,8 +113,12 @@ export function readDiplomacy(buf: ByteBuffer, obj: FramedObject): DiplomacyEntr
 }
 
 /**
- * Player. `playerNo` and `race` are derived from the RACE_ID/PLAYER_ID compound
- * 4-hex indices. IS_HUMAN is a presence-only bool flag.
+ * Player — FULL MidPlayer field set (D2Player.h port, byte-verified on the pristine corpus):
+ * PLAYER_ID · NAME_TXT · DESC_TXT · LORD_ID · RACE_ID · FOG_ID · KNOWN_ID · BUILDS_ID · FACE ·
+ * QTY_BREAKS · BANK · IS_HUMAN(value bool!) · SPELL_BANK · ATTITUDE · RESEAR_T · CONSTR_T ·
+ * SPY_1..3 · CAPT_BY · [ALWAYSAI] · [EXMAPID/TURN 1..3] (version-conditional tails — captured
+ * iff present, re-emitted iff captured). `playerNo`/`race` stay derived for the editor.
+ * NOTE: IS_HUMAN carries a VALUE byte — the old presence-only read reported every player human.
  */
 export function readPlayer(buf: ByteBuffer, obj: FramedObject): PlayerInfo {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
@@ -123,7 +127,33 @@ export function readPlayer(buf: ByteBuffer, obj: FramedObject): PlayerInfo {
   const raceId = readDefaultString(buf, "RACE_ID", f, e);
   const parsedPlayer = parseCompoundId(id);
   const parsedRace = raceId ? parseCompoundId(raceId) : null;
-  const isHuman = readDefaultBool(buf, "IS_HUMAN", f, e);
+  const isHuman = readBoolValue(buf, "IS_HUMAN", f, e) ?? false;
+
+  const str = (tag: string) => readDefaultString(buf, tag, f, e);
+  const int = (tag: string) => readDefaultInt(buf, tag, f, e);
+  const desc = str("DESC_TXT");
+  const lordId = str("LORD_ID");
+  const fogId = str("FOG_ID");
+  const knownId = str("KNOWN_ID");
+  const buildsId = str("BUILDS_ID");
+  const face = int("FACE");
+  const qtyBreaks = int("QTY_BREAKS");
+  const bank = str("BANK");
+  const spellBank = str("SPELL_BANK");
+  const attitude = int("ATTITUDE");
+  const researchT = int("RESEAR_T");
+  const constructT = int("CONSTR_T");
+  const spy1 = str("SPY_1");
+  const spy2 = str("SPY_2");
+  const spy3 = str("SPY_3");
+  const capturedBy = str("CAPT_BY");
+  const alwaysAi = readBoolValue(buf, "ALWAYSAI", f, e); // conditional on disk — null when absent
+  const exMapId1 = str("EXMAPID1");
+  const exMapTurn1 = int("EXMAPTURN1");
+  const exMapId2 = str("EXMAPID2");
+  const exMapTurn2 = int("EXMAPTURN2");
+  const exMapId3 = str("EXMAPID3");
+  const exMapTurn3 = int("EXMAPTURN3");
 
   return {
     id,
@@ -131,5 +161,46 @@ export function readPlayer(buf: ByteBuffer, obj: FramedObject): PlayerInfo {
     race: parsedRace ? parsedRace.index : 0,
     name,
     isHuman,
+    ...(desc !== null ? { desc } : {}),
+    ...(lordId !== null ? { lordId } : {}),
+    ...(raceId !== null ? { raceId } : {}),
+    ...(fogId !== null ? { fogId } : {}),
+    ...(knownId !== null ? { knownId } : {}),
+    ...(buildsId !== null ? { buildsId } : {}),
+    ...(face !== null ? { face } : {}),
+    ...(qtyBreaks !== null ? { qtyBreaks } : {}),
+    ...(bank !== null ? { bank } : {}),
+    ...(spellBank !== null ? { spellBank } : {}),
+    ...(attitude !== null ? { attitude } : {}),
+    ...(researchT !== null ? { researchT } : {}),
+    ...(constructT !== null ? { constructT } : {}),
+    ...(spy1 !== null ? { spy1 } : {}),
+    ...(spy2 !== null ? { spy2 } : {}),
+    ...(spy3 !== null ? { spy3 } : {}),
+    ...(capturedBy !== null ? { capturedBy } : {}),
+    ...(alwaysAi !== null ? { alwaysAi } : {}),
+    ...(exMapId1 !== null ? { exMapId1 } : {}),
+    ...(exMapTurn1 !== null ? { exMapTurn1 } : {}),
+    ...(exMapId2 !== null ? { exMapId2 } : {}),
+    ...(exMapTurn2 !== null ? { exMapTurn2 } : {}),
+    ...(exMapId3 !== null ? { exMapId3 } : {}),
+    ...(exMapTurn3 !== null ? { exMapTurn3 } : {}),
+  };
+}
+
+/** MidSubRace — full record (D2SubRace.h port): SUBRACE_ID(self) · SUBRACE · PLAYER_ID ·
+ *  NUMBER · NAME_TXT · BANNER. */
+export function readSubRace(buf: ByteBuffer, obj: FramedObject): SubRaceInfo {
+  const { fieldsFrom: f, fieldsEnd: e } = obj;
+  // "SUBRACE" is a PREFIX of the leading "SUBRACE_ID" tag — search the int field only after it.
+  const idTag = buf.indexOf("SUBRACE_ID", f);
+  const afterId = idTag >= 0 && idTag < e ? idTag + "SUBRACE_ID".length : f;
+  return {
+    id: obj.id,
+    subrace: readDefaultInt(buf, "SUBRACE", afterId, e) ?? 0,
+    playerId: readDefaultString(buf, "PLAYER_ID", f, e) ?? "G000000000",
+    number: readDefaultInt(buf, "NUMBER", f, e) ?? 0,
+    name: readDefaultString(buf, "NAME_TXT", f, e) ?? "",
+    banner: readDefaultInt(buf, "BANNER", f, e) ?? 0,
   };
 }

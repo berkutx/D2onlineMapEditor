@@ -1966,6 +1966,78 @@
               },
               "color": {
                 "type": "string"
+              },
+              "desc": {
+                "type": "string"
+              },
+              "lordId": {
+                "type": "string"
+              },
+              "raceId": {
+                "type": "string"
+              },
+              "fogId": {
+                "type": "string"
+              },
+              "knownId": {
+                "type": "string"
+              },
+              "buildsId": {
+                "type": "string"
+              },
+              "face": {
+                "type": "integer"
+              },
+              "qtyBreaks": {
+                "type": "integer"
+              },
+              "bank": {
+                "type": "string"
+              },
+              "spellBank": {
+                "type": "string"
+              },
+              "attitude": {
+                "type": "integer"
+              },
+              "researchT": {
+                "type": "integer"
+              },
+              "constructT": {
+                "type": "integer"
+              },
+              "spy1": {
+                "type": "string"
+              },
+              "spy2": {
+                "type": "string"
+              },
+              "spy3": {
+                "type": "string"
+              },
+              "capturedBy": {
+                "type": "string"
+              },
+              "alwaysAi": {
+                "type": "boolean"
+              },
+              "exMapId1": {
+                "type": "string"
+              },
+              "exMapTurn1": {
+                "type": "integer"
+              },
+              "exMapId2": {
+                "type": "string"
+              },
+              "exMapTurn2": {
+                "type": "integer"
+              },
+              "exMapId3": {
+                "type": "string"
+              },
+              "exMapTurn3": {
+                "type": "integer"
               }
             },
             "required": [
@@ -3434,6 +3506,41 @@
             }
           },
           "additionalProperties": false
+        },
+        "subraces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "subrace": {
+                "type": "integer"
+              },
+              "playerId": {
+                "type": "string"
+              },
+              "number": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "banner": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "subrace",
+              "playerId",
+              "number",
+              "name",
+              "banner"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [

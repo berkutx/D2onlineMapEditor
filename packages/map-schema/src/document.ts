@@ -51,8 +51,48 @@ export const PlayerInfo = z.object({
   name: z.string().default(""),
   isHuman: z.boolean().default(false),
   color: z.string().optional(), // derived team color hex (#rrggbb)
+  // ---- full MidPlayer field set (D2Player.h port, byte-verified) — all optional so old docs
+  // stay valid; refs are kept VERBATIM (the byte-exact value incl. version prefix / sentinel). ----
+  desc: z.string().optional(), // DESC_TXT
+  lordId: z.string().optional(), // LORD_ID — global Glord db id (e.g. G000LR0013)
+  raceId: z.string().optional(), // RACE_ID — global Grace db id (the string `race` is derived from)
+  fogId: z.string().optional(), // FOG_ID -> MidFog block ref
+  knownId: z.string().optional(), // KNOWN_ID -> PlayerKnownSpells block ref
+  buildsId: z.string().optional(), // BUILDS_ID -> PlayerBuildings block ref
+  face: z.number().int().optional(), // FACE portrait index
+  qtyBreaks: z.number().int().optional(), // QTY_BREAKS
+  bank: z.string().optional(), // BANK "G####:R####:Y####:E####:W####:B####"
+  spellBank: z.string().optional(), // SPELL_BANK (same resource-string format)
+  attitude: z.number().int().optional(), // ATTITUDE
+  researchT: z.number().int().optional(), // RESEAR_T — research on this turn
+  constructT: z.number().int().optional(), // CONSTR_T — construction on this turn
+  spy1: z.string().optional(), // SPY_1 ref (G000000000 = none)
+  spy2: z.string().optional(), // SPY_2
+  spy3: z.string().optional(), // SPY_3
+  capturedBy: z.string().optional(), // CAPT_BY ref
+  /** ALWAYSAI — version-conditional on disk (EES or offset==0); present iff it was read. */
+  alwaysAi: z.boolean().optional(),
+  /** EXMAPID1-3 / EXMAPTURN1-3 — EES-only trailing group; present iff read. */
+  exMapId1: z.string().optional(),
+  exMapTurn1: z.number().int().optional(),
+  exMapId2: z.string().optional(),
+  exMapTurn2: z.number().int().optional(),
+  exMapId3: z.string().optional(),
+  exMapTurn3: z.number().int().optional(),
 });
 export type PlayerInfo = z.infer<typeof PlayerInfo>;
+
+/** One MidSubRace table entry (D2SubRace.h port): the faction/banner record stacks & forts
+ *  link via SUBRACE. Full field set — byte-exact model rebuild. */
+export const SubRaceInfo = z.object({
+  id: z.string(), // full uid, e.g. "S143SR0003"
+  subrace: z.number().int(), // SUBRACE — LSubRace enum value
+  playerId: z.string(), // PLAYER_ID ref (verbatim, e.g. "S143PL0000" or the nil sentinel)
+  number: z.number().int(), // NUMBER
+  name: z.string(), // NAME_TXT (CP1251)
+  banner: z.number().int(), // BANNER — the sprite index stacks/forts resolve
+});
+export type SubRaceInfo = z.infer<typeof SubRaceInfo>;
 
 /** A MidItem instance block: a scenario item living inside a chest / stack inventory (NOT a
  *  placed object). ITEM_TYPE = the global GItem template it instantiates. */
@@ -104,5 +144,7 @@ export const MapDocument = z.object({
       items: z.array(ItemInstance).default([]),
     })
     .optional(),
+  /** MidSubRace table — full records (bannerIndex resolution reads from here). Additive. */
+  subraces: z.array(SubRaceInfo).optional(),
 });
 export type MapDocument = z.infer<typeof MapDocument>;

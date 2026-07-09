@@ -13,6 +13,7 @@ import {
   readScenarioInfo,
   readDiplomacy,
   readPlayer,
+  readSubRace,
   readMidgardMapSize,
   readMapBlock,
   readRoad,
@@ -36,7 +37,7 @@ import { readDefaultInt, readDefaultString } from "./bytebuffer.js";
 import { readEvent, readScenVariables, readStackTemplate } from "./blocks/events.js";
 import type {
   MapDocument, MapObject, PlayerInfo, MapHeader, GarrisonUnit, MapEvent, ScenarioVariable,
-  StackTemplate, DiplomacyEntry, UnitInstance,
+  StackTemplate, DiplomacyEntry, UnitInstance, SubRaceInfo,
 } from "@d2/map-schema";
 
 const DEFAULT_SG_VERSION = "S143";
@@ -76,6 +77,8 @@ interface Accumulated {
   roads: RoadRecord[];
   /** MidSubRace block index -> banner number (for stack/fort STACK_BANNER sprites). */
   subraceBanners: Map<number, number>;
+  /** Full MidSubRace records — the typed table the rebuild re-emits. */
+  subraces: SubRaceInfo[];
   /** MidItem instance id -> ITEM_TYPE global template id (for chest item resolution). */
   itemInstances: Record<string, string>;
   /** MidUnit instance id -> its FULL record (impl/level/hp/xp/creation/name/modifiers). Used for
@@ -135,11 +138,12 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       return;
     }
     case "MidSubRace": {
-      // Non-visual: capture only the banner number, keyed by the block's index,
-      // so stacks/forts can resolve their STACK_BANNER sprite via their SUBRACE link.
-      const banner = readDefaultInt(buf, "BANNER", obj.fieldsFrom, obj.fieldsEnd);
+      // Full record (rebuild re-emits it); the banner map is derived for the sprite resolution
+      // (stacks/forts resolve their STACK_BANNER via their SUBRACE link, keyed by block index).
+      const sr = readSubRace(buf, obj);
+      acc.subraces.push(sr);
       const idx = parseCompoundId(obj.id)?.index;
-      if (banner !== null && idx !== undefined) acc.subraceBanners.set(idx, banner);
+      if (idx !== undefined) acc.subraceBanners.set(idx, sr.banner);
       return;
     }
     case "MidMountains": {
@@ -221,6 +225,7 @@ export function assembleDocument(
     blocks: [],
     roads: [],
     subraceBanners: new Map(),
+    subraces: [],
     itemInstances: {},
     unitInstances: {},
   };
@@ -346,6 +351,7 @@ export function assembleDocument(
     templates: acc.templates,
     diplomacy: acc.diplomacy,
     instances: { units, items },
+    subraces: acc.subraces,
   };
 }
 
