@@ -459,6 +459,42 @@
                     },
                     "stackRef": {
                       "type": "string"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "raw": {
+                      "type": "object",
+                      "properties": {
+                        "unitSlots": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "posOfCell": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer"
+                          }
+                        },
+                        "leaderId": {
+                          "type": "string"
+                        },
+                        "itemIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -1676,6 +1712,33 @@
                     "type": {
                       "type": "string",
                       "const": "tomb"
+                    },
+                    "epitaphs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "owner": {
+                            "type": "string"
+                          },
+                          "killer": {
+                            "type": "string"
+                          },
+                          "turn": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "owner",
+                          "killer",
+                          "turn",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [

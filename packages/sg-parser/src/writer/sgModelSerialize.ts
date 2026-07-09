@@ -13,7 +13,7 @@
 import type { MapDocument, MapObject, ItemInstance, UnitInstance } from "@d2/map-schema";
 import {
   landmarkFrame, locationFrame, crystalFrame, siteFrame, itemFrame, unitFrame, stackFrame,
-  villageFrame, ruinFrame, bagFrame, mountainsFrame,
+  villageFrame, ruinFrame, bagFrame, mountainsFrame, capitalFrame, rodFrame, tombFrame,
 } from "./sgRebuild.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 
@@ -148,6 +148,28 @@ export function serializeTypedBlock(
         itemIds: obj.raw?.itemIds,
       });
     }
+    case "Capital": {
+      if (obj.type !== "capital") return null;
+      return capitalFrame(version, secondOf(obj.id), {
+        posX: obj.pos.x,
+        posY: obj.pos.y,
+        name: obj.name,
+        desc: obj.desc,
+        owner: obj.owner,
+        subRace: obj.subRace,
+        stackRef: obj.stackRef,
+        priority: obj.priority,
+        unitSlots: obj.raw?.unitSlots,
+        posOfCell: obj.raw?.posOfCell,
+        itemIds: obj.raw?.itemIds,
+      });
+    }
+    case "MidRod":
+      if (obj.type !== "rod") return null;
+      return rodFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.owner);
+    case "MidTomb":
+      if (obj.type !== "tomb") return null;
+      return tombFrame(version, secondOf(obj.id), obj.pos.x, obj.pos.y, obj.epitaphs ?? []);
     default:
       return null;
   }
@@ -265,6 +287,9 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
   "MidRuin",
   "MidBag",
   "MidMountains",
+  "Capital",
+  "MidRod",
+  "MidTomb",
 ]);
 
 /**

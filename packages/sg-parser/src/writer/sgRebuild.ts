@@ -205,6 +205,87 @@ export function villageFrame(
   });
 }
 
+/**
+ * A Capital block frame (code 0x0f, short FT — shared with MidVillage; disambiguated by the
+ * `.?AVC Capital` decl). Field order byte-verified on 215 pristine capitals (ONE layout):
+ * CITY_ID(self) · NAME_TXT · DESC_TXT · OWNER · SUBRACE · STACK · POS_X · POS_Y · GROUP_ID(self) ·
+ * UNIT_0..5 · POS_0..5 · <ownId> item count + N×ITEM_ID · AIPRIORITY. Like a village but WITHOUT
+ * the economy tail (PROTECT_B, REGEN_B, MORALE, GROWTH_T, SIZE, the P_O_ bools, RIOT_T).
+ */
+export function capitalFrame(
+  version: string,
+  second: number,
+  o: {
+    posX: number;
+    posY: number;
+    name?: string;
+    desc?: string;
+    owner?: string;
+    subRace?: string;
+    stackRef?: string;
+    priority?: number;
+    unitSlots?: readonly (string | null)[];
+    posOfCell?: readonly number[];
+    itemIds?: readonly string[];
+  },
+): Uint8Array {
+  const NIL = "G000000000";
+  return emitBlock(version, "Capital", 0x0f, "FT", second, (w, full) => {
+    w.refField("CITY_ID", full);
+    w.stringField("NAME_TXT", o.name ?? "");
+    w.stringField("DESC_TXT", o.desc ?? "");
+    w.refField("OWNER", o.owner || NIL);
+    w.refField("SUBRACE", o.subRace || NIL);
+    w.refField("STACK", o.stackRef || NIL);
+    w.defaultInt("POS_X", o.posX);
+    w.defaultInt("POS_Y", o.posY);
+    w.refField("GROUP_ID", full);
+    for (let i = 0; i < 6; i++) w.refField(`UNIT_${i}`, o.unitSlots?.[i] ?? NIL);
+    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, o.posOfCell?.[i] ?? -1);
+    const items = o.itemIds ?? [];
+    w.defaultInt(full, items.length); // stored-items count (tag = the capital's own id)
+    for (const id of items) w.refField("ITEM_ID", id);
+    w.defaultInt("AIPRIORITY", o.priority ?? 0);
+  });
+}
+
+/** A MidRod block frame (code 0x0e, short RD): ROD_ID(self) · OWNER · POS_X · POS_Y.
+ *  Byte-verified on 33 pristine rods (ONE layout). */
+export function rodFrame(version: string, second: number, x: number, y: number, owner?: string): Uint8Array {
+  return emitBlock(version, "MidRod", 0x0e, "RD", second, (w, full) => {
+    w.refField("ROD_ID", full);
+    w.refField("OWNER", owner || "G000000000");
+    w.defaultInt("POS_X", x);
+    w.defaultInt("POS_Y", y);
+  });
+}
+
+/**
+ * A MidTomb block frame (code 0x0f, short TB): TOMB_ID(self) · POS_X · POS_Y · QTY_EP +
+ * N×{STACK_OWNR(ref) · KILLER(ref) · TURN(int) · STACK_NAME(CP1251)}. Tombs are playthrough
+ * state (a stack died here) — 0 on authored maps; layout byte-verified on campaign saves.
+ */
+export function tombFrame(
+  version: string,
+  second: number,
+  x: number,
+  y: number,
+  epitaphs: readonly { owner: string; killer: string; turn: number; name: string }[] = [],
+): Uint8Array {
+  return emitBlock(version, "MidTomb", 0x0f, "TB", second, (w, full) => {
+    w.refField("TOMB_ID", full);
+    w.defaultInt("POS_X", x);
+    w.defaultInt("POS_Y", y);
+    w.defaultInt("QTY_EP", epitaphs.length);
+    for (const ep of epitaphs) {
+      w.refField("STACK_OWNR", ep.owner);
+      w.refField("KILLER", ep.killer);
+      w.defaultInt("TURN", ep.turn);
+      w.stringField("STACK_NAME", ep.name);
+    }
+  });
+}
+
 /** A MidUnit block frame (code 0x0f, short UN): a unit INSTANCE referenced by a fort garrison
  *  or a stack. Minimal body verified on real bytes: UNIT_ID(self) + TYPE(global Gunit id) +
  *  LEVEL + MODIF count(0, tag=self id) + CREATION(0) + NAME_TXT("") + TRANSF/DYNLEVEL(false) +

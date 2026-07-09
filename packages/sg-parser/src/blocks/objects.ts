@@ -292,6 +292,7 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
   const desc = readDefaultString(buf, "DESC_TXT", f, e);
   const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   const stackRef = refOrUndef(readDefaultString(buf, "STACK", f, e));
+  const itemIds = readAllStrings(buf, "ITEM_ID", f, e); // stored items — MidItem instance refs
   return {
     type: "capital",
     id: obj.id,
@@ -303,6 +304,9 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(priority !== null ? { priority } : {}),
     garrisonRaw: readGarrison(buf, f, e), // city's OWN defense; resolved in assemble post-pass
     ...(stackRef ? { stackRef } : {}),
+    // resolved to GItem templates in the post-pass (like a chest); addRace seeds 3× G000IG0006
+    items: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    raw: { ...readSlots(buf, f, e), itemIds }, // load-only byte-exact snapshot
   };
 }
 
@@ -445,12 +449,40 @@ export function readRod(buf: ByteBuffer, obj: FramedObject): MapObject {
   };
 }
 
-/** MidTomb (D2Tomb): a graveyard marker. Constant sprite G000TB0000G (no race). */
+/**
+ * MidTomb (D2Tomb): a graveyard marker — playthrough state (a stack died here). Body:
+ * TOMB_ID · POS_X · POS_Y · QTY_EP + N×{STACK_OWNR(ref) · KILLER(ref) · TURN(int) ·
+ * STACK_NAME(CP1251)}. 0 on authored maps; campaign saves carry epitaph lists.
+ */
 export function readTomb(buf: ByteBuffer, obj: FramedObject): MapObject {
+  const { fieldsFrom: f, fieldsEnd: e } = obj;
+  const epitaphs: { owner: string; killer: string; turn: number; name: string }[] = [];
+  const at = buf.indexOf("QTY_EP", f);
+  if (at >= 0 && at < e) {
+    const count = buf.readInt32LE(at + "QTY_EP".length);
+    let p = at + "QTY_EP".length + 4;
+    for (let i = 0; i < count; i++) {
+      const owner = readStrAt(buf, p, "STACK_OWNR");
+      if (!owner) break;
+      const killer = readStrAt(buf, owner.next, "KILLER");
+      if (!killer) break;
+      const turn = readIntAt(buf, killer.next, "TURN");
+      if (!turn) break;
+      // STACK_NAME is CP1251 (a player-visible stack name), not an ASCII ref
+      const np = turn.next;
+      if (buf.asciiSlice(np, np + "STACK_NAME".length) !== "STACK_NAME") break;
+      const len = buf.readInt32LE(np + "STACK_NAME".length);
+      const nameStart = np + "STACK_NAME".length + 4;
+      const name = buf.cp1251Slice(nameStart, nameStart + Math.max(0, len - 1));
+      epitaphs.push({ owner: owner.value, killer: killer.value, turn: turn.value, name });
+      p = nameStart + len;
+    }
+  }
   return {
     type: "tomb",
     id: obj.id,
     pos: pos(buf, obj),
+    ...(epitaphs.length ? { epitaphs } : {}),
   };
 }
 

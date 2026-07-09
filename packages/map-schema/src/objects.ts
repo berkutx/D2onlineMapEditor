@@ -136,6 +136,10 @@ export const CapitalObject = z.object({
   garrison: z.array(GarrisonUnit.nullable()).optional(),
   garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   stackRef: z.string().optional(), // STACK uid -> the visiting hero MidStack (the SECOND garrison)
+  /** ITEM_ID list — the capital's stored items (addRace seeds 3× G000IG0006), resolved to GItem
+   *  templates in the post-pass (like a chest). */
+  items: z.array(z.string()).optional(),
+  raw: InstanceRawSnapshot.optional(), // load-only byte-exact snapshot (garrison slots + item instances)
 });
 export const VillageObject = z.object({
   ...base,
@@ -263,9 +267,21 @@ export const RodObject = z.object({
   owner: z.string().optional(),
   race: z.number().int().optional(), // owner player's Grace index -> G000RR<rodRaceID>RROD8
 });
+/** One MidTomb epitaph: a stack that died on this cell — owner, killer, turn, stack name. */
+export const TombEpitaph = z.object({
+  owner: z.string(), // STACK_OWNR player ref
+  killer: z.string(), // KILLER player ref
+  turn: z.number().int(), // TURN
+  name: z.string(), // STACK_NAME (CP1251)
+});
+export type TombEpitaph = z.infer<typeof TombEpitaph>;
+
 export const TombObject = z.object({
   ...base,
   type: z.literal("tomb"), // constant sprite G000TB0000G
+  /** QTY_EP epitaph list — playthrough state (tombs appear only in campaign saves, 0 on
+   *  authored maps); modeled so a save round-trips through the full rebuild. */
+  epitaphs: z.array(TombEpitaph).optional(),
 });
 
 /** Fallback for any block type the parser does not yet model: keeps the map renderable

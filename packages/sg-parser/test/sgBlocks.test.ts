@@ -166,6 +166,8 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
     ["MidRuin", "ruin"],
     ["MidBag", "treasure"],
     ["MidMountains", "mountains"],
+    ["Capital", "capital"],
+    ["MidRod", "rod"],
   ] as const) {
     it(`${decl}: model-rebuild reparses, preserves objects, validates (byte-diff reported)`, () => {
       const before = parseScenario(bytes);
@@ -189,6 +191,22 @@ describe("@d2/sg-parser block-list STEP 3 — model-serialize typed blocks", () 
       expect(diffs, `${decl} model-rebuild should reproduce the original byte-for-byte`).toBe(0);
     });
   }
+
+  it("MidTomb: epitaph list rebuilds byte-for-byte (tombs = playthrough state, campaign save only)", () => {
+    // Tombs never appear on authored maps (0 in the pristine corpus) — gate on a campaign save
+    // that carries real epitaphs (an S132-format map; the frame derives the version from the doc).
+    const tombMap = campaignMap(join("Возвращение Галлеана", "Орды Нежити", "1. BOONS ON BLACK TONGUES.SG"));
+    let b: Uint8Array;
+    try {
+      b = read(tombMap);
+    } catch {
+      return; // that campaign isn't part of this install — nothing to gate
+    }
+    const doc = parseScenario(b);
+    expect(doc.objects.some((o) => o.type === "tomb" && (o.epitaphs?.length ?? 0) > 0)).toBe(true);
+    const out = rebuildScenario(rebuildFromModel(splitScenario(b), doc, new Set(["MidTomb"])));
+    expect(countDiffs(b, out), "MidTomb model-rebuild should be byte-exact").toBe(0);
+  });
 });
 
 describe("@d2/sg-parser block-list STEP 4 — full-rebuild export path (rebuildBytes)", () => {

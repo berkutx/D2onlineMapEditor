@@ -289,6 +289,9 @@ export function assembleDocument(
       o.items = o.items.map((inst) => acc.itemInstances[inst] ?? inst);
     } else if (o.type === "stack" && o.inventory) {
       o.inventory = o.inventory.map((inst) => acc.itemInstances[inst] ?? inst);
+    } else if (o.type === "capital" && o.items) {
+      // the capital's stored items (addRace seeds 3× G000IG0006) — same instance→template resolve
+      o.items = o.items.map((inst) => acc.itemInstances[inst] ?? inst);
     }
   }
 
