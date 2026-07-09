@@ -109,6 +109,16 @@ raw passthrough still exists; each one exits the raw path the moment its fields 
 three orderings + entity keys — a few bits per object, all typed. The no-raw-bytes target costs
 almost nothing.
 
+**Reference parity (verified in toolsqt sources):** the reference does EXACTLY this. `D2Stack`
+keeps `int unit[6]; int pos[6]; int leaderId;` — typed fields stored as read, re-serialized
+verbatim with no normalization (ids as plain ints; the `S143UN` prefix is reconstructed at write
+time from version+type). Block order = the `m_blocks` list in read order (`save()` = `foreach`).
+Raw bytes exist in exactly ONE place: `TagDataBlock { QByteArray m_data; }` — the passthrough for
+block types toolsqt never modeled (their permanent class 4). Id allocation for new objects lives
+in the editor layer (max+1 per type — already ported to `place.ts`). Our target = the reference's
+scheme MINUS `TagDataBlock`: finish class 4 and delete the raw path entirely — the one step the
+reference never took.
+
 ---
 
 ## 2. Hardcoded constants — fields we ASSUME invariant (from-scratch risk)
