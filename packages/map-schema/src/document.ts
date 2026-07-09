@@ -31,6 +31,19 @@ export const MapHeader = z.object({
       city: z.number().int(),
     })
     .optional(),
+  // ---- full ScenarioInfo field set (D2ScenarioInfo.h port) — additive/optional. ----
+  campaign: z.string().optional(), // CAMPAIGN db ref (e.g. "C000CC0001")
+  sourceM: z.boolean().optional(), // SOURCE_M value bool
+  qtyCities: z.number().int().optional(), // QTY_CITIES
+  flagO: z.boolean().optional(), // the single-letter "O" value bool
+  curTurn: z.number().int().optional(), // CUR_TURN
+  /** PLAYER_1..PLAYER_13 — fixed 13-int list (99 = closed slot). */
+  playerSlots: z.array(z.number().int()).optional(),
+  /** DEBUNKW,2..5 — the VERBATIM on-disk victory-text parts ('_' continuations intact).
+   *  `winText` stays the derived joined/stripped view; parts are the byte-exact source. */
+  winTextParts: z.array(z.string()).optional(),
+  /** BRIEFLONG1..5 — the VERBATIM on-disk story parts (see winTextParts). */
+  storyParts: z.array(z.string()).optional(),
 });
 export type MapHeader = z.infer<typeof MapHeader>;
 

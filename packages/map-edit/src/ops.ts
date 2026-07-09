@@ -9,6 +9,7 @@
 import type { MapDocument, MapObject, MapCell } from "@d2/map-schema";
 import { MapEvent } from "@d2/map-schema";
 import { EditOp } from "@d2/socket-contract";
+import { splitMultiString } from "@d2/sg-parser";
 import { makeCell } from "./bits.js";
 
 export { EditOp };
@@ -160,7 +161,14 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
           : v;
       }
       const inverse: EditOp = { kind: "setScenarioInfo", fields: prev as typeof op.fields };
-      return { doc: { ...doc, header: { ...doc.header, ...op.fields } }, inverse };
+      const nextHeader = { ...doc.header, ...op.fields };
+      // The byte writer splices story/winText as '_'-multi-parts (splitMultiString); keep the
+      // VERBATIM parts in sync so the model matches the reparse AND a later model rebuild
+      // doesn't replay stale parts (the raw-staleness class of bug).
+      const f = op.fields as { winText?: unknown; story?: unknown };
+      if (typeof f.winText === "string") nextHeader.winTextParts = splitMultiString(f.winText, 5);
+      if (typeof f.story === "string") nextHeader.storyParts = splitMultiString(f.story, 5);
+      return { doc: { ...doc, header: nextHeader }, inverse };
     }
 
     case "setDiplomacy": {

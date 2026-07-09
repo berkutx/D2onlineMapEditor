@@ -250,6 +250,77 @@ export function capitalFrame(
 }
 
 /**
+ * The ScenarioInfo block frame (code 0x14, short IF, singleton) — FULL D2ScenarioInfo.h field
+ * order, byte-verified: INFO_ID(self) · CAMPAIGN · SOURCE_M(bool) · QTY_CITIES · NAME · DESC ·
+ * BRIEFING · DEBUNKW,2..5 · DEBUNKL · BRIEFLONG1..5 · O(bool) · CUR_TURN · MAX_UNIT · MAX_SPELL ·
+ * MAX_LEADER · MAX_CITY · MAP_SIZE · DIFFSCEN · DIFFGAME · CREATOR · PLAYER_1..13 · SUGG_LVL ·
+ * MAP_SEED. Multi-string parts are written VERBATIM (their '_' continuations + boundaries are
+ * on-disk history the model preserves as typed strings).
+ */
+export function scenarioInfoFrame(
+  version: string,
+  second: number,
+  h: {
+    name?: string; description?: string; author?: string;
+    objective?: string; loseText?: string;
+    storyParts?: readonly string[]; winTextParts?: readonly string[];
+    story?: string; winText?: string;
+    campaign?: string; sourceM?: boolean; qtyCities?: number; flagO?: boolean; curTurn?: number;
+    playerSlots?: readonly number[];
+    difficulty?: { scenario: number; game: number };
+    limits?: { unit: number; spell: number; leader: number; city: number };
+    suggestedLevel?: number; seed?: number;
+  },
+  size: number,
+): Uint8Array {
+  // PRESENCE-DRIVEN: version-conditional / optional groups are written exactly as captured
+  // (an old-format map carries only DEBUNKW and may lack later groups). Fallback for a doc with
+  // no verbatim parts: the joined text as a single part.
+  const win = h.winTextParts?.length ? [...h.winTextParts] : [h.winText ?? ""];
+  const long = h.storyParts?.length ? [...h.storyParts] : [h.story ?? ""];
+  const WIN_TAGS = ["DEBUNKW", "DEBUNKW2", "DEBUNKW3", "DEBUNKW4", "DEBUNKW5"];
+  const LONG_TAGS = ["BRIEFLONG1", "BRIEFLONG2", "BRIEFLONG3", "BRIEFLONG4", "BRIEFLONG5"];
+  return emitBlock(version, "ScenarioInfo", 0x14, "IF", second, (w, full) => {
+    w.refField("INFO_ID", full);
+    if (h.campaign !== undefined) w.refField("CAMPAIGN", h.campaign);
+    if (h.sourceM !== undefined) w.bool("SOURCE_M", h.sourceM);
+    if (h.qtyCities !== undefined) w.defaultInt("QTY_CITIES", h.qtyCities);
+    w.stringField("NAME", h.name ?? "");
+    w.stringField("DESC", h.description ?? "");
+    w.stringField("BRIEFING", h.objective ?? "");
+    win.forEach((p, i) => { if (i < WIN_TAGS.length) w.stringField(WIN_TAGS[i]!, p); });
+    w.stringField("DEBUNKL", h.loseText ?? "");
+    long.forEach((p, i) => { if (i < LONG_TAGS.length) w.stringField(LONG_TAGS[i]!, p); });
+    if (h.flagO !== undefined) w.bool("O", h.flagO);
+    if (h.curTurn !== undefined) w.defaultInt("CUR_TURN", h.curTurn);
+    if (h.limits) {
+      w.defaultInt("MAX_UNIT", h.limits.unit);
+      w.defaultInt("MAX_SPELL", h.limits.spell);
+      w.defaultInt("MAX_LEADER", h.limits.leader);
+      w.defaultInt("MAX_CITY", h.limits.city);
+    }
+    w.defaultInt("MAP_SIZE", size);
+    if (h.difficulty) {
+      w.defaultInt("DIFFSCEN", h.difficulty.scenario);
+      w.defaultInt("DIFFGAME", h.difficulty.game);
+    }
+    w.stringField("CREATOR", h.author ?? "");
+    if (h.playerSlots?.length === 13)
+      for (let i = 1; i <= 13; i++) w.defaultInt(`PLAYER_${i}`, h.playerSlots[i - 1]!);
+    if (h.suggestedLevel !== undefined) w.defaultInt("SUGG_LVL", h.suggestedLevel);
+    if (h.seed !== undefined) w.defaultInt("MAP_SEED", h.seed);
+  });
+}
+
+/** The MidgardMap block frame (code 0x12, short MP, singleton): ONE field — the map size,
+ *  tagged with the block's own full id (D2Map.h). */
+export function mapFrame(version: string, second: number, size: number): Uint8Array {
+  return emitBlock(version, "MidgardMap", 0x12, "MP", second, (w, full) => {
+    w.defaultInt(full, size);
+  });
+}
+
+/**
  * A MidPlayer block frame (code 0x11, short PL) — FULL D2Player.h field order, byte-verified:
  * PLAYER_ID(self) · NAME_TXT · DESC_TXT · LORD_ID · RACE_ID · FOG_ID · KNOWN_ID · BUILDS_ID ·
  * FACE · QTY_BREAKS · BANK · IS_HUMAN(value bool) · SPELL_BANK · ATTITUDE · RESEAR_T · CONSTR_T ·

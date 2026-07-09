@@ -12,6 +12,7 @@ import {
   readDefaultInt,
   readDefaultString,
   readBoolValue,
+  stripTrailingNul,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import { parseCompoundId } from "../framing.js";
@@ -43,14 +44,31 @@ export function readScenarioInfo(buf: ByteBuffer, obj: FramedObject): ScenarioIn
   const game = readDefaultInt(buf, "DIFFGAME", f, e);
 
   // scenario texts: BRIEFING (short objective), BRIEFLONG1-5 (story), DEBUNKW+W2-5 (victory),
-  // DEBUNKL (defeat). The long ones use the '_' multi-part convention.
+  // DEBUNKL (defeat). The long ones use the '_' multi-part convention. Parts are read with a
+  // MOVING CURSOR (consecutive on disk): a plain indexOf-per-tag false-matches when a value's
+  // LENGTH byte forms the next tag (e.g. DEBUNKW len 0x33 = ASCII '3' reads as "DEBUNKW3").
   const objective = readDefaultString(buf, "BRIEFING", f, e) ?? "";
-  const story = ["BRIEFLONG1", "BRIEFLONG2", "BRIEFLONG3", "BRIEFLONG4", "BRIEFLONG5"]
-    .map((t) => multiPart(readDefaultString(buf, t, f, e)))
-    .join("");
-  const winText = ["DEBUNKW", "DEBUNKW2", "DEBUNKW3", "DEBUNKW4", "DEBUNKW5"]
-    .map((t) => multiPart(readDefaultString(buf, t, f, e)))
-    .join("");
+  const readParts = (tags: string[]): string[] => {
+    const out: string[] = [];
+    let cursor = f;
+    for (const t of tags) {
+      const i = buf.indexOf(t, cursor);
+      if (i < 0 || i >= e) break;
+      const lenAt = i + t.length;
+      const len = buf.readInt32LE(lenAt);
+      if (len < 0 || lenAt + 4 + len > e) break;
+      out.push(stripTrailingNul(buf.cp1251Slice(lenAt + 4, lenAt + 4 + len)));
+      cursor = lenAt + 4 + len;
+    }
+    return out;
+  };
+  // VERBATIM multi-string parts ('_' continuations + boundaries intact = on-disk history);
+  // PRESENCE-DRIVEN: old-format maps carry only DEBUNKW — capture exactly what exists.
+  const storyParts = readParts(["BRIEFLONG1", "BRIEFLONG2", "BRIEFLONG3", "BRIEFLONG4", "BRIEFLONG5"]);
+  const winTextParts = readParts(["DEBUNKW", "DEBUNKW2", "DEBUNKW3", "DEBUNKW4", "DEBUNKW5"]);
+  // the joined editor view derives FROM the parts (single source, no re-scan)
+  const story = storyParts.map((p) => multiPart(p)).join("");
+  const winText = winTextParts.map((p) => multiPart(p)).join("");
   const loseText = readDefaultString(buf, "DEBUNKL", f, e) ?? "";
 
   const maxUnit = readDefaultInt(buf, "MAX_UNIT", f, e);
@@ -59,6 +77,26 @@ export function readScenarioInfo(buf: ByteBuffer, obj: FramedObject): ScenarioIn
   const maxCity = readDefaultInt(buf, "MAX_CITY", f, e);
   const suggestedLevel = readDefaultInt(buf, "SUGG_LVL", f, e);
   const seed = readDefaultInt(buf, "MAP_SEED", f, e);
+
+  // ---- full D2ScenarioInfo field set (byte-exact model rebuild) ----
+  const campaign = readDefaultString(buf, "CAMPAIGN", f, e);
+  const sourceM = readBoolValue(buf, "SOURCE_M", f, e);
+  const qtyCities = readDefaultInt(buf, "QTY_CITIES", f, e);
+  const curTurn = readDefaultInt(buf, "CUR_TURN", f, e);
+  // the single-letter "O" bool sits immediately BEFORE the CUR_TURN tag (indexOf("O") would
+  // false-match text bytes, so locate it positionally and verify the tag byte).
+  const ct = buf.indexOf("CUR_TURN", f);
+  const flagO = ct > f + 1 && ct < e && buf.asciiSlice(ct - 2, ct - 1) === "O"
+    ? buf.bytes[ct - 1] !== 0
+    : null;
+  // PLAYER_1..13 — fixed 13-int list (PLAYER_1 precedes PLAYER_10.. on disk, so the prefix
+  // collision resolves positionally).
+  const playerSlots: number[] = [];
+  for (let i = 1; i <= 13; i++) {
+    const v = readDefaultInt(buf, `PLAYER_${i}`, f, e);
+    if (v === null) { playerSlots.length = 0; break; }
+    playerSlots.push(v);
+  }
 
   const header: MapHeader = {
     name,
@@ -78,6 +116,14 @@ export function readScenarioInfo(buf: ByteBuffer, obj: FramedObject): ScenarioIn
     ...(maxUnit !== null && maxSpell !== null && maxLeader !== null && maxCity !== null
       ? { limits: { unit: maxUnit, spell: maxSpell, leader: maxLeader, city: maxCity } }
       : {}),
+    ...(campaign !== null ? { campaign } : {}),
+    ...(sourceM !== null ? { sourceM } : {}),
+    ...(qtyCities !== null ? { qtyCities } : {}),
+    ...(flagO !== null ? { flagO } : {}),
+    ...(curTurn !== null ? { curTurn } : {}),
+    ...(playerSlots.length === 13 ? { playerSlots } : {}),
+    ...(storyParts.length ? { storyParts } : {}),
+    ...(winTextParts.length ? { winTextParts } : {}),
   };
   return { size, header };
 }

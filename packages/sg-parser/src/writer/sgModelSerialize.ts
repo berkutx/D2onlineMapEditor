@@ -14,7 +14,7 @@ import type { MapDocument, MapObject, ItemInstance, UnitInstance } from "@d2/map
 import {
   landmarkFrame, locationFrame, crystalFrame, siteFrame, itemFrame, unitFrame, stackFrame,
   villageFrame, ruinFrame, bagFrame, mountainsFrame, capitalFrame, rodFrame, tombFrame,
-  playerFrame, subraceFrame,
+  playerFrame, subraceFrame, scenarioInfoFrame, mapFrame,
 } from "./sgRebuild.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 
@@ -244,6 +244,11 @@ export function rebuildFromModel(
       const sr = (doc.subraces ?? []).find((x) => x.id === b.id);
       return sr ? { ...b, bytes: subraceFrame(version, secondOf(b.id), sr) } : b;
     }
+    // Singletons from the header.
+    if (b.typeName === "ScenarioInfo")
+      return { ...b, bytes: scenarioInfoFrame(version, secondOf(b.id), doc.header, doc.size) };
+    if (b.typeName === "MidgardMap")
+      return { ...b, bytes: mapFrame(version, secondOf(b.id), doc.size) };
     const obj = b.id ? byId.get(b.id) : undefined;
     if (!obj) return b;
     const frame = serializeTypedBlock(b.typeName, obj, version);
@@ -302,6 +307,8 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
   "MidTomb",
   "MidPlayer",
   "MidSubRace",
+  "ScenarioInfo",
+  "MidgardMap",
 ]);
 
 /**

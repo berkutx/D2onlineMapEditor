@@ -91,6 +91,39 @@
                 "city"
               ],
               "additionalProperties": false
+            },
+            "campaign": {
+              "type": "string"
+            },
+            "sourceM": {
+              "type": "boolean"
+            },
+            "qtyCities": {
+              "type": "integer"
+            },
+            "flagO": {
+              "type": "boolean"
+            },
+            "curTurn": {
+              "type": "integer"
+            },
+            "playerSlots": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "winTextParts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "storyParts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
