@@ -240,6 +240,13 @@ editor's place-ops → `applyBytes`, using the same frames. Concrete from-scratc
 
 ## 8. Remaining work (ordered) + the gold-check
 
+**STATUS 2026-07-10: steps 1-4 are DONE.** REBUILD_TYPES = 38 = every block type on the corpus;
+`rebuildBytes(x, parse(x)) === x` on all 80 pristine originals AND 55/55 campaign saves with
+**ZERO raw passthrough** (a census in the gate proves no block falls back to TagDataBlock-style
+copying). Newly modeled along the way: MidSiteResourceMarket (mod-era 5th site kind: CUSTOM +
+embedded Lua CODE + BANK + INF - the tail is read positionally because Lua text can contain
+tag-like substrings). Remaining: step 5 (the entity refactor) and step 6 (the ScenEdit gold-check).
+
 1. **Close the object set:** add **Capital** (clone the village garrison path), then **Rod/Tomb**
    (trivial) → 100% of object blocks model-driven.
 2. **Fold in the mechanical non-object blocks:** terrain (`MidgardMapBlock`), `MidRoad`, `MidPlayer`,
