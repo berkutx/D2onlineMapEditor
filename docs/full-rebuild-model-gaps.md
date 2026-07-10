@@ -267,9 +267,19 @@ itemKeys/inventoryKeys, idMount, template slots) — the DB-auto-key analogy, no
 Bonus fix: applyBytes garrison re-mint now carries xp/creation/name/modifiers into the fresh
 MidUnit (before, editing a garrison silently reset a veteran's XP/name in the bytes).
 
-Remaining: step 6 (the ScenEdit gold-check). Known non-goal (unchanged): `rebuildBytes` of an
-object whose garrison was EDITED in-session returns the block raw-unchanged (members lose key/slot
-on edit; minting fresh ids is applyBytes' job — the production export path).
+**Step 6 (the ScenEdit gold-check) is DONE — the roadmap is COMPLETE.** Protocol: every corpus
+map got a battery of MODEL edits (scenario/village/location/event/template rename + stack
+facing), was exported via the FULL model rebuild (bytes genuinely diverge from the original),
+and fed to the map's own mod editor (`last_version` ScenEdit, headless: null-render cnc-ddraw
+as C4dll-R.dll + `ScenEditDatabase=0`, driven by `tools/scen-tester` posted messages under a
+Win32 debugger). Result: **originals 80/80 PASS, model-rebuilt-with-edits 80/80 PASS** —
+loaded AND re-saved by the game's own validator, zero rejections. (First attempt against the
+slasher install produced a false signal — 29/30 originals rejected on ITS mod DB, `MidItem:
+Invalid type G000IG7105` — always gold-check against the mod the maps were written for.)
+
+Known non-goal (unchanged): `rebuildBytes` of an object whose garrison was EDITED in-session
+returns the block raw-unchanged (members lose key/slot on edit; minting fresh ids is
+applyBytes' job — the production export path).
 
 1. **Close the object set:** add **Capital** (clone the village garrison path), then **Rod/Tomb**
    (trivial) → 100% of object blocks model-driven.
