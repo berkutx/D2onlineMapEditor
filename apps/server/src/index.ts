@@ -13,7 +13,7 @@ async function main(): Promise<void> {
 
   // Ensure the HTTP server exists before socket.io attaches to it.
   await app.ready();
-  const { io } = createIo(app.server, store, log);
+  const { io, snapshots } = createIo(app.server, store, log);
 
   await app.listen({ port: config.PORT, host: config.HOST });
 
@@ -48,6 +48,7 @@ async function main(): Promise<void> {
     // appendFile is still queued is lost on restart (the very event the log must survive).
     try {
       await log.flush();
+      await snapshots.flush(); // persist any in-flight gz snapshot too (derived, but avoids a re-fold)
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("[@d2/server] EditLog flush failed on shutdown:", e);
