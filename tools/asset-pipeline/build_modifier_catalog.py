@@ -37,6 +37,19 @@ from build_item_catalog import read_dbf, _find, ascii_, cp866_
 
 NULL_REF = "G000000000"
 
+# The game's own "this modifier has no name" placeholder (Tglobal x000tg6000). ~278 Gmodif
+# rows have a GmodifL detail whose DESC token resolves to it — we must IGNORE it (fall through
+# to the generated stat+magnitude) instead of surfacing it as the name.
+NO_NAME = "!! Отсутствует название модификатора !!"
+
+# IMMUNITY source id (GmodifL.IMMUNITY) -> RU school. Derived from the resist_source_* scripts
+# / the dialog set's known names; covers the 6 elemental schools + the physical wards. IMMUNECAT
+# (LImmune): 2 = L_ONCE (снимаемая «Защита»), 3 = L_ALWAYS («Иммунитет»).
+IMMUNE_SCHOOL = {
+    1: "оружия", 2: "разума", 3: "жизни", 4: "смерти", 5: "воды",
+    6: "земли", 7: "воздуха", 8: "огня", 9: "источника",
+}
+
 # LmodifE TYPE -> (class, RU stat label, magnitude mode: True=PERCENT, False=NUMBER, "auto")
 TYPE_MAP = {
     1: ("scout", "обзор", False),
@@ -129,6 +142,37 @@ def _clean_text(t):
     return re.sub(r"^\\f\w+;", "", t).strip()
 
 
+# Last-resort NAME for mod-added modifiers with no text/stat at all (341/1575, all G024/G040/
+# G203 item+perk .lua hooks): humanize the script basename — far more useful than the raw id.
+# Common tokens → RU; the rest stay as prettified English so it's at least readable.
+_SCRIPT_TOKENS = {
+    "banner": "знамя", "boots": "сапоги", "art": "артефакт", "potion": "зелье",
+    "relic": "реликвия", "orb": "сфера", "talisman": "талисман", "wand": "жезл",
+    "perks": "перк", "perk": "перк", "items": "предмет", "spells": "заклинание",
+    "walk": "ход", "speed": "скорость", "move": "передвижение", "great": "великий",
+    "traveler": "путешественник", "forest": "лес", "water": "вода", "fire": "огонь",
+    "earth": "земля", "air": "воздух", "death": "смерть", "mind": "разум",
+    "weapon": "оружие", "critical": "крит.", "hit": "удар", "rune": "руна",
+    "guardian": "страж", "fallen": "павший", "regen": "регенерация", "armor": "броня",
+    "hp": "здоровье", "damage": "урон", "heal": "лечение", "immune": "иммунитет",
+    "resist": "защита", "leadership": "лидерство", "scout": "обзор", "sea": "море",
+}
+
+
+def script_label(scr):
+    base = re.split(r"[\\/]", scr)[-1]
+    base = re.sub(r"\.lua$", "", base, flags=re.IGNORECASE)
+    # split on separators, camelCase boundaries, and letter↔digit boundaries
+    base = re.sub(r"(?<=[a-zа-я])(?=[A-ZА-Я])", " ", base)
+    base = re.sub(r"(?<=[A-Za-zА-Яа-я])(?=\d)|(?<=\d)(?=[A-Za-zА-Яа-я])", " ", base)
+    parts = [p for p in re.split(r"[_\-\s]+", base) if p]
+    if not parts:
+        return ""
+    words = [_SCRIPT_TOKENS.get(p.lower(), p) for p in parts]
+    label = " ".join(words).strip()
+    return label[:1].upper() + label[1:] if label else ""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
@@ -147,7 +191,17 @@ def main():
         texts[ascii_(r["TXT_ID"]).strip().lower()] = _clean_text(cp866_(r["TEXT"]))
 
     def resolve(token):
-        return texts.get(ascii_(token).strip().lower(), "") if ascii_(token).strip() else ""
+        t = texts.get(ascii_(token).strip().lower(), "") if ascii_(token).strip() else ""
+        return "" if t == NO_NAME else t  # the game's "no name" placeholder is not a name
+
+    def immune_effect(d):
+        """«Иммунитет/Защита от <школы>» from GmodifL IMMUNITY + IMMUNECAT (L_ONCE/L_ALWAYS)."""
+        src = _int(d["IMMUNITY"]) or _int(d["IMMUNITYC"])
+        cat = _int(d["IMMUNECAT"]) or _int(d["IMMUNECATC"])
+        school = IMMUNE_SCHOOL.get(src)
+        if not school:
+            return None
+        return ("Иммунитет от %s" if cat == 3 else "Защита от %s") % school
 
     out = []
     for row in gmodif:
@@ -163,14 +217,21 @@ def main():
         cls = None
         effects = []
         for d in details:
-            tm = TYPE_MAP.get(_int(d["TYPE"]))
+            t = _int(d["TYPE"])
+            tm = TYPE_MAP.get(t)
             if tm and cls is None:
                 cls = tm[0]
-            # per-detail text beats generated stat+magnitude
+            # per-detail text beats generated stat+magnitude (placeholder already filtered out)
             dt = resolve(d["DESC"])
             if dt:
                 effects.append(dt)
                 continue
+            # immunity/ward types (12/14) carry no PCT/NUM — describe the warded school instead
+            if t in (12, 14):
+                imm = immune_effect(d)
+                if imm:
+                    effects.append(imm)
+                    continue
             if not tm:
                 continue
             _, ru, mode = tm
@@ -180,7 +241,8 @@ def main():
             elif mode is False:
                 effects.append("%+d %s" % (num, ru) if num else ru)
             elif mode == "auto":
-                v, suf = (num, "") if num else (pct, "%")
+                # hp «усиления» carry both PCT (real) and NUM=1 (flag) — prefer the percent
+                v, suf = (pct, "%") if pct else (num, "")
                 effects.append("%+d%s %s" % (v, suf, ru) if v else ru)
             else:
                 effects.append(ru)
@@ -197,9 +259,12 @@ def main():
                     break
 
         dialog = bool(re.match(r"^G000UM9\d{3}$", mid)) and bool(name)
+        # name chain: real Tglobal name → generated stat effects → dev comment → humanized
+        # script basename → the raw id (only when literally nothing else exists)
+        display = name or (" · ".join(effects) if effects else "") or comment or (script_label(script) if script else "") or mid
         entry = {
             "id": mid,
-            "name": name or (" · ".join(effects) if effects else "") or comment or mid,
+            "name": display,
             "source": source,
             "sourceKey": lmodifs.get(source, ""),
             "class": cls or "misc",
