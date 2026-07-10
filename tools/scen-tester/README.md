@@ -32,7 +32,23 @@ python scen_tester.py --auto --map "C:\any\path\to\map.sg" --log run.log --resul
 # Or two processes (debugger watches; you drive when ready):
 python scen_tester.py --map "C:\any\path\to\map.sg" --log run.log   # then, once up (~13s):
 python drive.py
+
+# BATCH over a folder (resumable summary.json; PASS/REJECT/FLOW per map):
+python batch_runner.py "C:\maps\folder"
+
+# PARALLEL batch: N junction clones of the game dir (own Exports each), then N workers
+# with 5s staggered starts (the editor takes a DB lock while loading a map):
+powershell -File make_clones.ps1 -Count 4
+set GC_PAR=4 && python batch_runner.py "C:\maps\folder"
+powershell -File make_clones.ps1 -Count 0     # remove the clones afterwards
 ```
+
+**Target-editor prerequisites** (found the hard way): the load list must be in
+folder-browse mode — `ScenEditDatabase=0` in `Disciple.ini` (`=1` lists the DATABASE
+scenarios, so the staged copy never appears and the first-row click loads a wrong map).
+Headless = the null-render wrapper: cnc-ddraw built as `C4dll-R.dll` + `ddraw.ini` with
+`renderer=null` (see the slasher dir). The driver binds its window lookup to the debuggee
+PID, so parallel editors don't steal each other's clicks.
 `--map` may point anywhere; the file is copied to `Exports\_scentest_<pid>.sg` first, so the
 original is NEVER overwritten by the editor's save.
 

@@ -892,7 +892,10 @@ def main():
         threading.Thread(target=drive.run_sequence,
                          kwargs={"log": log,
                                  "list_check": lambda: dbg.headers_read > 0,
-                                 "loaded_check": lambda: len(dbg.loaded_files) > 0},
+                                 "loaded_check": lambda: len(dbg.loaded_files) > 0,
+                                 # bind the UI drive to OUR editor process — with parallel
+                                 # runs a title-only lookup would grab an arbitrary editor
+                                 "pid": dbg.pid},
                          daemon=True).start()
         log("[*] --auto: self-drive thread started (waits for the window, then posts Load+Save)")
     deadline = time.time() + args.timeout if args.timeout else None
