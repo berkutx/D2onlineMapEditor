@@ -29,6 +29,7 @@ import type { MapStore } from "../maps/mapStore.js";
 import { RoomManager, roomId, roomKey } from "./RoomManager.js";
 import type { EditLog } from "./EditLog.js";
 import type { RoomSnapshots } from "./RoomSnapshots.js";
+import type { RoomEvictor } from "./RoomEvictor.js";
 
 type IO = Server<
   ClientToServerEvents,
@@ -59,6 +60,7 @@ export function registerRoomHandlers(
   log: EditLog,
   store: MapStore,
   snapshots?: RoomSnapshots,
+  evictor?: RoomEvictor,
 ): void {
   const last: Throttle = { cursor: 0, viewport: 0, select: 0 };
 
@@ -101,6 +103,7 @@ export function registerRoomHandlers(
         // the socket may have disconnected DURING the async disk load — leave/disconnect
         // already ran (before rooms.join), so joining now would leak a permanent ghost peer.
         if (socket.disconnected) return;
+        evictor?.cancel(key); // a (re)join keeps the room's log in RAM (undo a pending eviction)
         const presence = rooms.join(
           key,
           socket.id,
@@ -128,7 +131,7 @@ export function registerRoomHandlers(
   socket.on("room:leave", (p) => {
     if (!p || typeof p.mapId !== "string") return;
     const key = keyFor(p.mapId);
-    if (key) handleLeave(io, socket, rooms, key);
+    if (key) handleLeave(io, socket, rooms, key, evictor);
   });
 
   socket.on("presence:cursor", (p) => {
@@ -375,7 +378,7 @@ export function registerRoomHandlers(
 
   socket.on("disconnect", () => {
     for (const key of rooms.roomsForSocket(socket.id)) {
-      handleLeave(io, socket, rooms, key);
+      handleLeave(io, socket, rooms, key, evictor);
     }
   });
 }
@@ -393,9 +396,10 @@ function handleLeave(
   socket: IOSocket,
   rooms: RoomManager,
   key: string,
+  evictor?: RoomEvictor,
 ): void {
-  const left = rooms.leave(key, socket.id);
-  if (left) {
+  const { presence, empty } = rooms.leave(key, socket.id);
+  if (presence) {
     socket.to(roomId(key)).emit("presence:left", { socketId: socket.id });
   }
   void socket.leave(roomId(key));
@@ -403,4 +407,7 @@ function handleLeave(
     socket.data.roomKey = undefined;
     socket.data.mapId = undefined;
   }
+  // last one out → schedule the room's log+snapshot eviction from RAM (grace-delayed so a
+  // reconnect flap doesn't thrash a full re-read; the durable file is untouched).
+  if (empty) evictor?.schedule(key);
 }

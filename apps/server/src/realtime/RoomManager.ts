@@ -98,16 +98,23 @@ export class RoomManager {
     return this.rooms.get(roomId(mapId))?.slots.get(socketId) ?? 0;
   }
 
-  /** Remove a member; cleans up the room when it empties. */
-  leave(mapId: string, socketId: string): UserPresence | undefined {
+  /** Remove a member; cleans up the room when it empties. `empty` = the room now has NO
+   *  members, so the caller can evict its (durable) op-log + snapshot from RAM. */
+  leave(mapId: string, socketId: string): { presence: UserPresence | undefined; empty: boolean } {
     const key = roomId(mapId);
     const r = this.rooms.get(key);
-    if (!r) return undefined;
+    if (!r) return { presence: undefined, empty: false };
     const presence = r.members.get(socketId);
     r.members.delete(socketId);
     r.slots.delete(socketId); // free the id slot for the next joiner
-    if (r.members.size === 0) this.rooms.delete(key);
-    return presence;
+    const empty = r.members.size === 0;
+    if (empty) this.rooms.delete(key);
+    return { presence, empty };
+  }
+
+  /** True iff the room currently has at least one member (evict double-check). */
+  hasMembers(mapId: string): boolean {
+    return (this.rooms.get(roomId(mapId))?.members.size ?? 0) > 0;
   }
 
   /** Current peers in a room, optionally excluding one socket. */
