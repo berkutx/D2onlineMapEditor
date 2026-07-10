@@ -20,6 +20,9 @@ export interface ModifierEntry {
   effects?: string[];
   comment?: string;
   scripted?: boolean;
+  /** Provenance — the .lua source path (present for scripted modifiers). Lets the user see
+   *  WHICH file/pack a modifier came from when several share a name. */
+  script?: string;
 }
 
 export interface ModifierGroup {
@@ -61,7 +64,7 @@ export const useModifierStore = defineStore("modifier", () => {
       // ?v cache-bust: the catalog is a fresh asset, and Cloudflare cached a 404 for the
       // bare URL before it was uploaded — a versioned key dodges that stale negative cache
       // and lets future catalog rebuilds invalidate cleanly (bump on content change).
-      const res = await fetch(assetUrl("modifierCatalog.json") + "?v=1");
+      const res = await fetch(assetUrl("modifierCatalog.json") + "?v=2");
       if (!res.ok) throw new Error(`modifierCatalog.json ${res.status}`);
       const arr = (await res.json()) as ModifierEntry[];
       const map: Record<string, ModifierEntry> = {};

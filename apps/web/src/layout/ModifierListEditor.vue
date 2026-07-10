@@ -125,7 +125,16 @@ function removeAll(id: string): void {
 }
 
 const tip = (m: ModifierEntry | undefined): string =>
-  m ? [m.effects?.join(" · "), m.comment, m.scripted ? "(скрипт)" : ""].filter(Boolean).join("\n") : "";
+  m
+    ? [
+        m.id, // уникальный id — для сверки в базе (Gmodif.dbf)
+        m.effects?.join(" · "),
+        m.comment,
+        m.script ? `источник: ${m.script}` : m.scripted ? "(скрипт)" : "",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
 const markTip = (m: ModifierEntry | undefined): string =>
   isStandard(m)
     ? "Стандартный набор редактора игры"
@@ -167,7 +176,7 @@ const markTip = (m: ModifierEntry | undefined): string =>
               <button v-for="m in g.mods" :key="m.id" type="button" class="ml-row"
                 :class="{ picked: countOf(m.id) > 0 }" :title="tip(m)" @click="addOne(m.id)">
                 <span class="ml-mark" :title="markTip(m)">{{ isStandard(m) ? "★" : isOutside(m) ? "🧪" : "" }}</span>
-                <span class="ml-name">{{ m.name }}</span>
+                <span class="ml-name">{{ m.name }} <span class="ml-id">{{ m.id }}</span></span>
                 <span v-if="countOf(m.id)" class="ml-x">×{{ countOf(m.id) }}</span>
                 <span class="ml-add">＋</span>
               </button>
@@ -182,7 +191,7 @@ const markTip = (m: ModifierEntry | undefined): string =>
             <div v-if="!chosen.length" class="ml-status">Пусто — кликните модификатор слева</div>
             <div v-for="c in chosen" :key="c.id" class="ml-row chosen" :title="tip(store.get(c.id))">
               <span class="ml-mark" :title="markTip(store.get(c.id))">{{ isStandard(store.get(c.id)) ? "★" : isOutside(store.get(c.id)) ? "🧪" : "" }}</span>
-              <span class="ml-name">{{ store.nameOf(c.id) }}</span>
+              <span class="ml-name">{{ store.nameOf(c.id) }} <span class="ml-id">{{ c.id }}</span></span>
               <span class="ml-step">
                 <button type="button" class="ml-stepbtn" title="Убрать одну" @click="removeOne(c.id)">−</button>
                 <span class="ml-x">×{{ c.count }}</span>
@@ -276,6 +285,13 @@ button.ml-row:hover { background: var(--el-fill-color-light); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* уникальный id — приглушённо, моноширинно; сверить в базе / развести дубли по имени */
+.ml-id {
+  font-family: var(--el-font-family-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--el-text-color-placeholder);
+  margin-left: 4px;
 }
 .ml-x {
   flex: 0 0 auto;
