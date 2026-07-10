@@ -560,12 +560,11 @@ function buildLinkGroups(
   if (!mine?.length) return { groups: [], moreCount: 0 };
   const byId = new Map(doc.objects.map((o) => [o.id, o]));
   if (!byId.has(selectedId)) return { groups: [], moreCount: 0 };
-  // events of the selected object, in first-appearance order; the grid shows MAX_EVENTS,
-  // the rest collapse into the «+N» chip (клик — список событий объекта)
-  const MAX_EVENTS = 12;
+  // events of the selected object, in first-appearance order — ALL of them (the badge
+  // ring grows its radius with the count; no «+N» truncation by design)
   const eventIds: string[] = [];
   for (const r of mine) if (!eventIds.includes(r.ev.id)) eventIds.push(r.ev.id);
-  const shown = new Set(eventIds.slice(0, MAX_EVENTS));
+  const shown = new Set(eventIds);
   const groups = new Map<string, LinkGroup>();
   for (const r of mine) {
     if (!shown.has(r.ev.id)) continue;
@@ -592,14 +591,26 @@ function buildLinkGroups(
   }
   return {
     groups: [...groups.values()].filter((g) => g.parts.length > 0),
-    moreCount: Math.max(0, eventIds.length - MAX_EVENTS),
+    moreCount: 0,
   };
 }
 
 /** Hover state over the link web: highlighted event + the DOM tooltip payload. */
 let linkHoverHit: LinkHit | null = null;
+let linkGroupIds = new Set<string>(); // events currently on the badge ring
 const linkTip = ref<{ x: number; y: number; hit: LinkHit } | null>(null);
 const linkGroupCount = ref(0); // >0 → the links legend is up
+/** Effective badge spotlight: map hover wins, then the panel-list hover, then the event
+ *  SELECTED in the scenario window (постоянная подсветка «выделено там и на кружке»). */
+function applyLinkFocus(): void {
+  const s = getScene();
+  if (!s) return;
+  const pick = (id: string | null | undefined): string | null =>
+    id && linkGroupIds.has(id) ? id : null;
+  s.setObjectLinkFocus(
+    pick(linkHoverHit?.eventId) ?? pick(eventStore.listHoverId) ?? pick(eventStore.selectedId),
+  );
+}
 function updateLinkHover(e: PointerEvent): void {
   const s = getScene();
   if (!s || !linkGroupCount.value) {
@@ -610,7 +621,8 @@ function updateLinkHover(e: PointerEvent): void {
   const hit = w ? s.hitObjectLink(w.x, w.y, w.tol) : null;
   if ((hit?.eventId ?? null) !== (linkHoverHit?.eventId ?? null) || hit?.kind !== linkHoverHit?.kind) {
     linkHoverHit = hit;
-    s.setObjectLinkFocus(hit?.eventId ?? null);
+    eventStore.mapHoverId = hit && hit.kind !== "more" ? hit.eventId : null;
+    applyLinkFocus();
     const canvas = s.canvas;
     if (canvas) canvas.style.cursor = hit?.kind === "node" ? "pointer" : "";
   }
@@ -620,8 +632,9 @@ function updateLinkHover(e: PointerEvent): void {
 function clearLinkHover(): void {
   linkHoverHit = null;
   linkTip.value = null;
+  eventStore.mapHoverId = null;
+  applyLinkFocus();
   const s = getScene();
-  s?.setObjectLinkFocus(null);
   if (s?.canvas) s.canvas.style.cursor = "";
 }
 /** Tooltip payload: the hovered event + the SELECTED object's role lines in it. */
@@ -2014,11 +2027,17 @@ watch(
       ? buildLinkGroups(doc, id)
       : { groups: [] as LinkGroup[], moreCount: 0 };
     linkGroupCount.value = groups.length;
+    linkGroupIds = new Set(groups.map((g) => g.eventId));
     if (!groups.length && linkHoverHit) clearLinkHover();
     const anchor = id ? doc.objects.find((o) => o.id === id)?.pos ?? null : null;
     s.updateObjectLinks(groups.length ? id : null, anchor, groups, moreCount);
+    applyLinkFocus(); // выделенное в окне «Сценарий» событие сразу подсвечено на кольце
   },
 );
+
+// Двусторонняя подсветка: hover строки в списке событий / выделение события в окне
+// «Сценарий» → спотлайт его бейджа на кольце связей (карта → список идёт через mapHoverId).
+watch([() => eventStore.listHoverId, () => eventStore.selectedId], () => applyLinkFocus());
 
 // Collab presence: broadcast my selection to room peers; render their live cursors.
 watch(
@@ -2248,11 +2267,15 @@ watch(
     <div v-if="viewStore.rolesVisible && currentMap" class="roles-legend d2-float">
       ⚡ вход-триггер&ensp;✨ спавн&ensp;➜ цель&ensp;☁ эффект&ensp;<span class="rl-dim">· точка — не используется</span>
     </div>
-    <!-- легенда нитей связей выбранного объекта (причинность по направлению стрелок) -->
+    <!-- легенда нитей связей: цвет кольца бейджа = роль выбранного объекта в событии -->
     <div v-if="linkGroupCount && currentMap" class="links-legend d2-float">
-      <span class="ll-node">кружки-события вокруг объекта</span> (цвет+значок = его роль) · стрелки — только к местам на карте:
-      причина ⚡ ➔ ● ➔ следствие (🎯 изменит · ✨ спавн · ➜ движение · ☁ среда)
-      <span class="rl-dim">· наведи — подсветка, клик по кружку — открыть</span>
+      <span class="ll-title">кружки = события объекта; цвет — его роль:</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#e6a23c" />⚡ запускает</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#f56c6c" />🎯 изменит его</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#67c23a" />✨ спавн</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#409eff" />➜ движение</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#b07dd8" />☁ среда</span>
+      <span class="ll-hint">стрелки — к местам на карте: причина → ● → следствие · наведи — подсветка · клик — открыть</span>
     </div>
     <!-- тултип наведения на нить/узел: имя события + роль выбранного объекта в нём -->
     <div
@@ -2346,21 +2369,44 @@ watch(
 .rl-dim {
   color: var(--el-text-color-secondary);
 }
-/* links legend sits ABOVE the roles legend slot (both can show at once) */
+/* links legend sits ABOVE the roles legend slot (both can show at once). Wraps —
+ * a single nowrap line overflowed the canvas on narrow windows. */
 .links-legend {
   position: absolute;
   left: 12px;
   bottom: 38px;
   z-index: 20;
-  padding: 4px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 12px;
+  max-width: min(560px, calc(100% - 220px));
+  padding: 6px 10px;
   font-size: 11px;
+  line-height: 1.35;
   color: var(--el-text-color-regular);
   pointer-events: none;
+}
+.ll-title {
+  flex-basis: 100%;
+  font-weight: 600;
+}
+.ll-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   white-space: nowrap;
 }
-.ll-node {
-  color: #c98f2e;
-  font-weight: 600;
+.ll-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.45);
+  flex: none;
+}
+.ll-hint {
+  flex-basis: 100%;
+  color: var(--el-text-color-secondary);
 }
 /* hover tooltip of the link web: fixed at the pointer, never intercepts events */
 .link-tip {

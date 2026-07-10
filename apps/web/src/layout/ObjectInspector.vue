@@ -958,7 +958,13 @@ function close(): void {
           <template #content>
             <EventSummaryCard :event="r.ev" />
           </template>
-          <div class="role-line d2-row" @click="openRole(r)">
+          <div
+            class="role-line d2-row"
+            :class="{ 'map-hover': r.ev.id === eventStore.mapHoverId }"
+            @click="openRole(r)"
+            @mouseenter="eventStore.listHoverId = r.ev.id"
+            @mouseleave="eventStore.listHoverId = null"
+          >
             <span class="role-icon" :title="ROLE_META[r.cls].label">{{ ROLE_META[r.cls].icon }}</span>
             <span class="stk-text">
               <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
@@ -1196,6 +1202,8 @@ function close(): void {
   flex-direction: column;
   gap: 2px;
 }
+/* курсор на бейдже этого события на карте — зеркальная подсветка строки */
+.role-line.map-hover { box-shadow: inset 0 0 0 1px var(--el-color-warning); background: var(--el-fill-color-light); }
 .role-line {
   display: flex;
   align-items: center;

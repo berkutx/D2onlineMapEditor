@@ -42,6 +42,11 @@ export const useEventStore = defineStore("events", () => {
   const filter = ref("");
   /** When set, the panel shows only events referencing this object id (per-object view). */
   const objectFilter = ref<string | null>(null);
+  /** Двусторонняя подсветка карта↔список: событие под курсором на КАРТЕ (бейдж/дуга
+   *  нитей связей) — список тонирует его строку; событие под курсором В СПИСКЕ — карта
+   *  спотлайтит его бейдж; выделенное (selectedId) карта держит подсвеченным постоянно. */
+  const mapHoverId = ref<string | null>(null);
+  const listHoverId = ref<string | null>(null);
   /** Active tab of the scenario window — in the store so «где используется» jumps
    *  (variables → event, graph var-node → variables tab) can switch it from outside. */
   const panelTab = ref<"events" | "vars" | "templates" | "settings" | "diplomacy">("events");
@@ -761,6 +766,7 @@ export const useEventStore = defineStore("events", () => {
 
   return {
     selectedId, filter, objectFilter, panelTab, events, selected, filtered,
+    mapHoverId, listHoverId,
     select, upsert, remove, create, clone, referencesObject,
     breadcrumbs, canGoBack, canGoForward, navigate, goBack, goForward, goToCrumb, cardReveal, revealCard, linkNavSignal,
     createForObject, createChainedEvent, createCounterGate, createSpawnAt,

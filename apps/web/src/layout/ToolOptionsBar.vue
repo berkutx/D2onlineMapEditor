@@ -41,8 +41,8 @@ const sizeOptions = [
 /** «Локации»: role filter — non-matching locations dim out and are not pickable.
  *  Значения и подписи — единый источник LOC_FILTERS (services/scenarioRoles): триггеры
  *  разложены по смыслу (⚡ вход / 👣 отряд в зоне / 🎒 предмет), остальное по классу роли. */
-const locFilterOptions = LOC_FILTERS.map((f) => ({ label: f.icon, value: f.value }));
-const LOC_FILTER_HINT = "Фильтр локаций: " + LOC_FILTERS.map((f) => `${f.icon} ${f.hint}`).join(" · ");
+const locFilterOptions = LOC_FILTERS.map((f) => ({ label: f.label, icon: f.icon, value: f.value }));
+const LOC_FILTER_HINT = "Фильтр локаций: " + LOC_FILTERS.map((f) => `${f.icon} ${f.label} — ${f.hint}`).join(" · ");
 function onLocFilter(v: string | number | boolean): void {
   toolStore.setLocFilter(v as LocFilter);
 }
@@ -163,7 +163,11 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
     </template>
     <template v-else-if="showLocFilter">
       <el-tooltip :content="LOC_FILTER_HINT" placement="bottom" :show-after="300">
-        <el-segmented :model-value="locFilter" :options="locFilterOptions" size="small" @change="onLocFilter" />
+        <el-segmented :model-value="locFilter" :options="locFilterOptions" size="small" class="loc-filter" @change="onLocFilter">
+          <template #default="{ item }">
+            <span class="lf-cell"><span class="lf-ico">{{ item.icon }}</span><span class="lf-lbl">{{ item.label }}</span></span>
+          </template>
+        </el-segmented>
       </el-tooltip>
     </template>
     <template v-else-if="showObjectTool">
@@ -200,6 +204,20 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
   align-items: center;
   gap: var(--d2-sp-2);
   padding: var(--d2-sp-1) var(--d2-sp-2);
+}
+/* фильтр локаций: значок + подпись под ним в каждой ячейке сегмента */
+.lf-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.lf-ico {
+  font-size: 13px;
+}
+.lf-lbl {
+  font-size: 9px;
+  opacity: 0.85;
 }
 .to-terrain {
   width: 150px;

@@ -145,15 +145,15 @@ export type LocFilter =
   | "enter" | "stackIn" | "itemTo"
   | "spawn" | "destination" | "env";
 
-export const LOC_FILTERS: { value: LocFilter; icon: string; hint: string }[] = [
-  { value: "all", icon: "Все", hint: "показать все локации" },
-  { value: "free", icon: "∅", hint: "свободные — не используются ни одним событием" },
-  { value: "enter", icon: "⚡", hint: "вход в зону (триггер)" },
-  { value: "stackIn", icon: "👣", hint: "отряд в зоне (триггер)" },
-  { value: "itemTo", icon: "🎒", hint: "предмет в зону (триггер)" },
-  { value: "spawn", icon: "✨", hint: "спавны (создать отряд)" },
-  { value: "destination", icon: "➜", hint: "цели движения и приказов" },
-  { value: "env", icon: "☁", hint: "эффекты среды (заклинание / туман / рельеф)" },
+export const LOC_FILTERS: { value: LocFilter; icon: string; label: string; hint: string }[] = [
+  { value: "all", icon: "☰", label: "все", hint: "показать все локации" },
+  { value: "free", icon: "∅", label: "пустые", hint: "свободные — не используются ни одним событием" },
+  { value: "enter", icon: "⚡", label: "вход", hint: "вход в зону (триггер)" },
+  { value: "stackIn", icon: "👣", label: "отряд", hint: "отряд в зоне (триггер)" },
+  { value: "itemTo", icon: "🎒", label: "предмет", hint: "предмет в зону (триггер)" },
+  { value: "spawn", icon: "✨", label: "спавн", hint: "спавны (создать отряд)" },
+  { value: "destination", icon: "➜", label: "движение", hint: "цели движения и приказов" },
+  { value: "env", icon: "☁", label: "среда", hint: "эффекты среды (заклинание / туман / рельеф)" },
 ];
 
 /** Does a role list pass the sub-filter? (`free` handled by the caller: no roles at all) */

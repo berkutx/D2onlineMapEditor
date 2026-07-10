@@ -197,18 +197,17 @@ export class EventOverlayLayer {
     if (!fromId || !anchor || !groups.length) return;
 
     const origin = cellToWorld(anchor.x + 0.5, anchor.y + 0.5);
-    // ROUND badges on an ARC above the object (a radial-menu look — deliberately UI-shaped:
-    // the old diamond chips echoed the iso-cell rhombus and read as map objects). The arc
-    // radius grows with the badge count so they never overlap.
+    // ROUND badges on a FULL CIRCLE around the object (a radial-menu look — deliberately
+    // UI-shaped: diamond chips echoed the iso-cell rhombus and read as map objects). Every
+    // event gets a badge (no cap); the ring radius grows so neighbours never overlap.
     const total = groups.length + (moreCount > 0 ? 1 : 0);
     const CHIP_R = 11;
-    const SPAN = (Math.PI * 7) / 9; // 140° upper fan
-    const step = total > 1 ? Math.min(Math.PI / 6.5, SPAN / (total - 1)) : 0;
+    const step = total > 1 ? (Math.PI * 2) / total : 0;
     // adjacent badges must not overlap: arc spacing R·step ≥ badge diameter + gap
     const R = total > 1 ? Math.max(64, (CHIP_R * 2 + 6) / step) : 64;
     const chipAt = (i: number): Pt => {
-      const ang = -Math.PI / 2 + (i - (total - 1) / 2) * step;
-      return { x: origin.x + R * Math.cos(ang), y: origin.y - 26 + R * Math.sin(ang) };
+      const ang = -Math.PI / 2 + i * step; // start at 12 o'clock, clockwise
+      return { x: origin.x + R * Math.cos(ang), y: origin.y + R * Math.sin(ang) };
     };
 
     const drawChip = (g: Graphics, p: Pt, ring: number): void => {
@@ -217,12 +216,10 @@ export class EventOverlayLayer {
         .stroke({ color: ring, alpha: 0.98, width: 2.5 });
     };
 
-    // a faint guide arc through the badge band ties the ring to the object as ONE control
+    // a faint guide ring through the badge band ties the circle to the object as ONE control
     if (total > 1) {
       const g0 = new Graphics();
-      const a0 = -Math.PI / 2 - ((total - 1) / 2) * step - 0.08;
-      const a1 = -Math.PI / 2 + ((total - 1) / 2) * step + 0.08;
-      g0.arc(origin.x, origin.y - 26, R, a0, a1).stroke({ color: 0x9aa0aa, alpha: 0.35, width: 1.5 });
+      g0.circle(origin.x, origin.y, R).stroke({ color: 0x9aa0aa, alpha: 0.35, width: 1.5 });
       this.linkC.addChild(g0);
     }
 

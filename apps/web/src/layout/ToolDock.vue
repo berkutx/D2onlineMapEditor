@@ -67,7 +67,7 @@ const ZONE_MODES: { label: string; value: ZoneMode }[] = [
   { label: "▭", value: "rect" }, { label: "🖌", value: "brush" },
   { label: "╱", value: "line" }, { label: "▢", value: "frame" },
 ];
-const locFilterOptions = LOC_FILTERS.map((f) => ({ label: f.icon, value: f.value }));
+const locFilterOptions = LOC_FILTERS.map((f) => ({ label: f.label, icon: f.icon, value: f.value }));
 
 // Flyout actions — every preset click also ACTIVATES the tool.
 function pickTerrain(id: number): void {
@@ -216,7 +216,11 @@ function pickDrawGen(id: string): void {
 
         <template v-else-if="t.value === 'locations'">
           <div class="fly-row">
-            <el-segmented :model-value="locFilter" :options="locFilterOptions" size="small" @change="onFlyLocFilter($event)" />
+            <el-segmented :model-value="locFilter" :options="locFilterOptions" size="small" class="loc-filter" @change="onFlyLocFilter($event)">
+              <template #default="{ item }">
+                <span class="lf-cell"><span class="lf-ico">{{ item.icon }}</span><span class="lf-lbl">{{ item.label }}</span></span>
+              </template>
+            </el-segmented>
           </div>
           <button class="pop-row" @click="view.toggleRoles()">
             <el-icon class="pop-ck" :style="{ visibility: rolesVisible ? 'visible' : 'hidden' }"><Check /></el-icon>
@@ -406,6 +410,24 @@ function pickDrawGen(id: string): void {
   align-items: center;
   gap: 8px;
   padding: 4px 8px 6px;
+}
+/* фильтр локаций во флайауте: сегмент переносится по строкам (8 фильтров не влезают
+ * в одну), в каждой ячейке значок + подпись под ним */
+.dock-pop .loc-filter :deep(.el-segmented__group) {
+  flex-wrap: wrap;
+}
+.dock-pop .lf-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.1;
+}
+.dock-pop .lf-ico {
+  font-size: 13px;
+}
+.dock-pop .lf-lbl {
+  font-size: 9px;
+  opacity: 0.85;
 }
 .dock-pop .fly-lbl {
   flex: 0 0 auto;

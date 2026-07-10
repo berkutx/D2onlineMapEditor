@@ -346,8 +346,14 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
               </template>
             <div
               class="ev-row d2-row"
-              :class="{ active: e.id === store.selectedId, 'is-clone': zoneGroups.cloneOf.has(e.id) }"
+              :class="{
+                active: e.id === store.selectedId,
+                'is-clone': zoneGroups.cloneOf.has(e.id),
+                'map-hover': e.id === store.mapHoverId,
+              }"
               @click="store.navigate({ tab: 'events', eventId: e.id })"
+              @mouseenter="store.listHoverId = e.id"
+              @mouseleave="store.listHoverId = null"
             >
               <div class="ev-row-main">
                 <span class="ev-name">{{ e.name || "(без имени)" }}</span>
@@ -555,6 +561,8 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 .ev-ce { color: var(--el-text-color-secondary); }
 /* событие без эффектов инертно (обычно недоделанная заготовка) — мягкий варнинг */
 .ev-ce-inert { color: var(--el-color-warning); }
+/* курсор на бейдже этого события на КАРТЕ — зеркальная подсветка строки списка */
+.ev-row.map-hover { box-shadow: inset 0 0 0 1px var(--el-color-warning); background: var(--el-fill-color-light); }
 .ev-editor { flex: 1; min-height: 0; }
 .ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; align-items: center; }
 .ev-props label { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-regular); }
