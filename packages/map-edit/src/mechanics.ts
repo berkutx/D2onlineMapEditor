@@ -94,6 +94,20 @@ export function validateMechanics(doc: MapDocument, _opts: MechanicsOptions = {}
     }
   }
 
+  // 3) stack template without a leader among its cells. The leader IS one of the 6
+  // formation cells — LEADER/LEADER_LVL are a derived duplicate of that cell (reference
+  // updateTemplate; 2656/2656 shipped templates comply). A template with units but no
+  // in-cell leader is an authoring leftover the game may mis-spawn.
+  for (const t of doc.templates ?? []) {
+    const filled = t.units.filter(Boolean).length;
+    const leaderInCells = !!t.leader && t.units.some((u) => u && u.unit === t.leader);
+    if (filled > 0 && !leaderInCells) {
+      warnings.push(
+        `mechanics: шаблон ${t.id} («${t.name}») — лидер ${t.leader ? "не размещён в ячейках" : "не задан"}, отряд возглавить некому`,
+      );
+    }
+  }
+
   return warnings;
 }
 

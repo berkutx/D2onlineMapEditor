@@ -1,8 +1,13 @@
 <script setup lang="ts">
 /** Stack-template editor (MidStackTemplate): the reusable armies spawned by events
- *  (CREATE_NEW_STACK / MOVE_STACK). List + editor: name, order, leader, 6 unit cells (global
- *  Gunit ids via UnitPicker + level). Modifiers / facing are preserved on round-trip. Edits
- *  commit as upsertTemplate/deleteTemplate ops (undoable + collab). */
+ *  (CREATE_NEW_STACK / MOVE_STACK). List + editor: name, order, 6 unit cells (global Gunit
+ *  ids via UnitPicker + level). THE LEADER IS ONE OF THE 6 CELLS (★): on-disk LEADER/
+ *  LEADER_LVL are a derived duplicate of the leader cell — the reference exports them from
+ *  the flagged unit and re-finds the cell by type-id match on import; measured 2656/2656
+ *  shipped templates. So an empty template asks for the leader FIRST (any cell click opens
+ *  the leaders roster), and the leader cell keeps LEADER/LEADER_LVL in sync. Modifiers /
+ *  facing are preserved on round-trip (equipment does not exist in the template format).
+ *  Edits commit as upsertTemplate/deleteTemplate ops (undoable + collab). */
 import { computed, nextTick, watch } from "vue";
 import { ElInput, ElInputNumber, ElButton, ElScrollbar, ElEmpty, ElSelect, ElOption, ElTooltip } from "element-plus";
 import type { StackTemplate, TemplateUnit } from "@d2/map-schema";
@@ -42,18 +47,51 @@ function patch(partial: Partial<StackTemplate>): void {
   if (!sel.value) return;
   store.upsertTemplate({ ...sel.value, ...partial });
 }
+
+/** Ячейка лидера = та, чей юнит совпадает с LEADER (семантика импорта эталона). */
+const leaderCellIdx = computed(() => {
+  const t = sel.value;
+  if (!t?.leader) return -1;
+  return t.units.findIndex((u) => u && u.unit === t.leader);
+});
+const hasLeader = computed(() => leaderCellIdx.value >= 0);
+/** Заготовка старого образца: LEADER задан, но в ячейках его нет — чинится кликом. */
+const orphanLeader = computed(() => !!sel.value?.leader && !hasLeader.value);
+const soldierCount = computed(
+  () => (sel.value?.units.filter(Boolean).length ?? 0) - (hasLeader.value ? 1 : 0),
+);
+
+/** Пока лидера нет — ЛЮБАЯ ячейка предлагает лидера; ячейка лидера меняет лидера. */
+const cellRoster = (i: number): "leaders" | "soldiers" =>
+  !hasLeader.value || i === leaderCellIdx.value ? "leaders" : "soldiers";
+const cellTitle = (i: number): string =>
+  !hasLeader.value
+    ? "Сначала лидер — герой или вор возглавит отряд"
+    : i === leaderCellIdx.value
+      ? "Лидер отряда — герой или вор"
+      : "Выбор юнита";
+/** Ячейку лидера нельзя опустошить, пока в отряде есть другие юниты. */
+const cellClearable = (i: number): boolean =>
+  i !== leaderCellIdx.value || soldierCount.value === 0;
+
 function setCell(i: number, unit: string | null): void {
   if (!sel.value) return;
   const units = sel.value.units.slice();
   while (units.length < 6) units.push(null);
-  units[i] = unit ? { unit, level: units[i]?.level ?? 1 } : null;
-  patch({ units });
+  const level = units[i]?.level ?? 1;
+  units[i] = unit ? { unit, level } : null;
+  if (!hasLeader.value || i === leaderCellIdx.value) {
+    // лидер-путь: LEADER/LEADER_LVL — производные от ячейки лидера
+    patch({ units, leader: unit ?? "", leaderLevel: unit ? level : 1 });
+  } else {
+    patch({ units });
+  }
 }
 function setCellLevel(i: number, level: number): void {
   if (!sel.value) return;
   const units = sel.value.units.slice();
   if (units[i]) units[i] = { ...(units[i] as TemplateUnit), level };
-  patch({ units });
+  patch(i === leaderCellIdx.value ? { units, leaderLevel: level } : { units });
 }
 const cell = (i: number): TemplateUnit | null => sel.value?.units[i] ?? null;
 const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
@@ -96,26 +134,30 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
           </el-select>
         </label>
       </div>
-      <div class="tpl-leader">
-        <label>Лидер</label>
-        <!-- вести отряд может только герой/вор (L_LEADER/L_NOBLE) -->
-        <UnitPicker :model-value="sel.leader || null" nullable roster="leaders"
-          title="Лидер отряда — герой или вор" @update:model-value="patch({ leader: $event || '' })" />
-        <el-input-number :model-value="sel.leaderLevel" :min="1" :max="10" size="small" controls-position="right"
-          style="width: 92px" @update:model-value="patch({ leaderLevel: ($event as number) ?? 1 })" />
-      </div>
       <div class="tpl-units">
-        <div class="tpl-units-lbl d2-sec">Состав (6 ячеек):</div>
+        <div class="tpl-units-lbl d2-sec">Состав (6 ячеек, лидер ★ — одна из них):</div>
+        <p v-if="!hasLeader" class="tpl-need-leader">
+          {{ orphanLeader
+            ? "Лидер выбран, но не размещён в отряде — кликните ячейку, чтобы поставить его ★"
+            : "Отряд начинается с лидера: кликните любую ячейку — сперва выбирается герой или вор ★" }}
+        </p>
         <div v-for="i in 6" :key="i" class="tpl-cell">
-          <span class="tpl-cell-n">{{ i - 1 }}</span>
-          <UnitPicker :model-value="cell(i - 1)?.unit ?? null" nullable roster="soldiers"
+          <span class="tpl-cell-n" :class="{ leader: i - 1 === leaderCellIdx }">{{
+            i - 1 === leaderCellIdx ? "★" : i - 1
+          }}</span>
+          <UnitPicker :model-value="cell(i - 1)?.unit ?? null" :nullable="cellClearable(i - 1)"
+            :roster="cellRoster(i - 1)" :title="cellTitle(i - 1)"
             @update:model-value="setCell(i - 1, $event)" />
           <el-input-number v-if="cell(i - 1)" :model-value="cell(i - 1)!.level" :min="1" :max="10"
             size="small" controls-position="right" style="width: 84px"
             @update:model-value="setCellLevel(i - 1, ($event as number) ?? 1)" />
+          <el-tooltip v-if="i - 1 === leaderCellIdx && soldierCount > 0"
+            content="Лидера нельзя убрать, пока в отряде есть юниты — можно только заменить другим героем">
+            <span class="tpl-lock">🔒</span>
+          </el-tooltip>
         </div>
       </div>
-      <p class="tpl-hint">Шаблон — «рецепт» отряда: событие «Создать отряд» ставит его в выбранную локацию. Модификаторы и снаряжение шаблона сохраняются при экспорте.</p>
+      <p class="tpl-hint">Шаблон — «рецепт» отряда: событие «Создать отряд» ставит его в выбранную локацию. Лидер (★) — часть отряда и занимает одну из 6 ячеек. Модификаторы юнитов сохраняются при экспорте; снаряжения у шаблона не бывает — формат .sg его не хранит.</p>
     </el-scrollbar>
   </div>
 </template>
@@ -138,10 +180,12 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
 .tpl-meta { color: var(--el-text-color-secondary); margin-left: auto; font-size: 11px; }
 .tpl-form { min-height: 0; padding: 8px 12px; max-width: 560px; }
 .tpl-props { margin: 8px 0; }
-.tpl-props label, .tpl-leader label { color: var(--el-text-color-secondary); margin-right: 6px; }
-.tpl-leader { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+.tpl-props label { color: var(--el-text-color-secondary); margin-right: 6px; }
 .tpl-cell { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
 .tpl-cell-n { width: 16px; color: var(--el-text-color-secondary); font-family: monospace; font-size: 11px; }
+.tpl-cell-n.leader { color: var(--el-color-warning); font-size: 13px; }
+.tpl-need-leader { color: var(--el-color-warning); font-size: 11px; margin: 4px 0 8px; }
+.tpl-lock { cursor: help; opacity: 0.7; }
 .tpl-hint { color: var(--el-text-color-secondary); font-size: 11px; margin-top: 12px; }
 .icon-btn { opacity: 0.6; transition: opacity 0.12s; }
 .icon-btn:hover { opacity: 1; }
