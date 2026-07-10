@@ -58,7 +58,10 @@ export const useModifierStore = defineStore("modifier", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("modifierCatalog.json"));
+      // ?v cache-bust: the catalog is a fresh asset, and Cloudflare cached a 404 for the
+      // bare URL before it was uploaded — a versioned key dodges that stale negative cache
+      // and lets future catalog rebuilds invalidate cleanly (bump on content change).
+      const res = await fetch(assetUrl("modifierCatalog.json") + "?v=1");
       if (!res.ok) throw new Error(`modifierCatalog.json ${res.status}`);
       const arr = (await res.json()) as ModifierEntry[];
       const map: Record<string, ModifierEntry> = {};
