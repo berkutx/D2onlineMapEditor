@@ -2250,9 +2250,9 @@ watch(
     </div>
     <!-- легенда нитей связей выбранного объекта (причинность по направлению стрелок) -->
     <div v-if="linkGroupCount && currentMap" class="links-legend d2-float">
-      <span class="ll-node">◆ над объектом</span> = его события (значок = роль объекта) · стрелки — только к местам на карте:
-      причина ⚡ ➔ ◆ ➔ следствие (🎯 изменит · ✨ спавн · ➜ движение · ☁ среда)
-      <span class="rl-dim">· наведи — подсветка, клик по ◆ — открыть</span>
+      <span class="ll-node">кружки-события вокруг объекта</span> (цвет+значок = его роль) · стрелки — только к местам на карте:
+      причина ⚡ ➔ ● ➔ следствие (🎯 изменит · ✨ спавн · ➜ движение · ☁ среда)
+      <span class="rl-dim">· наведи — подсветка, клик по кружку — открыть</span>
     </div>
     <!-- тултип наведения на нить/узел: имя события + роль выбранного объекта в нём -->
     <div
@@ -2260,7 +2260,7 @@ watch(
       class="link-tip d2-float"
       :style="{ left: linkTip.x + 'px', top: linkTip.y + 'px' }"
     >
-      <div class="lt-title">◆ {{ linkTipData.name }}</div>
+      <div class="lt-title">● {{ linkTipData.name }}</div>
       <div v-for="line in linkTipData.roleLines" :key="line" class="lt-role">{{ line }}</div>
       <div class="lt-foot">{{ linkTipData.counts }}<template v-if="linkTipData.isNode"> · клик — открыть событие</template></div>
     </div>

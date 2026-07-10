@@ -197,26 +197,34 @@ export class EventOverlayLayer {
     if (!fromId || !anchor || !groups.length) return;
 
     const origin = cellToWorld(anchor.x + 0.5, anchor.y + 0.5);
-    // chip grid above the object: PER_ROW per row, bottom row closest to the object
-    const PER_ROW = 6;
-    const DX = 32;
-    const DY = 26;
+    // ROUND badges on an ARC above the object (a radial-menu look — deliberately UI-shaped:
+    // the old diamond chips echoed the iso-cell rhombus and read as map objects). The arc
+    // radius grows with the badge count so they never overlap.
     const total = groups.length + (moreCount > 0 ? 1 : 0);
+    const CHIP_R = 11;
+    const SPAN = (Math.PI * 7) / 9; // 140° upper fan
+    const step = total > 1 ? Math.min(Math.PI / 6.5, SPAN / (total - 1)) : 0;
+    // adjacent badges must not overlap: arc spacing R·step ≥ badge diameter + gap
+    const R = total > 1 ? Math.max(64, (CHIP_R * 2 + 6) / step) : 64;
     const chipAt = (i: number): Pt => {
-      const row = Math.floor(i / PER_ROW);
-      const inRow = Math.min(PER_ROW, total - row * PER_ROW);
-      const col = i % PER_ROW;
-      return {
-        x: origin.x + (col - (inRow - 1) / 2) * DX,
-        y: origin.y - 44 - row * DY,
-      };
+      const ang = -Math.PI / 2 + (i - (total - 1) / 2) * step;
+      return { x: origin.x + R * Math.cos(ang), y: origin.y - 26 + R * Math.sin(ang) };
     };
 
-    const drawChip = (g: Graphics, p: Pt): void => {
-      g.poly([p.x, p.y - 10, p.x + 12, p.y, p.x, p.y + 10, p.x - 12, p.y])
-        .fill({ color: 0x241f16, alpha: 0.94 })
-        .stroke({ color: LINK, alpha: 0.98, width: 2 });
+    const drawChip = (g: Graphics, p: Pt, ring: number): void => {
+      g.circle(p.x, p.y, CHIP_R)
+        .fill({ color: 0x20242c, alpha: 0.95 })
+        .stroke({ color: ring, alpha: 0.98, width: 2.5 });
     };
+
+    // a faint guide arc through the badge band ties the ring to the object as ONE control
+    if (total > 1) {
+      const g0 = new Graphics();
+      const a0 = -Math.PI / 2 - ((total - 1) / 2) * step - 0.08;
+      const a1 = -Math.PI / 2 + ((total - 1) / 2) * step + 0.08;
+      g0.arc(origin.x, origin.y - 26, R, a0, a1).stroke({ color: 0x9aa0aa, alpha: 0.35, width: 1.5 });
+      this.linkC.addChild(g0);
+    }
 
     groups.forEach((grp, i) => {
       const node = chipAt(i);
@@ -259,11 +267,11 @@ export class EventOverlayLayer {
         }
       }
 
-      // the event chip; glyph = the SELECTED object's role in this event
-      drawChip(g, node);
+      // the event badge; ring color + glyph = the SELECTED object's role in this event
+      drawChip(g, node, ROLE_COLOR[grp.selfCls ?? "trigger"]);
       const glyph = new Text({
         text: ROLE_GLYPH[grp.selfCls ?? "trigger"],
-        style: { fontFamily: "sans-serif", fontSize: 10, fill: 0xffe2ae },
+        style: { fontFamily: "sans-serif", fontSize: 10, fill: 0xf2f4f8 },
       });
       glyph.anchor.set(0.5, 0.5);
       glyph.position.set(node.x, node.y);
@@ -284,16 +292,16 @@ export class EventOverlayLayer {
       this.linkGeom.push({ eventId: grp.eventId, name: grp.name, node, arcs, view, label });
     });
 
-    // «+N ещё» chip — the object has more events than the grid shows
+    // «+N ещё» badge — the object has more events than the fan shows
     if (moreCount > 0) {
       const pos = chipAt(groups.length);
       const view = new Container();
       view.eventMode = "none";
       const g = new Graphics();
-      drawChip(g, pos);
+      drawChip(g, pos, 0x9aa0aa); // neutral grey — «служебный» badge, not a role
       const t = new Text({
         text: `+${moreCount}`,
-        style: { fontFamily: "sans-serif", fontSize: 9, fill: 0xffe2ae },
+        style: { fontFamily: "sans-serif", fontSize: 9, fill: 0xf2f4f8 },
       });
       t.anchor.set(0.5, 0.5);
       t.position.set(pos.x, pos.y);
@@ -303,15 +311,10 @@ export class EventOverlayLayer {
       this.linkMore = { pos, count: moreCount, view };
     }
 
-    // a thin leader from the object's center to the chip row roots the row visually
+    // a small neutral hub dot marks the fan's center on the object
     const g = new Graphics();
-    const rowY = origin.y - 44 + 10;
-    g.moveTo(origin.x, origin.y - 6).lineTo(origin.x, rowY)
-      .stroke({ color: 0x000000, alpha: 0.4, width: 3.5 });
-    g.moveTo(origin.x, origin.y - 6).lineTo(origin.x, rowY)
-      .stroke({ color: LINK, alpha: 0.8, width: 1.5 });
-    g.circle(origin.x, origin.y, 5).fill({ color: LINK, alpha: 0.98 });
-    g.circle(origin.x, origin.y, 5).stroke({ color: 0x000000, alpha: 0.6, width: 2 });
+    g.circle(origin.x, origin.y, 4.5).fill({ color: 0x20242c, alpha: 0.95 });
+    g.circle(origin.x, origin.y, 4.5).stroke({ color: 0x9aa0aa, alpha: 0.9, width: 1.5 });
     this.linkC.addChild(g);
   }
 
