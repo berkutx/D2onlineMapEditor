@@ -31,6 +31,7 @@ import UnitIcon from "./UnitIcon.vue";
 import SpellPicker from "./SpellPicker.vue";
 import SpellIcon from "./SpellIcon.vue";
 import GarrisonEditor from "./GarrisonEditor.vue";
+import EventSummaryCard from "./EventSummaryCard.vue";
 import ImagePicker from "./ImagePicker.vue";
 import SpriteThumb from "./SpriteThumb.vue";
 import RegionPreview from "./RegionPreview.vue";
@@ -945,23 +946,30 @@ function close(): void {
     <div v-if="objectRoles.length" class="ins-body">
       <div class="d2-sec">Сценарий <span class="muted">({{ objectRoles.length }})</span></div>
       <div class="roles-list">
-        <div
+        <!-- hover = шпаргалка события (условия/эффекты именами); клик = перейти к событию -->
+        <el-tooltip
           v-for="(r, i) in visibleRoles"
           :key="`${r.ev.id}#${i}`"
-          class="role-line d2-row"
-          :title="`${ROLE_META[r.cls].label} — ${r.ev.id}`"
-          @click="openRole(r)"
+          placement="left"
+          :show-after="450"
+          :persistent="false"
+          popper-class="ev-sum-pop"
         >
-          <span class="role-icon">{{ ROLE_META[r.cls].icon }}</span>
-          <span class="stk-text">
-            <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
-            <span class="stk-sub">{{ r.what }}{{ r.detail ? `: ${r.detail}` : "" }}</span>
-          </span>
-          <!-- сложность: событие с условиями сработает не всегда — видно сразу -->
-          <span v-if="r.ev.conditions.length > 1" class="role-cond muted" title="у события есть дополнительные условия (переменные, сроки и т.п.)">
-            {{ r.ev.conditions.length }} усл.
-          </span>
-        </div>
+          <template #content>
+            <EventSummaryCard :event="r.ev" />
+          </template>
+          <div class="role-line d2-row" @click="openRole(r)">
+            <span class="role-icon" :title="ROLE_META[r.cls].label">{{ ROLE_META[r.cls].icon }}</span>
+            <span class="stk-text">
+              <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
+              <span class="stk-sub">{{ r.cls === "trigger" ? "причина" : "следствие" }} · {{ r.what }}{{ r.detail ? `: ${r.detail}` : "" }}</span>
+            </span>
+            <!-- сложность: событие с условиями сработает не всегда — видно сразу -->
+            <span v-if="r.ev.conditions.length > 1" class="role-cond muted">
+              {{ r.ev.conditions.length }} усл.
+            </span>
+          </div>
+        </el-tooltip>
         <el-button
           v-if="objectRoles.length > ROLE_LIMIT"
           class="role-more"

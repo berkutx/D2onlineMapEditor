@@ -21,6 +21,7 @@ import { useUnitStore } from "../stores/unitStore";
 import { eventBadges } from "../services/scenarioRoles";
 import EventFieldInput from "./EventFieldInput.vue";
 import EventGraph from "./EventGraph.vue";
+import EventSummaryCard from "./EventSummaryCard.vue";
 import VariablesEditor from "./VariablesEditor.vue";
 import TemplatesEditor from "./TemplatesEditor.vue";
 import ScenarioSettingsEditor from "./ScenarioSettingsEditor.vue";
@@ -331,9 +332,19 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
             <el-button size="small" text @click="store.objectFilter = null">показать все</el-button>
           </div>
           <el-scrollbar class="ev-list">
-            <div
+            <!-- hover-задержка = шпаргалка события (условия/эффекты именами + заметка автора) -->
+            <el-tooltip
               v-for="e in listRows"
               :key="e.id"
+              placement="right"
+              :show-after="500"
+              :persistent="false"
+              popper-class="ev-sum-pop"
+            >
+              <template #content>
+                <EventSummaryCard :event="e" />
+              </template>
+            <div
               class="ev-row d2-row"
               :class="{ active: e.id === store.selectedId, 'is-clone': zoneGroups.cloneOf.has(e.id) }"
               @click="store.navigate({ tab: 'events', eventId: e.id })"
@@ -359,6 +370,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
               </div>
             </div>
+            </el-tooltip>
             <el-empty v-if="!listRows.length" description="Нет событий" :image-size="60" />
           </el-scrollbar>
         </div>

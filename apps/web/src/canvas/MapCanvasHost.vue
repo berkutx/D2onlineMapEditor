@@ -11,12 +11,12 @@
  * sceneHolder module; this component only ever holds plain refs (the mount
  * element, a loading flag). Pixi objects never enter Vue's reactive graph.
  */
-import { onMounted, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { assetUrl } from "../services/api";
 import { storeToRefs } from "pinia";
 import { Scene } from "@d2/pixi-render";
-import type { CameraSnapshot, DebugStats, LandmarkFootprints, ObjectRoleMarker } from "@d2/pixi-render";
+import type { CameraSnapshot, DebugStats, LandmarkFootprints, LinkGroup, LinkHit, ObjectRoleMarker } from "@d2/pixi-render";
 import { worldToCell, cellToWorld, objectFootprint, objectZBase, objectSprites, type ZoneVisual } from "@d2/pixi-render";
 import type { MapDocument, MapObject } from "@d2/map-schema";
 import {
@@ -53,6 +53,7 @@ import {
   countsOf,
   rolesMatchFilter,
   formatRoleBadges,
+  ROLE_META,
   type ObjectRole,
   type RoleCounts,
 } from "../services/scenarioRoles";
@@ -541,6 +542,104 @@ function updateLocationFocus(cell: { x: number; y: number } | null, force = fals
   } else {
     s.setLocationFocus(filter);
   }
+}
+
+// --- «Нити связей» выбранного объекта: сгруппированы ПО СОБЫТИЮ (причины → ◆ → следствия) --
+/** Build the plain-data link groups the renderer draws: one group per event of the selected
+ *  object, each with EVERY participant (id + cell + role class). Причинность читается по
+ *  направлению: триггеры втекают в ромб события, эффекты вытекают к своим целям. */
+function buildLinkGroups(doc: MapDocument, selectedId: string): LinkGroup[] {
+  const roles = locRoles();
+  const mine = roles.get(selectedId);
+  if (!mine?.length) return [];
+  const byId = new Map(doc.objects.map((o) => [o.id, o]));
+  if (!byId.has(selectedId)) return [];
+  // events of the selected object, in first-appearance order (cap: a 40-event hub is noise)
+  const MAX_EVENTS = 24;
+  const eventIds: string[] = [];
+  for (const r of mine) if (!eventIds.includes(r.ev.id)) eventIds.push(r.ev.id);
+  const shown = new Set(eventIds.slice(0, MAX_EVENTS));
+  const groups = new Map<string, LinkGroup>();
+  for (const r of mine) {
+    if (!shown.has(r.ev.id) || groups.has(r.ev.id)) continue;
+    groups.set(r.ev.id, { eventId: r.ev.id, name: r.ev.name || r.ev.id, parts: [] });
+  }
+  // every participant of those events (the whole roles map is already computed + cached)
+  const MAX_PARTS = 12;
+  for (const [objId, list] of roles) {
+    const o = byId.get(objId);
+    if (!o) continue;
+    for (const r of list) {
+      const grp = groups.get(r.ev.id);
+      if (!grp) continue;
+      const self = objId === selectedId;
+      if (!self && grp.parts.length >= MAX_PARTS) continue;
+      if (grp.parts.some((p) => p.id === objId && p.cls === r.cls)) continue; // dedup
+      grp.parts.push({ id: objId, x: o.pos.x, y: o.pos.y, cls: r.cls, ...(self ? { self } : {}) });
+    }
+  }
+  return [...groups.values()].filter((g) => g.parts.length > 0);
+}
+
+/** Hover state over the link web: highlighted event + the DOM tooltip payload. */
+let linkHoverHit: LinkHit | null = null;
+const linkTip = ref<{ x: number; y: number; hit: LinkHit } | null>(null);
+const linkGroupCount = ref(0); // >0 → the links legend is up
+function updateLinkHover(e: PointerEvent): void {
+  const s = getScene();
+  if (!s || !linkGroupCount.value) {
+    if (linkHoverHit) clearLinkHover();
+    return;
+  }
+  const w = worldFromEvent(e, 10);
+  const hit = w ? s.hitObjectLink(w.x, w.y, w.tol) : null;
+  if ((hit?.eventId ?? null) !== (linkHoverHit?.eventId ?? null) || hit?.kind !== linkHoverHit?.kind) {
+    linkHoverHit = hit;
+    s.setObjectLinkFocus(hit?.eventId ?? null);
+    const canvas = s.canvas;
+    if (canvas) canvas.style.cursor = hit?.kind === "node" ? "pointer" : "";
+  }
+  // the tooltip follows the pointer while an arc/node stays hovered
+  linkTip.value = hit ? { x: e.clientX + 14, y: e.clientY + 16, hit } : null;
+}
+function clearLinkHover(): void {
+  linkHoverHit = null;
+  linkTip.value = null;
+  const s = getScene();
+  s?.setObjectLinkFocus(null);
+  if (s?.canvas) s.canvas.style.cursor = "";
+}
+/** Tooltip payload: the hovered event + the SELECTED object's role lines in it. */
+const linkTipData = computed(() => {
+  const tip = linkTip.value;
+  const id = toolStore.selectedId;
+  if (!tip || !id) return null;
+  const ev = (editStore.liveDoc?.events ?? []).find((x) => x.id === tip.hit.eventId);
+  if (!ev) return null;
+  const mine = (locRoles().get(id) ?? []).filter((r) => r.ev.id === ev.id);
+  const seen = new Set<string>();
+  const roleLines: string[] = [];
+  for (const r of mine) {
+    const line =
+      r.cls === "trigger"
+        ? `${ROLE_META.trigger.icon} причина: ${r.what}`
+        : `${ROLE_META[r.cls].icon} следствие: ${r.what}${r.detail ? ` (${r.detail})` : ""}`;
+    if (!seen.has(line)) {
+      seen.add(line);
+      roleLines.push(line);
+    }
+  }
+  return {
+    name: ev.name || ev.id,
+    roleLines: roleLines.slice(0, 3),
+    counts: `${ev.conditions.length} усл. · ${ev.effects.length} эфф.`,
+    isNode: tip.hit.kind === "node",
+  };
+});
+/** Open the hovered event in the scenario window (the ◆ node click). */
+function openLinkEvent(eventId: string): void {
+  eventStore.navigate({ tab: "events", eventId, fromLink: true });
+  if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
 }
 
 // --- region select (zone for Copilot generation) -----------------------------
@@ -1164,6 +1263,12 @@ function onPointerDown(e: PointerEvent): void {
     else { anchorPickFor.value = null; ElMessage.info("Якорение отменено"); }
     return;
   }
+  // клик по ◆-узлу события в нитях связей → открыть это событие в окне «Сценарий».
+  // Только УЗЕЛ (не дуги): дуга может проходить над другим объектом, клик по нему важнее.
+  if (linkHoverHit?.kind === "node" && toolStore.tool === "select" && e.button === 0) {
+    openLinkEvent(linkHoverHit.eventId);
+    return;
+  }
   if (e.ctrlKey) return; // Ctrl+drag pans the camera (handled by Scene), not a tool action
   // region tool (Copilot generation zone) + zone tool («Зона» → локации-примитивы): both
   // draw a cell mask with the same rect/brush/line/frame pipeline; only the ACCEPT differs.
@@ -1646,6 +1751,8 @@ function onPointerMove(e: PointerEvent): void {
   }
   // hover spotlight for location overlays (all tools — this is what declutters the soup)
   updateLocationFocus(cell);
+  // hover over the link web: spotlight the event's bundle + follow-the-pointer tooltip
+  updateLinkHover(e);
   // locations tool: dragging a ZONE moves the whole entity — shifted-mask preview
   if (zoneDrag && cell) {
     if (!zoneDrag.moved && (cell.x !== zoneDrag.start.x || cell.y !== zoneDrag.start.y)) zoneDrag.moved = true;
@@ -1713,6 +1820,7 @@ function onPointerLeave(): void {
   viewStore.setCursorCell(null);
   getScene()?.setCursorCell(null);
   clearPreview();
+  if (linkHoverHit) clearLinkHover();
 }
 
 onBeforeUnmount(() => {
@@ -1861,7 +1969,8 @@ watch(
   { deep: true },
 );
 
-// Link threads of the SELECTED object: arcs to every entity its events wire. Selection-
+// Link threads of the SELECTED object, grouped by EVENT: причины (условия) втекают в
+// ромб-узел события, следствия (эффекты) вытекают к своим целям с цветом роли. Selection-
 // scoped by design (permanent all-links rendering is unreadable on dense maps): click an
 // event-wired object → its web lights up; deselect → clean map.
 watch(
@@ -1871,9 +1980,10 @@ watch(
     const doc = editStore.liveDoc;
     if (!s || !doc) return;
     const id = toolStore.selectedId;
-    const roles = id ? locRoles().get(id) : undefined;
-    const events = roles?.length ? [...new Set(roles.map((r) => r.ev))] : [];
-    s.updateObjectLinks(doc, events.length ? id : null, events);
+    const groups = id ? buildLinkGroups(doc, id) : [];
+    linkGroupCount.value = groups.length;
+    if (!groups.length && linkHoverHit) clearLinkHover();
+    s.updateObjectLinks(groups.length ? id : null, groups);
   },
 );
 
@@ -2105,6 +2215,21 @@ watch(
     <div v-if="viewStore.rolesVisible && currentMap" class="roles-legend d2-float">
       ⚡ вход-триггер&ensp;✨ спавн&ensp;➜ цель&ensp;☁ эффект&ensp;<span class="rl-dim">· точка — не используется</span>
     </div>
+    <!-- легенда нитей связей выбранного объекта (причинность по направлению стрелок) -->
+    <div v-if="linkGroupCount && currentMap" class="links-legend d2-float">
+      причины ⚡ ➔ <span class="ll-node">◆ событие</span> ➔ следствия (🎯 изменит · ✨ спавн · ➜ движение · ☁ среда)
+      <span class="rl-dim">· наведи на ◆/дугу — подсветка, клик по ◆ — открыть</span>
+    </div>
+    <!-- тултип наведения на нить/узел: имя события + роль выбранного объекта в нём -->
+    <div
+      v-if="linkTipData && linkTip"
+      class="link-tip d2-float"
+      :style="{ left: linkTip.x + 'px', top: linkTip.y + 'px' }"
+    >
+      <div class="lt-title">◆ {{ linkTipData.name }}</div>
+      <div v-for="line in linkTipData.roleLines" :key="line" class="lt-role">{{ line }}</div>
+      <div class="lt-foot">{{ linkTipData.counts }}<template v-if="linkTipData.isNode"> · клик — открыть событие</template></div>
+    </div>
     <div v-if="building" v-loading="true" class="canvas-overlay" element-loading-text="Building scene…" />
     <el-alert
       v-if="buildError"
@@ -2185,6 +2310,46 @@ watch(
   white-space: nowrap;
 }
 .rl-dim {
+  color: var(--el-text-color-secondary);
+}
+/* links legend sits ABOVE the roles legend slot (both can show at once) */
+.links-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 38px;
+  z-index: 20;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--el-text-color-regular);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.ll-node {
+  color: #c98f2e;
+  font-weight: 600;
+}
+/* hover tooltip of the link web: fixed at the pointer, never intercepts events */
+.link-tip {
+  position: fixed;
+  z-index: 80;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.lt-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.lt-role {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lt-foot {
+  margin-top: 2px;
+  font-size: 11px;
   color: var(--el-text-color-secondary);
 }
 .ctx-danger {
