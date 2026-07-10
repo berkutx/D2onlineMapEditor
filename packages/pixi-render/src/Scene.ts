@@ -440,14 +440,17 @@ export class Scene {
     this.renderNow();
   }
 
-  /** Link threads of a selected OBJECT, grouped by EVENT (causes → ◆node → consequences).
+  /** Link threads of a selected OBJECT, grouped by EVENT: a chip grid above the object
+   *  (anchor = its cell) + arcs to real participants (causes → ◆chip → consequences).
    *  The host prepares the plain-data groups from its scenarioRoles model; null = clear. */
   updateObjectLinks(
     fromId: string | null,
+    anchor: { x: number; y: number } | null,
     groups: readonly import("./EventOverlayLayer.js").LinkGroup[] = [],
+    moreCount = 0,
   ): void {
     if (!this.eventOverlay) return;
-    this.eventOverlay.buildObjectLinks(fromId, groups);
+    this.eventOverlay.buildObjectLinks(fromId, anchor, groups, moreCount);
     this.renderNow();
   }
 

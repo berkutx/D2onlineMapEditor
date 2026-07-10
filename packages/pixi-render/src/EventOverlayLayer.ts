@@ -39,13 +39,15 @@ export interface LinkGroup {
   eventId: string;
   name: string;
   parts: LinkPart[];
+  /** The SELECTED object's primary role in this event — drawn as the chip glyph. */
+  selfCls?: LinkRole;
 }
 
 /** What a pointer hit on the link web resolves to. */
 export interface LinkHit {
   eventId: string;
   name: string;
-  kind: "node" | "arc";
+  kind: "node" | "arc" | "more";
 }
 
 const ROLE_COLOR: Record<LinkRole, number> = {
@@ -54,6 +56,14 @@ const ROLE_COLOR: Record<LinkRole, number> = {
   spawn: 0x67c23a,
   destination: 0x409eff,
   env: 0xb07dd8,
+};
+/** MUST mirror the host's ROLE_META icons (documented coupling). */
+const ROLE_GLYPH: Record<LinkRole, string> = {
+  trigger: "⚡",
+  target: "🎯",
+  spawn: "✨",
+  destination: "➜",
+  env: "☁",
 };
 
 /** Point on a quadratic bezier a→(ctrl c)→b at t. */
@@ -161,69 +171,84 @@ export class EventOverlayLayer {
   }> = [];
   private linkFocus: string | null = null;
 
+  /** «+N» overflow chip (opens the object's event list); null when everything fits. */
+  private linkMore: { pos: Pt; count: number; view: Container } | null = null;
+
   /**
-   * Link threads for a SELECTED OBJECT, grouped by EVENT so causality reads directly:
-   * each event is a diamond NODE; arcs from its TRIGGER participants flow INTO the node
-   * (arrowhead at the node) and arcs OUT of the node flow to the objects the event
-   * changes (arrowhead at the object, colored by role: 🎯/✨/➜/☁). «Стрелка выходит из
-   * меня — я причина; стрелка входит в меня — я следствие.» Selection-scoped by design —
-   * drawing EVERY event link permanently is unreadable on dense maps.
+   * Link threads for a SELECTED OBJECT, grouped by EVENT. Each event is a diamond CHIP in
+   * a compact grid ABOVE the object — deliberately UI-looking, NOT geo-anchored (a floating
+   * node reads as «какая-то клетка на карте», which it never was). The chip glyph = the
+   * object's own role in that event (⚡ triggers it / 🎯 it changes the object / …). Arcs
+   * connect chips ONLY to REAL other participants on the map: causes flow INTO the chip
+   * (arrowhead at the chip), consequences flow OUT to their targets (arrowhead + ring at
+   * the object, colored by role). Events whose only mapped participant is the selected
+   * object itself get a chip and NO arcs. `moreCount` > 0 adds a «+N» chip.
    */
-  buildObjectLinks(fromId: string | null, groups: readonly LinkGroup[]): void {
+  buildObjectLinks(
+    fromId: string | null,
+    anchor: { x: number; y: number } | null,
+    groups: readonly LinkGroup[],
+    moreCount = 0,
+  ): void {
     this.linkC.removeChildren().forEach((c) => c.destroy());
     this.linkGeom = [];
+    this.linkMore = null;
     this.linkFocus = null;
-    if (!fromId || !groups.length) return;
+    if (!fromId || !anchor || !groups.length) return;
 
-    // node collision buckets: events over the same participants must not stack their chips
-    const buckets = new Map<string, number>();
-    let selfPt: Pt | null = null;
+    const origin = cellToWorld(anchor.x + 0.5, anchor.y + 0.5);
+    // chip grid above the object: PER_ROW per row, bottom row closest to the object
+    const PER_ROW = 6;
+    const DX = 32;
+    const DY = 26;
+    const total = groups.length + (moreCount > 0 ? 1 : 0);
+    const chipAt = (i: number): Pt => {
+      const row = Math.floor(i / PER_ROW);
+      const inRow = Math.min(PER_ROW, total - row * PER_ROW);
+      const col = i % PER_ROW;
+      return {
+        x: origin.x + (col - (inRow - 1) / 2) * DX,
+        y: origin.y - 44 - row * DY,
+      };
+    };
 
-    for (const grp of groups) {
-      const pts = grp.parts.map((p) => ({ ...p, w: cellToWorld(p.x + 0.5, p.y + 0.5) }));
-      if (!pts.length) continue;
-      const self = pts.find((p) => p.self);
-      if (self && !selfPt) selfPt = self.w;
+    const drawChip = (g: Graphics, p: Pt): void => {
+      g.poly([p.x, p.y - 10, p.x + 12, p.y, p.x, p.y + 10, p.x - 12, p.y])
+        .fill({ color: 0x241f16, alpha: 0.94 })
+        .stroke({ color: LINK, alpha: 0.98, width: 2 });
+    };
 
-      // node = centroid of the participants, lifted; single-participant events float above it
-      const cx = pts.reduce((s, p) => s + p.w.x, 0) / pts.length;
-      const cy = pts.reduce((s, p) => s + p.w.y, 0) / pts.length;
-      const spread = Math.max(...pts.map((p) => Math.hypot(p.w.x - cx, p.w.y - cy)));
-      let node: Pt = { x: cx, y: cy - Math.max(56, spread / 4) };
-      const key = `${Math.round(node.x / 90)},${Math.round(node.y / 60)}`;
-      const k = buckets.get(key) ?? 0;
-      buckets.set(key, k + 1);
-      if (k > 0) node = { x: node.x + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 52, y: node.y - (k % 3) * 20 };
-
+    groups.forEach((grp, i) => {
+      const node = chipAt(i);
       const view = new Container();
       view.eventMode = "none";
       const g = new Graphics();
       const arcs: Array<{ a: Pt; c: Pt; b: Pt }> = [];
 
-      for (const p of pts) {
-        const into = p.cls === "trigger"; // causes flow INTO the event node
-        const a = into ? p.w : node;
-        const b = into ? node : p.w;
+      for (const p of grp.parts) {
+        if (p.self) continue; // the chip row IS the selected object's end — no self arcs
+        const w = cellToWorld(p.x + 0.5, p.y + 0.5);
+        const into = p.cls === "trigger"; // causes flow INTO the event chip
+        const a = into ? w : node;
+        const b = into ? node : w;
         const dist = Math.hypot(b.x - a.x, b.y - a.y);
-        if (dist < 4) continue; // degenerate (participant under the node)
+        if (dist < 4) continue;
         // gentle arc: control point lifted off the chord midpoint
         const c: Pt = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - Math.max(10, dist / 7) };
         arcs.push({ a, c, b });
         const color = ROLE_COLOR[p.cls];
-        const width = p.self ? 3 : 2;
         g.moveTo(a.x, a.y).quadraticCurveTo(c.x, c.y, b.x, b.y)
-          .stroke({ color: 0x000000, alpha: 0.5, width: width + 2.5 });
+          .stroke({ color: 0x000000, alpha: 0.5, width: 4.5 });
         g.moveTo(a.x, a.y).quadraticCurveTo(c.x, c.y, b.x, b.y)
-          .stroke({ color, alpha: p.self ? 0.98 : 0.85, width });
+          .stroke({ color, alpha: 0.9, width: 2 });
         // arrowhead near the destination end, oriented along the curve tangent
         const tip = qPoint(a, c, b, into ? 0.86 : 0.9);
         const tan = qTangent(a, c, b, into ? 0.86 : 0.9);
         const ang = Math.atan2(tan.y, tan.x);
-        const h = p.self ? 12 : 10;
         for (const s of [-0.45, 0.45]) {
           g.moveTo(tip.x, tip.y)
-            .lineTo(tip.x - h * Math.cos(ang - s), tip.y - h * Math.sin(ang - s))
-            .stroke({ color, alpha: 0.95, width });
+            .lineTo(tip.x - 10 * Math.cos(ang - s), tip.y - 10 * Math.sin(ang - s))
+            .stroke({ color, alpha: 0.95, width: 2 });
         }
         // effect targets get a role-colored ring marker (triggers keep a small source dot)
         if (!into) {
@@ -234,12 +259,10 @@ export class EventOverlayLayer {
         }
       }
 
-      // the event node: a warm diamond chip with a ⚡ glyph (click target; name on hover)
-      g.poly([node.x, node.y - 10, node.x + 12, node.y, node.x, node.y + 10, node.x - 12, node.y])
-        .fill({ color: 0x241f16, alpha: 0.94 })
-        .stroke({ color: LINK, alpha: 0.98, width: 2 });
+      // the event chip; glyph = the SELECTED object's role in this event
+      drawChip(g, node);
       const glyph = new Text({
-        text: "⚡",
+        text: ROLE_GLYPH[grp.selfCls ?? "trigger"],
         style: { fontFamily: "sans-serif", fontSize: 10, fill: 0xffe2ae },
       });
       glyph.anchor.set(0.5, 0.5);
@@ -259,18 +282,40 @@ export class EventOverlayLayer {
       view.addChild(g, glyph, label);
       this.linkC.addChild(view);
       this.linkGeom.push({ eventId: grp.eventId, name: grp.name, node, arcs, view, label });
+    });
+
+    // «+N ещё» chip — the object has more events than the grid shows
+    if (moreCount > 0) {
+      const pos = chipAt(groups.length);
+      const view = new Container();
+      view.eventMode = "none";
+      const g = new Graphics();
+      drawChip(g, pos);
+      const t = new Text({
+        text: `+${moreCount}`,
+        style: { fontFamily: "sans-serif", fontSize: 9, fill: 0xffe2ae },
+      });
+      t.anchor.set(0.5, 0.5);
+      t.position.set(pos.x, pos.y);
+      t.eventMode = "none";
+      view.addChild(g, t);
+      this.linkC.addChild(view);
+      this.linkMore = { pos, count: moreCount, view };
     }
 
-    // the selected object itself: a bright anchor dot
-    if (selfPt) {
-      const g = new Graphics();
-      g.circle(selfPt.x, selfPt.y, 5).fill({ color: LINK, alpha: 0.98 });
-      g.circle(selfPt.x, selfPt.y, 5).stroke({ color: 0x000000, alpha: 0.6, width: 2 });
-      this.linkC.addChild(g);
-    }
+    // a thin leader from the object's center to the chip row roots the row visually
+    const g = new Graphics();
+    const rowY = origin.y - 44 + 10;
+    g.moveTo(origin.x, origin.y - 6).lineTo(origin.x, rowY)
+      .stroke({ color: 0x000000, alpha: 0.4, width: 3.5 });
+    g.moveTo(origin.x, origin.y - 6).lineTo(origin.x, rowY)
+      .stroke({ color: LINK, alpha: 0.8, width: 1.5 });
+    g.circle(origin.x, origin.y, 5).fill({ color: LINK, alpha: 0.98 });
+    g.circle(origin.x, origin.y, 5).stroke({ color: 0x000000, alpha: 0.6, width: 2 });
+    this.linkC.addChild(g);
   }
 
-  /** Hover hit-test over the link web (world coords + zoom-aware tolerance). Nodes win
+  /** Hover hit-test over the link web (world coords + zoom-aware tolerance). Chips win
    *  over arcs; among arcs the closest one wins. Pure math — the layer is eventMode:none. */
   hitObjectLink(wx: number, wy: number, tol: number): LinkHit | null {
     let best: { d: number; hit: LinkHit } | null = null;
@@ -281,7 +326,13 @@ export class EventOverlayLayer {
         if (!best || dn < best.d - 6) best = { d: dn - 6, hit }; // slight node priority
       }
     }
-    if (best) return best.hit; // a node under the cursor always wins
+    if (this.linkMore) {
+      const dm = Math.hypot(this.linkMore.pos.x - wx, this.linkMore.pos.y - wy);
+      if (dm <= Math.max(tol, 14) && (!best || dm < best.d)) {
+        best = { d: dm, hit: { eventId: "", name: `+${this.linkMore.count}`, kind: "more" } };
+      }
+    }
+    if (best) return best.hit; // a chip under the cursor always wins
     for (const grp of this.linkGeom) {
       for (const arc of grp.arcs) {
         // sample the quadratic — cheap and exact enough for a hover test
@@ -303,6 +354,7 @@ export class EventOverlayLayer {
   setLinkFocus(eventId: string | null): void {
     if (this.linkFocus === eventId) return;
     this.linkFocus = eventId;
+    if (this.linkMore) this.linkMore.view.alpha = eventId ? 0.3 : 1;
     for (const grp of this.linkGeom) {
       const focused = !eventId || grp.eventId === eventId;
       grp.view.alpha = focused ? 1 : 0.16;

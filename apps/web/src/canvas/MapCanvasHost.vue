@@ -544,25 +544,37 @@ function updateLocationFocus(cell: { x: number; y: number } | null, force = fals
   }
 }
 
-// --- «Нити связей» выбранного объекта: сгруппированы ПО СОБЫТИЮ (причины → ◆ → следствия) --
+// --- «Нити связей» выбранного объекта: чипы событий над ним + дуги к реальным местам ------
+/** Order in which the chip glyph picks the object's PRIMARY role (effects trump trigger —
+ *  «событие меня изменит» важнее увидеть, чем «я его запускаю»; тултип перечисляет все). */
+const SELF_CLS_ORDER = ["target", "destination", "spawn", "env", "trigger"] as const;
 /** Build the plain-data link groups the renderer draws: one group per event of the selected
- *  object, each with EVERY participant (id + cell + role class). Причинность читается по
- *  направлению: триггеры втекают в ромб события, эффекты вытекают к своим целям. */
-function buildLinkGroups(doc: MapDocument, selectedId: string): LinkGroup[] {
+ *  object, each with EVERY participant (id + cell + role class). Chips are NOT geo-anchored
+ *  (they grid above the object); arcs connect chips only to REAL other participants. */
+function buildLinkGroups(
+  doc: MapDocument,
+  selectedId: string,
+): { groups: LinkGroup[]; moreCount: number } {
   const roles = locRoles();
   const mine = roles.get(selectedId);
-  if (!mine?.length) return [];
+  if (!mine?.length) return { groups: [], moreCount: 0 };
   const byId = new Map(doc.objects.map((o) => [o.id, o]));
-  if (!byId.has(selectedId)) return [];
-  // events of the selected object, in first-appearance order (cap: a 40-event hub is noise)
-  const MAX_EVENTS = 24;
+  if (!byId.has(selectedId)) return { groups: [], moreCount: 0 };
+  // events of the selected object, in first-appearance order; the grid shows MAX_EVENTS,
+  // the rest collapse into the «+N» chip (клик — список событий объекта)
+  const MAX_EVENTS = 12;
   const eventIds: string[] = [];
   for (const r of mine) if (!eventIds.includes(r.ev.id)) eventIds.push(r.ev.id);
   const shown = new Set(eventIds.slice(0, MAX_EVENTS));
   const groups = new Map<string, LinkGroup>();
   for (const r of mine) {
-    if (!shown.has(r.ev.id) || groups.has(r.ev.id)) continue;
-    groups.set(r.ev.id, { eventId: r.ev.id, name: r.ev.name || r.ev.id, parts: [] });
+    if (!shown.has(r.ev.id)) continue;
+    const grp = groups.get(r.ev.id) ?? { eventId: r.ev.id, name: r.ev.name || r.ev.id, parts: [] };
+    // the selected object's primary role in this event → the chip glyph
+    const cur = grp.selfCls ? SELF_CLS_ORDER.indexOf(grp.selfCls) : SELF_CLS_ORDER.length;
+    const nxt = SELF_CLS_ORDER.indexOf(r.cls);
+    if (nxt >= 0 && nxt < cur) grp.selfCls = r.cls;
+    groups.set(r.ev.id, grp);
   }
   // every participant of those events (the whole roles map is already computed + cached)
   const MAX_PARTS = 12;
@@ -578,7 +590,10 @@ function buildLinkGroups(doc: MapDocument, selectedId: string): LinkGroup[] {
       grp.parts.push({ id: objId, x: o.pos.x, y: o.pos.y, cls: r.cls, ...(self ? { self } : {}) });
     }
   }
-  return [...groups.values()].filter((g) => g.parts.length > 0);
+  return {
+    groups: [...groups.values()].filter((g) => g.parts.length > 0),
+    moreCount: Math.max(0, eventIds.length - MAX_EVENTS),
+  };
 }
 
 /** Hover state over the link web: highlighted event + the DOM tooltip payload. */
@@ -614,6 +629,14 @@ const linkTipData = computed(() => {
   const tip = linkTip.value;
   const id = toolStore.selectedId;
   if (!tip || !id) return null;
+  if (tip.hit.kind === "more") {
+    return {
+      name: `ещё ${tip.hit.name.replace("+", "")} событий этого объекта`,
+      roleLines: [] as string[],
+      counts: "клик — открыть их список в окне «Сценарий»",
+      isNode: false,
+    };
+  }
   const ev = (editStore.liveDoc?.events ?? []).find((x) => x.id === tip.hit.eventId);
   if (!ev) return null;
   const mine = (locRoles().get(id) ?? []).filter((r) => r.ev.id === ev.id);
@@ -1263,10 +1286,17 @@ function onPointerDown(e: PointerEvent): void {
     else { anchorPickFor.value = null; ElMessage.info("Якорение отменено"); }
     return;
   }
-  // клик по ◆-узлу события в нитях связей → открыть это событие в окне «Сценарий».
-  // Только УЗЕЛ (не дуги): дуга может проходить над другим объектом, клик по нему важнее.
-  if (linkHoverHit?.kind === "node" && toolStore.tool === "select" && e.button === 0) {
-    openLinkEvent(linkHoverHit.eventId);
+  // клик по ◆-чипу события в нитях связей → открыть это событие в окне «Сценарий»;
+  // по чипу «+N» → список всех событий объекта. Только ЧИПЫ (не дуги): дуга может
+  // проходить над другим объектом, клик по нему важнее.
+  if (linkHoverHit && linkHoverHit.kind !== "arc" && toolStore.tool === "select" && e.button === 0) {
+    if (linkHoverHit.kind === "more") {
+      if (toolStore.selectedId) eventStore.objectFilter = toolStore.selectedId;
+      eventStore.panelTab = "events";
+      if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
+    } else {
+      openLinkEvent(linkHoverHit.eventId);
+    }
     return;
   }
   if (e.ctrlKey) return; // Ctrl+drag pans the camera (handled by Scene), not a tool action
@@ -1980,10 +2010,13 @@ watch(
     const doc = editStore.liveDoc;
     if (!s || !doc) return;
     const id = toolStore.selectedId;
-    const groups = id ? buildLinkGroups(doc, id) : [];
+    const { groups, moreCount } = id
+      ? buildLinkGroups(doc, id)
+      : { groups: [] as LinkGroup[], moreCount: 0 };
     linkGroupCount.value = groups.length;
     if (!groups.length && linkHoverHit) clearLinkHover();
-    s.updateObjectLinks(groups.length ? id : null, groups);
+    const anchor = id ? doc.objects.find((o) => o.id === id)?.pos ?? null : null;
+    s.updateObjectLinks(groups.length ? id : null, anchor, groups, moreCount);
   },
 );
 
@@ -2217,8 +2250,9 @@ watch(
     </div>
     <!-- легенда нитей связей выбранного объекта (причинность по направлению стрелок) -->
     <div v-if="linkGroupCount && currentMap" class="links-legend d2-float">
-      причины ⚡ ➔ <span class="ll-node">◆ событие</span> ➔ следствия (🎯 изменит · ✨ спавн · ➜ движение · ☁ среда)
-      <span class="rl-dim">· наведи на ◆/дугу — подсветка, клик по ◆ — открыть</span>
+      <span class="ll-node">◆ над объектом</span> = его события (значок = роль объекта) · стрелки — только к местам на карте:
+      причина ⚡ ➔ ◆ ➔ следствие (🎯 изменит · ✨ спавн · ➜ движение · ☁ среда)
+      <span class="rl-dim">· наведи — подсветка, клик по ◆ — открыть</span>
     </div>
     <!-- тултип наведения на нить/узел: имя события + роль выбранного объекта в нём -->
     <div

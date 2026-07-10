@@ -92,24 +92,46 @@ def _wait(check, secs, step=0.5):
     return bool(check())
 
 
-def run_sequence(title="Scenario Editor", log=print, wait_window=40,
+def find_ready_hwnd(title, timeout, log):
+    """Find the editor's REAL window: at startup a small stub window with the same title
+    briefly exists and is then destroyed/recreated at full size. Re-find on invalidation
+    and require a sane client size before driving (a 222x117 stub eats the clicks)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        hwnd = u32.FindWindowA(None, title.encode("mbcs"))
+        if hwnd:
+            w, h = client_size(hwnd)
+            if w >= 500 and h >= 300:
+                return hwnd
+            log("[drive] stub window 0x%X (%dx%d) -- waiting for the real one" % (hwnd, w, h))
+        time.sleep(0.7)
+    return None
+
+
+def run_sequence(title="Scenario Editor", log=print, wait_window=60,
                  loaded_check=None, list_check=None):
     """Drive the whole load+save flow by posted messages. Feedback-driven so it can't
     desync: retry the Load click until the list actually opens (list_check), then wait for
     the scenario to finish loading (loaded_check) before OPTIONS/Save. Both checks are wired
     by the debugger from its scenario_read_header / scenario_open_read breakpoints."""
-    hwnd = find_hwnd(title, wait_window)
+    hwnd = find_ready_hwnd(title, wait_window, log)
     if not hwnd:
         log("[drive] window '%s' not found" % title); return False
     log("[drive] hwnd=0x%X client=%dx%d" % (hwnd, *client_size(hwnd)))
     u32.ShowWindow(hwnd, SW_RESTORE); u32.SetForegroundWindow(hwnd)
     time.sleep(1.0)
 
-    # 1) open the Load list — retry until the editor's menu is ready and the list populates
+    # 1) open the Load list — retry until the editor's menu is ready and the list populates.
+    # The window may still be destroyed/recreated under us early on — re-find, don't give up.
     opened = False
     for attempt in range(20):
         if not u32.IsWindow(hwnd):
-            log("[drive] window gone"); return False
+            log("[drive] window recreated -- re-finding")
+            hwnd = find_ready_hwnd(title, 20, log)
+            if not hwnd:
+                log("[drive] window gone for good"); return False
+            log("[drive] re-found hwnd=0x%X client=%dx%d" % (hwnd, *client_size(hwnd)))
+            u32.ShowWindow(hwnd, SW_RESTORE)
         click(hwnd, *POINTS["menu_load"])
         if _wait(list_check, 2.0) or list_check is None:
             opened = True
