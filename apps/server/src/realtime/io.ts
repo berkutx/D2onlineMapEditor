@@ -31,6 +31,7 @@ export interface IoBundle {
   io: TypedIO;
   rooms: RoomManager;
   log: EditLog;
+  snapshots: RoomSnapshots;
 }
 
 export function createIo(httpServer: HttpServer, store: MapStore, log: EditLog): IoBundle {
@@ -46,8 +47,9 @@ export function createIo(httpServer: HttpServer, store: MapStore, log: EditLog):
 
   const rooms = new RoomManager();
   // `log` is shared with the REST layer (the export-at route reads the same durable op-log).
-  // materialised-document cache so catch-up folds only the tail, not the whole log.
-  const snapshots = new RoomSnapshots();
+  // materialised-document cache so catch-up folds only the tail, not the whole log; persisted
+  // to ROOMS_DIR so a restart seeds from the newest snapshot instead of re-folding 90k ops.
+  const snapshots = new RoomSnapshots(config.ROOMS_DIR);
 
   io.on("connection", (socket) => {
     socket.data.userId = randomUUID();
@@ -57,5 +59,5 @@ export function createIo(httpServer: HttpServer, store: MapStore, log: EditLog):
     registerRoomHandlers(io, socket, rooms, log, store, snapshots);
   });
 
-  return { io, rooms, log };
+  return { io, rooms, log, snapshots };
 }

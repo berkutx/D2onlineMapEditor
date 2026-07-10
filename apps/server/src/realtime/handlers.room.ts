@@ -255,6 +255,7 @@ export function registerRoomHandlers(
         // materialise the HEAD doc via the cache (folds only the tail since the last snapshot),
         // falling back to a full fold when no cache is wired (unit tests).
         if (snapshots) {
+          await snapshots.ensureLoaded(key); // seed from the newest persisted snapshot (post-restart)
           const snap = snapshots.materialize(key, loaded.doc, log);
           ack({ seq: snap.seq, doc: snap.doc });
         } else {
@@ -344,6 +345,7 @@ export function registerRoomHandlers(
           // diffDocs(HEAD, target) — minimal and only on the (peer-free) reverted keys.
           const keepOps = all.filter((e) => !revertSeqs.has(e.seq)).map((e) => e.op);
           const target = applyOps(loaded.doc, keepOps);
+          if (snapshots) await snapshots.ensureLoaded(key);
           const headDoc = snapshots
             ? snapshots.materialize(key, loaded.doc, log).doc
             : applyOps(loaded.doc, all.map((e) => e.op));
