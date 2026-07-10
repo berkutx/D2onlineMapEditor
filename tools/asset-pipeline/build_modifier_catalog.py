@@ -274,6 +274,7 @@ def main():
             entry["effects"] = effects
         if script:
             entry["scripted"] = True
+            entry["script"] = script.replace("\\", "/")  # provenance: the .lua source path
         if comment and comment != entry["name"]:
             entry["comment"] = comment
         out.append(entry)
