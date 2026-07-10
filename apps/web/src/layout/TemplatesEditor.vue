@@ -15,6 +15,7 @@ import { useEventStore } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
 import { useUnitStore } from "../stores/unitStore";
 import UnitPicker from "./UnitPicker.vue";
+import ModifierListEditor from "./ModifierListEditor.vue";
 
 const store = useEventStore();
 const edit = useEditStore();
@@ -80,11 +81,15 @@ function setCell(i: number, unit: string | null): void {
   while (units.length < 6) units.push(null);
   const level = units[i]?.level ?? 1;
   units[i] = unit ? { unit, level } : null;
+  // опустевшая ячейка теряет и свои модификаторы (unitPos указывал бы в пустоту)
+  const modsPatch = unit
+    ? {}
+    : { modifiers: (sel.value.modifiers ?? []).filter((m) => m.unitPos !== i) };
   if (!hasLeader.value || i === leaderCellIdx.value) {
     // лидер-путь: LEADER/LEADER_LVL — производные от ячейки лидера
-    patch({ units, leader: unit ?? "", leaderLevel: unit ? level : 1 });
+    patch({ units, leader: unit ?? "", leaderLevel: unit ? level : 1, ...modsPatch });
   } else {
-    patch({ units });
+    patch({ units, ...modsPatch });
   }
 }
 function setCellLevel(i: number, level: number): void {
@@ -95,6 +100,20 @@ function setCellLevel(i: number, level: number): void {
 }
 const cell = (i: number): TemplateUnit | null => sel.value?.units[i] ?? null;
 const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
+
+/** Модификаторы ячейки: в шаблоне это плоский список {unitPos (индекс ЯЧЕЙКИ), modifId} —
+ *  семантика эталона (mod.index = grid index). Правка пересобирает список: чужие ячейки
+ *  как были, свои — в новом порядке. */
+const cellMods = (i: number): string[] =>
+  (sel.value?.modifiers ?? []).filter((m) => m.unitPos === i).map((m) => m.modifId);
+function setCellMods(i: number, mods: string[]): void {
+  if (!sel.value) return;
+  const others = (sel.value.modifiers ?? []).filter((m) => m.unitPos !== i);
+  const next = [...others, ...mods.map((modifId) => ({ unitPos: i, modifId }))];
+  // канонично: эталонный экспорт сортирует список по ячейке (внутри ячейки — порядок выбора)
+  next.sort((a, b) => a.unitPos - b.unitPos);
+  patch({ modifiers: next });
+}
 </script>
 
 <template>
@@ -151,13 +170,17 @@ const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
           <el-input-number v-if="cell(i - 1)" :model-value="cell(i - 1)!.level" :min="1" :max="10"
             size="small" controls-position="right" style="width: 84px"
             @update:model-value="setCellLevel(i - 1, ($event as number) ?? 1)" />
+          <ModifierListEditor v-if="cell(i - 1)" :model-value="cellMods(i - 1)"
+            :title="`${unitStore.nameOf(cell(i - 1)!.unit)} — модификаторы`"
+            :leader="i - 1 === leaderCellIdx" compact
+            @update:model-value="setCellMods(i - 1, $event)" />
           <el-tooltip v-if="i - 1 === leaderCellIdx && soldierCount > 0"
             content="Лидера нельзя убрать, пока в отряде есть юниты — можно только заменить другим героем">
             <span class="tpl-lock">🔒</span>
           </el-tooltip>
         </div>
       </div>
-      <p class="tpl-hint">Шаблон — «рецепт» отряда: событие «Создать отряд» ставит его в выбранную локацию. Лидер (★) — часть отряда и занимает одну из 6 ячеек. Модификаторы юнитов сохраняются при экспорте; снаряжения у шаблона не бывает — формат .sg его не хранит.</p>
+      <p class="tpl-hint">Шаблон — «рецепт» отряда: событие «Создать отряд» ставит его в выбранную локацию. Лидер (★) — часть отряда и занимает одну из 6 ячеек; модификаторы юнита — под ⚙ у ячейки. Снаряжения у шаблона не бывает — формат .sg его не хранит.</p>
     </el-scrollbar>
   </div>
 </template>

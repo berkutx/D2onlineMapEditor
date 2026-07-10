@@ -257,10 +257,13 @@ function chestMoveItem(idx: number, dir: number): void {
  *  • VISITOR — a separate hero MidStack stationed inside (city.stackRef → that stack). Shown
  *    read-only for now; full editing comes with the Отряд (stack) editor. Each cell = a global
  *    Gunit id + level + HP; the writer re-creates the MidUnit instances + UNIT_/POS_ slots. */
-type GarrUnit = { unit: string; level: number; hp: number };
+// FULL entity copy: a member carries xp/name/creation/modifiers/key/slot beyond
+// unit/level/hp — stripping them here used to WIPE veteran data on any garrison edit
+// (patchObject replaces the whole array; nothing merges it back).
+type GarrUnit = { unit: string; level: number; hp: number; modifiers?: string[] };
 function garr6(o: { garrison?: (GarrUnit | null)[] } | null | undefined): (GarrUnit | null)[] {
   const out: (GarrUnit | null)[] = [null, null, null, null, null, null];
-  (o?.garrison ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { unit: c.unit, level: c.level, hp: c.hp }; });
+  (o?.garrison ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { ...c }; });
   return out;
 }
 /** the visiting hero stack stationed inside this city (city.stackRef → a MidStack), if any */
@@ -294,6 +297,21 @@ function setGarrisonStatOn(targetId: string, cur: (GarrUnit | null)[], cell: num
   const c = g[cell];
   if (!c) return;
   g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  commitGarrison(targetId, g);
+}
+/** unit-with-updated-modifiers; the key is DELETED when the list empties (an explicit
+ *  undefined would survive JSON.stringify-free paths and confuse deep-equality). */
+function withMods(c: GarrUnit, mods: string[]): GarrUnit {
+  const next = { ...c };
+  if (mods.length) next.modifiers = mods.slice();
+  else delete next.modifiers;
+  return next;
+}
+function setGarrisonModsOn(targetId: string, cur: (GarrUnit | null)[], cell: number, mods: string[]): void {
+  const g = cur.map((c) => (c ? { ...c } : null));
+  const c = g[cell];
+  if (!c) return;
+  g[cell] = withMods(c, mods);
   commitGarrison(targetId, g);
 }
 
@@ -407,6 +425,14 @@ function stackSetStat(st: StackLike, cell: number, key: "level" | "hp", v: numbe
   const c = g[cell];
   if (!c) return;
   g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  commitStackFormation(st, g, st.leaderCell ?? -1);
+}
+function stackSetMods(st: StackLike, cell: number, mods: string[]): void {
+  if (!st) return;
+  const g = garr6(st).map((c) => (c ? { ...c } : null));
+  const c = g[cell];
+  if (!c) return;
+  g[cell] = withMods(c, mods);
   commitStackFormation(st, g, st.leaderCell ?? -1);
 }
 function stackSetLeader(st: StackLike, cell: number): void {
@@ -772,6 +798,7 @@ function close(): void {
           @clear="(c) => stackClearCell(obj, c)"
           @set-stat="(c, k, v) => stackSetStat(obj, c, k, v)"
           @set-leader="(c) => stackSetLeader(obj, c)"
+          @set-mods="(c, m) => stackSetMods(obj, c, m)"
         />
 
         <div class="d2-sec">Экипировка лидера</div>
@@ -904,6 +931,7 @@ function close(): void {
           @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
           @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
           @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"
+          @set-mods="(c, m) => setGarrisonModsOn(obj.id, defenseGarrison, c, m)"
         />
         <div class="section-divider" />
         <div class="d2-sec">
@@ -928,6 +956,7 @@ function close(): void {
           @clear="(c) => stackClearCell(visitorStack, c)"
           @set-stat="(c, k, v) => stackSetStat(visitorStack, c, k, v)"
           @set-leader="(c) => stackSetLeader(visitorStack, c)"
+          @set-mods="(c, m) => stackSetMods(visitorStack, c, m)"
         />
         <p v-if="obj.type === 'capital'" class="muted sm">Гостя-лорда выбирает игрок в игре — редактируется только оборона.</p>
         <template v-else-if="!visitorStack">

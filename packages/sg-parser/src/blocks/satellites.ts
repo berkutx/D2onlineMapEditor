@@ -130,7 +130,13 @@ export function readQuestLog(buf: ByteBuffer, obj: FramedObject): QuestLogInfo {
   return { id: obj.id, entries };
 }
 
-/** MidSpellCast: TWO ints, both tagged with the block's own id (semantics unknown, 0 authored). */
+/** MidSpellCast: TWO ints, both tagged with the block's own id. IDA-CONFIRMED (ScenEdit
+ *  0x501005 + Discipl2 0x6084B1): they are the COUNTS of two runtime cast-registry lists —
+ *  "SCSpell" (strategic-map spell casts per player: {PLAYER_ID, ORIGIN, TURN_STOP}) and
+ *  "SCWand" (casts from wand items) — the once-per-day cast limit bookkeeping; TURN_STOP =
+ *  expiry turn. Scenario files always carry 0/0 (byte-verified on all 135 gate maps);
+ *  non-empty lists exist only in mid-game saves. Extend to full list parsing if a save
+ *  with records ever needs editing. */
 export function readSpellCast(buf: ByteBuffer, obj: FramedObject): SpellCastInfo {
   const i1 = buf.indexOf(obj.id, obj.fieldsFrom);
   if (i1 < 0 || i1 >= obj.fieldsEnd) return { id: obj.id, v1: 0, v2: 0 };

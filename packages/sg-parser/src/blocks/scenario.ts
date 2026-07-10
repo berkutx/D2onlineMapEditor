@@ -85,6 +85,10 @@ export function readScenarioInfo(buf: ByteBuffer, obj: FramedObject): ScenarioIn
   const curTurn = readDefaultInt(buf, "CUR_TURN", f, e);
   // the single-letter "O" bool sits immediately BEFORE the CUR_TURN tag (indexOf("O") would
   // false-match text bytes, so locate it positionally and verify the tag byte).
+  // IDA-CONFIRMED (ScenEdit 0x4E2BED + Discipl2 0x5E4DFF): OPTIONAL field, absent ⇒ false;
+  // semantics = "guardian units unlocked" — lifts the engine's IUsGuardian restrictions
+  // (a garrison may hold several guardians, the guardian may leave its fortification,
+  // guardians gain XP normally). Normal maps omit it / carry false.
   const ct = buf.indexOf("CUR_TURN", f);
   const flagO = ct > f + 1 && ct < e && buf.asciiSlice(ct - 2, ct - 1) === "O"
     ? buf.bytes[ct - 1] !== 0
