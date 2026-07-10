@@ -13,7 +13,7 @@ async function main(): Promise<void> {
 
   // Ensure the HTTP server exists before socket.io attaches to it.
   await app.ready();
-  const { io, snapshots } = createIo(app.server, store, log);
+  const { io, snapshots, evictor } = createIo(app.server, store, log);
 
   await app.listen({ port: config.PORT, host: config.HOST });
 
@@ -42,6 +42,7 @@ async function main(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[@d2/server] ${signal} -> shutting down`);
     clearInterval(sweeper);
+    evictor.dispose(); // cancel any pending room evictions (their timers are unref'd anyway)
     io.close();
     await app.close();
     // Flush pending durable op-log writes BEFORE exit — otherwise a just-acked edit whose

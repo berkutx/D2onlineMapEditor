@@ -103,6 +103,11 @@ export const config = {
   ROOMS_DIR:
     process.env.ROOMS_DIR ?? resolve(REPO_ROOT, "var", "rooms"),
 
+  /** Grace delay before an EMPTY room's parsed op-log + snapshot are evicted from RAM (the
+   *  durable .jsonl stays on disk; a real rejoin lazily re-reads it). A window so a brief
+   *  socket flap that empties then re-fills the room doesn't thrash a full re-read. Default 60s. */
+  ROOM_EVICT_MS: envInt("ROOM_EVICT_MS", 60_000),
+
   /** Copilot LLM file-bridge dir (Phase-4 POC): requests/ + responses/ + archive/. */
   LLM_DIR:
     process.env.LLM_DIR ?? resolve(REPO_ROOT, "var", "llm"),
