@@ -31,10 +31,13 @@ rule, else `/` swallows it. Changes take effect in seconds and are trivially rev
 
 ### 2.5 Data disk (done 2026-07-02)
 Volumes are bind-backed onto a dedicated disk: `/dev/sda` (ext4, label `d2data`, in fstab
-with `nofail`) mounted at **`/mnt/data`**; our data lives in `/mnt/data/d2editor/{assets,uploads}`
+with `nofail`) mounted at **`/mnt/data`**; our data lives in `/mnt/data/d2editor/{assets,uploads,projects,rooms}`
 (the voicer's in `/mnt/data/d2mapeditor/*`). The compose volume NAMES are unchanged, so the
-asset-upload command and CI work as before. If the server is ever rebuilt: create + mount the
-disk and `mkdir -p` those dirs BEFORE `docker compose up` (bind volumes fail on missing dirs).
+asset-upload command and CI work as before. `rooms` = the durable per-room collab op-log
+(added 2026-07-10). The deploy workflow now `mkdir -p`s these dirs before `up` (via a throwaway
+alpine container, so it needs no host sudo). If the server is ever rebuilt: create + mount the
+disk; the deploy step recreates the dirs (bind volumes fail on a missing dir → the container
+won't start, so the dirs must exist before `docker compose up`).
 
 ### 3. Populate the atlas volume (253 MB, not in git)
 The atlases are built offline from the GOG install and are gitignored, so they ship out of

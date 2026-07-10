@@ -14,7 +14,7 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { EditOp, UserPresence } from "@d2/socket-contract";
-import { activeOps, activeOpUids, allOpUids, opKeys } from "@d2/map-edit";
+import { activeOps, activeOpUids, allOpUids, opKeys, applyOps, occupancyErrors, validateMechanics } from "@d2/map-edit";
 import { getSocket } from "../realtime/socket";
 import { getChannelId } from "../services/clientId";
 import { useEditStore } from "./editStore";
@@ -45,6 +45,11 @@ export interface HistoryEntry {
   batchId?: string;
   /** How many ops this row represents (undefined/1 = standalone). */
   count?: number;
+  /** Conflict keys of ALL ops in this entry (opKeys union), captured at record time. The
+   *  dependency guard needs this because a pre-join-draft batch is recorded with an EMPTY
+   *  inverse — deriving keys from op+inverse would then see only the representative op and
+   *  miss the batch's other targets (silent-clobber hole). Absent on legacy in-memory rows. */
+  keys?: string[];
 }
 
 function randomName(): string {
@@ -245,7 +250,7 @@ export const useCollabStore = defineStore("collab", () => {
     const ctx = opCtx();
     history.value = [
       ...history.value,
-      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse },
+      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse, keys: opKeys(op) },
     ];
   }
 
@@ -261,6 +266,7 @@ export const useCollabStore = defineStore("collab", () => {
       agg.entry.count = agg.count;
       agg.entry.seq = Math.min(agg.entry.seq, seq);
       if (inverse?.length) agg.entry.inverse = [...inverse, ...(agg.entry.inverse ?? [])]; // newest-first
+      for (const k of opKeys(op)) if (!agg.entry.keys!.includes(k)) agg.entry.keys!.push(k); // accumulate conflict keys as the stroke streams in
       agg.entry.summary = `✎ правок за операцию: ${agg.count}`;
       agg.entry.detail = `${agg.count} правок за одну операцию`;
       return;
@@ -268,7 +274,7 @@ export const useCollabStore = defineStore("collab", () => {
     const ctx = opCtx();
     const entry: HistoryEntry = {
       seq, by, byName: nameOf(by), byColor: colorOf(by), op,
-      summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse: inverse ?? [], batchId, count: 1,
+      summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse: inverse ?? [], batchId, count: 1, keys: opKeys(op),
     };
     batchAgg.set(batchId, { entry, count: 1 });
     history.value = [...history.value, entry];
@@ -281,10 +287,14 @@ export const useCollabStore = defineStore("collab", () => {
     seq: number, by: string, ops: readonly EditOp[], inverse: EditOp[] | undefined, batchId: string, mine: boolean,
   ): HistoryEntry {
     const ctx = opCtx();
+    // keys from ALL ops (not just op[0]/inverse): a pre-join draft batch is recorded with an
+    // empty inverse, so op+inverse would under-cover it and the dependency guard would miss it.
+    const keys = new Set<string>();
+    for (const o of ops) for (const k of opKeys(o)) keys.add(k);
     const entry: HistoryEntry = {
       seq, by, byName: nameOf(by), byColor: colorOf(by),
       op: ops[0]!, summary: summarizeBatch(ops, ctx), detail: detailBatch(ops),
-      mine, inverse: inverse ?? [], batchId, count: ops.length,
+      mine, inverse: inverse ?? [], batchId, count: ops.length, keys: [...keys],
     };
     batchAgg.set(batchId, { entry, count: ops.length }); // a stray later op merges, not dups
     history.value = [...history.value, entry];
@@ -455,71 +465,113 @@ export const useCollabStore = defineStore("collab", () => {
       .flatMap((e) => e.inverse ?? []);
   }
 
-  /** Every cell/object key an entry touches: its representative op + ALL batch inverses
-   *  (each real op's inverse targets the same keys, so the union covers the whole batch). */
+  /** Every cell/object key an entry touches. Prefer `keys` captured at record time from ALL
+   *  ops (a draft batch has an EMPTY inverse, so op+inverse would under-cover it); fall back to
+   *  op+inverse for legacy rows. Cached per entry — entries are immutable once their batch
+   *  closes, and the hot path (history panel re-renders on every peer op) must not rebuild
+   *  a 50k-key Set each time. */
+  const entryKeysCache = new WeakMap<HistoryEntry, Set<string>>();
   function entryKeys(e: HistoryEntry): Set<string> {
-    const ks = new Set(opKeys(e.op));
-    for (const inv of e.inverse ?? []) for (const k of opKeys(inv)) ks.add(k);
+    const cached = entryKeysCache.get(e);
+    if (cached) return cached;
+    let ks: Set<string>;
+    if (e.keys) ks = new Set(e.keys);
+    else {
+      ks = new Set(opKeys(e.op));
+      for (const inv of e.inverse ?? []) for (const k of opKeys(inv)) ks.add(k);
+    }
+    // only cache CLOSED rows (a live aggregating batch keeps mutating keys)
+    if (!e.batchId || !batchAgg.has(e.batchId)) entryKeysCache.set(e, ks);
     return ks;
   }
 
   /**
-   * «Зависимые далее по цепочке»: LATER history entries touching the same cells/objects as
-   * entry `seq`. A cherry-pick revert («только это») is only safe when this is EMPTY —
-   * otherwise applying the old inverse would silently clobber the newer edits (patch/move),
-   * or structurally break (delete/re-add). Same key notion as the server's M5 conflict
-   * boundary (opKeys).
+   * «Зависимые далее по цепочке»: LATER history entries touching the same cells/objects as an
+   * entry. A cherry-pick revert («только это») is only safe when this is EMPTY — otherwise
+   * applying the old inverse silently clobbers the newer edits (patch/move produce a VALID doc,
+   * so validation can't catch it). Same key notion as the server's M5 conflict boundary.
+   * MEMOISED: one pass per history change (the map is rebuilt only when history.value changes),
+   * so the panel's per-row :disabled binding is O(1), not O(history²).
    */
+  const dependentsBySeq = computed<Map<number, RevertDependent[]>>(() => {
+    const rows = history.value;
+    const out = new Map<number, RevertDependent[]>();
+    for (let i = 0; i < rows.length; i++) {
+      const a = rows[i]!;
+      const keys = entryKeys(a);
+      const deps: RevertDependent[] = [];
+      for (let j = i + 1; j < rows.length; j++) {
+        const b = rows[j]!;
+        if (b.seq <= a.seq) continue; // ARRAY order is truth; seq can tie on optimistic rows
+        for (const k of entryKeys(b)) {
+          if (keys.has(k)) { deps.push({ seq: b.seq, byName: b.byName, mine: b.mine, summary: b.summary }); break; }
+        }
+      }
+      if (deps.length) out.set(a.seq, deps);
+    }
+    return out;
+  });
   function dependentsOf(seq: number): RevertDependent[] {
-    const entry = history.value.find((e) => e.seq === seq);
-    if (!entry) return [];
-    const keys = entryKeys(entry);
-    const out: RevertDependent[] = [];
-    for (const e of history.value) {
-      if (e.seq <= seq) continue;
-      for (const k of entryKeys(e)) {
-        if (keys.has(k)) {
-          out.push({ seq: e.seq, byName: e.byName, mine: e.mine, summary: e.summary });
-          break;
+    return dependentsBySeq.value.get(seq) ?? [];
+  }
+
+  /** SIMULATE the revert on a clone and report NEW structural problems it would introduce —
+   *  the general net that special-casing every dependency class (occupancy, dangling refs,
+   *  city-on-water) would miss. A patch/move clobber is caught by `dependentsOf` (it yields a
+   *  valid doc); THIS catches revert-of-add re-placing onto an occupied cell, revert-of-delete
+   *  re-adding a referenced object, revert-of-paint under a later building, etc. Returns [] when
+   *  the reverted state is no worse than now (baseline-subtracted so pre-existing issues on a
+   *  shipped map don't block). */
+  function revertStructuralIssues(entry: HistoryEntry): string[] {
+    const doc = edit.liveDoc;
+    if (!doc) return [];
+    let after: typeof doc;
+    try {
+      after = applyOps(doc, inversesOf([entry]));
+    } catch (err) {
+      return [`структурный конфликт: ${(err as Error).message}`]; // delete/re-add that cannot apply
+    }
+    const baseline = new Set([...occupancyErrors(doc), ...validateMechanics(doc), ...danglingRefs(doc)]);
+    const now = [...occupancyErrors(after), ...validateMechanics(after), ...danglingRefs(after)];
+    return now.filter((m) => !baseline.has(m));
+  }
+
+  /** Dangling references in a doc: events / a city's visitor stack pointing at a missing
+   *  object, or a spawn/enable effect at a missing template/event. Typed (event ref-fields),
+   *  not a substring probe — a free-text field equal to an id no longer false-blocks. */
+  function danglingRefs(doc: NonNullable<typeof edit.liveDoc>): string[] {
+    const ids = new Set(doc.objects.map((o) => o.id));
+    const tmplIds = new Set((doc.templates ?? []).map((t) => t.id));
+    const evtIds = new Set((doc.events ?? []).map((e) => e.id));
+    const REF = ["locId", "cityId", "stackId", "siteId", "ruinId", "lmarkId", "orderTarget", "stackTmpId", "player", "player1", "player2"];
+    const out: string[] = [];
+    for (const o of doc.objects) {
+      const ref = (o as { stackRef?: string }).stackRef;
+      if (ref && ref !== "G000000000" && !ids.has(ref)) out.push(`висячая ссылка: гость города ${o.id} → нет ${ref}`);
+    }
+    for (const ev of doc.events ?? []) {
+      for (const part of [...ev.conditions, ...ev.effects] as Record<string, unknown>[]) {
+        for (const k of REF) {
+          const v = part[k];
+          if (typeof v === "string" && v && v !== "G000000000" && !ids.has(v) && !tmplIds.has(v) && !evtIds.has(v)) {
+            out.push(`висячая ссылка: событие ${ev.id} → нет ${v}`);
+          }
         }
       }
     }
     return out;
   }
 
-  /** Objects the entry's revert would DELETE (its inverse contains deleteObject) that are
-   *  still referenced from elsewhere in the live doc (events / a city's visiting stack) —
-   *  the indirect dependency a key-intersection can't see. */
-  function revertDanglingRefs(seq: number): string[] {
-    const entry = history.value.find((e) => e.seq === seq);
-    if (!entry) return [];
-    const doc = edit.liveDoc;
-    if (!doc) return [];
-    const out: string[] = [];
-    for (const inv of entry.inverse ?? []) {
-      if (inv.kind !== "deleteObject") continue;
-      const id = inv.id;
-      const inEvents = (doc.events ?? []).some((ev) =>
-        JSON.stringify(ev.conditions).includes(`"${id}"`) || JSON.stringify(ev.effects).includes(`"${id}"`),
-      );
-      const asVisitor = doc.objects.some(
-        (o) => (o as { stackRef?: string }).stackRef === id,
-      );
-      if (inEvents || asVisitor) out.push(id);
-    }
-    return out;
-  }
-
-  /** Revert ONE entry — ONLY when nothing later depends on it («вырывать» середину цепочки
-   *  нельзя: поздние правки тех же клеток/объектов перезатёрлись бы молча). The result says
-   *  WHY when blocked, so the UI can point at the dependents / suggest «откатить моё отсюда». */
-  function revertOne(seq: number): { ok: boolean; blocked?: "dependents" | "refs" | "conflict"; dependents?: RevertDependent[]; refs?: string[] } {
+  /** Revert ONE entry — only when nothing later depends on it (silent-clobber guard) AND the
+   *  revert introduces no NEW structural problem (occupancy / dangling / mechanics). The result
+   *  says WHY when blocked so the UI can point at the dependents or the structural issues. */
+  function revertOne(seq: number): { ok: boolean; blocked?: "dependents" | "structure" | "conflict"; dependents?: RevertDependent[]; issues?: string[] } {
     const entry = history.value.find((e) => e.seq === seq);
     if (!entry) return { ok: false, blocked: "conflict" };
     const deps = dependentsOf(seq);
     if (deps.length) return { ok: false, blocked: "dependents", dependents: deps };
-    const refs = revertDanglingRefs(seq);
-    if (refs.length) return { ok: false, blocked: "refs", refs };
+    const issues = revertStructuralIssues(entry);
+    if (issues.length) return { ok: false, blocked: "structure", issues };
     const ok = applyRevert(inversesOf([entry]), `#${seq}`);
     return ok ? { ok: true } : { ok: false, blocked: "conflict" };
   }

@@ -51,6 +51,10 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd ~/d2editor
+            # Bind-backed volume device dirs MUST exist before `up` (type:none bind mounts fail on a
+            # missing dir → the container won't start). Idempotent; created via docker so it works
+            # without host sudo (the daemon runs as root). `rooms` is the durable collab op-log.
+            docker run --rm -v /mnt/data/d2editor:/d alpine mkdir -p /d/rooms /d/uploads /d/projects || true
             # The VPS disk is small + shared with other stacks. Free build cache + dangling images
             # BEFORE building (NEVER volumes — they hold both sites' data) so the build has room.
             docker builder prune -af || true

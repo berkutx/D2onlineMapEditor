@@ -177,6 +177,12 @@ export function registerRoomHandlers(
       return;
     }
     withRoom(key, () => {
+      // durability freeze: the room's log file stopped accepting writes (disk full/IO) —
+      // acking an edit we cannot persist would silently diverge memory from disk.
+      if (log.isDegraded(key)) {
+        ack({ ok: false, reason: "хранилище недоступно — правка отклонена, попробуйте позже" });
+        return;
+      }
       const author = socket.data.clientId ?? socket.id;
       const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now(), p.batchId, author);
       ack({ ok: true, seq: entry.seq });
@@ -218,6 +224,10 @@ export function registerRoomHandlers(
       validated.push({ clientOpId: String(item?.clientOpId ?? ""), op: parsed.data });
     }
     withRoom(key, () => {
+      if (log.isDegraded(key)) {
+        ack({ ok: false, reason: "хранилище недоступно — правки отклонены, попробуйте позже" });
+        return;
+      }
       const author = socket.data.clientId ?? socket.id;
       const entries = log.appendBatch(key, validated, socket.id, p.batchId, Date.now(), author);
       ack({ ok: true, seqStart: entries[0]!.seq, seqEnd: entries[entries.length - 1]!.seq });

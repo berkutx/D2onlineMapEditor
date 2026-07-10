@@ -71,12 +71,14 @@ function toggle(seq: number): void {
 const revertable = (e: HistoryEntry): boolean => (e.inverse?.length ?? 0) > 0;
 
 /** «Только это» is allowed ONLY when nothing newer touches the same cells/objects —
- *  вырывать середину цепочки нельзя (поздние правки перезатёрлись бы молча). */
+ *  вырывать середину цепочки нельзя (поздние правки перезатёрлись бы молча). dependentsOf is
+ *  O(1) (memoised in the store), so calling it per row on re-render is cheap. Structural safety
+ *  (occupancy / dangling refs) is a heavier check run once on click, not per render. */
 const dependents = (e: HistoryEntry) => collab.dependentsOf(e.seq);
 const revertOneTitle = (e: HistoryEntry): string => {
   if (!revertable(e)) return "Нет обратной правки (часть мазка — откатывайте с последней записи мазка)";
   const deps = dependents(e);
-  if (!deps.length) return "Применить обратную правку только для этой записи (позже её никто не трогал)";
+  if (!deps.length) return "Откатить только эту запись (проверю структуру при клике)";
   const list = deps.slice(0, 3).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName})`).join(", ");
   return `Нельзя вырвать из середины: тот же объект/клетки правились позже — ${list}${deps.length > 3 ? ` и ещё ${deps.length - 3}` : ""}. Используйте «откатить моё отсюда».`;
 };
@@ -90,8 +92,8 @@ function revertOne(e: HistoryEntry): void {
   if (r.blocked === "dependents" && r.dependents?.length) {
     const list = r.dependents.slice(0, 4).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName}) ${d.summary}`).join("; ");
     ElMessage.warning(`Нельзя откатить только эту запись — есть зависимые позже: ${list}${r.dependents.length > 4 ? "…" : ""}`);
-  } else if (r.blocked === "refs" && r.refs?.length) {
-    ElMessage.warning(`Нельзя откатить: объект (${r.refs.join(", ")}) уже используется событиями/городом — сперва уберите ссылки`);
+  } else if (r.blocked === "structure" && r.issues?.length) {
+    ElMessage.warning(`Нельзя откатить — сломает карту: ${r.issues.slice(0, 3).join("; ")}${r.issues.length > 3 ? "…" : ""}`);
   } else {
     ElMessage.warning("Не удалось откатить — запись конфликтует с более поздними правками");
   }
