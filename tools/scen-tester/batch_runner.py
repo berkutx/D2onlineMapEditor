@@ -38,6 +38,22 @@ PAR = max(1, int(os.environ.get("GC_PAR", "1")))
 STAGGER = float(os.environ.get("GC_STAGGER", "5"))
 
 _lock = threading.Lock()
+_launch_lock = threading.Lock()
+_last_launch = [0.0]
+
+
+def _throttle_launch():
+    """GLOBAL minimum interval between editor STARTS (not just the first per worker):
+    the editor takes a DB lock both at boot and at map load — un-staggered launches
+    drift back into sync and starve each other's loads (load confirmed=False FLOWs)."""
+    while True:
+        with _launch_lock:
+            now = time.time()
+            wait = _last_launch[0] + STAGGER - now
+            if wait <= 0:
+                _last_launch[0] = now
+                return
+        time.sleep(min(wait, 1.0))
 
 
 def run_one(map_path, tag, editor):
@@ -45,6 +61,7 @@ def run_one(map_path, tag, editor):
     timeout_s = 80 if mb < 0.7 else (120 if mb < 1.6 else 160)
     log = os.path.join(OUT, tag + ".log")
     res = os.path.join(OUT, tag + ".json")
+    _throttle_launch()
     try:
         subprocess.run(
             [sys.executable, os.path.join(TOOLS, "scen_tester.py"), "--auto", "--kill-exit",

@@ -163,10 +163,18 @@ def run_sequence(title="Scenario Editor", log=print, wait_window=60,
     if list_check and not opened:
         log("[drive] load list never opened"); return False
 
-    # 2) pick first scenario + Ok, then wait for it to actually load
-    click(hwnd, *POINTS["list_item0"]); time.sleep(0.6)
-    click(hwnd, *POINTS["list_ok"])
-    log("[drive] load confirmed=%s" % _wait(loaded_check, 25.0))
+    # 2) pick first scenario + Ok, then wait for it to actually load. Under parallel
+    # runs a load can stall on the shared-DB lock — retry the pick+Ok once.
+    loaded = False
+    for _ in range(2):
+        click(hwnd, *POINTS["list_item0"]); time.sleep(0.6)
+        click(hwnd, *POINTS["list_ok"])
+        loaded = _wait(loaded_check, 45.0)
+        if loaded or loaded_check is None:
+            break
+        log("[drive] load did not start — re-picking")
+        click(hwnd, *POINTS["menu_load"]); time.sleep(1.0)
+    log("[drive] load confirmed=%s" % loaded)
     time.sleep(1.0)
 
     # 3) OPTIONS -> Save
