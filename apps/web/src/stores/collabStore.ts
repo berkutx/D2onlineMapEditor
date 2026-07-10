@@ -14,13 +14,16 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { EditOp, UserPresence } from "@d2/socket-contract";
-import { activeOps, activeOpUids, allOpUids } from "@d2/map-edit";
+import { activeOps, activeOpUids, allOpUids, opKeys } from "@d2/map-edit";
 import { getSocket } from "../realtime/socket";
 import { getChannelId } from "../services/clientId";
 import { useEditStore } from "./editStore";
 import { useDecorStore } from "./decorStore";
 
 const NAME_KEY = "d2.collab.name";
+
+/** A later history entry that blocks a cherry-pick revert (touches the same keys). */
+export type RevertDependent = { seq: number; byName: string; mine: boolean; summary: string };
 
 /** A shared-timeline entry (newest last): who applied which op at which seq. */
 export interface HistoryEntry {
@@ -452,11 +455,73 @@ export const useCollabStore = defineStore("collab", () => {
       .flatMap((e) => e.inverse ?? []);
   }
 
-  /** Revert ONE entry (may conflict with later edits — applyOp fails loud, nothing applies). */
-  function revertOne(seq: number): boolean {
+  /** Every cell/object key an entry touches: its representative op + ALL batch inverses
+   *  (each real op's inverse targets the same keys, so the union covers the whole batch). */
+  function entryKeys(e: HistoryEntry): Set<string> {
+    const ks = new Set(opKeys(e.op));
+    for (const inv of e.inverse ?? []) for (const k of opKeys(inv)) ks.add(k);
+    return ks;
+  }
+
+  /**
+   * «Зависимые далее по цепочке»: LATER history entries touching the same cells/objects as
+   * entry `seq`. A cherry-pick revert («только это») is only safe when this is EMPTY —
+   * otherwise applying the old inverse would silently clobber the newer edits (patch/move),
+   * or structurally break (delete/re-add). Same key notion as the server's M5 conflict
+   * boundary (opKeys).
+   */
+  function dependentsOf(seq: number): RevertDependent[] {
     const entry = history.value.find((e) => e.seq === seq);
-    if (!entry) return false;
-    return applyRevert(inversesOf([entry]), `#${seq}`);
+    if (!entry) return [];
+    const keys = entryKeys(entry);
+    const out: RevertDependent[] = [];
+    for (const e of history.value) {
+      if (e.seq <= seq) continue;
+      for (const k of entryKeys(e)) {
+        if (keys.has(k)) {
+          out.push({ seq: e.seq, byName: e.byName, mine: e.mine, summary: e.summary });
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Objects the entry's revert would DELETE (its inverse contains deleteObject) that are
+   *  still referenced from elsewhere in the live doc (events / a city's visiting stack) —
+   *  the indirect dependency a key-intersection can't see. */
+  function revertDanglingRefs(seq: number): string[] {
+    const entry = history.value.find((e) => e.seq === seq);
+    if (!entry) return [];
+    const doc = edit.liveDoc;
+    if (!doc) return [];
+    const out: string[] = [];
+    for (const inv of entry.inverse ?? []) {
+      if (inv.kind !== "deleteObject") continue;
+      const id = inv.id;
+      const inEvents = (doc.events ?? []).some((ev) =>
+        JSON.stringify(ev.conditions).includes(`"${id}"`) || JSON.stringify(ev.effects).includes(`"${id}"`),
+      );
+      const asVisitor = doc.objects.some(
+        (o) => (o as { stackRef?: string }).stackRef === id,
+      );
+      if (inEvents || asVisitor) out.push(id);
+    }
+    return out;
+  }
+
+  /** Revert ONE entry — ONLY when nothing later depends on it («вырывать» середину цепочки
+   *  нельзя: поздние правки тех же клеток/объектов перезатёрлись бы молча). The result says
+   *  WHY when blocked, so the UI can point at the dependents / suggest «откатить моё отсюда». */
+  function revertOne(seq: number): { ok: boolean; blocked?: "dependents" | "refs" | "conflict"; dependents?: RevertDependent[]; refs?: string[] } {
+    const entry = history.value.find((e) => e.seq === seq);
+    if (!entry) return { ok: false, blocked: "conflict" };
+    const deps = dependentsOf(seq);
+    if (deps.length) return { ok: false, blocked: "dependents", dependents: deps };
+    const refs = revertDanglingRefs(seq);
+    if (refs.length) return { ok: false, blocked: "refs", refs };
+    const ok = applyRevert(inversesOf([entry]), `#${seq}`);
+    return ok ? { ok: true } : { ok: false, blocked: "conflict" };
   }
 
   /** Revert entry `seq` and EVERYTHING newer (exact inverses, newest→oldest). */
@@ -706,6 +771,7 @@ export const useCollabStore = defineStore("collab", () => {
     sendCursor,
     sendSelection,
     revertOne,
+    dependentsOf,
     revertFrom,
     revertRangeServer,
   };
