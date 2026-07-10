@@ -5,6 +5,8 @@
  * the RoomSnapshots materialisation of the post-revert HEAD.
  */
 
+process.env.REVERT_COOLDOWN_MS = "0"; // tests fire reverts back-to-back in one room
+
 import { describe, it, expect } from "vitest";
 import type { EditOp } from "@d2/socket-contract";
 import type { MapDocument } from "@d2/map-schema";
@@ -146,5 +148,91 @@ describe("edit:revertRange", () => {
     const { doc } = snaps.materialize(KEY, baseDoc(), log);
     expect(doc.terrain.cells[15]!.value).toBe(0); // (3,3) reverted (peer-free)
     expect(doc.terrain.cells[0]!.value).toBe(9);  // (0,0) kept (peer's)
+  });
+});
+
+describe("edit:revertOne (authoritative cherry-pick)", () => {
+  function setup(): { A: ReturnType<typeof fakeSocket>; B: ReturnType<typeof fakeSocket>; log: EditLog; snaps: RoomSnapshots } {
+    const rooms = new RoomManager();
+    const log = new EditLog();
+    const snaps = new RoomSnapshots();
+    const A = fakeSocket("sockA", "clientA");
+    const B = fakeSocket("sockB", "clientB");
+    registerRoomHandlers(fakeIo, A.socket, rooms, log, fakeStore, snaps);
+    registerRoomHandlers(fakeIo, B.socket, rooms, log, fakeStore, snaps);
+    A.invoke("room:join", { mapId: MAP, channel: CH, user: { name: "A" } }, () => undefined);
+    B.invoke("room:join", { mapId: MAP, channel: CH, user: { name: "B" } }, () => undefined);
+    return { A, B, log, snaps };
+  }
+  type OneAck = {
+    ok: boolean; revertedCount?: number; reason?: string;
+    blocked?: string; dependents?: { seq: number; author: string }[]; issues?: string[];
+  };
+
+  it("reverts a MIDDLE entry when nothing later touches its keys — later entries survive", async () => {
+    const { A, log, snaps } = setup();
+    opAt(A.invoke, setCell(0, 0, 5), "a1"); // seq 1 — the target
+    opAt(A.invoke, setCell(1, 1, 7), "a2"); // seq 2 — different key, must survive
+    const res = await ackP<OneAck>(A.invoke, "edit:revertOne", { mapId: MAP, seq: 1 });
+    expect(res.ok).toBe(true);
+    expect(res.revertedCount).toBe(1);
+    const { doc } = snaps.materialize(KEY, baseDoc(), log);
+    expect(doc.terrain.cells[0]!.value).toBe(0); // (0,0) reverted
+    expect(doc.terrain.cells[5]!.value).toBe(7); // (1,1) untouched
+  });
+
+  it("BLOCKS when a later entry (any author) touches the same key — reports dependents", async () => {
+    const { A, B, log, snaps } = setup();
+    opAt(A.invoke, setCell(0, 0, 5), "a1"); // seq 1 — the target
+    opAt(B.invoke, setCell(0, 0, 9), "b1"); // seq 2 — PEER's later write on the same cell
+    const res = await ackP<OneAck>(A.invoke, "edit:revertOne", { mapId: MAP, seq: 1 });
+    expect(res.ok).toBe(false);
+    expect(res.blocked).toBe("dependents");
+    expect(res.dependents).toEqual([{ seq: 2, author: "clientB" }]);
+    const { doc } = snaps.materialize(KEY, baseDoc(), log);
+    expect(doc.terrain.cells[0]!.value).toBe(9); // nothing reverted
+  });
+
+  it("reverts a WHOLE batch by batchId (the row's undo unit)", async () => {
+    const { A, log, snaps } = setup();
+    A.invoke(
+      "edit:ops",
+      { mapId: MAP, batchId: "batch-1", baseSeq: 0, ops: [
+        { clientOpId: "a1", op: setCell(0, 0, 5) },
+        { clientOpId: "a2", op: setCell(1, 1, 7) },
+      ] },
+      () => undefined,
+    );
+    opAt(A.invoke, setCell(2, 2, 3), "a3"); // seq 3 — outside the batch, must survive
+    const res = await ackP<OneAck>(A.invoke, "edit:revertOne", { mapId: MAP, seq: 1, batchId: "batch-1" });
+    expect(res.ok).toBe(true);
+    expect(res.revertedCount).toBe(2);
+    const { doc } = snaps.materialize(KEY, baseDoc(), log);
+    expect(doc.terrain.cells[0]!.value).toBe(0); // batch reverted
+    expect(doc.terrain.cells[5]!.value).toBe(0);
+    expect(doc.terrain.cells[10]!.value).toBe(3); // seq 3 survives
+  });
+
+  it("BLOCKS on structure: reverting a template's creation a later event references", async () => {
+    const { A, log, snaps } = setup();
+    opAt(A.invoke, { kind: "upsertTemplate", template: { id: "TMPL0001" } } as unknown as EditOp, "a1"); // seq 1
+    opAt(A.invoke, { kind: "upsertEvent", event: {
+      id: "EV0001", name: "e", appliesTo: {}, canTrigger: {},
+      conditions: [], effects: [{ kind: "createStack", templateId: "TMPL0001" }],
+    } } as unknown as EditOp, "a2"); // seq 2 — keys T: vs E: are DISJOINT (dependents guard passes)
+    const res = await ackP<OneAck>(A.invoke, "edit:revertOne", { mapId: MAP, seq: 1 });
+    expect(res.ok).toBe(false);
+    expect(res.blocked).toBe("structure");
+    expect(res.issues!.some((m) => m.includes("TMPL0001"))).toBe(true);
+    const { doc } = snaps.materialize(KEY, baseDoc(), log);
+    expect((doc.templates ?? []).some((t) => t.id === "TMPL0001")).toBe(true); // kept
+  });
+
+  it("404s an unknown seq", async () => {
+    const { A } = setup();
+    opAt(A.invoke, setCell(0, 0, 5), "a1");
+    const res = await ackP<OneAck>(A.invoke, "edit:revertOne", { mapId: MAP, seq: 99 });
+    expect(res.ok).toBe(false);
+    expect(res.blocked).toBeUndefined();
   });
 });

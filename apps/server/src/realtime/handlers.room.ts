@@ -24,7 +24,7 @@ import type {
   UserPresence,
 } from "@d2/socket-contract";
 import { EditOp } from "@d2/socket-contract";
-import { applyOps, diffDocs, opKeys } from "@d2/map-edit";
+import { applyOps, diffDocs, opKeys, laterTouching, newStructuralIssues } from "@d2/map-edit";
 import type { MapStore } from "../maps/mapStore.js";
 import { RoomManager, roomId, roomKey } from "./RoomManager.js";
 import type { EditLog } from "./EditLog.js";
@@ -46,6 +46,30 @@ type IOSocket = Socket<
 
 /** ~20Hz presence throttle. */
 const PRESENCE_INTERVAL_MS = 50;
+
+/** Rooms with a revert in flight (module-level — one guard across every socket). A revert
+ *  re-folds the WHOLE log synchronously (applyOps over up to ~90k ops = seconds of event-loop
+ *  time on a big map); without this, one member hammering «только это» stalls every room —
+ *  a trivial griefing vector on an endpoint that sits behind a per-row button. */
+const revertBusyRooms = new Set<string>();
+/** Per-room cooldown between reverts (ms since epoch of the last one). */
+const revertLastAt = new Map<string, number>();
+
+/** Acquire the room's revert slot; null = acquired, else the rejection reason. The cooldown
+ *  is read from the env PER CALL (not at module init) so tests — whose imports are hoisted
+ *  above their own env assignment — can disable it. */
+function acquireRevertSlot(key: string): string | null {
+  if (revertBusyRooms.has(key)) return "в комнате уже выполняется откат — подождите";
+  const cooldown = Number(process.env.REVERT_COOLDOWN_MS ?? 1_000);
+  const last = revertLastAt.get(key) ?? 0;
+  if (Date.now() - last < cooldown) return "слишком часто — подождите секунду";
+  revertBusyRooms.add(key);
+  return null;
+}
+function releaseRevertSlot(key: string): void {
+  revertBusyRooms.delete(key);
+  revertLastAt.set(key, Date.now());
+}
 
 interface Throttle {
   cursor: number;
@@ -310,12 +334,28 @@ export function registerRoomHandlers(
     const me = socket.data.clientId ?? socket.id;
     withRoom(key, () => {
       void (async () => {
+        const busy = acquireRevertSlot(key);
+        if (busy) {
+          ack({ ok: false, reason: busy });
+          return;
+        }
         try {
+          // durability freeze: a revert APPENDS to the log like any edit — same rejection rule.
+          if (log.isDegraded(key)) {
+            ack({ ok: false, reason: "хранилище недоступно — откат отклонён, попробуйте позже" });
+            return;
+          }
           const loaded = await store.getMap(p.mapId);
           if (!loaded) {
             ack({ ok: false, reason: "map not found" });
             return;
           }
+          // Load the snapshot cache BEFORE reading the log: this is the LAST await, so the
+          // guard, keepOps/target, materialize and appendBatch below all run in one synchronous
+          // tail. An edit:op landing during a suspension here is fine (the log is re-read
+          // after); one landing between the guard and the append would be silently reverted
+          // by the diff — that window must not exist.
+          if (snapshots) await snapshots.ensureLoaded(key);
           const all = log.all(key);
           // keys any OTHER author wrote after fromSeq — reverting one of mine on such a key
           // would clobber their live edit (a conflict).
@@ -348,13 +388,19 @@ export function registerRoomHandlers(
           // diffDocs(HEAD, target) — minimal and only on the (peer-free) reverted keys.
           const keepOps = all.filter((e) => !revertSeqs.has(e.seq)).map((e) => e.op);
           const target = applyOps(loaded.doc, keepOps);
-          if (snapshots) await snapshots.ensureLoaded(key);
           const headDoc = snapshots
             ? snapshots.materialize(key, loaded.doc, log).doc
             : applyOps(loaded.doc, all.map((e) => e.op));
           const revertOps = diffDocs(headDoc, target);
           if (revertOps.length === 0) {
             ack({ ok: true, revertedCount: revertSeqs.size, conflictAt });
+            return;
+          }
+          // re-check the durability freeze in the SYNCHRONOUS tail: the flag can flip during
+          // the awaits above (a concurrent op's persist fails ~60ms later) — appending then
+          // would ack+broadcast entries the disk never gets (the exact divergence we refuse).
+          if (log.isDegraded(key)) {
+            ack({ ok: false, reason: "хранилище недоступно — откат отклонён, попробуйте позже" });
             return;
           }
           const batchId = `revert:${me}:${log.head(key)}`;
@@ -371,6 +417,113 @@ export function registerRoomHandlers(
           });
         } catch (err) {
           ack({ ok: false, reason: (err as Error).message });
+        } finally {
+          releaseRevertSlot(key);
+        }
+      })();
+    });
+  });
+
+  // Authoritative cherry-pick revert («только это», v0.9): revert ONE entry / one whole batch,
+  // guarded against the SERVER's log — the client's replica is racy (a broadcast still in
+  // flight is invisible to a client-side dependents check, and its optimistic rows carry
+  // provisional seqs). Two guards, both on final data: (1) dependents — NOTHING later in the
+  // log may touch the entry's cells/objects, else the old inverse would silently clobber the
+  // newer edits; (2) structure — the reverted state must introduce no NEW occupancy/mechanics/
+  // dangling-ref problem vs the head (baseline-subtracted). The revert itself is
+  // diffDocs(head, sim-without-entry) appended as a normal forward batch (the log never
+  // rewinds) and broadcast to the WHOLE room including the author.
+  socket.on("edit:revertOne", (p, ack) => {
+    if (!p || typeof p.mapId !== "string" || typeof p.seq !== "number") {
+      ack({ ok: false, reason: "invalid edit:revertOne payload" });
+      return;
+    }
+    const key = keyFor(p.mapId);
+    if (!key) {
+      ack({ ok: false, reason: "not joined to this map's room" });
+      return;
+    }
+    const me = socket.data.clientId ?? socket.id;
+    withRoom(key, () => {
+      void (async () => {
+        const busy = acquireRevertSlot(key);
+        if (busy) {
+          ack({ ok: false, reason: busy });
+          return;
+        }
+        try {
+          if (log.isDegraded(key)) {
+            ack({ ok: false, reason: "хранилище недоступно — откат отклонён, попробуйте позже" });
+            return;
+          }
+          const loaded = await store.getMap(p.mapId);
+          if (!loaded) {
+            ack({ ok: false, reason: "map not found" });
+            return;
+          }
+          // LAST await before the append: everything below (log read, guards, materialize,
+          // appendBatch) runs in one synchronous tail. A cold ensureLoaded suspends on real
+          // disk I/O — an edit:op appended during a suspension AFTER the log was read would be
+          // in headDoc but not in target, and the diff would silently revert it past the guard.
+          if (snapshots) await snapshots.ensureLoaded(key);
+          const all = log.all(key);
+          // the target: one whole batch (a stroke/generation is one undo unit) or one entry
+          const targetIdxs = new Set<number>();
+          for (let i = 0; i < all.length; i++) {
+            const e = all[i]!;
+            if (p.batchId ? e.batchId === p.batchId : e.seq === p.seq) targetIdxs.add(i);
+          }
+          if (targetIdxs.size === 0) {
+            ack({ ok: false, reason: "запись не найдена в логе комнаты" });
+            return;
+          }
+          // guard 1 — dependents: the log IS application order, so the shared pure check is exact
+          const deps = laterTouching(all.map((e) => opKeys(e.op)), targetIdxs);
+          if (deps.length) {
+            ack({
+              ok: false,
+              reason: "есть зависимые правки позже",
+              blocked: "dependents",
+              dependents: deps.slice(0, 8).map((i) => ({ seq: all[i]!.seq, author: all[i]!.author })),
+            });
+            return;
+          }
+          const keepOps = all.filter((_, i) => !targetIdxs.has(i)).map((e) => e.op);
+          const target = applyOps(loaded.doc, keepOps);
+          const headDoc = snapshots
+            ? snapshots.materialize(key, loaded.doc, log).doc
+            : applyOps(loaded.doc, all.map((e) => e.op));
+          // guard 2 — structure: key-disjoint entries can still break the map when ripped out
+          // (revert-of-add under a later building, revert-of-create a later event references)
+          const issues = newStructuralIssues(headDoc, target);
+          if (issues.length) {
+            ack({ ok: false, reason: "откат сломает карту", blocked: "structure", issues: issues.slice(0, 8) });
+            return;
+          }
+          const revertOps = diffDocs(headDoc, target);
+          if (revertOps.length === 0) {
+            ack({ ok: true, revertedCount: targetIdxs.size }); // already a no-op (e.g. self-cancelled batch)
+            return;
+          }
+          // re-check the durability freeze in the SYNCHRONOUS tail (can flip during the awaits)
+          if (log.isDegraded(key)) {
+            ack({ ok: false, reason: "хранилище недоступно — откат отклонён, попробуйте позже" });
+            return;
+          }
+          const batchId = `revert1:${me}:${log.head(key)}`;
+          const withIds = revertOps.map((op, i) => ({ clientOpId: `${batchId}:${i}`, op }));
+          const entries = log.appendBatch(key, withIds, socket.id, batchId, Date.now(), me);
+          ack({ ok: true, revertedCount: targetIdxs.size });
+          io.to(roomId(key)).emit("edit:opsApplied", {
+            batchId,
+            by: socket.id,
+            author: me,
+            ops: entries.map((e) => ({ seq: e.seq, clientOpId: e.clientOpId, op: e.op })),
+          });
+        } catch (err) {
+          ack({ ok: false, reason: (err as Error).message });
+        } finally {
+          releaseRevertSlot(key);
         }
       })();
     });

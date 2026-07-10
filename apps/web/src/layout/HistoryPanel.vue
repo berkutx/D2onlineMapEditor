@@ -2,10 +2,11 @@
 /**
  * Shared change history (collab). A floating, collapsible card listing the room's EditOp
  * log newest-first — each entry tagged with its author's colour + name. A row expands to
- * its detail + revert actions: «только это» (one entry) and «отсюда» (the entry and
- * everything newer, exact inverses newest→oldest). Reverts are regular forward commits —
- * append-only, broadcast to peers, and undoable (Ctrl+Z). Local undo/redo stays on the
- * toolbar; shown only while connected to a room.
+ * its detail + revert actions: «только это» (one entry, server-checked cherry-pick) and
+ * «отсюда» (my entries from here on, conflict-aware server revert). Reverts are regular
+ * forward commits — append-only and broadcast to peers; to cancel one, revert ITS new
+ * history row (server-computed reverts do not enter the local Ctrl+Z stack). Local
+ * undo/redo stays on the toolbar; shown only while connected to a room.
  */
 import { ref, computed } from "vue";
 import { storeToRefs } from "pinia";
@@ -58,65 +59,89 @@ function startResize(e: PointerEvent): void {
   e.preventDefault();
 }
 
-/** seqs whose detail is expanded (click a row to toggle). */
+/** rids whose detail is expanded (click a row to toggle). Row identity is `rid`, NEVER seq:
+ *  my optimistic rows carry a provisional seq that can tie until the ack. */
 const expanded = ref<Set<number>>(new Set());
-function toggle(seq: number): void {
+function toggle(rid: number): void {
   const s = new Set(expanded.value);
-  s.has(seq) ? s.delete(seq) : s.add(seq);
+  s.has(rid) ? s.delete(rid) : s.add(rid);
   expanded.value = s;
 }
 
 // --- revert actions (per expanded row) ------------------------------------------------------
-/** No captured inverse → nothing to revert (mid-stroke entry: its stroke's last row has it). */
-const revertable = (e: HistoryEntry): boolean => (e.inverse?.length ?? 0) > 0;
+/** Revertable = has a locally captured inverse, OR is server-confirmed while in a room (the
+ *  server computes the cherry-pick itself — rows re-folded after a reload have no local
+ *  inverse but ARE revertable that way). */
+const revertable = (e: HistoryEntry): boolean =>
+  (e.inverse?.length ?? 0) > 0 || (connected.value && e.acked);
 
 /** «Только это» is allowed ONLY when nothing newer touches the same cells/objects —
  *  вырывать середину цепочки нельзя (поздние правки перезатёрлись бы молча). dependentsOf is
- *  O(1) (memoised in the store), so calling it per row on re-render is cheap. Structural safety
- *  (occupancy / dangling refs) is a heavier check run once on click, not per render. */
-const dependents = (e: HistoryEntry) => collab.dependentsOf(e.seq);
+ *  memoised in the store, so calling it per row on re-render is cheap. Structural safety
+ *  (occupancy / dangling refs) is a heavier check run once on click — and in a room the
+ *  authoritative dependents+structure check runs SERVER-side on click anyway. */
+const dependents = (e: HistoryEntry) => collab.dependentsOf(e.rid);
+const formatDeps = (deps: { seq: number; byName: string; mine: boolean }[], max: number): string => {
+  const list = deps.slice(0, max).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName})`).join(", ");
+  return `${list}${deps.length > max ? ` и ещё ${deps.length - max}` : ""}`;
+};
 const revertOneTitle = (e: HistoryEntry): string => {
   if (!revertable(e)) return "Нет обратной правки (часть мазка — откатывайте с последней записи мазка)";
   const deps = dependents(e);
   if (!deps.length) return "Откатить только эту запись (проверю структуру при клике)";
-  const list = deps.slice(0, 3).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName})`).join(", ");
-  return `Нельзя вырвать из середины: тот же объект/клетки правились позже — ${list}${deps.length > 3 ? ` и ещё ${deps.length - 3}` : ""}. Используйте «откатить моё отсюда».`;
+  return `Нельзя вырвать из середины: тот же объект/клетки правились позже — ${formatDeps(deps, 3)}. Используйте «откатить моё отсюда».`;
 };
 
-function revertOne(e: HistoryEntry): void {
-  const r = collab.revertOne(e.seq);
+async function revertOne(e: HistoryEntry): Promise<void> {
+  const r = await collab.revertOne(e.rid);
   if (r.ok) {
     ElMessage.success(`Откачено: ${e.summary}`);
     return;
   }
   if (r.blocked === "dependents" && r.dependents?.length) {
-    const list = r.dependents.slice(0, 4).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName}) ${d.summary}`).join("; ");
-    ElMessage.warning(`Нельзя откатить только эту запись — есть зависимые позже: ${list}${r.dependents.length > 4 ? "…" : ""}`);
+    ElMessage.warning(`Нельзя откатить только эту запись — есть зависимые позже: ${formatDeps(r.dependents, 4)}`);
   } else if (r.blocked === "structure" && r.issues?.length) {
     ElMessage.warning(`Нельзя откатить — сломает карту: ${r.issues.slice(0, 3).join("; ")}${r.issues.length > 3 ? "…" : ""}`);
+  } else if (r.blocked === "pending") {
+    ElMessage.warning("Запись ещё синхронизируется (⟳) — дождитесь подтверждения сервера и повторите");
+  } else if (r.blocked === "offline") {
+    ElMessage.warning("Нет связи с комнатой — откат этой записи выполняет сервер. Проверьте историю после переподключения");
   } else {
-    ElMessage.warning("Не удалось откатить — запись конфликтует с более поздними правками");
+    ElMessage.warning(r.reason || "Не удалось откатить — запись конфликтует с более поздними правками");
   }
 }
 function revertFrom(e: HistoryEntry): void {
+  if (connected.value && e.rejected) {
+    ElMessage.warning("Эта правка отклонена сервером и существует только локально — откатите её через «только это»");
+    return;
+  }
+  if (connected.value && !e.acked) {
+    ElMessage.warning("Запись ещё не подтверждена сервером — дождитесь синхронизации (⟳)");
+    return;
+  }
   void ElMessageBox.confirm(
-    `Откатить ВАШИ правки с #${e.seq} и новее? Чужие правки останутся; откат остановится на первой клетке/объекте, которые изменил другой участник. Это обычная правка (в историю, Ctrl+Z отменяет).`,
+    `Откатить ВАШИ правки с #${e.seq} и новее? Чужие правки останутся; откат остановится на первой клетке/объекте, которые изменил другой участник. Откат — обычная запись в истории: чтобы вернуть, откатите её саму.`,
     "Откатить моё отсюда",
     { confirmButtonText: "Откатить", cancelButtonText: "Отмена", type: "warning" },
   )
     .then(async () => {
       const r = await collab.revertRangeServer(e.seq);
       if (!r.ok) {
-        ElMessage.warning("Не удалось откатить");
+        ElMessage.warning(r.offline
+          ? "Нет связи с комнатой — конфликт-осознанный откат выполняет сервер. Попробуйте после переподключения"
+          : "Не удалось откатить");
         return;
       }
       const boundary = r.conflictAt
         ? ` Дальше конфликт — изменил другой участник (${r.conflictAt.keys.slice(0, 4).join(", ")}${r.conflictAt.keys.length > 4 ? "…" : ""}).`
         : "";
+      const rejectedNote = r.rejectedLeft
+        ? " Отклонённые сервером (локальные) правки не тронуты — откатите их через «только это»."
+        : "";
       if (r.revertedCount === 0) {
-        ElMessage.warning(`Нечего откатывать${r.conflictAt ? " — сразу конфликт." + boundary : "."}`);
+        ElMessage.warning(`Нечего откатывать${r.conflictAt ? " — сразу конфликт." + boundary : "."}${rejectedNote}`);
       } else {
-        ElMessage.success(`Откачено ваших правок: ${r.revertedCount}.${boundary}`);
+        ElMessage.success(`Откачено ваших правок: ${r.revertedCount}.${boundary}${rejectedNote}`);
       }
     })
     .catch(() => { /* отмена */ });
@@ -159,14 +184,14 @@ async function download(e: HistoryEntry): Promise<void> {
     <div v-show="open" class="hist-body" :style="{ height: bodyHeight + 'px' }">
       <div v-if="!rows.length" class="hist-empty">Пока нет правок в этой сессии.</div>
       <ul v-else class="hist-list">
-        <li v-for="e in rows" :key="e.seq" class="hist-item">
-          <div class="hist-row d2-row" :class="{ active: expanded.has(e.seq) }" @click="toggle(e.seq)">
+        <li v-for="e in rows" :key="e.rid" class="hist-item">
+          <div class="hist-row d2-row" :class="{ active: expanded.has(e.rid) }" @click="toggle(e.rid)">
             <span class="dot" :style="{ background: e.byColor }" />
-            <span class="seq">#{{ e.seq }}</span>
+            <span class="seq" :title="e.acked ? '' : e.rejected ? 'Отклонена сервером — только локально' : 'Синхронизируется…'">#{{ e.seq }}{{ e.acked ? '' : e.rejected ? '✗' : '⟳' }}</span>
             <span class="who" :class="{ mine: e.mine }">{{ e.mine ? 'вы' : e.byName }}</span>
             <span class="what">{{ e.summary }}</span>
           </div>
-          <template v-if="expanded.has(e.seq)">
+          <template v-if="expanded.has(e.rid)">
             <pre class="hist-detail">{{ e.detail }}</pre>
             <div class="hist-actions">
               <button
