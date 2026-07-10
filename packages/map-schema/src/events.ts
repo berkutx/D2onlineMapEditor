@@ -46,6 +46,10 @@ export interface EventFieldSpec {
    *  undocumented in the reference). MUST still live in the spec: otherwise a spec-shaped
    *  event differs from a reparsed one and the semantic verifier fails. */
   hidden?: boolean;
+  /** Conditional visibility in the FORM only (the value still exists and serializes): show
+   *  this field while `cond[key] !== not`. Dead inputs behind an «ignore» switch confuse
+   *  more than they inform (e.g. varInRange's second variable). */
+  showWhen?: { key: string; not: number };
 }
 
 export interface EventTypeSpec {
@@ -125,15 +129,21 @@ export const CONDITION_SPECS: readonly EventTypeSpec[] = [
   { code: 17, kind: "stackExists", label: "Существование отряда", fields: [
     { key: "stackId", label: "Отряд", type: "ref-stack" },
     { key: "mustExist", label: "Должен существовать", type: "bool" } ] },
+  // Сработает, когда var1 ∈ [min1..max1] (и/или var2 ∈ [min2..max2] — по relation).
+  // FORM order ≠ disk order (кодек сериализует по своей таблице тегов): «relation» идёт
+  // ПЕРЕД второй переменной и прячет её поля, пока вторая проверка выключена — три мёртвых
+  // инпута под «Игнор. 2-ю» читались как бессмыслица.
   { code: 18, kind: "varInRange", label: "Переменная в диапазоне", fields: [
-    { key: "var1", label: "Переменная 1", type: "var" },
-    { key: "min1", label: "Мин 1", type: "int" },
-    { key: "max1", label: "Макс 1", type: "int" },
-    { key: "var2", label: "Переменная 2", type: "var" },
-    { key: "min2", label: "Мин 2", type: "int" },
-    { key: "max2", label: "Макс 2", type: "int" },
-    { key: "relation", label: "Связь", type: "enum", options: [
-      { value: 0, label: "Игнор. 2-ю" }, { value: 1, label: "Обе (И)" }, { value: 2, label: "Любая (ИЛИ)" } ] } ] },
+    { key: "var1", label: "Переменная", type: "var" },
+    { key: "min1", label: "От (мин)", type: "int" },
+    { key: "max1", label: "До (макс)", type: "int" },
+    { key: "relation", label: "Вторая проверка", type: "enum", options: [
+      { value: 0, label: "— не проверять" },
+      { value: 1, label: "И: обе в диапазоне" },
+      { value: 2, label: "ИЛИ: любая в диапазоне" } ] },
+    { key: "var2", label: "Переменная 2", type: "var", showWhen: { key: "relation", not: 0 } },
+    { key: "min2", label: "От (мин) 2", type: "int", showWhen: { key: "relation", not: 0 } },
+    { key: "max2", label: "До (макс) 2", type: "int", showWhen: { key: "relation", not: 0 } } ] },
   { code: 19, kind: "resourceAmount", label: "Ресурсы игрока", fields: [
     { key: "bank", label: "Банк (G:R:Y:E:W:B)", type: "text" },
     { key: "greaterOrEqual", label: "Больше или равно", type: "bool" } ] },
@@ -142,12 +152,13 @@ export const CONDITION_SPECS: readonly EventTypeSpec[] = [
       { value: 0, label: "Одиночная" }, { value: 1, label: "Хотсит" }, { value: 2, label: "Онлайн" } ] } ] },
   { code: 21, kind: "checkForHuman", label: "Человек / ИИ", fields: [
     { key: "isAI", label: "Управляет ИИ", type: "bool" } ] },
+  // FORM order = «Переменная 1 <оператор> Переменная 2» — читается слева направо.
   { code: 22, kind: "compareVar", label: "Сравнение переменных", fields: [
     { key: "var1", label: "Переменная 1", type: "var" },
-    { key: "var2", label: "Переменная 2", type: "var" },
     { key: "cmp", label: "Оператор", type: "enum", options: [
       { value: 0, label: "==" }, { value: 1, label: "≠" }, { value: 2, label: ">" },
-      { value: 3, label: "≥" }, { value: 4, label: "<" }, { value: 5, label: "≤" } ] } ] },
+      { value: 3, label: "≥" }, { value: 4, label: "<" }, { value: 5, label: "≤" } ] },
+    { key: "var2", label: "Переменная 2", type: "var" } ] },
   { code: 23, kind: "customScript", label: "Lua-скрипт", fields: [
     { key: "code", label: "Код", type: "text" },
     { key: "desc", label: "Описание", type: "text" } ] },

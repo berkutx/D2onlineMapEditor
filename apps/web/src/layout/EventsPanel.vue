@@ -227,10 +227,14 @@ function onZonePick(zid: string): void {
   });
 }
 
+/** showWhen: поле видно, пока управляющее значение ≠ not (данные живут и сериализуются —
+ *  прячем только мёртвые инпуты за выключенной опцией, напр. вторую переменную varInRange). */
+const fieldVisible = (f: { hidden?: boolean; showWhen?: { key: string; not: number } }, holder: Record<string, unknown>): boolean =>
+  !f.hidden && (!f.showWhen || holder[f.showWhen.key] !== f.showWhen.not);
 const condFields = (c: EventCondition) =>
-  (CONDITION_BY_KIND[c.kind]?.fields ?? []).filter((f) => !f.hidden);
+  (CONDITION_BY_KIND[c.kind]?.fields ?? []).filter((f) => fieldVisible(f, c as Record<string, unknown>));
 const effFields = (e: EventEffect) =>
-  (EFFECT_BY_KIND[e.kind]?.fields ?? []).filter((f) => !f.hidden);
+  (EFFECT_BY_KIND[e.kind]?.fields ?? []).filter((f) => fieldVisible(f, e as Record<string, unknown>));
 const condLabel = (c: EventCondition) => CONDITION_BY_KIND[c.kind]?.label ?? c.kind;
 const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
 /** Role-class icons for a list row (shared scenarioRoles model), capped at 4. */
