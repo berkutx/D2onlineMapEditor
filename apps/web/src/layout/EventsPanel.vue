@@ -365,7 +365,9 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
                 <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
                 <span class="ev-icons">{{ badgeIcons(e) }}</span>
-                <span class="ev-ce">{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
+                <span class="ev-ce" :class="{ 'ev-ce-inert': !e.effects.length }"
+                  :title="!e.effects.length ? 'у события нет эффектов — оно ничего не делает' : undefined"
+                >{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
                 <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
                 <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
               </div>
@@ -551,6 +553,8 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
    icons + counts sit together on the right edge */
 .ev-icons { margin-left: auto; font-size: 11px; line-height: 1; letter-spacing: 1px; }
 .ev-ce { color: var(--el-text-color-secondary); }
+/* событие без эффектов инертно (обычно недоделанная заготовка) — мягкий варнинг */
+.ev-ce-inert { color: var(--el-color-warning); }
 .ev-editor { flex: 1; min-height: 0; }
 .ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; align-items: center; }
 .ev-props label { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-regular); }

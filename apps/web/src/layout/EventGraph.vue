@@ -122,6 +122,16 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
     effIdx.push(nodes.length - 1);
     edges.push({ x1: center.x + center.w, y1: cy, x2: COL.eff, y2: y + NODE_H / 2, cls: "e-eff", a: centerIdx, b: effIdx[i]! });
   });
+  // «обрыв» без эффектов путает (событие выглядит недоделанным молча) — явная заглушка
+  if (!effs.length) {
+    nodes.push({
+      x: COL.eff, y: cy - NODE_H / 2, w: BW.eff, h: NODE_H,
+      title: "эффектов нет", sub: "событие ничего не делает — добавьте ★",
+      icon: "∅", cls: "g-empty", tip: "добавьте эффект в редакторе справа («+ эффект»)",
+      click: () => store.revealCard("eff", 0),
+    });
+    edges.push({ x1: center.x + center.w, y1: cy, x2: COL.eff, y2: cy, cls: "e-empty", a: centerIdx, b: nodes.length - 1 });
+  }
 
   // left satellites (enabler events + condition entities)
   const lYs = stackYs(leftSats.length, cy);
@@ -599,6 +609,10 @@ rect {
 .e-eff { stroke: var(--el-color-success); stroke-width: 1.4; opacity: 0.7; }
 .e-sat { stroke: var(--el-border-color); stroke-width: 1.1; opacity: 0.9; }
 .e-chain { stroke: var(--el-color-primary); stroke-width: 1.3; stroke-dasharray: 5 4; opacity: 0.8; }
+/* «эффектов нет» — пунктирная заглушка вместо молчаливого обрыва графа */
+.g-empty rect { stroke: var(--el-text-color-secondary); stroke-dasharray: 3 3; opacity: 0.8; }
+.g-empty { opacity: 0.75; }
+.e-empty { stroke: var(--el-text-color-secondary); stroke-width: 1.2; stroke-dasharray: 3 3; opacity: 0.55; }
 /* hover highlight: the hovered node's edges pop, everything else fades */
 path, g { transition: opacity 0.14s ease; }
 path.hot { stroke-width: 2.4; opacity: 1; }
