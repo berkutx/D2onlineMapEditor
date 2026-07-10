@@ -70,10 +70,31 @@ function toggle(seq: number): void {
 /** No captured inverse → nothing to revert (mid-stroke entry: its stroke's last row has it). */
 const revertable = (e: HistoryEntry): boolean => (e.inverse?.length ?? 0) > 0;
 
+/** «Только это» is allowed ONLY when nothing newer touches the same cells/objects —
+ *  вырывать середину цепочки нельзя (поздние правки перезатёрлись бы молча). */
+const dependents = (e: HistoryEntry) => collab.dependentsOf(e.seq);
+const revertOneTitle = (e: HistoryEntry): string => {
+  if (!revertable(e)) return "Нет обратной правки (часть мазка — откатывайте с последней записи мазка)";
+  const deps = dependents(e);
+  if (!deps.length) return "Применить обратную правку только для этой записи (позже её никто не трогал)";
+  const list = deps.slice(0, 3).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName})`).join(", ");
+  return `Нельзя вырвать из середины: тот же объект/клетки правились позже — ${list}${deps.length > 3 ? ` и ещё ${deps.length - 3}` : ""}. Используйте «откатить моё отсюда».`;
+};
+
 function revertOne(e: HistoryEntry): void {
-  const ok = collab.revertOne(e.seq);
-  if (ok) ElMessage.success(`Откачено: ${e.summary}`);
-  else ElMessage.warning("Не удалось откатить — запись конфликтует с более поздними правками");
+  const r = collab.revertOne(e.seq);
+  if (r.ok) {
+    ElMessage.success(`Откачено: ${e.summary}`);
+    return;
+  }
+  if (r.blocked === "dependents" && r.dependents?.length) {
+    const list = r.dependents.slice(0, 4).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName}) ${d.summary}`).join("; ");
+    ElMessage.warning(`Нельзя откатить только эту запись — есть зависимые позже: ${list}${r.dependents.length > 4 ? "…" : ""}`);
+  } else if (r.blocked === "refs" && r.refs?.length) {
+    ElMessage.warning(`Нельзя откатить: объект (${r.refs.join(", ")}) уже используется событиями/городом — сперва уберите ссылки`);
+  } else {
+    ElMessage.warning("Не удалось откатить — запись конфликтует с более поздними правками");
+  }
 }
 function revertFrom(e: HistoryEntry): void {
   void ElMessageBox.confirm(
@@ -149,8 +170,8 @@ async function download(e: HistoryEntry): Promise<void> {
               <button
                 type="button"
                 class="hist-act"
-                :disabled="!revertable(e)"
-                :title="revertable(e) ? 'Применить обратную правку только для этой записи' : 'Нет обратной правки (часть мазка — откатывайте с последней записи мазка)'"
+                :disabled="!revertable(e) || dependents(e).length > 0"
+                :title="revertOneTitle(e)"
                 @click.stop="revertOne(e)"
               >⎌ только это</button>
               <button
