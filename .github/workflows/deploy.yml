@@ -51,6 +51,11 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd ~/d2editor
+            # The data disk is fstab-nofail: after a reboot without it, /mnt/data is an EMPTY dir on
+            # the root FS. `docker run -v` would then silently manufacture /mnt/data/d2editor on the
+            # root disk and every op-log/upload written since would be shadowed (lost) when the disk
+            # remounts — so ABORT the deploy instead when the mount is gone.
+            mountpoint -q /mnt/data || { echo "FATAL: /mnt/data is not mounted — refusing to deploy onto the root disk"; exit 1; }
             # Bind-backed volume device dirs MUST exist before `up` (type:none bind mounts fail on a
             # missing dir → the container won't start). Idempotent; created via docker so it works
             # without host sudo (the daemon runs as root). `rooms` is the durable collab op-log.

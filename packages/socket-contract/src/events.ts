@@ -89,6 +89,32 @@ export interface ClientToServerEvents {
   ) => void;
 
   /**
+   * Authoritative cherry-pick revert (additive, v0.9): revert ONE log entry (or one whole
+   * batch) «только это», checked against the SERVER's log — not the client's replica, whose
+   * view is racy (a peer op broadcast still in flight is invisible to a client-side guard).
+   * Blocked unless NOTHING later in the log touches the same cells/objects (dependents guard)
+   * AND the reverted state introduces no NEW structural problem vs the current head (structure
+   * guard, baseline-subtracted). The revert is computed as diffDocs(head, sim-without-entry)
+   * and APPENDED as a normal forward batch broadcast to the room (the log never rewinds).
+   */
+  "edit:revertOne": (
+    p: { mapId: string; seq: number; batchId?: string },
+    ack: (
+      r:
+        | { ok: true; revertedCount: number }
+        | {
+            ok: false;
+            reason: string;
+            /** dependents = later log entries on the same keys; structure = the revert would
+             *  break the map (issues lists the NEW problems). Absent = lookup/transport error. */
+            blocked?: "dependents" | "structure";
+            dependents?: { seq: number; author: string }[];
+            issues?: string[];
+          },
+    ) => void,
+  ) => void;
+
+  /**
    * Reconnect catch-up (additive, v0.3): the room-log entries STRICTLY AFTER `afterSeq`.
    * A reconnecting client must NOT take a full snapshot — its journal already holds every
    * op it saw, so rebasing on a snapshot double-applies them (addObject/deleteObject throw).
@@ -156,6 +182,7 @@ export const EVENTS = {
   editOp: "edit:op",
   editOps: "edit:ops",
   editRevertRange: "edit:revertRange",
+  editRevertOne: "edit:revertOne",
   snapshotRequest: "snapshot:request",
   opsSince: "ops:since",
   roomPeers: "room:peers",

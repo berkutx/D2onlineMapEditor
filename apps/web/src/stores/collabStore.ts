@@ -14,9 +14,9 @@ import { defineStore } from "pinia";
 import { ref, reactive, computed } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import type { EditOp, UserPresence } from "@d2/socket-contract";
-import { activeOps, activeOpUids, allOpUids, opKeys, applyOps, occupancyErrors, validateMechanics } from "@d2/map-edit";
+import { activeOps, activeOpUids, allOpUids, opKeys, applyOps, newStructuralIssues } from "@d2/map-edit";
 import { getSocket } from "../realtime/socket";
-import { getChannelId } from "../services/clientId";
+import { getChannelId, getClientId } from "../services/clientId";
 import { useEditStore } from "./editStore";
 import { useDecorStore } from "./decorStore";
 
@@ -27,6 +27,10 @@ export type RevertDependent = { seq: number; byName: string; mine: boolean; summ
 
 /** A shared-timeline entry (newest last): who applied which op at which seq. */
 export interface HistoryEntry {
+  /** Stable per-session ROW id — the panel and the revert APIs address rows by this, never
+   *  by seq: my optimistic rows carry a PROVISIONAL seq (lastSeq+1) until the ack, so two
+   *  in-flight commits can tie and a seq lookup resolves the wrong entry. */
+  rid: number;
   seq: number;
   by: string; // socketId of the author
   byName: string;
@@ -36,9 +40,18 @@ export interface HistoryEntry {
   /** A slightly longer, click-to-reveal description (what exactly changed). */
   detail: string;
   mine: boolean;
+  /** The server confirmed this row (its seq is authoritative → the server-side cherry-pick
+   *  can target it). false while in flight, and forever for rejected/local-only rows. */
+  acked: boolean;
+  /** The server REFUSED this row's ops (ack.ok=false) — they are applied locally but are NOT
+   *  in the room log. Distinguishes "local-only" (safe to revert locally) from "in flight"
+   *  (reverting locally would race the pending ack — wait instead). */
+  rejected?: boolean;
   /** Ops that undo this entry (apply in array order), captured at apply time. For a batched
    *  entry this is EVERY op's inverse, newest-first, so one revert undoes the whole commit.
-   *  Empty for a mid-stroke entry whose composed inverse rides on the stroke's LAST entry. */
+   *  Empty for a mid-stroke entry whose composed inverse rides on the stroke's LAST entry,
+   *  and for rows re-folded from the room log after a reload (no local capture — the
+   *  server-side revert handles those). */
   inverse?: EditOp[];
   /** Ops of ONE commit (brush stroke, Copilot generation) collapse into a single row keyed
    *  by this. Absent for a standalone op. */
@@ -215,7 +228,15 @@ export const useCollabStore = defineStore("collab", () => {
   /** Highest seq this client has applied (its position in the shared log). */
   let lastSeq = 0;
   let opCounter = 0;
+  /** Monotonic history-row id source (see HistoryEntry.rid). */
+  let ridCounter = 0;
+  /** clientOpId (journal uid) → its history row, for fold-time dedup + pending-row
+   *  confirmation (an op whose ack was lost is re-seen in the log on reconnect). */
+  let rowByUid = new Map<string, HistoryEntry>();
   let listenersBound = false;
+  /** My durable browser identity — log entries whose `author` matches are MINE («вы»),
+   *  whichever session or tab of this browser sent them. */
+  const myClientId = getClientId();
 
   const userName = ref<string>(localStorage.getItem(NAME_KEY) || randomName());
   function setUserName(name: string): void {
@@ -246,20 +267,42 @@ export const useCollabStore = defineStore("collab", () => {
     };
   }
 
-  function record(seq: number, by: string, op: EditOp, mine: boolean, inverse?: EditOp[]): void {
+  /** Push an entry and return its REACTIVE proxy from the array — every later mutation
+   *  (seq fix-up on ack, batch merge) must go through the proxy, or Vue effects (the
+   *  dependents index, the panel's :disabled) keep serving stale results. In-place push
+   *  (reactive, tracked via length) — NOT a spread copy: a reload fold records a row per
+   *  log entry, and spreading the proxied array per row is O(rows²) proxy traps. */
+  function pushEntry(entry: HistoryEntry, uids?: readonly (string | undefined)[]): HistoryEntry {
+    history.value.push(entry);
+    const proxy = history.value[history.value.length - 1]!;
+    if (uids) for (const u of uids) if (u) rowByUid.set(u, proxy);
+    return proxy;
+  }
+
+  function record(
+    seq: number, by: string, op: EditOp, mine: boolean, inverse?: EditOp[],
+    opts?: { acked?: boolean; uid?: string },
+  ): HistoryEntry {
     const ctx = opCtx();
-    history.value = [
-      ...history.value,
-      { seq, by, byName: nameOf(by), byColor: colorOf(by), op, summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse, keys: opKeys(op) },
-    ];
+    return pushEntry(
+      {
+        rid: ridCounter++, seq, by, byName: nameOf(by), byColor: colorOf(by), op,
+        summary: summarize(op, ctx), detail: detailOf(op, ctx), mine,
+        acked: opts?.acked ?? true, inverse, keys: opKeys(op),
+      },
+      [opts?.uid],
+    );
   }
 
   /** Live/catch-up grouping of a peer's (or a reloaded) commit: ops sharing a `batchId` fold
    *  into ONE row as they stream in (find-or-create), so a peer's generation is one line, not
    *  thousands. My OWN commits are recorded whole in sendOps (I have every op at once). */
   const batchAgg = new Map<string, { entry: HistoryEntry; count: number }>();
-  function recordGrouped(seq: number, by: string, op: EditOp, mine: boolean, inverse: EditOp[] | undefined, batchId?: string): void {
-    if (!batchId) return record(seq, by, op, mine, inverse);
+  function recordGrouped(seq: number, by: string, op: EditOp, mine: boolean, inverse: EditOp[] | undefined, batchId?: string, uid?: string): void {
+    if (!batchId) {
+      record(seq, by, op, mine, inverse, { uid });
+      return;
+    }
     const agg = batchAgg.get(batchId);
     if (agg) {
       agg.count++;
@@ -267,17 +310,22 @@ export const useCollabStore = defineStore("collab", () => {
       agg.entry.seq = Math.min(agg.entry.seq, seq);
       if (inverse?.length) agg.entry.inverse = [...inverse, ...(agg.entry.inverse ?? [])]; // newest-first
       for (const k of opKeys(op)) if (!agg.entry.keys!.includes(k)) agg.entry.keys!.push(k); // accumulate conflict keys as the stroke streams in
+      entryKeysCache.delete(agg.entry); // keys grew — a cached Set would silently under-cover
       agg.entry.summary = `✎ правок за операцию: ${agg.count}`;
       agg.entry.detail = `${agg.count} правок за одну операцию`;
+      if (uid) rowByUid.set(uid, agg.entry);
       return;
     }
     const ctx = opCtx();
-    const entry: HistoryEntry = {
-      seq, by, byName: nameOf(by), byColor: colorOf(by), op,
-      summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, inverse: inverse ?? [], batchId, count: 1, keys: opKeys(op),
-    };
+    const entry = pushEntry(
+      {
+        rid: ridCounter++, seq, by, byName: nameOf(by), byColor: colorOf(by), op,
+        summary: summarize(op, ctx), detail: detailOf(op, ctx), mine, acked: true,
+        inverse: inverse ?? [], batchId, count: 1, keys: opKeys(op),
+      },
+      [uid],
+    );
     batchAgg.set(batchId, { entry, count: 1 });
-    history.value = [...history.value, entry];
   }
 
   /** Record a WHOLE batched commit as ONE history row (I have every op + inverse at once —
@@ -285,19 +333,22 @@ export const useCollabStore = defineStore("collab", () => {
    *  so a single revert undoes the whole commit. */
   function recordBatchRow(
     seq: number, by: string, ops: readonly EditOp[], inverse: EditOp[] | undefined, batchId: string, mine: boolean,
+    opts?: { acked?: boolean; uids?: readonly (string | undefined)[] },
   ): HistoryEntry {
     const ctx = opCtx();
     // keys from ALL ops (not just op[0]/inverse): a pre-join draft batch is recorded with an
     // empty inverse, so op+inverse would under-cover it and the dependency guard would miss it.
     const keys = new Set<string>();
     for (const o of ops) for (const k of opKeys(o)) keys.add(k);
-    const entry: HistoryEntry = {
-      seq, by, byName: nameOf(by), byColor: colorOf(by),
-      op: ops[0]!, summary: summarizeBatch(ops, ctx), detail: detailBatch(ops),
-      mine, inverse: inverse ?? [], batchId, count: ops.length, keys: [...keys],
-    };
+    const entry = pushEntry(
+      {
+        rid: ridCounter++, seq, by, byName: nameOf(by), byColor: colorOf(by),
+        op: ops[0]!, summary: summarizeBatch(ops, ctx), detail: detailBatch(ops),
+        mine, acked: opts?.acked ?? true, inverse: inverse ?? [], batchId, count: ops.length, keys: [...keys],
+      },
+      opts?.uids,
+    );
     batchAgg.set(batchId, { entry, count: ops.length }); // a stray later op merges, not dups
-    history.value = [...history.value, entry];
     return entry;
   }
 
@@ -307,7 +358,7 @@ export const useCollabStore = defineStore("collab", () => {
     const socket = getSocket();
     (window as unknown as { __d2socket?: unknown }).__d2socket = socket; // debug hook (inspect emits)
 
-    socket.on("edit:applied", ({ seq, by, clientOpId, op, batchId }) => {
+    socket.on("edit:applied", ({ seq, by, author, clientOpId, op, batchId }) => {
       lastSeq = Math.max(lastSeq, seq);
       // a second tab of THIS browser shares the localStorage journal — an op it already
       // holds must not double-apply (addObject would throw)
@@ -315,7 +366,8 @@ export const useCollabStore = defineStore("collab", () => {
       try {
         const inv = edit.applyIncoming([op], clientOpId ? [clientOpId] : undefined); // peer op → live doc + journal (not my undo stack)
         if (clientOpId) knownOpIds.add(clientOpId);
-        recordGrouped(seq, by, op, false, inv, batchId); // peer's stroke/generation → ONE row
+        // `mine` by the DURABLE author id: my other tab's op is «вы», not an anonymous peer
+        recordGrouped(seq, by, op, author === myClientId, inv, batchId, clientOpId);
       } catch (err) {
         // a conflicting peer op (e.g. an id our local draft already used) must not kill
         // the socket pipeline — surface it instead
@@ -327,14 +379,16 @@ export const useCollabStore = defineStore("collab", () => {
 
     // A peer's WHOLE batched commit (see edit:ops) — apply every op in ONE pass and record
     // ONE history row. This is the receive side of the per-tile-flood fix.
-    socket.on("edit:opsApplied", ({ batchId, by, ops }) => {
+    socket.on("edit:opsApplied", ({ batchId, by, author, ops }) => {
       for (const o of ops) lastSeq = Math.max(lastSeq, o.seq);
       const fresh = ops.filter((o) => !(o.clientOpId && knownOpIds.has(o.clientOpId))); // skip 2nd-tab dups
       if (fresh.length === 0) return;
       try {
         const inv = edit.applyIncoming(fresh.map((f) => f.op), fresh.map((f) => f.clientOpId)); // ONE apply pass
         for (const f of fresh) if (f.clientOpId) knownOpIds.add(f.clientOpId);
-        recordBatchRow(fresh[0]!.seq, by, fresh.map((f) => f.op), inv, batchId, false);
+        recordBatchRow(fresh[0]!.seq, by, fresh.map((f) => f.op), inv, batchId, author === myClientId, {
+          uids: fresh.map((f) => f.clientOpId),
+        });
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("[collab] пакет правок участника не применился:", err);
@@ -378,17 +432,22 @@ export const useCollabStore = defineStore("collab", () => {
     if (!id || !me.value || ops.length === 0) return;
     const meId = me.value.socketId;
 
-    // Single op → one edit:op message + its own history row (unchanged).
+    // Single op → one edit:op message + its own history row. The row is recorded AT COMMIT
+    // TIME (provisional seq, acked=false), not in the ack — an in-flight op invisible to the
+    // dependents guard was a silent-clobber window (revert of an older same-key row slipped
+    // through during the RTT). The ack only fixes seq/acked up; a rejected op keeps its row
+    // (the edit is still applied locally — it is a local-only change, revertable locally).
     if (ops.length === 1) {
       const op = ops[0]!;
       const clientOpId = uids?.[0] || `${meId}:${opCounter++}`;
       knownOpIds.add(clientOpId);
       const inverse = inverses?.[0];
+      const entry = record(lastSeq + 1, meId, op, true, inverse, { acked: false, uid: clientOpId });
       pending.value++;
       socket.emit("edit:op", { mapId: id, clientOpId, baseSeq: lastSeq, op }, (ack) => {
         pending.value = Math.max(0, pending.value - 1);
-        if (ack.ok && typeof ack.seq === "number") { lastSeq = Math.max(lastSeq, ack.seq); record(ack.seq, meId, op, true, inverse); }
-        else console.warn("[collab] op rejected:", ack.reason); // eslint-disable-line no-console
+        if (ack.ok && typeof ack.seq === "number") { lastSeq = Math.max(lastSeq, ack.seq); entry.seq = ack.seq; entry.acked = true; }
+        else { entry.rejected = true; console.warn("[collab] op rejected:", ack.reason); } // eslint-disable-line no-console
       });
       return;
     }
@@ -403,12 +462,15 @@ export const useCollabStore = defineStore("collab", () => {
       return { clientOpId, op };
     });
     const flatInverse = inverses ? inverses.slice().reverse().flatMap((iv) => iv) : []; // newest-first
-    const entry = recordBatchRow(lastSeq + 1, meId, ops, flatInverse, batchId, true);
+    const entry = recordBatchRow(lastSeq + 1, meId, ops, flatInverse, batchId, true, {
+      acked: false,
+      uids: opsWithIds.map((o) => o.clientOpId),
+    });
     pending.value++;
     socket.emit("edit:ops", { mapId: id, batchId, baseSeq: lastSeq, ops: opsWithIds }, (ack) => {
       pending.value = Math.max(0, pending.value - 1);
-      if (ack.ok) { lastSeq = Math.max(lastSeq, ack.seqEnd); entry.seq = ack.seqStart; }
-      else console.warn("[collab] batch rejected:", ack.reason); // eslint-disable-line no-console
+      if (ack.ok) { lastSeq = Math.max(lastSeq, ack.seqEnd); entry.seq = ack.seqStart; entry.acked = true; }
+      else { entry.rejected = true; console.warn("[collab] batch rejected:", ack.reason); } // eslint-disable-line no-console
     });
   }
 
@@ -457,19 +519,21 @@ export const useCollabStore = defineStore("collab", () => {
   // Revert = apply the captured inverses as a NEW forward commit (append-only model: nothing
   // is rewound; peers receive it as a regular edit; it lands in MY undo stack).
 
-  /** Inverses of the given entries, newest→oldest, ready to apply in order. */
+  /** Inverses of the given entries, newest→oldest in APPLY order (rid desc — seq can tie on
+   *  optimistic in-flight rows, and unwinding must mirror how the doc was built), ready to
+   *  apply in order. */
   function inversesOf(entries: HistoryEntry[]): EditOp[] {
     return entries
       .slice()
-      .sort((a, b) => b.seq - a.seq)
+      .sort((a, b) => b.rid - a.rid)
       .flatMap((e) => e.inverse ?? []);
   }
 
   /** Every cell/object key an entry touches. Prefer `keys` captured at record time from ALL
    *  ops (a draft batch has an EMPTY inverse, so op+inverse would under-cover it); fall back to
-   *  op+inverse for legacy rows. Cached per entry — entries are immutable once their batch
-   *  closes, and the hot path (history panel re-renders on every peer op) must not rebuild
-   *  a 50k-key Set each time. */
+   *  op+inverse for legacy rows. Cached per entry (recordGrouped INVALIDATES on merge — keys
+   *  grow while a peer's stroke streams in), so the hot path (history panel re-renders on
+   *  every peer op) does not rebuild a 50k-key Set each time. */
   const entryKeysCache = new WeakMap<HistoryEntry, Set<string>>();
   function entryKeys(e: HistoryEntry): Set<string> {
     const cached = entryKeysCache.get(e);
@@ -480,8 +544,7 @@ export const useCollabStore = defineStore("collab", () => {
       ks = new Set(opKeys(e.op));
       for (const inv of e.inverse ?? []) for (const k of opKeys(inv)) ks.add(k);
     }
-    // only cache CLOSED rows (a live aggregating batch keeps mutating keys)
-    if (!e.batchId || !batchAgg.has(e.batchId)) entryKeysCache.set(e, ks);
+    entryKeysCache.set(e, ks);
     return ks;
   }
 
@@ -489,30 +552,53 @@ export const useCollabStore = defineStore("collab", () => {
    * «Зависимые далее по цепочке»: LATER history entries touching the same cells/objects as an
    * entry. A cherry-pick revert («только это») is only safe when this is EMPTY — otherwise
    * applying the old inverse silently clobbers the newer edits (patch/move produce a VALID doc,
-   * so validation can't catch it). Same key notion as the server's M5 conflict boundary.
-   * MEMOISED: one pass per history change (the map is rebuilt only when history.value changes),
-   * so the panel's per-row :disabled binding is O(1), not O(history²).
+   * so validation can't catch it). Same key notion as the server's M5 conflict boundary; the
+   * authoritative check runs SERVER-side on click (`edit:revertOne`) — this local one drives
+   * the instant per-row disabled state.
+   *
+   * «Later» = ARRAY order. Rows are recorded when their ops are APPLIED to the live doc (my
+   * commits at commit time, peers' at arrival, reload folds in log order), so array order IS
+   * local application order. Seq deliberately plays no part: my optimistic rows carry a
+   * provisional seq that can tie or interleave with server-assigned ones (the old `b.seq <=
+   * a.seq` skip silently HID a same-key in-flight stroke from the guard).
+   *
+   * key → row positions index, rebuilt once per history change; per-row lookups memoised on
+   * the index object (a generation row can carry 50k keys — no per-render rebuilds).
    */
-  const dependentsBySeq = computed<Map<number, RevertDependent[]>>(() => {
+  const historyIndex = computed(() => {
     const rows = history.value;
-    const out = new Map<number, RevertDependent[]>();
-    for (let i = 0; i < rows.length; i++) {
-      const a = rows[i]!;
-      const keys = entryKeys(a);
-      const deps: RevertDependent[] = [];
-      for (let j = i + 1; j < rows.length; j++) {
-        const b = rows[j]!;
-        if (b.seq <= a.seq) continue; // ARRAY order is truth; seq can tie on optimistic rows
-        for (const k of entryKeys(b)) {
-          if (keys.has(k)) { deps.push({ seq: b.seq, byName: b.byName, mine: b.mine, summary: b.summary }); break; }
-        }
+    const posByRid = new Map<number, number>();
+    const posByKey = new Map<string, number[]>();
+    rows.forEach((e, i) => {
+      posByRid.set(e.rid, i);
+      // SUBSCRIBE to the keys array length explicitly: entryKeys may serve a cached Set
+      // (no reactive read), and a live batch merge grows e.keys in place — without this
+      // tracked read the merge would never dirty the index and the guard would go stale.
+      void e.keys?.length;
+      for (const k of entryKeys(e)) {
+        const arr = posByKey.get(k);
+        if (arr) arr.push(i);
+        else posByKey.set(k, [i]);
       }
-      if (deps.length) out.set(a.seq, deps);
-    }
-    return out;
+    });
+    return { rows, posByRid, posByKey, depsMemo: new Map<number, RevertDependent[]>() };
   });
-  function dependentsOf(seq: number): RevertDependent[] {
-    return dependentsBySeq.value.get(seq) ?? [];
+  function dependentsOf(rid: number): RevertDependent[] {
+    const idx = historyIndex.value;
+    const memo = idx.depsMemo.get(rid);
+    if (memo) return memo;
+    const i = idx.posByRid.get(rid);
+    if (i === undefined) return [];
+    const later = new Set<number>();
+    for (const k of entryKeys(idx.rows[i]!)) {
+      for (const j of idx.posByKey.get(k) ?? []) if (j > i) later.add(j);
+    }
+    const deps = [...later].sort((a, b) => a - b).map((j) => {
+      const b = idx.rows[j]!;
+      return { seq: b.seq, byName: b.byName, mine: b.mine, summary: b.summary };
+    });
+    idx.depsMemo.set(rid, deps);
+    return deps;
   }
 
   /** SIMULATE the revert on a clone and report NEW structural problems it would introduce —
@@ -520,8 +606,8 @@ export const useCollabStore = defineStore("collab", () => {
    *  city-on-water) would miss. A patch/move clobber is caught by `dependentsOf` (it yields a
    *  valid doc); THIS catches revert-of-add re-placing onto an occupied cell, revert-of-delete
    *  re-adding a referenced object, revert-of-paint under a later building, etc. Returns [] when
-   *  the reverted state is no worse than now (baseline-subtracted so pre-existing issues on a
-   *  shipped map don't block). */
+   *  the reverted state is no worse than now (the shared `newStructuralIssues` is
+   *  baseline-subtracted, so pre-existing issues on a shipped map don't block). */
   function revertStructuralIssues(entry: HistoryEntry): string[] {
     const doc = edit.liveDoc;
     if (!doc) return [];
@@ -531,52 +617,115 @@ export const useCollabStore = defineStore("collab", () => {
     } catch (err) {
       return [`структурный конфликт: ${(err as Error).message}`]; // delete/re-add that cannot apply
     }
-    const baseline = new Set([...occupancyErrors(doc), ...validateMechanics(doc), ...danglingRefs(doc)]);
-    const now = [...occupancyErrors(after), ...validateMechanics(after), ...danglingRefs(after)];
-    return now.filter((m) => !baseline.has(m));
+    return newStructuralIssues(doc, after);
   }
 
-  /** Dangling references in a doc: events / a city's visitor stack pointing at a missing
-   *  object, or a spawn/enable effect at a missing template/event. Typed (event ref-fields),
-   *  not a substring probe — a free-text field equal to an id no longer false-blocks. */
-  function danglingRefs(doc: NonNullable<typeof edit.liveDoc>): string[] {
-    const ids = new Set(doc.objects.map((o) => o.id));
-    const tmplIds = new Set((doc.templates ?? []).map((t) => t.id));
-    const evtIds = new Set((doc.events ?? []).map((e) => e.id));
-    const REF = ["locId", "cityId", "stackId", "siteId", "ruinId", "lmarkId", "orderTarget", "stackTmpId", "player", "player1", "player2"];
-    const out: string[] = [];
-    for (const o of doc.objects) {
-      const ref = (o as { stackRef?: string }).stackRef;
-      if (ref && ref !== "G000000000" && !ids.has(ref)) out.push(`висячая ссылка: гость города ${o.id} → нет ${ref}`);
-    }
-    for (const ev of doc.events ?? []) {
-      for (const part of [...ev.conditions, ...ev.effects] as Record<string, unknown>[]) {
-        for (const k of REF) {
-          const v = part[k];
-          if (typeof v === "string" && v && v !== "G000000000" && !ids.has(v) && !tmplIds.has(v) && !evtIds.has(v)) {
-            out.push(`висячая ссылка: событие ${ev.id} → нет ${v}`);
-          }
-        }
+  type RevertResult = {
+    ok: boolean;
+    /** dependents/structure = guard blocks; pending = the row is still in flight (wait for
+     *  the ack — reverting now would race it); offline = the row needs the server (no local
+     *  inverse) but there is no live socket; conflict = apply/transport failure. */
+    blocked?: "dependents" | "structure" | "conflict" | "pending" | "offline";
+    dependents?: RevertDependent[];
+    issues?: string[];
+    /** the server's own rejection text, when it gave one (throttle / busy / not found). */
+    reason?: string;
+  };
+
+  /** Revert ONE entry «только это» — only when nothing later depends on it (silent-clobber
+   *  guard) AND the revert introduces no NEW structural problem. In a room the click goes to
+   *  the SERVER (`edit:revertOne`): its log sees peers' in-flight ops this replica hasn't
+   *  received yet, its seqs are final, and it works for rows re-folded after a reload (which
+   *  carry no local inverse). REJECTED rows (server refused the op — it exists only locally)
+   *  are undone via applyIncoming: the inverse must NEVER be broadcast, because peers' log
+   *  never held the op (an addObject's inverse would be an unappliable deleteObject there —
+   *  one such entry permanently breaks every fold of the room log). An in-flight row (ack
+   *  pending) is refused — its inverse predates whatever the room applied meanwhile. A dead
+   *  socket while in a room is refused too: edit.commit would BUFFER the broadcast and fire
+   *  it after the reconnect against a moved-on log. */
+  async function revertOne(rid: number): Promise<RevertResult> {
+    const entry = history.value.find((e) => e.rid === rid);
+    if (!entry) return { ok: false, blocked: "conflict" };
+    // fast local pre-check — the server re-checks authoritatively, this catches the obvious
+    const deps = dependentsOf(rid);
+    if (deps.length) return { ok: false, blocked: "dependents", dependents: deps };
+    if (entry.rejected) {
+      if (!entry.inverse?.length) return { ok: false, blocked: "conflict" }; // already undone
+      const issues = revertStructuralIssues(entry);
+      if (issues.length) return { ok: false, blocked: "structure", issues };
+      try {
+        edit.applyIncoming(inversesOf([entry])); // local-only: live doc + journal, NO broadcast
+        entry.inverse = []; // undone — the row must not be revertable twice
+        return { ok: true };
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[collab] локальный откат отклонённой правки не применился:", err);
+        return { ok: false, blocked: "conflict" };
       }
     }
-    return out;
-  }
-
-  /** Revert ONE entry — only when nothing later depends on it (silent-clobber guard) AND the
-   *  revert introduces no NEW structural problem (occupancy / dangling / mechanics). The result
-   *  says WHY when blocked so the UI can point at the dependents or the structural issues. */
-  function revertOne(seq: number): { ok: boolean; blocked?: "dependents" | "structure" | "conflict"; dependents?: RevertDependent[]; issues?: string[] } {
-    const entry = history.value.find((e) => e.seq === seq);
-    if (!entry) return { ok: false, blocked: "conflict" };
-    const deps = dependentsOf(seq);
-    if (deps.length) return { ok: false, blocked: "dependents", dependents: deps };
+    if (connected.value) {
+      if (!getSocket().connected) return { ok: false, blocked: "offline" };
+      if (!entry.acked) return { ok: false, blocked: "pending" };
+      return revertOneServer(entry);
+    }
+    // solo (no room): sendOps is inert (me == null), the local inverse cannot leak anywhere
+    if (!entry.inverse?.length) return { ok: false, blocked: "offline" };
     const issues = revertStructuralIssues(entry);
     if (issues.length) return { ok: false, blocked: "structure", issues };
-    const ok = applyRevert(inversesOf([entry]), `#${seq}`);
+    const ok = applyRevert(inversesOf([entry]), `#${entry.seq}`);
     return ok ? { ok: true } : { ok: false, blocked: "conflict" };
   }
 
-  /** Revert entry `seq` and EVERYTHING newer (exact inverses, newest→oldest). */
+  /** The server-side cherry-pick: authoritative dependents + structure guards over the ROOM
+   *  log, revert = diffDocs(head, sim-without-entry) appended as a forward batch and broadcast
+   *  to everyone including us (applied via the normal edit:opsApplied path). `.timeout()` so a
+   *  socket drop after the emit resolves honestly instead of hanging the click forever (the
+   *  revert may still have landed — the catch-up fold will show it). */
+  const REVERT_ACK_TIMEOUT_MS = 15_000;
+  function revertOneServer(entry: HistoryEntry): Promise<RevertResult> {
+    const id = mapId.value!;
+    return new Promise((resolve) => {
+      getSocket().timeout(REVERT_ACK_TIMEOUT_MS).emit(
+        "edit:revertOne",
+        { mapId: id, seq: entry.seq, batchId: entry.batchId },
+        (err, r) => {
+          if (err || !r) {
+            // eslint-disable-next-line no-console
+            console.warn("[collab] серверный откат: нет ответа (обрыв/таймаут)", err);
+            resolve({ ok: false, blocked: "offline" });
+            return;
+          }
+          if (r.ok) {
+            resolve({ ok: true });
+            return;
+          }
+          if (r.blocked === "dependents") {
+            resolve({
+              ok: false,
+              blocked: "dependents",
+              dependents: (r.dependents ?? []).map((d) => ({
+                seq: d.seq,
+                byName: d.author === myClientId ? "вы" : "участник",
+                mine: d.author === myClientId,
+                summary: "",
+              })),
+            });
+            return;
+          }
+          if (r.blocked === "structure") {
+            resolve({ ok: false, blocked: "structure", issues: r.issues ?? [] });
+            return;
+          }
+          // eslint-disable-next-line no-console
+          console.warn("[collab] серверный откат отклонён:", r.reason);
+          resolve({ ok: false, blocked: "conflict", reason: r.reason });
+        },
+      );
+    });
+  }
+
+  /** Revert entry `seq` and EVERYTHING newer (exact inverses, newest→oldest in APPLY order —
+   *  rid order, not seq: provisional seqs can tie). Offline fallback for revertRangeServer. */
   function revertFrom(seq: number): boolean {
     return applyRevert(inversesOf(history.value.filter((e) => e.seq >= seq)), `#${seq} и новее`);
   }
@@ -605,18 +754,34 @@ export const useCollabStore = defineStore("collab", () => {
    */
   function revertRangeServer(
     seq: number,
-  ): Promise<{ ok: boolean; revertedCount: number; conflictAt: { seq: number; keys: string[] } | null }> {
+  ): Promise<{ ok: boolean; offline?: boolean; rejectedLeft?: boolean; revertedCount: number; conflictAt: { seq: number; keys: string[] } | null }> {
     const id = mapId.value;
     if (!connected.value || !id) {
-      const n = history.value.filter((e) => e.seq >= seq).length;
-      return Promise.resolve({ ok: revertFrom(seq), revertedCount: n, conflictAt: null });
+      // SOLO (no room — leave() cleared any peer rows): local inverses are safe, nothing is
+      // broadcast (sendOps is inert without `me`). Count ONLY rows with a captured inverse —
+      // rows re-folded after a reload carry none, counting them would report a full revert
+      // while silently leaving their edits applied.
+      const inRange = history.value.filter((e) => e.seq >= seq);
+      const applicable = inRange.filter((e) => (e.inverse?.length ?? 0) > 0);
+      const ok = revertFrom(seq);
+      return Promise.resolve({ ok, revertedCount: ok ? applicable.length : 0, conflictAt: null });
     }
+    // IN A ROOM with a dead socket: refuse. The local fallback would revert PEERS' rows too
+    // (history holds their inverses) — breaking the dialog's «чужие правки останутся» — and
+    // edit.commit would BUFFER the broadcast to fire after the reconnect against a moved-on
+    // log. The conflict-aware revert needs the server; the user retries after reconnecting.
+    if (!getSocket().connected) {
+      return Promise.resolve({ ok: false, offline: true, revertedCount: 0, conflictAt: null });
+    }
+    // Rejected rows exist only locally — the server's log never held them, so the range
+    // revert cannot touch them; surface that instead of implying a full rollback.
+    const rejectedLeft = history.value.some((e) => e.rejected && (e.inverse?.length ?? 0) > 0);
     // fromSeq is EXCLUSIVE server-side (reverts my ops with seq > fromSeq), so pass seq-1 to
     // include the clicked entry and everything newer.
     return new Promise((resolve) => {
-      getSocket().emit("edit:revertRange", { mapId: id, fromSeq: seq - 1 }, (r) => {
-        if (r.ok) resolve({ ok: true, revertedCount: r.revertedCount, conflictAt: r.conflictAt });
-        else resolve({ ok: false, revertedCount: 0, conflictAt: null });
+      getSocket().timeout(REVERT_ACK_TIMEOUT_MS).emit("edit:revertRange", { mapId: id, fromSeq: seq - 1 }, (err, r) => {
+        if (!err && r?.ok) resolve({ ok: true, revertedCount: r.revertedCount, conflictAt: r.conflictAt, rejectedLeft });
+        else resolve({ ok: false, offline: !!err, revertedCount: 0, conflictAt: null });
       });
     });
   }
@@ -626,12 +791,16 @@ export const useCollabStore = defineStore("collab", () => {
     pendingShare = { mapId: forMapId, channel: chan };
   }
 
-  /** Fold room-log entries into the live doc, skipping ops the journal already holds
-   *  (matched by clientOpId == the op's journal uid). One conflicting entry must not
-   *  abort the rest — it is reported and skipped (the old snapshot path crashed the
-   *  whole join on the first conflict). */
+  /** Fold room-log entries into the live doc. Ops the journal already holds (matched by
+   *  clientOpId == the op's journal uid) are NOT re-applied — but they DO get a history row:
+   *  after a reload the whole log is journal-known, and skipping rows made my own earlier
+   *  edits invisible to the dependents guard («только это» on an old row silently clobbered
+   *  them). Re-folded rows carry no local inverse — the server-side revert handles those.
+   *  A pending row of THIS session (ack lost, reconnect re-delivers the op) is CONFIRMED in
+   *  place instead of duplicated. One conflicting entry must not abort the rest — it is
+   *  reported and skipped (the old snapshot path crashed the whole join on the first conflict). */
   function foldEntries(
-    entries: readonly { seq: number; by: string; clientOpId: string; op: EditOp; batchId?: string }[],
+    entries: readonly { seq: number; by: string; author?: string; clientOpId: string; op: EditOp; batchId?: string }[],
   ): void {
     let failed = 0;
     let i = 0;
@@ -645,11 +814,27 @@ export const useCollabStore = defineStore("collab", () => {
         const run: typeof entries[number][] = [];
         while (i < entries.length && entries[i]!.batchId === bid) { run.push(entries[i]!); lastSeq = Math.max(lastSeq, entries[i]!.seq); i++; }
         const fresh = run.filter((r) => !(r.clientOpId && knownOpIds.has(r.clientOpId)));
-        if (fresh.length === 0) continue;
+        const mine = (run[0]!.author ?? "") === myClientId;
+        if (fresh.length === 0) {
+          const pendingRow = batchAgg.get(bid)?.entry;
+          if (pendingRow) {
+            pendingRow.seq = run[0]!.seq; // my in-flight batch whose ack was lost — confirm it
+            pendingRow.acked = true;
+          } else if (!run.some((r) => r.clientOpId && rowByUid.has(r.clientOpId))) {
+            // journal-known from an EARLIER session / another tab: no re-apply, but the
+            // dependents guard needs the row (keys + timeline position)
+            recordBatchRow(run[0]!.seq, run[0]!.by, run.map((r) => r.op), [], bid, mine, { uids: run.map((r) => r.clientOpId) });
+          }
+          continue;
+        }
         try {
           const inv = edit.applyIncoming(fresh.map((f) => f.op), fresh.map((f) => f.clientOpId));
           for (const f of fresh) if (f.clientOpId) knownOpIds.add(f.clientOpId);
-          recordBatchRow(fresh[0]!.seq, fresh[0]!.by, fresh.map((f) => f.op), inv, bid, false);
+          // keys/count from the FULL run: a partially-known batch must still cover all its keys.
+          // A PARTIAL inverse (fresh ⊂ run) is dropped — locally applying it would half-revert
+          // the commit while the row claims all of it; the server path reverts it whole.
+          const rowInv = fresh.length === run.length ? inv : [];
+          recordBatchRow(fresh[0]!.seq, run[0]!.by, run.map((r) => r.op), rowInv, bid, mine, { uids: run.map((r) => r.clientOpId) });
         } catch (err) {
           failed += fresh.length;
           // eslint-disable-next-line no-console
@@ -658,11 +843,21 @@ export const useCollabStore = defineStore("collab", () => {
         continue;
       }
       i++;
-      if (en.clientOpId && knownOpIds.has(en.clientOpId)) continue; // уже в журнале (мой / другой таб)
+      const mine = (en.author ?? "") === myClientId;
+      if (en.clientOpId && knownOpIds.has(en.clientOpId)) {
+        const row = rowByUid.get(en.clientOpId);
+        if (row) {
+          row.seq = en.seq; // my in-flight single whose ack was lost — confirm it
+          row.acked = true;
+        } else {
+          record(en.seq, en.by, en.op, mine, [], { uid: en.clientOpId }); // journal-known: row for the guard
+        }
+        continue;
+      }
       try {
         const inv = edit.applyIncoming([en.op], en.clientOpId ? [en.clientOpId] : undefined);
         if (en.clientOpId) knownOpIds.add(en.clientOpId);
-        record(en.seq, en.by, en.op, false, inv); // singleton row
+        record(en.seq, en.by, en.op, mine, inv, { uid: en.clientOpId }); // singleton row
       } catch (err) {
         failed++;
         // eslint-disable-next-line no-console
@@ -718,6 +913,12 @@ export const useCollabStore = defineStore("collab", () => {
           // и если лог ПУСТ (0) — RE-SEED его моим журналом, чтобы гость/второй таб снова могли
           // догнать полное состояние (иначе шаринг отдаёт обрезанную карту). Только при head===0:
           // пустой лог гарантирует корректный порядок; частичный лог (>0) не трогаем.
+          // Строки истории при этом СБРАСЫВАЕМ: их seq указывают в умерший лог — серверный
+          // cherry-pick по такому seq попал бы в ЧУЖУЮ запись нового лога. Перезагрузка
+          // страницы восстановит историю фолдом уже из нового лога.
+          history.value = [];
+          batchAgg.clear();
+          rowByUid = new Map();
           lastSeq = serverHead;
           if (serverHead === 0) reseedRoom(id);
         }
@@ -733,6 +934,7 @@ export const useCollabStore = defineStore("collab", () => {
     mapId.value = id;
     history.value = [];
     batchAgg.clear();
+    rowByUid = new Map();
     await doJoin(id);
     offerPreJoinDraft(id);
   }
@@ -783,6 +985,7 @@ export const useCollabStore = defineStore("collab", () => {
     peers.clear();
     history.value = [];
     batchAgg.clear();
+    rowByUid = new Map();
     lastSeq = 0;
     pending.value = 0;
     idSlot.value = 0; // back to solo band
