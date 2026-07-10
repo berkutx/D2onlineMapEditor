@@ -47,7 +47,7 @@ def run_one(map_path, tag, editor):
     res = os.path.join(OUT, tag + ".json")
     try:
         subprocess.run(
-            [sys.executable, os.path.join(TOOLS, "scen_tester.py"), "--auto",
+            [sys.executable, os.path.join(TOOLS, "scen_tester.py"), "--auto", "--kill-exit",
              "--map", map_path, "--editor", editor,
              "--timeout", str(timeout_s), "--log", log, "--result", res],
             cwd=TOOLS, timeout=timeout_s + 90,
@@ -83,6 +83,10 @@ def main():
     if len(maps) == 1 and os.path.isdir(maps[0]):
         d = maps[0]
         maps = [os.path.join(d, n) for n in sorted(os.listdir(d)) if n.lower().endswith(".sg")]
+    only = os.environ.get("GC_FILTER_DIR")
+    if only:
+        allow = {n for n in os.listdir(only) if n.lower().endswith(".sg")}
+        maps = [m for m in maps if os.path.basename(m) in allow]
     rows = []
     if os.path.isfile(SUMMARY):
         with io.open(SUMMARY, "r", encoding="utf-8") as f:

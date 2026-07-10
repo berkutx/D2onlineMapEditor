@@ -661,6 +661,10 @@ class Debugger(object):
                     self.log("[*] deadline reached, detaching")
                     self.detach()
                     return
+                if getattr(self, "soft_stop", False):
+                    self.log("[*] drive sequence finished, detaching early")
+                    self.detach()
+                    return
                 continue
             self._ev += 1
             code = ev.dwDebugEventCode
@@ -728,6 +732,10 @@ class Debugger(object):
             kernel32.ContinueDebugEvent(ev.dwProcessId, tid, status)
             if deadline and time.time() > deadline:
                 self.log("[*] deadline reached, detaching")
+                self.detach()
+                return
+            if getattr(self, "soft_stop", False):
+                self.log("[*] drive sequence finished, detaching early")
                 self.detach()
                 return
 
@@ -813,6 +821,20 @@ class Debugger(object):
         except Exception:
             pass
 
+    def kill_target(self):
+        """Terminate the debuggee. A deadline DETACH leaves the editor running (kill-on-exit
+        no longer applies to a detached process) — in batch/parallel runs those strays pile
+        up and their DB locks starve every later load. Explicit kill is the batch semantic."""
+        PROCESS_TERMINATE = 0x0001
+        try:
+            h = kernel32.OpenProcess(PROCESS_TERMINATE, False, self.pid)
+            if h:
+                kernel32.TerminateProcess(h, 0)
+                kernel32.CloseHandle(h)
+                self.log("[*] killed editor pid=%d (--kill-exit)" % self.pid)
+        except Exception:
+            pass
+
 
 # ---------------------------------------------------------------------------
 def make_logger(logfile):
@@ -862,6 +884,8 @@ def main():
     ap.add_argument("--log", default=None)
     ap.add_argument("--result", default=None, help="write JSON findings here")
     ap.add_argument("--no-stage", action="store_true", help="load --map path as-is (must be in Exports)")
+    ap.add_argument("--kill-exit", action="store_true",
+                    help="terminate the editor on exit (batch runs; a deadline DETACH leaves it alive)")
     args = ap.parse_args()
 
     if struct.calcsize("P") * 8 != 32:
@@ -889,14 +913,19 @@ def main():
     if args.auto:
         import threading
         import drive
-        threading.Thread(target=drive.run_sequence,
-                         kwargs={"log": log,
-                                 "list_check": lambda: dbg.headers_read > 0,
-                                 "loaded_check": lambda: len(dbg.loaded_files) > 0,
-                                 # bind the UI drive to OUR editor process — with parallel
-                                 # runs a title-only lookup would grab an arbitrary editor
-                                 "pid": dbg.pid},
-                         daemon=True).start()
+        def _auto_drive():
+            drive.run_sequence(log=log,
+                               list_check=lambda: dbg.headers_read > 0,
+                               loaded_check=lambda: len(dbg.loaded_files) > 0,
+                               # bind the UI drive to OUR editor process — with parallel
+                               # runs a title-only lookup would grab an arbitrary editor
+                               pid=dbg.pid)
+            # give the save + validator diagnostics a moment, then stop the debug loop —
+            # idling until the full deadline wastes most of every batch slot
+            time.sleep(8)
+            dbg.soft_stop = True
+
+        threading.Thread(target=_auto_drive, daemon=True).start()
         log("[*] --auto: self-drive thread started (waits for the window, then posts Load+Save)")
     deadline = time.time() + args.timeout if args.timeout else None
     try:
@@ -908,6 +937,8 @@ def main():
         log("[FATAL] debugger loop crashed: %r" % e)
         log(traceback.format_exc())
     finally:
+        if args.kill_exit:
+            dbg.kill_target()
         if args.result:
             with open(args.result, "w") as f:
                 json.dump(dbg.findings, f, indent=2, ensure_ascii=False)
