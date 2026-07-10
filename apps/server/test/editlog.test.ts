@@ -139,3 +139,128 @@ describe("EditLog", () => {
     }
   });
 });
+
+describe("EditLog durability hardening (phase 1)", () => {
+  const entryLine = (seq: number, x: number, batchId?: string): string =>
+    JSON.stringify({ seq, op: setCell(x, 0, x), by: "s", author: "a", clientOpId: `c${seq}`, ...(batchId ? { batchId } : {}), ts: 0 }) + "\n";
+  const sentinelLine = (batchId: string, n: number): string => JSON.stringify({ commit: batchId, n }) + "\n";
+
+  it("drops an uncommitted TAIL batch whole (crash mid-batch, all-or-nothing)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-tear-"));
+    try {
+      const key = "tear#c";
+      const file = join(dir, createHash("sha1").update(key).digest("hex") + ".jsonl");
+      // solo(1) + committed batch A(2,3) + TORN tail batch B(4,5,6) with NO sentinel
+      await writeFile(
+        file,
+        entryLine(1, 1) +
+          entryLine(2, 2, "A") + entryLine(3, 3, "A") + sentinelLine("A", 2) +
+          entryLine(4, 4, "B") + entryLine(5, 5, "B") + entryLine(6, 6, "B"),
+      );
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      expect(log.all(key).map((e) => e.seq)).toEqual([1, 2, 3]); // batch B dropped whole
+      expect(log.head(key)).toBe(3);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a legacy tail batch (file written before sentinels existed)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-legacy-"));
+    try {
+      const key = "legacy#c";
+      const file = join(dir, createHash("sha1").update(key).digest("hex") + ".jsonl");
+      // pre-sentinel era: a batch tail with NO sentinel anywhere in the file → keep it
+      await writeFile(file, entryLine(1, 1) + entryLine(2, 2, "OLD") + entryLine(3, 3, "OLD"));
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      expect(log.all(key).map((e) => e.seq)).toEqual([1, 2, 3]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a 1-line tail with a batchId (single-op edit:op path writes no sentinel)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-solo-"));
+    try {
+      const key = "solo#c";
+      const file = join(dir, createHash("sha1").update(key).digest("hex") + ".jsonl");
+      await writeFile(
+        file,
+        entryLine(1, 1, "A") + entryLine(2, 2, "A") + sentinelLine("A", 2) + entryLine(3, 3, "X"),
+      );
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      expect(log.all(key).map((e) => e.seq)).toEqual([1, 2, 3]); // the single X line survives
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a MID-FILE batch whose sentinel was lost (later history must not vanish)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-mid-"));
+    try {
+      const key = "mid#c";
+      const file = join(dir, createHash("sha1").update(key).digest("hex") + ".jsonl");
+      // batch A(1,2) lost its sentinel, then a solo op and a committed batch B follow —
+      // A is accepted (only a TAIL without sentinel means crash-truncated)
+      await writeFile(
+        file,
+        entryLine(1, 1, "A") + entryLine(2, 2, "A") +
+          entryLine(3, 3) +
+          entryLine(4, 4, "B") + sentinelLine("B", 1) + entryLine(5, 5, "B") + sentinelLine("B", 1),
+      );
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      expect(log.all(key).map((e) => e.seq)).toEqual([1, 2, 3, 4, 5]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips its own batch sentinel: append → reload gives the same log", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-rt-"));
+    try {
+      const key = "rt#c";
+      const a = new EditLog(dir);
+      await a.ensureLoaded(key);
+      a.appendBatch(key, [
+        { clientOpId: "c1", op: setCell(1, 1, 1) },
+        { clientOpId: "c2", op: setCell(2, 2, 2) },
+      ], "s", "B1", 0, "auth");
+      a.append(key, setCell(3, 3, 3), "s", "c3", 1, undefined, "auth");
+      await a.flush(key);
+      const b = new EditLog(dir);
+      await b.ensureLoaded(key);
+      expect(b.all(key).map((e) => e.seq)).toEqual([1, 2, 3]);
+      expect(b.head(key)).toBe(3);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a room DEGRADED when persistence fails and recovers when writes succeed again", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-deg-"));
+    try {
+      const key = "deg#c";
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      // simulate ENOSPC: poison the write path, then heal it
+      const real = (log as unknown as { writeWithRetry: (k: string, l: string) => Promise<void> }).writeWithRetry.bind(log);
+      (log as unknown as { writeWithRetry: unknown }).writeWithRetry = () => Promise.reject(new Error("ENOSPC"));
+      log.append(key, setCell(0, 0, 1), "s", "c1", 0);
+      await log.flush(key);
+      expect(log.isDegraded(key)).toBe(true);
+      expect(log.degradedCount()).toBe(1);
+      // disk recovered → next successful persist lifts the freeze
+      (log as unknown as { writeWithRetry: unknown }).writeWithRetry = real;
+      log.append(key, setCell(1, 1, 2), "s", "c2", 1);
+      await log.flush(key);
+      expect(log.isDegraded(key)).toBe(false);
+      expect(log.degradedCount()).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

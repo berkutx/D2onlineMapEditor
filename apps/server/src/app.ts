@@ -68,7 +68,7 @@ export async function buildApp(): Promise<BuiltApp> {
   const log = new EditLog(config.ROOMS_DIR);
 
   await registerStatic(app);
-  await registerHealthRoutes(app);
+  await registerHealthRoutes(app, log);
   await registerScenarioRoutes(app, store);
   await registerMapRoutes(app, store, log);
   await registerAssetRoutes(app);

@@ -15,9 +15,25 @@
  */
 
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, open, readFile, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import type { EditOp } from "@d2/socket-contract";
+
+/** A batch COMMIT sentinel line: written after every multi-op batch append so a crash mid
+ *  batch is detected on load (an uncommitted TAIL batch is dropped whole — all-or-nothing;
+ *  the author re-sends unacked batches and journals dedupe by op uid). Single-op appends
+ *  need no sentinel: one JSONL line is torn-or-whole by itself. */
+interface CommitSentinel {
+  commit: string; // the batchId
+  n: number; // how many entries the batch wrote
+}
+const isSentinel = (v: unknown): v is CommitSentinel =>
+  !!v && typeof (v as CommitSentinel).commit === "string" && typeof (v as CommitSentinel).n === "number";
+
+/** How long dirty bytes may sit un-fsynced (group commit): the power-loss window. Process
+ *  crashes lose nothing regardless (the OS holds the page cache); this timer only bounds
+ *  KERNEL-level loss (power cut / host reset) without paying an fsync per brush op. */
+const FSYNC_INTERVAL_MS = 200;
 
 export interface LogEntry {
   /** 1-based monotonic sequence within the room's log. */
@@ -43,9 +59,29 @@ export class EditLog {
   private loads = new Map<string, Promise<void>>();
   /** roomKey -> the serialized append-write chain (keeps disk lines in order). */
   private writes = new Map<string, Promise<void>>();
+  /** roomKey -> open append FileHandle (group-commit fsync needs a handle, appendFile
+   *  opens+closes per call and cannot fdatasync). Closed in clear()/flush(all). */
+  private handles = new Map<string, FileHandle>();
+  /** rooms with un-fsynced bytes; drained by the group-commit timer. */
+  private dirty = new Set<string>();
+  private fsyncTimer: ReturnType<typeof setTimeout> | undefined;
+  /** rooms whose durability FAILED even after retries (disk full / IO dead): memory keeps
+   *  serving reads, but callers must REJECT new edits — an ack without durability is a
+   *  silent-divergence promise we refuse to make. */
+  private degradedRooms = new Set<string>();
 
   /** @param dataDir directory for durable per-room JSONL logs; omit for pure in-memory. */
   constructor(private readonly dataDir?: string) {}
+
+  /** True when the room's durable file stopped accepting writes — reject new edits. */
+  isDegraded(roomKey: string): boolean {
+    return this.degradedRooms.has(roomKey);
+  }
+
+  /** Count of degraded rooms (health route). */
+  degradedCount(): number {
+    return this.degradedRooms.size;
+  }
 
   private file(roomKey: string): string {
     // hash the room key: it contains `#` and arbitrary channel text (filename-unsafe).
@@ -81,37 +117,124 @@ export class EditLog {
       return;
     }
     const entries: LogEntry[] = [];
+    // Batch atomicity on load: entries sharing a batchId accumulate in `pending` until their
+    // COMMIT sentinel arrives; any non-batch line also flushes the buffer (mid-file sentinel
+    // loss must not swallow later acked history). Only files that USE sentinels get the
+    // all-or-nothing treatment — legacy files (written before sentinels) load as before.
+    let sawSentinel = false;
+    let pending: LogEntry[] = [];
+    let pendingBatch: string | undefined;
+    const accept = (e: LogEntry): void => {
+      // PRESERVE the stored seq (clients recorded it in their journals). A single dropped
+      // line must NOT renumber every later op — that would shift the whole `ops:since`
+      // window and re-send/skip ops on catch-up. Only repair anomalies (NaN / non-monotonic)
+      // so head/since stay strictly increasing; a genuine gap is kept as a gap.
+      const prev = entries.length ? entries[entries.length - 1]!.seq : 0;
+      if (typeof e.seq !== "number" || !Number.isFinite(e.seq) || e.seq <= prev) e.seq = prev + 1;
+      entries.push(e);
+    };
+    const flushPending = (): void => {
+      for (const e of pending) accept(e);
+      pending = [];
+      pendingBatch = undefined;
+    };
     for (const line of text.split("\n")) {
       if (!line) continue;
       try {
-        const e = JSON.parse(line) as LogEntry;
+        const parsed = JSON.parse(line) as unknown;
+        if (isSentinel(parsed)) {
+          sawSentinel = true;
+          if (pendingBatch === parsed.commit) flushPending();
+          continue; // a stray sentinel (already flushed / unknown) is inert
+        }
+        const e = parsed as LogEntry;
         if (e.author === undefined) e.author = e.by; // legacy lines predate `author`
-        // PRESERVE the stored seq (clients recorded it in their journals). A single dropped
-        // line must NOT renumber every later op — that would shift the whole `ops:since`
-        // window and re-send/skip ops on catch-up. Only repair anomalies (NaN / non-monotonic)
-        // so head/since stay strictly increasing; a genuine gap is kept as a gap.
-        const prev = entries.length ? entries[entries.length - 1]!.seq : 0;
-        if (typeof e.seq !== "number" || !Number.isFinite(e.seq) || e.seq <= prev) e.seq = prev + 1;
-        entries.push(e);
+        if (e.batchId) {
+          if (pendingBatch && pendingBatch !== e.batchId) flushPending(); // new batch closes the old
+          pendingBatch = e.batchId;
+          pending.push(e);
+        } else {
+          flushPending(); // a standalone op after an unclosed batch: keep the batch (mid-file)
+          accept(e);
+        }
       } catch {
         /* skip a partial/corrupt trailing line (crash mid-append) */
       }
     }
+    // A TAIL batch without its sentinel = crash mid-batch → drop whole (all-or-nothing) —
+    // but only in sentinel-era files; legacy files never wrote sentinels, keep their tail.
+    // A 1-line tail is ALWAYS kept: single-op append() carries a batchId too (the v0.5
+    // edit:op path) and never writes a sentinel — its one line is atomic by itself.
+    if (pending.length && (!sawSentinel || pending.length === 1)) flushPending();
+    else if (pending.length) {
+      console.warn(
+        `[EditLog] dropped an uncommitted tail batch (${pending.length} ops, crash mid-write) for ${roomKey}`,
+      );
+    }
     this.logs.set(roomKey, entries);
   }
 
-  /** appendFile with a couple of retries for transient failures (EMFILE/EBUSY/EIO), so a
-   *  brief hiccup does not silently drop a durably-acked op. Throws after the last attempt. */
-  private async writeWithRetry(path: string, lines: string, tries = 3): Promise<void> {
+  /** The room's open append handle (cached; reopened after clear()/close). */
+  private async handle(roomKey: string): Promise<FileHandle> {
+    let h = this.handles.get(roomKey);
+    if (!h) {
+      await mkdir(this.dataDir!, { recursive: true });
+      h = await open(this.file(roomKey), "a");
+      this.handles.set(roomKey, h);
+    }
+    return h;
+  }
+
+  /** handle.write with a couple of retries for transient failures (EMFILE/EBUSY/EIO), so a
+   *  brief hiccup does not silently drop a durably-acked op. Throws after the last attempt.
+   *  A failed attempt drops the cached handle (it may be poisoned) and reopens. */
+  private async writeWithRetry(roomKey: string, lines: string, tries = 3): Promise<void> {
     for (let attempt = 1; ; attempt++) {
       try {
-        await appendFile(path, lines);
+        const h = await this.handle(roomKey);
+        await h.write(lines);
         return;
       } catch (err) {
+        await this.closeHandle(roomKey);
         if (attempt >= tries) throw err;
         await new Promise((r) => setTimeout(r, 20 * attempt));
       }
     }
+  }
+
+  private async closeHandle(roomKey: string): Promise<void> {
+    const h = this.handles.get(roomKey);
+    if (!h) return;
+    this.handles.delete(roomKey);
+    try {
+      await h.close();
+    } catch {
+      /* already broken */
+    }
+  }
+
+  /** Group-commit: fdatasync every dirty room at most once per FSYNC_INTERVAL_MS. Bounds the
+   *  POWER-LOSS window to ~200 ms without an fsync per brush op (process crashes lose nothing
+   *  either way — the kernel owns the page cache). unref() keeps the timer from holding the
+   *  process open. */
+  private scheduleFsync(roomKey: string): void {
+    this.dirty.add(roomKey);
+    if (this.fsyncTimer) return;
+    this.fsyncTimer = setTimeout(() => {
+      this.fsyncTimer = undefined;
+      const rooms = [...this.dirty];
+      this.dirty.clear();
+      for (const key of rooms) {
+        // chain the sync AFTER any queued writes for that room
+        const prev = this.writes.get(key) ?? Promise.resolve();
+        const next = prev.then(async () => {
+          const h = this.handles.get(key);
+          if (h) await h.datasync().catch(() => undefined);
+        });
+        this.writes.set(key, next);
+      }
+    }, FSYNC_INTERVAL_MS);
+    this.fsyncTimer.unref?.();
   }
 
   /** Append entries' JSONL to disk, serialized per room (no interleaving), with retry. */
@@ -119,13 +242,17 @@ export class EditLog {
     if (!this.dataDir) return;
     const prev = this.writes.get(roomKey) ?? Promise.resolve();
     const next = prev
-      .then(() => mkdir(this.dataDir!, { recursive: true }))
-      .then(() => this.writeWithRetry(this.file(roomKey), lines))
+      .then(() => this.writeWithRetry(roomKey, lines))
+      .then(() => {
+        this.degradedRooms.delete(roomKey); // disk recovered → lift the write freeze
+        this.scheduleFsync(roomKey);
+      })
       .catch((err) => {
-        // last-resort: durability failed even after retries. Surface loudly; memory keeps
-        // serving (a fresh append will still assign the next seq — see the seq-preserving
-        // load, which keeps this from cascading into a whole-log renumber).
-        console.error(`[EditLog] persist FAILED (op(s) not durable) for ${roomKey}:`, (err as Error).message);
+        // Durability failed even after retries (disk full / IO dead). Memory keeps serving
+        // READS, but the room is marked DEGRADED so handlers REJECT new edits — acking an
+        // edit we cannot persist is a silent-divergence promise we refuse to make.
+        this.degradedRooms.add(roomKey);
+        console.error(`[EditLog] persist FAILED (room degraded, edits rejected) for ${roomKey}:`, (err as Error).message);
       });
     this.writes.set(roomKey, next);
   }
@@ -163,11 +290,9 @@ export class EditLog {
   }
 
   /** Append MANY ops as one batch (shared batchId) and return their entries (in order).
-   *  Each op still gets its own seq so LWW / catch-up work unchanged.
-   *  KNOWN LIMIT: the batch is one appendFile, which is NOT crash-atomic — a power-loss mid
-   *  write can leave a PREFIX of a large batch (the torn trailing line is skipped on load, but
-   *  earlier complete lines survive as a short batch). Planned restarts flush cleanly; a future
-   *  hardening (M2+) can add a per-batch commit marker to make batches all-or-nothing. */
+   *  Each op still gets its own seq so LWW / catch-up work unchanged. A COMMIT sentinel line
+   *  follows the batch: on load an uncommitted TAIL batch (crash mid-write) is dropped whole
+   *  (all-or-nothing) instead of surviving as a silent prefix. */
   appendBatch(
     roomKey: string,
     ops: readonly { clientOpId: string; op: EditOp }[],
@@ -185,6 +310,10 @@ export class EditLog {
       log.push(entry);
       entries.push(entry);
       lines += JSON.stringify(entry) + "\n";
+    }
+    if (entries.length > 1) {
+      const sentinel: CommitSentinel = { commit: batchId, n: entries.length };
+      lines += JSON.stringify(sentinel) + "\n";
     }
     this.persist(roomKey, lines);
     return entries;
@@ -218,18 +347,28 @@ export class EditLog {
     return log.slice(lo);
   }
 
-  /** Await pending disk writes (one room, or all). For graceful shutdown + tests. */
+  /** Await pending disk writes + fdatasync (one room, or all). For graceful shutdown + tests.
+   *  After a full flush every acked op is on stable storage — a SIGTERM redeploy loses zero. */
   async flush(roomKey?: string): Promise<void> {
+    const sync = async (key: string): Promise<void> => {
+      await this.writes.get(key);
+      const h = this.handles.get(key);
+      if (h) await h.datasync().catch(() => undefined);
+    };
     if (roomKey) {
-      await this.writes.get(roomKey);
+      await sync(roomKey);
       return;
     }
-    await Promise.all([...this.writes.values()]);
+    await Promise.all([...this.writes.keys()].map(sync));
   }
 
-  /** Drop a room's log from MEMORY (e.g. when its room empties). The durable file is kept. */
+  /** Drop a room's log from MEMORY (e.g. when its room empties). The durable file is kept;
+   *  the append handle is closed after its queued writes settle (reopened on next append). */
   clear(roomKey: string): void {
     this.logs.delete(roomKey);
     this.loads.delete(roomKey);
+    this.dirty.delete(roomKey);
+    const prev = this.writes.get(roomKey) ?? Promise.resolve();
+    void prev.then(() => this.closeHandle(roomKey));
   }
 }

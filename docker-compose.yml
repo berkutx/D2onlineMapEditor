@@ -25,12 +25,16 @@ services:
       SCENARIO_ROOTS: /app/deploy/scenarios
       UPLOAD_DIR: /app/var/uploads
       PROJECTS_DIR: /app/var/projects
+      # durable per-room collab op-logs — MUST be a volume, else every redeploy (image
+      # rebuild = fresh container FS) wipes the room history and clients have to re-seed
+      ROOMS_DIR: /app/var/rooms
       LLM_DIR: /app/var/llm
     volumes:
       # atlases (253 MB) are NOT in git — populate this volume once from the dev box (see README)
       - d2editor_assets:/app/public/assets:ro
       - d2editor_uploads:/app/var/uploads
       - d2editor_projects:/app/var/projects
+      - d2editor_rooms:/app/var/rooms
     networks: [d2map_net]
 
 networks:
@@ -64,3 +68,10 @@ volumes:
       type: none
       o: bind
       device: /mnt/data/d2editor/projects
+  d2editor_rooms:
+    name: d2editor_rooms
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/data/d2editor/rooms
