@@ -43,6 +43,7 @@ const TYPE_RANK: Record<MapObject["type"], number> = {
   merchant: 20,
   mage: 20,
   trainer: 20,
+  resourceMarket: 20,
   mercenary: 20,
   village: 25,
   fort: 26,

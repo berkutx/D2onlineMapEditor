@@ -139,12 +139,23 @@ export function stackTemplateFrame(version: string, tmpl: StackTemplate): Uint8A
     w.refField("ORDER_TARG", tmpl.orderTarget || EMPTY_REF);
     w.refField("SUBRACE", tmpl.subRace || EMPTY_REF);
     w.defaultInt("ORDER", tmpl.order);
-    for (let s = 0; s < 6; s++) {
-      const f = filled[s];
-      w.refField(`UNIT_${s}`, f ? f.unit : EMPTY_REF);
-      w.defaultInt(`UNIT_${s}_LVL`, f ? f.level : 0);
+    // The typed SLOT layout when captured at load (slot packing is editing history + orphan
+    // slots are real on-disk data); canonical re-pack for edited/fresh templates (upsertTemplate
+    // drops slots/slotOfCell so a stale layout can never overwrite an edit).
+    if (tmpl.slots && tmpl.slots.length === 6 && tmpl.slotOfCell && tmpl.slotOfCell.length === 6) {
+      for (let s = 0; s < 6; s++) {
+        w.refField(`UNIT_${s}`, tmpl.slots[s]?.unit || EMPTY_REF);
+        w.defaultInt(`UNIT_${s}_LVL`, tmpl.slots[s]?.level ?? 0);
+      }
+      for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, tmpl.slotOfCell[i] ?? -1);
+    } else {
+      for (let s = 0; s < 6; s++) {
+        const f = filled[s];
+        w.refField(`UNIT_${s}`, f ? f.unit : EMPTY_REF);
+        w.defaultInt(`UNIT_${s}_LVL`, f ? f.level : 0);
+      }
+      for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, slotOfCell[i]!);
     }
-    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, slotOfCell[i]!);
     w.bool("USE_FACING", tmpl.useFacing);
     w.defaultInt("FACING", tmpl.facing);
     w.defaultInt(full, tmpl.modifiers.length); // count tag == the block's own compound id

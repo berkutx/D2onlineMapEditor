@@ -31,6 +31,7 @@ import UnitIcon from "./UnitIcon.vue";
 import SpellPicker from "./SpellPicker.vue";
 import SpellIcon from "./SpellIcon.vue";
 import GarrisonEditor from "./GarrisonEditor.vue";
+import EventSummaryCard from "./EventSummaryCard.vue";
 import ImagePicker from "./ImagePicker.vue";
 import SpriteThumb from "./SpriteThumb.vue";
 import RegionPreview from "./RegionPreview.vue";
@@ -256,10 +257,13 @@ function chestMoveItem(idx: number, dir: number): void {
  *  • VISITOR — a separate hero MidStack stationed inside (city.stackRef → that stack). Shown
  *    read-only for now; full editing comes with the Отряд (stack) editor. Each cell = a global
  *    Gunit id + level + HP; the writer re-creates the MidUnit instances + UNIT_/POS_ slots. */
-type GarrUnit = { unit: string; level: number; hp: number };
+// FULL entity copy: a member carries xp/name/creation/modifiers/key/slot beyond
+// unit/level/hp — stripping them here used to WIPE veteran data on any garrison edit
+// (patchObject replaces the whole array; nothing merges it back).
+type GarrUnit = { unit: string; level: number; hp: number; modifiers?: string[] };
 function garr6(o: { garrison?: (GarrUnit | null)[] } | null | undefined): (GarrUnit | null)[] {
   const out: (GarrUnit | null)[] = [null, null, null, null, null, null];
-  (o?.garrison ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { unit: c.unit, level: c.level, hp: c.hp }; });
+  (o?.garrison ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { ...c }; });
   return out;
 }
 /** the visiting hero stack stationed inside this city (city.stackRef → a MidStack), if any */
@@ -293,6 +297,21 @@ function setGarrisonStatOn(targetId: string, cur: (GarrUnit | null)[], cell: num
   const c = g[cell];
   if (!c) return;
   g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  commitGarrison(targetId, g);
+}
+/** unit-with-updated-modifiers; the key is DELETED when the list empties (an explicit
+ *  undefined would survive JSON.stringify-free paths and confuse deep-equality). */
+function withMods(c: GarrUnit, mods: string[]): GarrUnit {
+  const next = { ...c };
+  if (mods.length) next.modifiers = mods.slice();
+  else delete next.modifiers;
+  return next;
+}
+function setGarrisonModsOn(targetId: string, cur: (GarrUnit | null)[], cell: number, mods: string[]): void {
+  const g = cur.map((c) => (c ? { ...c } : null));
+  const c = g[cell];
+  if (!c) return;
+  g[cell] = withMods(c, mods);
   commitGarrison(targetId, g);
 }
 
@@ -406,6 +425,14 @@ function stackSetStat(st: StackLike, cell: number, key: "level" | "hp", v: numbe
   const c = g[cell];
   if (!c) return;
   g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  commitStackFormation(st, g, st.leaderCell ?? -1);
+}
+function stackSetMods(st: StackLike, cell: number, mods: string[]): void {
+  if (!st) return;
+  const g = garr6(st).map((c) => (c ? { ...c } : null));
+  const c = g[cell];
+  if (!c) return;
+  g[cell] = withMods(c, mods);
   commitStackFormation(st, g, st.leaderCell ?? -1);
 }
 function stackSetLeader(st: StackLike, cell: number): void {
@@ -771,6 +798,7 @@ function close(): void {
           @clear="(c) => stackClearCell(obj, c)"
           @set-stat="(c, k, v) => stackSetStat(obj, c, k, v)"
           @set-leader="(c) => stackSetLeader(obj, c)"
+          @set-mods="(c, m) => stackSetMods(obj, c, m)"
         />
 
         <div class="d2-sec">Экипировка лидера</div>
@@ -903,6 +931,7 @@ function close(): void {
           @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
           @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
           @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"
+          @set-mods="(c, m) => setGarrisonModsOn(obj.id, defenseGarrison, c, m)"
         />
         <div class="section-divider" />
         <div class="d2-sec">
@@ -927,6 +956,7 @@ function close(): void {
           @clear="(c) => stackClearCell(visitorStack, c)"
           @set-stat="(c, k, v) => stackSetStat(visitorStack, c, k, v)"
           @set-leader="(c) => stackSetLeader(visitorStack, c)"
+          @set-mods="(c, m) => stackSetMods(visitorStack, c, m)"
         />
         <p v-if="obj.type === 'capital'" class="muted sm">Гостя-лорда выбирает игрок в игре — редактируется только оборона.</p>
         <template v-else-if="!visitorStack">
@@ -945,23 +975,36 @@ function close(): void {
     <div v-if="objectRoles.length" class="ins-body">
       <div class="d2-sec">Сценарий <span class="muted">({{ objectRoles.length }})</span></div>
       <div class="roles-list">
-        <div
+        <!-- hover = шпаргалка события (условия/эффекты именами); клик = перейти к событию -->
+        <el-tooltip
           v-for="(r, i) in visibleRoles"
           :key="`${r.ev.id}#${i}`"
-          class="role-line d2-row"
-          :title="`${ROLE_META[r.cls].label} — ${r.ev.id}`"
-          @click="openRole(r)"
+          placement="left"
+          :show-after="450"
+          :persistent="false"
+          popper-class="ev-sum-pop"
         >
-          <span class="role-icon">{{ ROLE_META[r.cls].icon }}</span>
-          <span class="stk-text">
-            <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
-            <span class="stk-sub">{{ r.what }}{{ r.detail ? `: ${r.detail}` : "" }}</span>
-          </span>
-          <!-- сложность: событие с условиями сработает не всегда — видно сразу -->
-          <span v-if="r.ev.conditions.length > 1" class="role-cond muted" title="у события есть дополнительные условия (переменные, сроки и т.п.)">
-            {{ r.ev.conditions.length }} усл.
-          </span>
-        </div>
+          <template #content>
+            <EventSummaryCard :event="r.ev" />
+          </template>
+          <div
+            class="role-line d2-row"
+            :class="{ 'map-hover': r.ev.id === eventStore.mapHoverId }"
+            @click="openRole(r)"
+            @mouseenter="eventStore.listHoverId = r.ev.id"
+            @mouseleave="eventStore.listHoverId = null"
+          >
+            <span class="role-icon" :title="ROLE_META[r.cls].label">{{ ROLE_META[r.cls].icon }}</span>
+            <span class="stk-text">
+              <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
+              <span class="stk-sub">{{ r.cls === "trigger" ? "причина" : "следствие" }} · {{ r.what }}{{ r.detail ? `: ${r.detail}` : "" }}</span>
+            </span>
+            <!-- сложность: событие с условиями сработает не всегда — видно сразу -->
+            <span v-if="r.ev.conditions.length > 1" class="role-cond muted">
+              {{ r.ev.conditions.length }} усл.
+            </span>
+          </div>
+        </el-tooltip>
         <el-button
           v-if="objectRoles.length > ROLE_LIMIT"
           class="role-more"
@@ -1188,6 +1231,8 @@ function close(): void {
   flex-direction: column;
   gap: 2px;
 }
+/* курсор на бейдже этого события на карте — зеркальная подсветка строки */
+.role-line.map-hover { box-shadow: inset 0 0 0 1px var(--el-color-warning); background: var(--el-fill-color-light); }
 .role-line {
   display: flex;
   align-items: center;

@@ -194,3 +194,19 @@ export function readDefaultBool(
   const i = buf.indexOf(tag, from);
   return i >= 0 && i < end;
 }
+
+/**
+ * VALUE-carrying boolean field: raw tag + ONE value byte (0/1) — the reference's writeBool
+ * encoding (IS_HUMAN, ALWAYSAI, BUY_*, MISSION, TRANSF, …). Returns null when the tag is
+ * absent. NOT `readDefaultBool` (presence-only), which reads a present-but-FALSE byte as true.
+ */
+export function readBoolValue(
+  buf: ByteBuffer,
+  tag: string,
+  from: number,
+  end: number,
+): boolean | null {
+  const i = buf.indexOf(tag, from);
+  if (i < 0 || i >= end) return null;
+  return buf.bytes[i + tag.length] !== 0;
+}

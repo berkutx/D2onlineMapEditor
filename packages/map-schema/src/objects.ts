@@ -11,12 +11,30 @@ const base = {
   z: z.number().int().optional(),
 };
 
-/** One garrison/army slot's unit: a global Gunit id + its level and (max) HP. The .sg stores
- *  these as a MidUnit instance; the editor model carries the resolved global id + stats. */
+/** One garrison/army formation cell's unit — the FULL MidUnit entity, inlined on the member
+ *  (there is no separate instance carrier). `unit` is the global Gunit template; the rest are
+ *  the instance's own persisted fields, omitted at their disk defaults so a freshly placed
+ *  member is just {unit, level, hp}.
+ *
+ *  `key` + `slot` are the entity's persistent on-disk identity: key = the MidUnit block id
+ *  (e.g. "S143UN001a"), slot = its UNIT_ slot index (the slot packing is editing history —
+ *  measured non-canonical on most shipped garrisons). Both are absent on a freshly placed/
+ *  edited member (the export mints them); the semantic round-trip strips them. A big unit
+ *  occupies two cells → the SAME member (key+slot) appears at both indices. */
 export const GarrisonUnit = z.object({
   unit: z.string(), // global Gunit id (G###UU####)
   level: z.number().int().default(1),
   hp: z.number().int().default(0), // current HP (== max for a freshly placed unit)
+  xp: z.number().int().optional(), // XP (omitted when 0)
+  creation: z.number().int().optional(), // CREATION (omitted when 0)
+  name: z.string().optional(), // NAME_TXT — custom unit name (omitted when empty)
+  /** MODIF_ID list — level-up / equipment stat modifiers (global Gmodif refs), in file order. */
+  modifiers: z.array(z.string()).optional(),
+  /** TRANSF true → a polymorphed unit carrying a nested block we don't model (0 of 34k on
+   *  shipped maps); its MidUnit block is kept as raw bytes in the rebuild. */
+  transformed: z.boolean().optional(),
+  key: z.string().optional(), // on-disk MidUnit block id (persistent identity; minted at export)
+  slot: z.number().int().optional(), // on-disk UNIT_ slot index (layout identity)
 });
 export type GarrisonUnit = z.infer<typeof GarrisonUnit>;
 
@@ -46,6 +64,15 @@ export const StackTemplate = z.object({
   aiPriority: z.number().int().default(0),
   /** Unit-modifier list (preserved; advanced-edit later): per entry {unitPos, modifId Gmodif}. */
   modifiers: z.array(z.object({ unitPos: z.number().int(), modifId: z.string() })).default([]),
+  /** The on-disk SLOT entries (UNIT_s + UNIT_s_LVL, s = slot index; null = empty slot). This is
+   *  the template's true persisted layout — the reference's D2StackTemplate stores exactly this.
+   *  MEASURED: 919/2656 shipped templates carry ORPHAN slots (a filled UNIT_s no POS_i points at
+   *  — editing leftovers), so the cell view (`units`) alone cannot reproduce the bytes. `units`
+   *  is the DERIVED cell view the UI edits (cell i = slots[slotOfCell[i]]). An edit through
+   *  upsertTemplate DROPS slots+slotOfCell (canonical re-pack; orphans are unreachable data). */
+  slots: z.array(TemplateUnit.nullable()).optional(),
+  /** POS_i per formation cell: which slot fills cell i (-1 = empty). Dropped on edit with `slots`. */
+  slotOfCell: z.array(z.number().int()).optional(),
 });
 export type StackTemplate = z.infer<typeof StackTemplate>;
 
@@ -79,12 +106,25 @@ export const StackObject = z.object({
   creatLvl: z.number().int().optional(), // CREAT_LVL creature level
   equip: StackEquip.optional(), // leader equipment slots
   inventory: z.array(z.string()).optional(), // carried items (global GItem template ids)
+  /** On-disk MidItem ids of `inventory`, index-aligned (measured: 0 sentinels in 8127 shipped
+   *  ITEM_ID lists). Absent on a fresh/edited list — the export mints ids; round-trip strips. */
+  inventoryKeys: z.array(z.string()).optional(),
   units: z.array(z.string()).optional(), // legacy/unused (formation lives in `garrison` now)
   inside: z.string().optional(), // INSIDE: a city/fort uid this stack is stationed in (a "visitor")
-  // formation by cell (POS 0..5) -> {unit (global Gunit id), level, hp}; the stack's own army.
+  // formation by cell (POS 0..5) -> the full unit entity (see GarrisonUnit); the stack's own army.
   // For a garrisoned/visiting stack this IS the city's "visitor" garrison (edited via the stack id).
   garrison: z.array(GarrisonUnit.nullable()).optional(),
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
+  // ---- full-parse scalars (byte-exact model rebuild). Omitted at their defaults so a placed/
+  // default stack round-trips without a phantom field. ----
+  aiOrder: z.number().int().optional(), // AIORDER (default 2 = Stand; ≠2 on ~99.8% of shipped stacks)
+  aiOrderTarget: z.string().optional(), // AIORDERTAR ref
+  orderTarget: z.string().optional(), // ORDER_TARG ref
+  srcTemplate: z.string().optional(), // SRCTMPL_ID ref (the MidStackTemplate this was spawned from)
+  leaderAlive: z.boolean().optional(), // LEADR_ALIV (default true)
+  invisible: z.boolean().optional(), // INVISIBLE
+  aiIgnore: z.boolean().optional(), // AI_IGNORE
+  upgCount: z.number().int().optional(), // UPGCOUNT
+  nbBattle: z.number().int().optional(), // NBBATTLE
 });
 
 export const FortObject = z.object({
@@ -104,11 +144,14 @@ export const CapitalObject = z.object({
   name: z.string().default(""),
   desc: z.string().optional(), // DESC_TXT
   priority: z.number().int().optional(), // AIPRIORITY 0..6
-  // garrison = the city's OWN DEFENSE: formation cell (POS 0..5) -> {unit (global Gunit id),
-  // level, hp}, resolved from the embedded UNIT_0..5/POS_0..5 MidUnit instances. null = empty.
+  // garrison = the city's OWN DEFENSE: formation cell (POS 0..5) -> the full unit entity
+  // (see GarrisonUnit), resolved from the embedded UNIT_0..5/POS_0..5 MidUnit instances.
   garrison: z.array(GarrisonUnit.nullable()).optional(),
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   stackRef: z.string().optional(), // STACK uid -> the visiting hero MidStack (the SECOND garrison)
+  /** ITEM_ID list — the capital's stored items (addRace seeds 3× G000IG0006), resolved to GItem
+   *  templates in the post-pass (like a chest). */
+  items: z.array(z.string()).optional(),
+  itemKeys: z.array(z.string()).optional(), // on-disk MidItem ids of `items`, index-aligned
 });
 export const VillageObject = z.object({
   ...base,
@@ -125,8 +168,10 @@ export const VillageObject = z.object({
   regen: z.number().int().optional(), // REGEN_B garrison regen
   growth: z.number().int().optional(), // GROWTH_T unit growth timer
   garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit (see CapitalObject)
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
   stackRef: z.string().optional(),
+  /** ITEM_ID list — the village's captured loot, resolved to GItem templates (like a chest). */
+  items: z.array(z.string()).optional(),
+  itemKeys: z.array(z.string()).optional(), // on-disk MidItem ids of `items`, index-aligned
 });
 
 export const RuinObject = z.object({
@@ -143,7 +188,6 @@ export const RuinObject = z.object({
   // the ruin's GUARDIANS (embedded GROUP_ID + UNIT_0..5/POS_0..5, like a fort's defense) —
   // byte-verified: every Riders ruin carries 2-5 MidUnit guards
   garrison: z.array(GarrisonUnit.nullable()).optional(), // formation cell -> unit
-  garrisonRaw: z.array(z.string().nullable()).optional(), // by-cell instance ids (reader → post-pass)
 });
 
 const SiteCommon = {
@@ -152,6 +196,8 @@ const SiteCommon = {
   image: z.number().int().optional(),
   /** TXT_DESC — the visit-dialog text; read so a delete's undo re-adds it verbatim. */
   desc: z.string().optional(),
+  /** AIPRIORITY — AI visit priority (default 0; some shipped sites carry 3). */
+  aiPriority: z.number().int().optional(),
 };
 // Site STOCK lists carry GLOBAL template ids (NOT MidItem/MidUnit instances), count-prefixed
 // by a literal QTY_* tag. Merchant sells items (+qty), mage sells spells, mercs hire units
@@ -160,6 +206,11 @@ export const MerchantObject = z.object({
   ...SiteCommon,
   type: z.literal("merchant"),
   items: z.array(z.object({ id: z.string(), count: z.number().int() })).optional(),
+  /** BUY_* toggles [armor, jewel, weapon, banner, potion, scroll, wand, value] — which item
+   *  categories the merchant buys back. Omitted (all true) on the vast majority of maps. */
+  buy: z.array(z.boolean()).length(8).optional(),
+  /** MISSION — non-default (true) on a handful of shipped merchants. Omitted when false. */
+  mission: z.boolean().optional(),
 });
 export const MageObject = z.object({
   ...SiteCommon,
@@ -167,6 +218,18 @@ export const MageObject = z.object({
   spells: z.array(z.string()).optional(),
 });
 export const TrainerObject = z.object({ ...SiteCommon, type: z.literal("trainer") });
+/** MidSiteResourceMarket (mod-era 5th site kind): a resource-exchange market.
+ *  CUSTOM(bool) + BANK resource-string + INF(int) after the common site head. */
+export const ResourceMarketObject = z.object({
+  ...SiteCommon,
+  type: z.literal("resourceMarket"),
+  custom: z.boolean().optional(), // CUSTOM
+  /** CODE - the embedded Lua exchange script (present when CUSTOM=1). A typed string: the
+   *  script IS the value. CODE_LEN on disk is derived (char count, sans NUL). */
+  code: z.string().optional(),
+  bank: z.string().optional(), // BANK "G####:R####:Y####:E####:W####:B####"
+  inf: z.number().int().optional(), // INF
+});
 export const MercenaryObject = z.object({
   ...SiteCommon,
   type: z.literal("mercenary"),
@@ -176,6 +239,7 @@ export const MercenaryObject = z.object({
 export const MountainsObject = z.object({
   ...base,
   type: z.literal("mountains"),
+  idMount: z.number().int().optional(), // ID_MOUNT — per-entry id (NOT sequential); kept for byte-exact rebuild
   image: z.number().int().optional(),
   race: z.number().int().optional(),
   // SIZE_X / SIZE_Y from the .sg entry. The editor's image key is
@@ -187,11 +251,16 @@ export const CrystalObject = z.object({
   ...base,
   type: z.literal("crystal"),
   resource: z.number().int().optional(), // mana type+amount packed
+  priority: z.number().int().optional(), // AIPRIORITY — AI collection priority (default 3)
 });
 export const LandmarkObject = z.object({
   ...base,
   type: z.literal("landmark"),
   baseType: z.string().optional(), // resolves footprint+image from SLmark.dbf
+  /** DESC_TXT — the author's CP1251 name/label for this decoration (e.g. "Топь", "Фонтан").
+   *  Modeled by the reference's D2LandMark; our parser used to drop it (lossy re-serialize).
+   *  Optional + omitted when empty (like baseType) so an unnamed landmark round-trips cleanly. */
+  desc: z.string().optional(),
 });
 export const LocationObject = z.object({
   ...base,
@@ -211,7 +280,8 @@ export const TreasureObject = z.object({
   type: z.literal("treasure"),
   image: z.number().int().optional(), // MidBag IMAGE -> G000BG0000{0|1}{image}
   priority: z.number().int().optional(), // AIPRIORITY 0..6
-  items: z.array(z.string()).optional(), // ITEM_ID list — the bag's contents
+  items: z.array(z.string()).optional(), // ITEM_ID list — the bag's contents (resolved to templates)
+  itemKeys: z.array(z.string()).optional(), // on-disk MidItem ids of `items`, index-aligned
 });
 
 export const RodObject = z.object({
@@ -220,9 +290,21 @@ export const RodObject = z.object({
   owner: z.string().optional(),
   race: z.number().int().optional(), // owner player's Grace index -> G000RR<rodRaceID>RROD8
 });
+/** One MidTomb epitaph: a stack that died on this cell — owner, killer, turn, stack name. */
+export const TombEpitaph = z.object({
+  owner: z.string(), // STACK_OWNR player ref
+  killer: z.string(), // KILLER player ref
+  turn: z.number().int(), // TURN
+  name: z.string(), // STACK_NAME (CP1251)
+});
+export type TombEpitaph = z.infer<typeof TombEpitaph>;
+
 export const TombObject = z.object({
   ...base,
   type: z.literal("tomb"), // constant sprite G000TB0000G
+  /** QTY_EP epitaph list — playthrough state (tombs appear only in campaign saves, 0 on
+   *  authored maps); modeled so a save round-trips through the full rebuild. */
+  epitaphs: z.array(TombEpitaph).optional(),
 });
 
 /** Fallback for any block type the parser does not yet model: keeps the map renderable
@@ -244,6 +326,7 @@ export const MapObject = z.discriminatedUnion("type", [
   MageObject,
   TrainerObject,
   MercenaryObject,
+  ResourceMarketObject,
   MountainsObject,
   CrystalObject,
   LandmarkObject,

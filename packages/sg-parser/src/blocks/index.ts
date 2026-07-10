@@ -2,4 +2,5 @@
 export * from "./terrain.js";
 export * from "./scenario.js";
 export * from "./objects.js";
+export * from "./satellites.js";
 export * from "./generic.js";

@@ -21,6 +21,7 @@ import { useUnitStore } from "../stores/unitStore";
 import { eventBadges } from "../services/scenarioRoles";
 import EventFieldInput from "./EventFieldInput.vue";
 import EventGraph from "./EventGraph.vue";
+import EventSummaryCard from "./EventSummaryCard.vue";
 import VariablesEditor from "./VariablesEditor.vue";
 import TemplatesEditor from "./TemplatesEditor.vue";
 import ScenarioSettingsEditor from "./ScenarioSettingsEditor.vue";
@@ -331,12 +332,28 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
             <el-button size="small" text @click="store.objectFilter = null">показать все</el-button>
           </div>
           <el-scrollbar class="ev-list">
-            <div
+            <!-- hover-задержка = шпаргалка события (условия/эффекты именами + заметка автора) -->
+            <el-tooltip
               v-for="e in listRows"
               :key="e.id"
+              placement="right"
+              :show-after="500"
+              :persistent="false"
+              popper-class="ev-sum-pop"
+            >
+              <template #content>
+                <EventSummaryCard :event="e" />
+              </template>
+            <div
               class="ev-row d2-row"
-              :class="{ active: e.id === store.selectedId, 'is-clone': zoneGroups.cloneOf.has(e.id) }"
+              :class="{
+                active: e.id === store.selectedId,
+                'is-clone': zoneGroups.cloneOf.has(e.id),
+                'map-hover': e.id === store.mapHoverId,
+              }"
               @click="store.navigate({ tab: 'events', eventId: e.id })"
+              @mouseenter="store.listHoverId = e.id"
+              @mouseleave="store.listHoverId = null"
             >
               <div class="ev-row-main">
                 <span class="ev-name">{{ e.name || "(без имени)" }}</span>
@@ -354,11 +371,14 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
                 <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
                 <span class="ev-icons">{{ badgeIcons(e) }}</span>
-                <span class="ev-ce">{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
+                <span class="ev-ce" :class="{ 'ev-ce-inert': !e.effects.length }"
+                  :title="!e.effects.length ? 'у события нет эффектов — оно ничего не делает' : undefined"
+                >{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
                 <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
                 <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
               </div>
             </div>
+            </el-tooltip>
             <el-empty v-if="!listRows.length" description="Нет событий" :image-size="60" />
           </el-scrollbar>
         </div>
@@ -539,6 +559,10 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
    icons + counts sit together on the right edge */
 .ev-icons { margin-left: auto; font-size: 11px; line-height: 1; letter-spacing: 1px; }
 .ev-ce { color: var(--el-text-color-secondary); }
+/* событие без эффектов инертно (обычно недоделанная заготовка) — мягкий варнинг */
+.ev-ce-inert { color: var(--el-color-warning); }
+/* курсор на бейдже этого события на КАРТЕ — зеркальная подсветка строки списка */
+.ev-row.map-hover { box-shadow: inset 0 0 0 1px var(--el-color-warning); background: var(--el-fill-color-light); }
 .ev-editor { flex: 1; min-height: 0; }
 .ev-props { display: flex; flex-wrap: wrap; gap: 10px 14px; margin: 12px 0; align-items: center; }
 .ev-props label { display: inline-flex; align-items: center; gap: 5px; color: var(--el-text-color-regular); }

@@ -9,9 +9,12 @@
 import { computed } from "vue";
 import UnitPicker from "./UnitPicker.vue";
 import UnitIcon from "./UnitIcon.vue";
+import ModifierListEditor from "./ModifierListEditor.vue";
 import { useUnitStore } from "../stores/unitStore";
 
-type GarrUnit = { unit: string; level: number; hp: number };
+// full-entity member (GarrisonUnit superset): extra persisted fields (xp/name/key/slot/…)
+// ride along untouched — the editor reads unit/level/hp/modifiers and emits intents only
+type GarrUnit = { unit: string; level: number; hp: number; modifiers?: string[] };
 
 const props = withDefaults(
   defineProps<{
@@ -31,6 +34,7 @@ const emit = defineEmits<{
   clear: [cell: number];
   setStat: [cell: number, key: "level" | "hp", value: number];
   setLeader: [cell: number];
+  setMods: [cell: number, mods: string[]];
 }>();
 
 const unitStore = useUnitStore();
@@ -125,6 +129,14 @@ function onPick(cell: number, v: string | null): void {
               size="small"
               :controls="false"
               @change="(v: number) => emit('setStat', cell, 'hp', v ?? 0)"
+            />
+            <ModifierListEditor
+              v-if="!readonly"
+              :model-value="garrison[cell]!.modifiers ?? []"
+              :title="`${unitStore.nameOf(garrison[cell]!.unit)} — модификаторы`"
+              :leader="leaderCell === cell"
+              compact
+              @update:model-value="(mods) => emit('setMods', cell, mods)"
             />
           </span>
           </div>

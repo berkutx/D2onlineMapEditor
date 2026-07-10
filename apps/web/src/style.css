@@ -169,3 +169,8 @@ body,
 .el-input-number.is-controls-right .el-input__wrapper {
   padding-left: 8px;
 }
+
+/* rich event-summary tooltip (EventSummaryCard inside el-tooltip poppers) */
+.ev-sum-pop {
+  max-width: 380px;
+}

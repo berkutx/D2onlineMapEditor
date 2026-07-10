@@ -21,6 +21,10 @@ import time
 u32 = ctypes.windll.user32
 u32.FindWindowA.restype = wt.HWND
 u32.FindWindowA.argtypes = [wt.LPCSTR, wt.LPCSTR]
+u32.FindWindowExA.restype = wt.HWND
+u32.FindWindowExA.argtypes = [wt.HWND, wt.HWND, wt.LPCSTR, wt.LPCSTR]
+u32.GetWindowThreadProcessId.restype = wt.DWORD
+u32.GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
 u32.PostMessageA.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
 u32.GetClientRect.argtypes = [wt.HWND, ctypes.POINTER(wt.RECT)]
 u32.SetForegroundWindow.argtypes = [wt.HWND]
@@ -92,24 +96,66 @@ def _wait(check, secs, step=0.5):
     return bool(check())
 
 
-def run_sequence(title="Scenario Editor", log=print, wait_window=40,
-                 loaded_check=None, list_check=None):
+def _hwnd_pid(hwnd):
+    pid = wt.DWORD(0)
+    u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def _find_titled(title, pid=None):
+    """First top-level window with this exact title (and owning PID, when given).
+    PID-bound lookup makes PARALLEL editors safe: FindWindowA alone returns an arbitrary
+    same-titled window, so 4 concurrent drivers would grab each other's editors."""
+    target = title.encode("mbcs")
+    hwnd = u32.FindWindowExA(None, None, None, target)
+    while hwnd:
+        if pid is None or _hwnd_pid(hwnd) == pid:
+            return hwnd
+        hwnd = u32.FindWindowExA(None, hwnd, None, target)
+    return None
+
+
+def find_ready_hwnd(title, timeout, log, pid=None):
+    """Find the editor's REAL window: at startup a small stub window with the same title
+    briefly exists and is then destroyed/recreated at full size. Re-find on invalidation
+    and require a sane client size before driving (a 222x117 stub eats the clicks)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        hwnd = _find_titled(title, pid)
+        if hwnd:
+            w, h = client_size(hwnd)
+            if w >= 500 and h >= 300:
+                return hwnd
+            log("[drive] stub window 0x%X (%dx%d) -- waiting for the real one" % (hwnd, w, h))
+        time.sleep(0.7)
+    return None
+
+
+def run_sequence(title="Scenario Editor", log=print, wait_window=60,
+                 loaded_check=None, list_check=None, pid=None):
     """Drive the whole load+save flow by posted messages. Feedback-driven so it can't
     desync: retry the Load click until the list actually opens (list_check), then wait for
     the scenario to finish loading (loaded_check) before OPTIONS/Save. Both checks are wired
-    by the debugger from its scenario_read_header / scenario_open_read breakpoints."""
-    hwnd = find_hwnd(title, wait_window)
+    by the debugger from its scenario_read_header / scenario_open_read breakpoints.
+    `pid` binds the window lookup to ONE editor process (required for parallel runs)."""
+    hwnd = find_ready_hwnd(title, wait_window, log, pid)
     if not hwnd:
         log("[drive] window '%s' not found" % title); return False
     log("[drive] hwnd=0x%X client=%dx%d" % (hwnd, *client_size(hwnd)))
     u32.ShowWindow(hwnd, SW_RESTORE); u32.SetForegroundWindow(hwnd)
     time.sleep(1.0)
 
-    # 1) open the Load list — retry until the editor's menu is ready and the list populates
+    # 1) open the Load list — retry until the editor's menu is ready and the list populates.
+    # The window may still be destroyed/recreated under us early on — re-find, don't give up.
     opened = False
     for attempt in range(20):
         if not u32.IsWindow(hwnd):
-            log("[drive] window gone"); return False
+            log("[drive] window recreated -- re-finding")
+            hwnd = find_ready_hwnd(title, 20, log, pid)
+            if not hwnd:
+                log("[drive] window gone for good"); return False
+            log("[drive] re-found hwnd=0x%X client=%dx%d" % (hwnd, *client_size(hwnd)))
+            u32.ShowWindow(hwnd, SW_RESTORE)
         click(hwnd, *POINTS["menu_load"])
         if _wait(list_check, 2.0) or list_check is None:
             opened = True
@@ -117,10 +163,18 @@ def run_sequence(title="Scenario Editor", log=print, wait_window=40,
     if list_check and not opened:
         log("[drive] load list never opened"); return False
 
-    # 2) pick first scenario + Ok, then wait for it to actually load
-    click(hwnd, *POINTS["list_item0"]); time.sleep(0.6)
-    click(hwnd, *POINTS["list_ok"])
-    log("[drive] load confirmed=%s" % _wait(loaded_check, 25.0))
+    # 2) pick first scenario + Ok, then wait for it to actually load. Under parallel
+    # runs a load can stall on the shared-DB lock — retry the pick+Ok once.
+    loaded = False
+    for _ in range(2):
+        click(hwnd, *POINTS["list_item0"]); time.sleep(0.6)
+        click(hwnd, *POINTS["list_ok"])
+        loaded = _wait(loaded_check, 45.0)
+        if loaded or loaded_check is None:
+            break
+        log("[drive] load did not start — re-picking")
+        click(hwnd, *POINTS["menu_load"]); time.sleep(1.0)
+    log("[drive] load confirmed=%s" % loaded)
     time.sleep(1.0)
 
     # 3) OPTIONS -> Save

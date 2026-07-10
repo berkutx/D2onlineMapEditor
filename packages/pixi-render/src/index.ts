@@ -31,6 +31,7 @@ export { ObjectLayer } from "./ObjectLayer.js";
 export { LocationLayer } from "./LocationLayer.js";
 export { ZoneLayer, type ZoneVisual } from "./ZoneLayer.js";
 export { EventOverlayLayer } from "./EventOverlayLayer.js";
+export type { LinkGroup, LinkPart, LinkRole, LinkHit } from "./EventOverlayLayer.js";
 export { AnchorLayer } from "./AnchorLayer.js";
 export { ScenarioRolesLayer } from "./ScenarioRolesLayer.js";
 export type { RoleCounts, ObjectRoleMarker } from "./ScenarioRolesLayer.js";

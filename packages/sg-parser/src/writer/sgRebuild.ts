@@ -52,21 +52,26 @@ export function roadFrame(
   });
 }
 
-/** A MidLandmark block frame (code 0x13, short MM): LMARK_ID, TYPE, POS_X, POS_Y, DESC_TXT. */
+/**
+ * A MidLandmark block frame (code 0x13, short MM): LMARK_ID, TYPE, POS_X, POS_Y, [DESC_TXT].
+ * `desc` is optional: pass `undefined` to OMIT the DESC_TXT field entirely (RMG-generated
+ * landmarks never carry it); pass `""` or a name to write it (editor-authored landmarks always
+ * do — the reference editor writes DESC_TXT on every landmark it saves).
+ */
 export function landmarkFrame(
   version: string,
   second: number,
   x: number,
   y: number,
   lmarkId: string,
-  desc = "",
+  desc?: string,
 ): Uint8Array {
   return emitBlock(version, "MidLandmark", 0x13, "MM", second, (w, full) => {
     w.refField("LMARK_ID", full);
     w.stringField("TYPE", lmarkId);
     w.defaultInt("POS_X", x);
     w.defaultInt("POS_Y", y);
-    w.stringField("DESC_TXT", desc);
+    if (desc !== undefined) w.stringField("DESC_TXT", desc);
   });
 }
 
@@ -86,6 +91,28 @@ export function locationFrame(
     w.defaultInt("POS_Y", y);
     w.stringField("NAME_TXT", name);
     w.defaultInt("RADIUS", radius);
+  });
+}
+
+/**
+ * MidCrystal frame (code 0x12, short CR): CRYSTAL_ID(self) · RESOURCE · POS_X · POS_Y · AIPRIORITY.
+ * Field order + code byte + short verified against Riders (`CR0000`: RESOURCE/POS_X/POS_Y/AIPRIORITY,
+ * priority defaults to 3). resource packs mana school+amount; priority = AI collection priority.
+ */
+export function crystalFrame(
+  version: string,
+  second: number,
+  x: number,
+  y: number,
+  resource: number,
+  priority = 3,
+): Uint8Array {
+  return emitBlock(version, "MidCrystal", 0x12, "CR", second, (w, full) => {
+    w.refField("CRYSTAL_ID", full);
+    w.defaultInt("RESOURCE", resource);
+    w.defaultInt("POS_X", x);
+    w.defaultInt("POS_Y", y);
+    w.defaultInt("AIPRIORITY", priority);
   });
 }
 
@@ -146,7 +173,7 @@ export function villageFrame(
     morale?: number;
     growth?: number;
     riot?: number;
-    unitSlots?: readonly string[];
+    unitSlots?: readonly (string | null)[];
     posOfCell?: readonly number[];
     itemIds?: readonly string[];
   },
@@ -178,6 +205,409 @@ export function villageFrame(
   });
 }
 
+/**
+ * A Capital block frame (code 0x0f, short FT — shared with MidVillage; disambiguated by the
+ * `.?AVC Capital` decl). Field order byte-verified on 215 pristine capitals (ONE layout):
+ * CITY_ID(self) · NAME_TXT · DESC_TXT · OWNER · SUBRACE · STACK · POS_X · POS_Y · GROUP_ID(self) ·
+ * UNIT_0..5 · POS_0..5 · <ownId> item count + N×ITEM_ID · AIPRIORITY. Like a village but WITHOUT
+ * the economy tail (PROTECT_B, REGEN_B, MORALE, GROWTH_T, SIZE, the P_O_ bools, RIOT_T).
+ */
+export function capitalFrame(
+  version: string,
+  second: number,
+  o: {
+    posX: number;
+    posY: number;
+    name?: string;
+    desc?: string;
+    owner?: string;
+    subRace?: string;
+    stackRef?: string;
+    priority?: number;
+    unitSlots?: readonly (string | null)[];
+    posOfCell?: readonly number[];
+    itemIds?: readonly string[];
+  },
+): Uint8Array {
+  const NIL = "G000000000";
+  return emitBlock(version, "Capital", 0x0f, "FT", second, (w, full) => {
+    w.refField("CITY_ID", full);
+    w.stringField("NAME_TXT", o.name ?? "");
+    w.stringField("DESC_TXT", o.desc ?? "");
+    w.refField("OWNER", o.owner || NIL);
+    w.refField("SUBRACE", o.subRace || NIL);
+    w.refField("STACK", o.stackRef || NIL);
+    w.defaultInt("POS_X", o.posX);
+    w.defaultInt("POS_Y", o.posY);
+    w.refField("GROUP_ID", full);
+    for (let i = 0; i < 6; i++) w.refField(`UNIT_${i}`, o.unitSlots?.[i] ?? NIL);
+    for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, o.posOfCell?.[i] ?? -1);
+    const items = o.itemIds ?? [];
+    w.defaultInt(full, items.length); // stored-items count (tag = the capital's own id)
+    for (const id of items) w.refField("ITEM_ID", id);
+    w.defaultInt("AIPRIORITY", o.priority ?? 0);
+  });
+}
+
+/**
+ * The ScenarioInfo block frame (code 0x14, short IF, singleton) — FULL D2ScenarioInfo.h field
+ * order, byte-verified: INFO_ID(self) · CAMPAIGN · SOURCE_M(bool) · QTY_CITIES · NAME · DESC ·
+ * BRIEFING · DEBUNKW,2..5 · DEBUNKL · BRIEFLONG1..5 · O(bool) · CUR_TURN · MAX_UNIT · MAX_SPELL ·
+ * MAX_LEADER · MAX_CITY · MAP_SIZE · DIFFSCEN · DIFFGAME · CREATOR · PLAYER_1..13 · SUGG_LVL ·
+ * MAP_SEED. Multi-string parts are written VERBATIM (their '_' continuations + boundaries are
+ * on-disk history the model preserves as typed strings).
+ */
+export function scenarioInfoFrame(
+  version: string,
+  second: number,
+  h: {
+    name?: string; description?: string; author?: string;
+    objective?: string; loseText?: string;
+    storyParts?: readonly string[]; winTextParts?: readonly string[];
+    story?: string; winText?: string;
+    campaign?: string; sourceM?: boolean; qtyCities?: number; flagO?: boolean; curTurn?: number;
+    playerSlots?: readonly number[];
+    difficulty?: { scenario: number; game: number };
+    limits?: { unit: number; spell: number; leader: number; city: number };
+    suggestedLevel?: number; seed?: number;
+  },
+  size: number,
+): Uint8Array {
+  // PRESENCE-DRIVEN: version-conditional / optional groups are written exactly as captured
+  // (an old-format map carries only DEBUNKW and may lack later groups). Fallback for a doc with
+  // no verbatim parts: the joined text as a single part.
+  const win = h.winTextParts?.length ? [...h.winTextParts] : [h.winText ?? ""];
+  const long = h.storyParts?.length ? [...h.storyParts] : [h.story ?? ""];
+  const WIN_TAGS = ["DEBUNKW", "DEBUNKW2", "DEBUNKW3", "DEBUNKW4", "DEBUNKW5"];
+  const LONG_TAGS = ["BRIEFLONG1", "BRIEFLONG2", "BRIEFLONG3", "BRIEFLONG4", "BRIEFLONG5"];
+  return emitBlock(version, "ScenarioInfo", 0x14, "IF", second, (w, full) => {
+    w.refField("INFO_ID", full);
+    if (h.campaign !== undefined) w.refField("CAMPAIGN", h.campaign);
+    if (h.sourceM !== undefined) w.bool("SOURCE_M", h.sourceM);
+    if (h.qtyCities !== undefined) w.defaultInt("QTY_CITIES", h.qtyCities);
+    w.stringField("NAME", h.name ?? "");
+    w.stringField("DESC", h.description ?? "");
+    w.stringField("BRIEFING", h.objective ?? "");
+    win.forEach((p, i) => { if (i < WIN_TAGS.length) w.stringField(WIN_TAGS[i]!, p); });
+    w.stringField("DEBUNKL", h.loseText ?? "");
+    long.forEach((p, i) => { if (i < LONG_TAGS.length) w.stringField(LONG_TAGS[i]!, p); });
+    if (h.flagO !== undefined) w.bool("O", h.flagO);
+    if (h.curTurn !== undefined) w.defaultInt("CUR_TURN", h.curTurn);
+    if (h.limits) {
+      w.defaultInt("MAX_UNIT", h.limits.unit);
+      w.defaultInt("MAX_SPELL", h.limits.spell);
+      w.defaultInt("MAX_LEADER", h.limits.leader);
+      w.defaultInt("MAX_CITY", h.limits.city);
+    }
+    w.defaultInt("MAP_SIZE", size);
+    if (h.difficulty) {
+      w.defaultInt("DIFFSCEN", h.difficulty.scenario);
+      w.defaultInt("DIFFGAME", h.difficulty.game);
+    }
+    w.stringField("CREATOR", h.author ?? "");
+    if (h.playerSlots?.length === 13)
+      for (let i = 1; i <= 13; i++) w.defaultInt(`PLAYER_${i}`, h.playerSlots[i - 1]!);
+    if (h.suggestedLevel !== undefined) w.defaultInt("SUGG_LVL", h.suggestedLevel);
+    if (h.seed !== undefined) w.defaultInt("MAP_SEED", h.seed);
+  });
+}
+
+/** The MidgardMap block frame (code 0x12, short MP, singleton): ONE field — the map size,
+ *  tagged with the block's own full id (D2Map.h). */
+export function mapFrame(version: string, second: number, size: number): Uint8Array {
+  return emitBlock(version, "MidgardMap", 0x12, "MP", second, (w, full) => {
+    w.defaultInt(full, size);
+  });
+}
+
+/** The MidgardPlan frame (code 0x13, short PN, singleton): `<ownId>`(map size) · `<ownId>`(count)
+ *  · N×{POS_X · POS_Y · ELEMENT}. Entries in list order (insertion order = on-disk history). */
+export function planFrame(
+  version: string,
+  second: number,
+  size: number,
+  entries: readonly { x: number; y: number; element: string }[],
+): Uint8Array {
+  return emitBlock(version, "MidgardPlan", 0x13, "PN", second, (w, full) => {
+    w.defaultInt(full, size);
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.defaultInt("POS_X", e.x);
+      w.defaultInt("POS_Y", e.y);
+      w.refField("ELEMENT", e.element);
+    }
+  });
+}
+
+/** A MidgardMapBlock terrain chunk frame (code 0x17, short MB): BLOCKID(self) · BLOCKDATA ·
+ *  int32 byteLen(128) · 32×int32 raw cell values (8 cols × 4 rows, row-major). The chunk's
+ *  cell origin is encoded in the uid: second = (rowOrigin << 8) | colOrigin. */
+export function mapBlockFrame(version: string, second: number, values: readonly number[]): Uint8Array {
+  return emitBlock(version, "MidgardMapBlock", 0x17, "MB", second, (w, full) => {
+    w.refField("BLOCKID", full);
+    w.defaultInt("BLOCKDATA", values.length * 4);
+    for (const v of values) w.i32(v);
+  });
+}
+
+// ---- satellite-block frames (Stage D): per-player state + playthrough logs. All lists use the
+// count-tag = the block's own full id; string/ref values are written VERBATIM as captured. ----
+
+/** MidgardMapFog (code 0x15, short FG): count + N×{POS_Y · FOG(byteCount) · untagged mask}. */
+export function fogFrame(
+  version: string,
+  second: number,
+  rows: readonly { y: number; mask: readonly number[] }[],
+): Uint8Array {
+  return emitBlock(version, "MidgardMapFog", 0x15, "FG", second, (w, full) => {
+    w.defaultInt(full, rows.length);
+    for (const r of rows) {
+      w.defaultInt("POS_Y", r.y);
+      w.defaultInt("FOG", r.mask.length);
+      w.raw([...r.mask]);
+    }
+  });
+}
+
+/** PlayerKnownSpells (code 0x19, short KS): count + N×SPELL_ID. */
+export function playerSpellsFrame(version: string, second: number, spells: readonly string[]): Uint8Array {
+  return emitBlock(version, "PlayerKnownSpells", 0x19, "KS", second, (w, full) => {
+    w.defaultInt(full, spells.length);
+    for (const s of spells) w.stringField("SPELL_ID", s);
+  });
+}
+
+/** PlayerBuildings (code 0x17, short PB): count + N×BUILD_ID. */
+export function playerBuildingsFrame(version: string, second: number, buildings: readonly string[]): Uint8Array {
+  return emitBlock(version, "PlayerBuildings", 0x17, "PB", second, (w, full) => {
+    w.defaultInt(full, buildings.length);
+    for (const b of buildings) w.stringField("BUILD_ID", b);
+  });
+}
+
+/** MidTalismanCharges (code 0x1a, short TC): count + N×{ID_TALIS · CHARGES}. */
+export function talismanChargesFrame(
+  version: string,
+  second: number,
+  entries: readonly { talisman: string; charges: number }[],
+): Uint8Array {
+  return emitBlock(version, "MidTalismanCharges", 0x1a, "TC", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_TALIS", e.talisman);
+      w.defaultInt("CHARGES", e.charges);
+    }
+  });
+}
+
+/** MidStackDestroyed (code 0x19, short SD): count + N×{ID_STACK · ID_KILLER · SRCTMPL_ID}. */
+export function stackDestroyedFrame(
+  version: string,
+  second: number,
+  entries: readonly { stack: string; killer: string; srcTemplate: string }[],
+): Uint8Array {
+  return emitBlock(version, "MidStackDestroyed", 0x19, "SD", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_STACK", e.stack);
+      w.stringField("ID_KILLER", e.killer);
+      w.stringField("SRCTMPL_ID", e.srcTemplate);
+    }
+  });
+}
+
+/** MidQuestLog (code 0x13, short QL): count + N×{ID_PLAYER · SEQ_NUM · CUR_TURN · TYPE ·
+ *  ID_EVENT · EFF_NUM}. */
+export function questLogFrame(
+  version: string,
+  second: number,
+  entries: readonly { player: string; seqNum: number; curTurn: number; type: number; event: string; effNum: number }[],
+): Uint8Array {
+  return emitBlock(version, "MidQuestLog", 0x13, "QL", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_PLAYER", e.player);
+      w.defaultInt("SEQ_NUM", e.seqNum);
+      w.defaultInt("CUR_TURN", e.curTurn);
+      w.defaultInt("TYPE", e.type);
+      w.stringField("ID_EVENT", e.event);
+      w.defaultInt("EFF_NUM", e.effNum);
+    }
+  });
+}
+
+/** MidSpellCast (code 0x14, short ST): TWO ints, both tagged with the block's own id. */
+export function spellCastFrame(version: string, second: number, v1: number, v2: number): Uint8Array {
+  return emitBlock(version, "MidSpellCast", 0x14, "ST", second, (w, full) => {
+    w.defaultInt(full, v1);
+    w.defaultInt(full, v2);
+  });
+}
+
+/** MidSpellEffects (code 0x17, short ET): ONE int tagged with the block's own id. */
+export function spellEffectsFrame(version: string, second: number, v: number): Uint8Array {
+  return emitBlock(version, "MidSpellEffects", 0x17, "ET", second, (w, full) => {
+    w.defaultInt(full, v);
+  });
+}
+
+/**
+ * TurnSummary (code 0x13, short TS): count + N variant entries — head {ID_PLAYER · TYPE · POS_X ·
+ * POS_Y} then the TYPE-selected payload. Type 3's ID_CITY is written (the reference's data()
+ * forgets it — its own read() would then desync; we keep the on-disk truth).
+ */
+export function turnSummaryFrame(
+  version: string,
+  second: number,
+  entries: readonly {
+    player: string; type: number; x: number; y: number;
+    player2?: string; spell?: string; stackA?: string; strStackA?: string;
+    stackD?: string; strStackD?: string; city?: string; acquire?: boolean;
+  }[],
+): Uint8Array {
+  return emitBlock(version, "TurnSummary", 0x13, "TS", second, (w, full) => {
+    w.defaultInt(full, entries.length);
+    for (const e of entries) {
+      w.stringField("ID_PLAYER", e.player);
+      w.defaultInt("TYPE", e.type);
+      w.defaultInt("POS_X", e.x);
+      w.defaultInt("POS_Y", e.y);
+      if (e.type === 0) {
+        w.stringField("ID_PLAYER2", e.player2 ?? "G000000000");
+        w.stringField("ID_SPELL", e.spell ?? "G000000000");
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+      } else if (e.type === 1) {
+        w.stringField("ID_PLAYER2", e.player2 ?? "G000000000");
+        w.stringField("ID_STK_A", e.stackA ?? "G000000000");
+        w.stringField("STR_STK_A", e.strStackA ?? "");
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+      } else if (e.type === 2 || e.type === 5) {
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+      } else if (e.type === 3) {
+        w.stringField("ID_CITY", e.city ?? "G000000000");
+      } else if (e.type === 6) {
+        w.stringField("ID_STK_D", e.stackD ?? "G000000000");
+        w.stringField("STR_STK_D", e.strStackD ?? "");
+        w.bool("ACQUIRE", e.acquire ?? false);
+      } // type 4: no payload
+    }
+  });
+}
+
+/**
+ * A MidPlayer block frame (code 0x11, short PL) — FULL D2Player.h field order, byte-verified:
+ * PLAYER_ID(self) · NAME_TXT · DESC_TXT · LORD_ID · RACE_ID · FOG_ID · KNOWN_ID · BUILDS_ID ·
+ * FACE · QTY_BREAKS · BANK · IS_HUMAN(value bool) · SPELL_BANK · ATTITUDE · RESEAR_T · CONSTR_T ·
+ * SPY_1..3 · CAPT_BY · [ALWAYSAI] · [EXMAPID/TURN 1..3]. The conditional tails are written iff
+ * the model captured them (presence == what was on disk; EES maps always carry both).
+ */
+export function playerFrame(
+  version: string,
+  second: number,
+  p: {
+    name?: string; desc?: string; lordId?: string; raceId?: string;
+    fogId?: string; knownId?: string; buildsId?: string;
+    face?: number; qtyBreaks?: number; bank?: string; isHuman?: boolean; spellBank?: string;
+    attitude?: number; researchT?: number; constructT?: number;
+    spy1?: string; spy2?: string; spy3?: string; capturedBy?: string;
+    alwaysAi?: boolean;
+    exMapId1?: string; exMapTurn1?: number;
+    exMapId2?: string; exMapTurn2?: number;
+    exMapId3?: string; exMapTurn3?: number;
+  },
+): Uint8Array {
+  const NIL = "G000000000";
+  const EMPTY_BANK = "G0000:R0000:Y0000:E0000:W0000:B0000";
+  return emitBlock(version, "MidPlayer", 0x11, "PL", second, (w, full) => {
+    w.refField("PLAYER_ID", full);
+    w.stringField("NAME_TXT", p.name ?? "");
+    w.stringField("DESC_TXT", p.desc ?? "");
+    w.refField("LORD_ID", p.lordId ?? "G000LR0001");
+    w.refField("RACE_ID", p.raceId ?? "G000RR0004");
+    w.refField("FOG_ID", p.fogId ?? NIL);
+    w.refField("KNOWN_ID", p.knownId ?? NIL);
+    w.refField("BUILDS_ID", p.buildsId ?? NIL);
+    w.defaultInt("FACE", p.face ?? 1);
+    w.defaultInt("QTY_BREAKS", p.qtyBreaks ?? 0);
+    w.stringField("BANK", p.bank ?? EMPTY_BANK);
+    w.bool("IS_HUMAN", p.isHuman ?? false);
+    w.stringField("SPELL_BANK", p.spellBank ?? EMPTY_BANK);
+    w.defaultInt("ATTITUDE", p.attitude ?? 1);
+    w.defaultInt("RESEAR_T", p.researchT ?? 0);
+    w.defaultInt("CONSTR_T", p.constructT ?? 0);
+    w.refField("SPY_1", p.spy1 ?? NIL);
+    w.refField("SPY_2", p.spy2 ?? NIL);
+    w.refField("SPY_3", p.spy3 ?? NIL);
+    w.refField("CAPT_BY", p.capturedBy ?? NIL);
+    if (p.alwaysAi !== undefined) w.bool("ALWAYSAI", p.alwaysAi);
+    if (p.exMapId1 !== undefined) {
+      w.refField("EXMAPID1", p.exMapId1 || NIL);
+      w.defaultInt("EXMAPTURN1", p.exMapTurn1 ?? 0);
+      w.refField("EXMAPID2", p.exMapId2 || NIL);
+      w.defaultInt("EXMAPTURN2", p.exMapTurn2 ?? 0);
+      w.refField("EXMAPID3", p.exMapId3 || NIL);
+      w.defaultInt("EXMAPTURN3", p.exMapTurn3 ?? 0);
+    }
+  });
+}
+
+/** A MidSubRace block frame (code 0x12, short SR): SUBRACE_ID(self) · SUBRACE · PLAYER_ID ·
+ *  NUMBER · NAME_TXT · BANNER — full D2SubRace.h port, byte-verified. */
+export function subraceFrame(
+  version: string,
+  second: number,
+  sr: { subrace: number; playerId: string; number: number; name: string; banner: number },
+): Uint8Array {
+  return emitBlock(version, "MidSubRace", 0x12, "SR", second, (w, full) => {
+    w.refField("SUBRACE_ID", full);
+    w.defaultInt("SUBRACE", sr.subrace);
+    w.refField("PLAYER_ID", sr.playerId || "G000000000");
+    w.defaultInt("NUMBER", sr.number);
+    w.stringField("NAME_TXT", sr.name);
+    w.defaultInt("BANNER", sr.banner);
+  });
+}
+
+/** A MidRod block frame (code 0x0e, short RD): ROD_ID(self) · OWNER · POS_X · POS_Y.
+ *  Byte-verified on 33 pristine rods (ONE layout). */
+export function rodFrame(version: string, second: number, x: number, y: number, owner?: string): Uint8Array {
+  return emitBlock(version, "MidRod", 0x0e, "RD", second, (w, full) => {
+    w.refField("ROD_ID", full);
+    w.refField("OWNER", owner || "G000000000");
+    w.defaultInt("POS_X", x);
+    w.defaultInt("POS_Y", y);
+  });
+}
+
+/**
+ * A MidTomb block frame (code 0x0f, short TB): TOMB_ID(self) · POS_X · POS_Y · QTY_EP +
+ * N×{STACK_OWNR(ref) · KILLER(ref) · TURN(int) · STACK_NAME(CP1251)}. Tombs are playthrough
+ * state (a stack died here) — 0 on authored maps; layout byte-verified on campaign saves.
+ */
+export function tombFrame(
+  version: string,
+  second: number,
+  x: number,
+  y: number,
+  epitaphs: readonly { owner: string; killer: string; turn: number; name: string }[] = [],
+): Uint8Array {
+  return emitBlock(version, "MidTomb", 0x0f, "TB", second, (w, full) => {
+    w.refField("TOMB_ID", full);
+    w.defaultInt("POS_X", x);
+    w.defaultInt("POS_Y", y);
+    w.defaultInt("QTY_EP", epitaphs.length);
+    for (const ep of epitaphs) {
+      w.refField("STACK_OWNR", ep.owner);
+      w.refField("KILLER", ep.killer);
+      w.defaultInt("TURN", ep.turn);
+      w.stringField("STACK_NAME", ep.name);
+    }
+  });
+}
+
 /** A MidUnit block frame (code 0x0f, short UN): a unit INSTANCE referenced by a fort garrison
  *  or a stack. Minimal body verified on real bytes: UNIT_ID(self) + TYPE(global Gunit id) +
  *  LEVEL + MODIF count(0, tag=self id) + CREATION(0) + NAME_TXT("") + TRANSF/DYNLEVEL(false) +
@@ -189,14 +619,24 @@ export function unitFrame(
   level: number,
   hp: number,
   xp = 0,
+  opts?: {
+    /** MODIF_ID list — level-up / equipment modifiers (global Gmodif refs, order + dupes as-is). */
+    modifiers?: readonly string[];
+    /** CREATION field (0 for a freshly minted unit). */
+    creation?: number;
+    /** NAME_TXT — custom unit name (empty for an unnamed unit). */
+    name?: string;
+  },
 ): Uint8Array {
   return emitBlock(version, "MidUnit", 0x0f, "UN", second, (w, full) => {
     w.refField("UNIT_ID", full);
     w.refField("TYPE", typeId);
     w.defaultInt("LEVEL", level);
-    w.defaultInt(full, 0); // MODIF_ID list count (count tag = the unit's own id) = no modifiers
-    w.defaultInt("CREATION", 0);
-    w.stringField("NAME_TXT", ""); // default name
+    const mods = opts?.modifiers ?? [];
+    w.defaultInt(full, mods.length); // MODIF_ID list count (count tag = the unit's own id)
+    for (const m of mods) w.refField("MODIF_ID", m);
+    w.defaultInt("CREATION", opts?.creation ?? 0);
+    w.stringField("NAME_TXT", opts?.name ?? "");
     w.bool("TRANSF", false);
     w.bool("DYNLEVEL", false);
     w.defaultInt("HP", hp);
@@ -222,7 +662,7 @@ export function stackFrame(
     subRace?: string;
     posX: number;
     posY: number;
-    unitSlots?: readonly string[];
+    unitSlots?: readonly (string | null)[];
     posOfCell?: readonly number[];
     leaderId?: string;
     itemIds?: readonly string[];
@@ -237,6 +677,16 @@ export function stackFrame(
     order?: number;
     priority?: number;
     creatLvl?: number;
+    // ---- full-parse scalars (defaults reproduce a fresh stack) ----
+    srcTemplate?: string;
+    leaderAlive?: boolean;
+    invisible?: boolean;
+    aiIgnore?: boolean;
+    upgCount?: number;
+    orderTarget?: string;
+    aiOrder?: number;
+    aiOrderTarget?: string;
+    nbBattle?: number;
   },
 ): Uint8Array {
   const NIL = "G000000000";
@@ -248,9 +698,9 @@ export function stackFrame(
     w.defaultInt(full, items.length); // carried-items count (tag = own id)
     for (const id of items) w.refField("ITEM_ID", id);
     w.refField("STACK_ID", full);
-    w.refField("SRCTMPL_ID", NIL);
+    w.refField("SRCTMPL_ID", o.srcTemplate || NIL);
     w.refField("LEADER_ID", o.leaderId ?? NIL);
-    w.bool("LEADR_ALIV", true);
+    w.bool("LEADR_ALIV", o.leaderAlive ?? true);
     w.defaultInt("POS_X", o.posX);
     w.defaultInt("POS_Y", o.posY);
     w.defaultInt("MORALE", o.morale ?? 0);
@@ -266,16 +716,16 @@ export function stackFrame(
     w.refField("OWNER", o.owner);
     w.refField("INSIDE", o.inside);
     w.refField("SUBRACE", o.subRace || NIL);
-    w.bool("INVISIBLE", false);
-    w.bool("AI_IGNORE", false);
-    w.defaultInt("UPGCOUNT", 0);
+    w.bool("INVISIBLE", o.invisible ?? false);
+    w.bool("AI_IGNORE", o.aiIgnore ?? false);
+    w.defaultInt("UPGCOUNT", o.upgCount ?? 0);
     w.defaultInt("ORDER", o.order ?? 1); // 1 = Normal
-    w.refField("ORDER_TARG", NIL);
-    w.defaultInt("AIORDER", 2); // Stand
-    w.refField("AIORDERTAR", NIL);
+    w.refField("ORDER_TARG", o.orderTarget || NIL);
+    w.defaultInt("AIORDER", o.aiOrder ?? 2); // 2 = Stand
+    w.refField("AIORDERTAR", o.aiOrderTarget || NIL);
     w.defaultInt("AIPRIORITY", o.priority ?? 3);
     w.defaultInt("CREAT_LVL", o.creatLvl ?? 1);
-    w.defaultInt("NBBATTLE", 0);
+    w.defaultInt("NBBATTLE", o.nbBattle ?? 0);
   });
 }
 
@@ -299,7 +749,7 @@ export function ruinFrame(
     item?: string;
     looter?: string;
     priority?: number;
-    unitSlots?: readonly string[];
+    unitSlots?: readonly (string | null)[];
     posOfCell?: readonly number[];
   },
 ): Uint8Array {
@@ -331,12 +781,13 @@ export function ruinFrame(
  * every shipped merchant) and a MISSION byte AFTER it (= 00 everywhere). Stock lists are
  * GLOBAL template ids (no MidItem/MidUnit instances → no delete cascade).
  */
-export type SiteKind = "merchant" | "mage" | "trainer" | "mercenary";
+export type SiteKind = "merchant" | "mage" | "trainer" | "mercenary" | "resourceMarket";
 const SITE_BLOCK: Record<SiteKind, { typeName: string; code: number }> = {
   merchant: { typeName: "MidSiteMerchant", code: 0x17 },
   mage: { typeName: "MidSiteMage", code: 0x13 },
   trainer: { typeName: "MidSiteTrainer", code: 0x16 },
   mercenary: { typeName: "MidSiteMercs", code: 0x14 },
+  resourceMarket: { typeName: "MidSiteResourceMarket", code: 0x1d },
 };
 export function siteFrame(
   version: string,
@@ -348,9 +799,16 @@ export function siteFrame(
     name?: string;
     desc?: string;
     image?: number;
+    aiPriority?: number;
     items?: readonly { id: string; count: number }[];
+    buy?: readonly boolean[];
+    mission?: boolean;
     spells?: readonly string[];
     units?: readonly { id: string; level: number; unique: boolean }[];
+    custom?: boolean;
+    code?: string;
+    bank?: string;
+    inf?: number;
   },
 ): Uint8Array {
   const { typeName, code } = SITE_BLOCK[kind];
@@ -363,17 +821,17 @@ export function siteFrame(
     w.defaultInt("POS_X", o.posX);
     w.defaultInt("POS_Y", o.posY);
     w.refField("VISITER", "G000000000");
-    w.defaultInt("AIPRIORITY", 0);
+    w.defaultInt("AIPRIORITY", o.aiPriority ?? 0);
     if (kind === "merchant") {
-      for (const f of ["BUY_ARMOR", "BUY_JEWEL", "BUY_WEAPON", "BUY_BANNER", "BUY_POTION", "BUY_SCROLL", "BUY_WAND", "BUY_VALUE"])
-        w.bool(f, true); // uniform 01 on every shipped merchant
+      const buyTags = ["BUY_ARMOR", "BUY_JEWEL", "BUY_WEAPON", "BUY_BANNER", "BUY_POTION", "BUY_SCROLL", "BUY_WAND", "BUY_VALUE"];
+      buyTags.forEach((f, i) => w.bool(f, o.buy?.[i] ?? true)); // default: buys every category
       const items = o.items ?? [];
       w.defaultInt("QTY_ITEM", items.length);
       for (const it of items) {
         w.refField("ITEM_ID", it.id);
         w.defaultInt("ITEM_COUNT", it.count);
       }
-      w.bool("MISSION", false); // 00 on every shipped merchant
+      w.bool("MISSION", o.mission ?? false);
     } else if (kind === "mage") {
       const spells = o.spells ?? [];
       w.defaultInt("QTY_SPELL", spells.length);
@@ -386,6 +844,14 @@ export function siteFrame(
         w.defaultInt("UNIT_LEVEL", u.level);
         w.bool("UNIT_UNIQ", u.unique);
       }
+    } else if (kind === "resourceMarket") {
+      w.bool("CUSTOM", o.custom ?? false);
+      if (o.code !== undefined) {
+        w.defaultInt("CODE_LEN", encodeCp1251(o.code).length); // char count sans NUL
+        w.stringField("CODE", o.code);
+      }
+      w.stringField("BANK", o.bank ?? "G0000:R0000:Y0000:E0000:W0000:B0000");
+      w.defaultInt("INF", o.inf ?? 0);
     }
     w.defaultInt(full, 0); // visiter count (tag = the site's own compound id)
   });
@@ -399,6 +865,8 @@ export interface MountainEntry {
   h: number;
   image: number;
   race: number;
+  /** ID_MOUNT — the per-entry id from a loaded block (non-sequential); falls back to the index. */
+  idMount?: number;
 }
 
 /** The single MidMountains block frame (code 0x14, short ML): count + per-entry fields. */
@@ -410,7 +878,7 @@ export function mountainsFrame(
   return emitBlock(version, "MidMountains", 0x14, "ML", second, (w, full) => {
     w.defaultInt(full, mountains.length);
     mountains.forEach((m, i) => {
-      w.defaultInt("ID_MOUNT", i);
+      w.defaultInt("ID_MOUNT", m.idMount ?? i);
       w.defaultInt("SIZE_X", m.w);
       w.defaultInt("SIZE_Y", m.h);
       w.defaultInt("POS_X", m.x);

@@ -440,15 +440,30 @@ export class Scene {
     this.renderNow();
   }
 
-  /** Link threads from a selected OBJECT to every map entity its events wire (null = clear). */
+  /** Link threads of a selected OBJECT, grouped by EVENT: a chip grid above the object
+   *  (anchor = its cell) + arcs to real participants (causes → ◆chip → consequences).
+   *  The host prepares the plain-data groups from its scenarioRoles model; null = clear. */
   updateObjectLinks(
-    map: MapDocument,
     fromId: string | null,
-    events: readonly import("@d2/map-schema").MapEvent[] = [],
+    anchor: { x: number; y: number } | null,
+    groups: readonly import("./EventOverlayLayer.js").LinkGroup[] = [],
+    moreCount = 0,
   ): void {
     if (!this.eventOverlay) return;
-    this.eventOverlay.buildObjectLinks(map, fromId, events);
+    this.eventOverlay.buildObjectLinks(fromId, anchor, groups, moreCount);
     this.renderNow();
+  }
+
+  /** Hover hit-test over the link web (world coords + zoom-aware pixel tolerance). */
+  hitObjectLink(wx: number, wy: number, tol: number): import("./EventOverlayLayer.js").LinkHit | null {
+    return this.eventOverlay?.hitObjectLink(wx, wy, tol) ?? null;
+  }
+
+  /** Spotlight one event's link bundle (dim the rest, show its name); null restores. */
+  setObjectLinkFocus(eventId: string | null): void {
+    if (!this.eventOverlay) return;
+    this.eventOverlay.setLinkFocus(eventId);
+    this.requestRender();
   }
 
   /** Redraw the editor-only anchors overlay («Связи»). */

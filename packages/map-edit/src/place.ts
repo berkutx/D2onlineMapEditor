@@ -220,7 +220,10 @@ export function placeVisitorOps(
 export function placeLandmarkOps(doc: MapDocument, cx: number, cy: number, lmarkKey: string, slot = 0): EditOp[] {
   const version = doc.header.version || "S143";
   const id = nextTypedId(doc, version, "MM", slot);
-  return [{ kind: "addObject", object: { type: "landmark", id, pos: { x: cx, y: cy }, baseType: lmarkKey } }];
+  // desc: "" mirrors the reference editor (which writes an empty DESC_TXT on every landmark it
+  // saves) and matches what readLandmark reports back after export (present-empty), so the
+  // semantic round-trip stays exact. Omitting it would reparse as undefined and mismatch.
+  return [{ kind: "addObject", object: { type: "landmark", id, pos: { x: cx, y: cy }, baseType: lmarkKey, desc: "" } }];
 }
 
 /** Ops to place a treasure chest (MidBag): one addObject. id = a fresh S143BG####.
@@ -271,6 +274,7 @@ export function placeVillageOps(
     regen: 0,
     growth: 0,
     garrison: [null, null, null, null, null, null] as null[],
+    items: [] as string[], // captured loot — the reader always emits the (possibly empty) list
   };
   return [{ kind: "addObject", object: village as unknown as MapObject }];
 }

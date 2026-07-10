@@ -5,9 +5,36 @@
  */
 
 import { parseScenario } from "@d2/sg-parser";
-import type { MapDocument } from "@d2/map-schema";
+import type { MapDocument, MapObject } from "@d2/map-schema";
 import { applyOps } from "./ops.js";
 import type { EditOp } from "./ops.js";
+
+/**
+ * Strip the entities' PERSISTENT IDENTITY attributes before comparing: key/slot on garrison
+ * members, itemKeys/inventoryKeys on item lists, idMount on a mountains entry. These are minted
+ * at export (like DB auto-keys) — a PLACED/edited object's reparse carries fresh ones the
+ * pre-export op can't know. Everything semantic (units/levels/hp/xp/names/items/scalars) still
+ * compares exactly.
+ */
+function stripEntityIdentity(objs: readonly MapObject[]): MapObject[] {
+  return objs.map((o) => {
+    const clone: Record<string, unknown> = { ...o };
+    delete clone.itemKeys;
+    delete clone.inventoryKeys;
+    delete clone.idMount;
+    const g = clone.garrison as ({ key?: string; slot?: number } | null)[] | undefined;
+    if (Array.isArray(g)) {
+      clone.garrison = g.map((m) => {
+        if (!m) return m;
+        const mc = { ...m };
+        delete mc.key;
+        delete mc.slot;
+        return mc;
+      });
+    }
+    return clone as unknown as MapObject;
+  });
+}
 
 /** Key-order-insensitive structural equality (documents are plain JSON values). */
 export function deepEqual(a: unknown, b: unknown): boolean {
@@ -68,7 +95,7 @@ export function roundTripSemantic(
   // Objects compared by id, ORDER-INSENSITIVELY: re-emitted blocks (e.g. an
   // appended landmark, or a rebuilt single MidMountains block) can land at a
   // different array index than applyOp's in-memory order, but the set must match.
-  if (!equalById(reparsed.objects, expected.objects)) {
+  if (!equalById(stripEntityIdentity(reparsed.objects), stripEntityIdentity(expected.objects))) {
     return { ok: false, reason: "objects differ after round-trip" };
   }
   // Events compared by id, order-insensitively (an appended/re-emitted MidEvent can land at a
@@ -80,7 +107,18 @@ export function roundTripSemantic(
   if (!deepEqual(reparsed.variables ?? [], expected.variables ?? [])) {
     return { ok: false, reason: "variables differ after round-trip" };
   }
-  if (!equalById(reparsed.templates ?? [], expected.templates ?? [])) {
+  // templates: strip the on-disk slot layout (slots + slotOfCell) — an edited template re-packs
+  // canonically, so its reparse can't match the pre-edit layout (the same identity-attribute
+  // class as a garrison member's key/slot).
+  const stripTmplLayout = <T extends { slots?: unknown; slotOfCell?: unknown }>(a: readonly T[]): T[] =>
+    a.map((t) => {
+      if (!("slots" in t) && !("slotOfCell" in t)) return t;
+      const clone = { ...t } as Record<string, unknown>;
+      delete clone.slots;
+      delete clone.slotOfCell;
+      return clone as unknown as T;
+    });
+  if (!equalById(stripTmplLayout(reparsed.templates ?? []), stripTmplLayout(expected.templates ?? []))) {
     return { ok: false, reason: "templates differ after round-trip" };
   }
   if (!deepEqual(reparsed.diplomacy ?? [], expected.diplomacy ?? [])) {

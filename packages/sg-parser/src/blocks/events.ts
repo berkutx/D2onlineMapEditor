@@ -168,7 +168,13 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
   }
   const aiPriority = c.int("AIPRIORITY");
 
-  // resolve the UNIT_/POS_ packing into 6 formation cells (cell i holds slot POS_i's unit)
+  // The SLOTS are the template's persisted layout (the reference's D2StackTemplate stores
+  // exactly unit[6]+pos[6]); `units` is the DERIVED cell view the UI edits (cell i = slot
+  // POS_i's unit). MEASURED: 919/2656 shipped templates carry ORPHAN slots (filled UNIT_s no
+  // POS_i points at — editing leftovers), so the cells alone cannot reproduce the layout.
+  const slots: (TemplateUnit | null)[] = slotUnits.map((u, s) =>
+    u ? { unit: u, level: slotLevels[s] ?? 0 } : null,
+  );
   const units: (TemplateUnit | null)[] = [null, null, null, null, null, null];
   for (let cell = 0; cell < 6; cell++) {
     const slot = pos[cell]!;
@@ -176,7 +182,11 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
       units[cell] = { unit: slotUnits[slot]!, level: slotLevels[slot] ?? 1 };
     }
   }
-  return { id: obj.id, name, owner, leader, leaderLevel, orderTarget, subRace, order, units, useFacing, facing, aiPriority, modifiers };
+  return {
+    id: obj.id, name, owner, leader, leaderLevel, orderTarget, subRace, order, units,
+    useFacing, facing, aiPriority, modifiers,
+    slots, slotOfCell: pos,
+  };
 }
 
 /** Parse a single MidEvent block into a MapEvent. `isEES` gates the elf-expansion race flags. */

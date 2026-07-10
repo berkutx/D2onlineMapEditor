@@ -7,6 +7,17 @@
  */
 
 export {
+  splitScenario,
+  joinScenario,
+  rebuildScenario,
+  patchBlockCount,
+  type ScenarioBlock,
+  type ScenarioBlocks,
+} from "./sgBlocks.js";
+
+export { serializeTypedBlock, rebuildFromModel, rebuildBytes, REBUILD_TYPES } from "./sgModelSerialize.js";
+
+export {
   parseScenarioRaw,
   stackDeleteCascade,
   villageDeleteCascade,
@@ -34,6 +45,9 @@ export {
   bagFrame,
   villageFrame,
   ruinFrame,
+  capitalFrame,
+  rodFrame,
+  tombFrame,
   siteFrame,
   type SiteKind,
   replaceBlock,

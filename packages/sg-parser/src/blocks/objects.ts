@@ -12,9 +12,11 @@ import {
   readDefaultInt,
   readDefaultString,
   readAllStrings,
+  readBoolValue,
+  stripTrailingNul,
 } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
-import type { MapObject } from "@d2/map-schema";
+import type { GarrisonUnit, MapObject, UnitInstance } from "@d2/map-schema";
 
 const NULL_ID = "G000000000"; // sentinel "no reference" compound id
 
@@ -33,18 +35,25 @@ function refOrUndef(s: string | null): string | undefined {
  *  the units in INSERTION order (slot index, NOT cell), and POS_0..5 where POS_i = the index
  *  into UNIT_ of the unit occupying FORMATION CELL i (-1 = empty cell). So **cell i = UNIT_[POS_i]**.
  *  (Verified verbatim vs D2RSG group.cpp serialize() + D2ModdingToolset unitslotview: even cell =
- *  front line, odd = back; column = cell/2.) Returns a 6-element array indexed by FORMATION CELL ->
- *  instance id (null = empty cell). */
-function readGarrison(buf: ByteBuffer, f: number, e: number): (string | null)[] {
-  const units: (string | null)[] = [];
-  for (let i = 0; i < 6; i++) units.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
-  const cells: (string | null)[] = [null, null, null, null, null, null];
+ *  front line, odd = back; column = cell/2.)
+ *
+ *  Returns the 6 formation cells as GarrisonUnit ENTITIES carrying their on-disk identity:
+ *  key = the MidUnit instance id, slot = the UNIT_ slot index (the packing is editing history —
+ *  MEASURED: 0 orphan slots / 0 unreachable leaders / 0 double refs on 13116 shipped garrisons,
+ *  so key+slot on the members reproduce UNIT_/POS_/LEADER_ID exactly). `unit` is a PLACEHOLDER
+ *  (= key) until the assemble post-pass enriches the member from its MidUnit record. */
+function readGarrisonMembers(buf: ByteBuffer, f: number, e: number): (GarrisonUnit | null)[] {
+  const cells: (GarrisonUnit | null)[] = [null, null, null, null, null, null];
+  const unitSlots: (string | null)[] = [];
+  for (let i = 0; i < 6; i++) unitSlots.push(refOrUndef(readDefaultString(buf, `UNIT_${i}`, f, e)) ?? null);
   for (let i = 0; i < 6; i++) {
-    const pos = readDefaultInt(buf, `POS_${i}`, f, e);
-    if (pos !== null && pos >= 0 && pos < 6) cells[i] = units[pos] ?? null;
+    const p = readDefaultInt(buf, `POS_${i}`, f, e) ?? -1;
+    const key = p >= 0 && p < 6 ? unitSlots[p] : null;
+    if (key) cells[i] = { unit: key, level: 1, hp: 0, key, slot: p };
   }
   return cells;
 }
+
 
 /** A cursor over contiguous site-stock entries. After the literal QTY_* int32, the count
  *  entries are written back-to-back; we walk them by tag. Returns null if the tag mismatches. */
@@ -65,6 +74,12 @@ function readBoolAt(buf: ByteBuffer, p: number, tag: string): { value: boolean; 
   return { value: buf.bytes[p + tag.length] !== 0, next: p + tag.length + 1 };
 }
 
+/** Merchant BUY_* toggle tags, in the block's field order. */
+const MERCHANT_BUY_TAGS = [
+  "BUY_ARMOR", "BUY_JEWEL", "BUY_WEAPON", "BUY_BANNER",
+  "BUY_POTION", "BUY_SCROLL", "BUY_WAND", "BUY_VALUE",
+] as const;
+
 /** Merchant stock: QTY_ITEM count, then [ITEM_ID(global) + ITEM_COUNT] × N. */
 function readMerchantItems(buf: ByteBuffer, f: number, e: number): { id: string; count: number }[] {
   const at = buf.indexOf("QTY_ITEM", f);
@@ -81,6 +96,52 @@ function readMerchantItems(buf: ByteBuffer, f: number, e: number): { id: string;
     out.push({ id: id.value, count: qty.value });
     p = qty.next;
   }
+  return out;
+}
+
+/**
+ * Merchant BUY_* toggles + MISSION, omitted when at their defaults (all BUY on, MISSION off) so
+ * the common merchant stays a clean `{ }` — only deviating merchants carry the fields. Byte-exact
+ * rebuild needs these: a merchant with MISSION=1 (or a BUY_* off) diffs otherwise.
+ */
+function readMerchantFlags(buf: ByteBuffer, f: number, e: number): { buy?: boolean[]; mission?: boolean } {
+  const out: { buy?: boolean[]; mission?: boolean } = {};
+  const buy = MERCHANT_BUY_TAGS.map((t) => readBoolValue(buf, t, f, e) ?? true);
+  if (buy.some((b) => !b)) out.buy = buy; // omit when every category is bought (the default)
+  const mission = readBoolValue(buf, "MISSION", f, e) ?? false;
+  if (mission) out.mission = true; // omit when false (the default)
+  return out;
+}
+
+/**
+ * Mod-era resource-market tail, read POSITIONALLY from the CUSTOM tag onward: CUSTOM(value bool) -
+ * [CODE_LEN(int) - CODE(len-prefixed Lua) when custom] - BANK(resource string) - INF(int). The Lua
+ * source can contain tag-like substrings ("BANK", "INF"), so indexOf scanning is unsafe here.
+ */
+function readResourceMarketExtras(
+  buf: ByteBuffer,
+  f: number,
+  e: number,
+): { custom?: boolean; code?: string; bank?: string; inf?: number } {
+  const cu = buf.indexOf("CUSTOM", f);
+  if (cu < 0 || cu >= e) return {};
+  const custom = buf.bytes[cu + "CUSTOM".length] !== 0;
+  let p = cu + "CUSTOM".length + 1;
+  const out: { custom?: boolean; code?: string; bank?: string; inf?: number } = { custom };
+  if (custom && buf.asciiSlice(p, p + 8) === "CODE_LEN") {
+    p += 8 + 4; // the char count is derived from the CODE value length on write
+    if (buf.asciiSlice(p, p + 4) === "CODE") {
+      const sl = buf.readInt32LE(p + 4);
+      out.code = stripTrailingNul(buf.cp1251Slice(p + 8, p + 8 + sl));
+      p += 8 + sl;
+    }
+  }
+  if (buf.asciiSlice(p, p + 4) === "BANK") {
+    const sl = buf.readInt32LE(p + 4);
+    out.bank = stripTrailingNul(buf.cp1251Slice(p + 8, p + 8 + sl));
+    p += 8 + sl;
+  }
+  if (buf.asciiSlice(p, p + 3) === "INF") out.inf = buf.readInt32LE(p + 3);
   return out;
 }
 
@@ -139,6 +200,20 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
   const move = readDefaultInt(buf, "MOVE", f, e);
   const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   const creatLvl = readDefaultInt(buf, "CREAT_LVL", f, e);
+  // ---- full-parse scalars: captured for a byte-exact model rebuild, OMITTED at their disk
+  // defaults (so a placed/default stack carries no phantom field). Defaults mirror stackFrame. ----
+  const aiOrderRaw = readDefaultInt(buf, "AIORDER", f, e);
+  const aiOrder = aiOrderRaw !== null && aiOrderRaw !== 2 ? aiOrderRaw : undefined; // default 2 (Stand)
+  const upgCountRaw = readDefaultInt(buf, "UPGCOUNT", f, e);
+  const upgCount = upgCountRaw ? upgCountRaw : undefined; // default 0
+  const nbBattleRaw = readDefaultInt(buf, "NBBATTLE", f, e);
+  const nbBattle = nbBattleRaw ? nbBattleRaw : undefined; // default 0
+  const srcTemplate = refOrUndef(readDefaultString(buf, "SRCTMPL_ID", f, e)); // default NIL
+  const orderTarget = refOrUndef(readDefaultString(buf, "ORDER_TARG", f, e));
+  const aiOrderTarget = refOrUndef(readDefaultString(buf, "AIORDERTAR", f, e));
+  const leaderAliveRaw = readBoolValue(buf, "LEADR_ALIV", f, e); // default true
+  const invisible = readBoolValue(buf, "INVISIBLE", f, e) === true; // default false
+  const aiIgnore = readBoolValue(buf, "AI_IGNORE", f, e) === true; // default false
   // Leader equipment slots — each a global item ref; empty = the "000000"/"G000000000"
   // sentinel. TOME = spellbook, BATTLE1/2 = battle items, ARTIFACT1/2 = artifacts, BOOTS = boots.
   // Only FILLED slots are kept (empty omitted) so the object survives JSON transport (which drops
@@ -151,6 +226,7 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     const s = readDefaultString(buf, tag, f, e);
     if (s && s !== NULL_ID && s !== "000000") equip[k] = s;
   }
+  const itemIds = readAllStrings(buf, "ITEM_ID", f, e); // MidItem instance refs — the exact list on disk
   return {
     type: "stack",
     id: obj.id,
@@ -166,11 +242,22 @@ export function readStack(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(move !== null ? { move } : {}),
     ...(priority !== null ? { priority } : {}),
     ...(creatLvl !== null ? { creatLvl } : {}),
+    ...(aiOrder !== undefined ? { aiOrder } : {}),
+    ...(upgCount !== undefined ? { upgCount } : {}),
+    ...(nbBattle !== undefined ? { nbBattle } : {}),
+    ...(srcTemplate ? { srcTemplate } : {}),
+    ...(orderTarget ? { orderTarget } : {}),
+    ...(aiOrderTarget ? { aiOrderTarget } : {}),
+    ...(leaderAliveRaw === false ? { leaderAlive: false } : {}), // keep only when NOT the default (true)
+    ...(invisible ? { invisible: true } : {}),
+    ...(aiIgnore ? { aiIgnore: true } : {}),
     equip,
     // Carried inventory: an ITEM_ID list (MidItem instances → resolved to templates in the
-    // post-pass, like a chest). All shipped Riders stacks carry 0, but the structure is real.
-    inventory: readAllStrings(buf, "ITEM_ID", f, e).filter((s) => s && s !== NULL_ID && s !== "000000"),
-    garrisonRaw: readGarrison(buf, f, e), // by-cell instance ids; resolved to garrison in post-pass
+    // post-pass, like a chest); inventoryKeys keeps the on-disk instance ids, index-aligned.
+    inventory: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    ...(itemIds.length ? { inventoryKeys: itemIds } : {}),
+    // formation members with on-disk identity (key+slot); enriched in the assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e),
   };
 }
 
@@ -189,6 +276,7 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
   const regen = readDefaultInt(buf, "REGEN_B", f, e);
   const growth = readDefaultInt(buf, "GROWTH_T", f, e);
   const stackRef = refOrUndef(readDefaultString(buf, "STACK", f, e));
+  const villageItemIds = readAllStrings(buf, "ITEM_ID", f, e); // captured loot — MidItem instance refs
   return {
     type: "village",
     id: obj.id,
@@ -202,8 +290,11 @@ export function readVillage(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(morale !== null ? { morale } : {}),
     ...(regen !== null ? { regen } : {}),
     ...(growth !== null ? { growth } : {}),
-    garrisonRaw: readGarrison(buf, f, e), // embedded instance ids; resolved in assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e), // enriched in the assemble post-pass
     ...(stackRef ? { stackRef } : {}),
+    // captured-loot ITEM_ID list (instances → templates in the post-pass; keys index-aligned)
+    items: villageItemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    ...(villageItemIds.length ? { itemKeys: villageItemIds } : {}),
   };
 }
 
@@ -219,6 +310,7 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
   const desc = readDefaultString(buf, "DESC_TXT", f, e);
   const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   const stackRef = refOrUndef(readDefaultString(buf, "STACK", f, e));
+  const itemIds = readAllStrings(buf, "ITEM_ID", f, e); // stored items — MidItem instance refs
   return {
     type: "capital",
     id: obj.id,
@@ -228,8 +320,11 @@ export function readCapital(buf: ByteBuffer, obj: FramedObject): MapObject {
     name,
     ...(desc !== null ? { desc } : {}), // present-but-empty -> editable; absent -> omit
     ...(priority !== null ? { priority } : {}),
-    garrisonRaw: readGarrison(buf, f, e), // city's OWN defense; resolved in assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e), // city's OWN defense; enriched in assemble post-pass
     ...(stackRef ? { stackRef } : {}),
+    // resolved to GItem templates in the post-pass (like a chest); addRace seeds 3× G000IG0006
+    items: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    ...(itemIds.length ? { itemKeys: itemIds } : {}),
   };
 }
 
@@ -259,12 +354,12 @@ export function readRuin(buf: ByteBuffer, obj: FramedObject): MapObject {
     ...(item ? { item } : {}),
     ...(priority !== null ? { priority } : {}),
     // the ruin's guardians (GROUP_ID + UNIT_0..5/POS_0..5 — same embedded-group layout as
-    // a fort's defense); resolved instance→impl in the assemble post-pass
-    garrisonRaw: readGarrison(buf, f, e),
+    // a fort's defense); enriched instance→impl in the assemble post-pass
+    garrison: readGarrisonMembers(buf, f, e),
   };
 }
 
-type SiteType = "merchant" | "mage" | "trainer" | "mercenary";
+type SiteType = "merchant" | "mage" | "trainer" | "mercenary" | "resourceMarket";
 
 /** MidSite*: shared layout. TXT_TITLE = name, IMG_ISO = image. */
 export function readSite(type: SiteType) {
@@ -273,11 +368,13 @@ export function readSite(type: SiteType) {
     const name = readDefaultString(buf, "TXT_TITLE", f, e) ?? "";
     const desc = readDefaultString(buf, "TXT_DESC", f, e);
     const image = readDefaultInt(buf, "IMG_ISO", f, e);
+    const aiPriority = readDefaultInt(buf, "AIPRIORITY", f, e);
     // stock list (global template ids) — merchant items, mage spells, mercenary units.
     const stock =
-      type === "merchant" ? { items: readMerchantItems(buf, f, e) } :
+      type === "merchant" ? { items: readMerchantItems(buf, f, e), ...readMerchantFlags(buf, f, e) } :
       type === "mage" ? { spells: readMageSpells(buf, f, e) } :
       type === "mercenary" ? { units: readMercUnits(buf, f, e) } :
+      type === "resourceMarket" ? readResourceMarketExtras(buf, f, e) :
       {};
     return {
       type,
@@ -286,6 +383,8 @@ export function readSite(type: SiteType) {
       name,
       ...(desc ? { desc } : {}),
       ...(image !== null ? { image } : {}),
+      // omit when 0 (siteFrame's default) so a placed/default site round-trips without a phantom field
+      ...(aiPriority ? { aiPriority } : {}),
       ...stock,
     };
   };
@@ -295,11 +394,13 @@ export function readSite(type: SiteType) {
 export function readCrystal(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const resource = readDefaultInt(buf, "RESOURCE", f, e);
+  const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
   return {
     type: "crystal",
     id: obj.id,
     pos: pos(buf, obj),
     ...(resource !== null ? { resource } : {}),
+    ...(priority !== null ? { priority } : {}),
   };
 }
 
@@ -321,11 +422,16 @@ export function readLocation(buf: ByteBuffer, obj: FramedObject): MapObject {
 export function readLandmark(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const baseType = refOrUndef(readDefaultString(buf, "TYPE", f, e));
+  const desc = readDefaultString(buf, "DESC_TXT", f, e); // author's decoration name (CP1251), "" if empty, null if ABSENT
   return {
     type: "landmark",
     id: obj.id,
     pos: pos(buf, obj),
     ...(baseType ? { baseType } : {}),
+    // Preserve DESC_TXT *presence*: "" (empty-but-present, editor-authored) vs undefined (field
+    // ABSENT, RMG-generated). Byte-exact rebuild needs the distinction — always-writing an empty
+    // DESC_TXT onto an RMG landmark that never had one adds bytes (see full-rebuild experiment).
+    ...(desc !== null ? { desc } : {}),
   };
 }
 
@@ -335,14 +441,16 @@ export function readTreasure(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const image = readDefaultInt(buf, "IMAGE", f, e);
   const priority = readDefaultInt(buf, "AIPRIORITY", f, e);
-  const items = readAllStrings(buf, "ITEM_ID", f, e).filter((s) => s && s !== NULL_ID && s !== "000000");
+  const itemIds = readAllStrings(buf, "ITEM_ID", f, e); // exact ITEM_ID list on disk (MidItem instances)
   return {
     type: "treasure",
     id: obj.id,
     pos: pos(buf, obj),
     ...(image !== null ? { image } : {}),
     ...(priority !== null ? { priority } : {}),
-    items, // always present (possibly empty) so add/clear round-trips have a stable shape
+    // resolved to templates in the post-pass; always present (possibly empty) for a stable shape
+    items: itemIds.filter((s) => s && s !== NULL_ID && s !== "000000"),
+    ...(itemIds.length ? { itemKeys: itemIds } : {}),
   };
 }
 
@@ -359,30 +467,74 @@ export function readRod(buf: ByteBuffer, obj: FramedObject): MapObject {
   };
 }
 
-/** MidTomb (D2Tomb): a graveyard marker. Constant sprite G000TB0000G (no race). */
+/**
+ * MidTomb (D2Tomb): a graveyard marker — playthrough state (a stack died here). Body:
+ * TOMB_ID · POS_X · POS_Y · QTY_EP + N×{STACK_OWNR(ref) · KILLER(ref) · TURN(int) ·
+ * STACK_NAME(CP1251)}. 0 on authored maps; campaign saves carry epitaph lists.
+ */
 export function readTomb(buf: ByteBuffer, obj: FramedObject): MapObject {
+  const { fieldsFrom: f, fieldsEnd: e } = obj;
+  const epitaphs: { owner: string; killer: string; turn: number; name: string }[] = [];
+  const at = buf.indexOf("QTY_EP", f);
+  if (at >= 0 && at < e) {
+    const count = buf.readInt32LE(at + "QTY_EP".length);
+    let p = at + "QTY_EP".length + 4;
+    for (let i = 0; i < count; i++) {
+      const owner = readStrAt(buf, p, "STACK_OWNR");
+      if (!owner) break;
+      const killer = readStrAt(buf, owner.next, "KILLER");
+      if (!killer) break;
+      const turn = readIntAt(buf, killer.next, "TURN");
+      if (!turn) break;
+      // STACK_NAME is CP1251 (a player-visible stack name), not an ASCII ref
+      const np = turn.next;
+      if (buf.asciiSlice(np, np + "STACK_NAME".length) !== "STACK_NAME") break;
+      const len = buf.readInt32LE(np + "STACK_NAME".length);
+      const nameStart = np + "STACK_NAME".length + 4;
+      const name = buf.cp1251Slice(nameStart, nameStart + Math.max(0, len - 1));
+      epitaphs.push({ owner: owner.value, killer: killer.value, turn: turn.value, name });
+      p = nameStart + len;
+    }
+  }
   return {
     type: "tomb",
     id: obj.id,
     pos: pos(buf, obj),
+    ...(epitaphs.length ? { epitaphs } : {}),
   };
 }
 
-/** MidUnit: a unit definition (referenced by stacks/cities). TYPE = impl id. */
-export function readUnit(buf: ByteBuffer, obj: FramedObject): MapObject {
+/**
+ * MidUnit: a scenario unit instance (referenced by stacks/cities). Full field capture (for a
+ * byte-exact model rebuild): TYPE(impl) · LEVEL · MODIF_ID list · CREATION · NAME_TXT · TRANSF ·
+ * HP · XP. Returns the instance record MINUS its id (the caller keys by the block id). `transformed`
+ * (TRANSF=true) flags a polymorph carrying a 5-field nested block we don't model — 0 of 34k on
+ * shipped maps, kept raw in the rebuild.
+ */
+export function readUnit(buf: ByteBuffer, obj: FramedObject): Omit<UnitInstance, "id"> {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const implId = refOrUndef(readDefaultString(buf, "TYPE", f, e));
   // LEVEL precedes DYNLEVEL in the body so the first "LEVEL" match is the real one; HP is the
   // current hit points (== max for a freshly placed unit).
   const level = readDefaultInt(buf, "LEVEL", f, e);
+  const modifiers = readAllStrings(buf, "MODIF_ID", f, e); // level-up/equip modifiers (order + dupes preserved)
+  const creation = readDefaultInt(buf, "CREATION", f, e);
+  const name = readDefaultString(buf, "NAME_TXT", f, e); // custom name; "" when unnamed
+  const transformed = readBoolValue(buf, "TRANSF", f, e) === true;
   const hp = readDefaultInt(buf, "HP", f, e);
+  const xp = readDefaultInt(buf, "XP", f, e);
   return {
-    type: "unit",
-    id: obj.id,
-    pos: { x: 0, y: 0 }, // units carry no map position; placed via their stack/city
     ...(implId ? { implId } : {}),
     ...(level !== null ? { level } : {}),
     ...(hp !== null ? { hp } : {}),
+    // XP/CREATION are omitted at their disk default (0) — like name/modifiers — so a freshly
+    // minted unit's reparse matches the bare {unit, level, hp} the op carried. unitFrame always
+    // writes `?? 0`, so the omission is byte-neutral.
+    ...(xp ? { xp } : {}),
+    ...(creation ? { creation } : {}),
+    ...(name ? { name } : {}), // omit when empty; the writer re-emits an empty NAME_TXT
+    ...(modifiers.length ? { modifiers } : {}),
+    ...(transformed ? { transformed } : {}),
   };
 }
 
@@ -405,6 +557,9 @@ export function readMountains(buf: ByteBuffer, obj: FramedObject): MapObject[] {
     const next = buf.indexOf("ID_MOUNT", idm + 1);
     const entryEnd = next >= 0 && next < e ? next : e;
 
+    // ID_MOUNT is a per-entry id, NOT the sequential index (83/93 shipped blocks are non-sequential,
+    // e.g. 4151,4157,…). Capture it so the rebuild reproduces the block byte-for-byte.
+    const idMount = buf.readInt32LE(idm + "ID_MOUNT".length);
     const w = readDefaultInt(buf, "SIZE_X", idm, entryEnd);
     const h = readDefaultInt(buf, "SIZE_Y", idm, entryEnd);
     const px = buf.indexOf("POS_X", idm);
@@ -418,6 +573,7 @@ export function readMountains(buf: ByteBuffer, obj: FramedObject): MapObject[] {
       type: "mountains",
       id: `${obj.id}#${n}`,
       pos: { x, y },
+      idMount,
       ...(w !== null ? { w } : {}),
       ...(h !== null ? { h } : {}),
       ...(image !== null ? { image } : {}),

@@ -9,6 +9,7 @@
 import type { MapDocument, MapObject, MapCell } from "@d2/map-schema";
 import { MapEvent } from "@d2/map-schema";
 import { EditOp } from "@d2/socket-contract";
+import { splitMultiString } from "@d2/sg-parser";
 import { makeCell } from "./bits.js";
 
 export { EditOp };
@@ -71,7 +72,18 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       const obj = objects[i]! as Record<string, unknown>;
       const prevFields: Record<string, unknown> = {};
       for (const k of Object.keys(op.fields)) prevFields[k] = obj[k];
-      objects[i] = { ...(obj as object), ...op.fields } as MapObject;
+      const next = { ...(obj as object), ...op.fields } as Record<string, unknown>;
+      // Anti-stale invariant: itemKeys/inventoryKeys are index-aligned with items/inventory
+      // (on-disk entity ids). A patch that rewrites the list without providing fresh keys
+      // invalidates them — drop, and record the old keys so undo restores the alignment.
+      const fields = op.fields as Record<string, unknown>;
+      for (const [list, keys] of [["items", "itemKeys"], ["inventory", "inventoryKeys"]] as const) {
+        if (list in fields && !(keys in fields) && keys in next) {
+          prevFields[keys] = obj[keys];
+          delete next[keys];
+        }
+      }
+      objects[i] = next as unknown as MapObject;
       const inverse: EditOp = { kind: "patchObject", id: op.id, fields: prevFields };
       return { doc: replaceObjects(doc, objects), inverse };
     }
@@ -133,8 +145,14 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
         i < 0
           ? { kind: "deleteTemplate", id: op.template.id }
           : { kind: "upsertTemplate", template: templates[i]! };
-      if (i < 0) templates.push(op.template);
-      else templates[i] = op.template;
+      // Drop the on-disk slot layout: an EDITED template re-packs canonically — a stale
+      // slots/slotOfCell replayed by the frame would silently overwrite the edit (the
+      // staleness class of bug).
+      const next = { ...op.template };
+      delete (next as { slots?: unknown }).slots;
+      delete (next as { slotOfCell?: unknown }).slotOfCell;
+      if (i < 0) templates.push(next);
+      else templates[i] = next;
       return { doc: { ...doc, templates }, inverse };
     }
 
@@ -160,7 +178,14 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
           : v;
       }
       const inverse: EditOp = { kind: "setScenarioInfo", fields: prev as typeof op.fields };
-      return { doc: { ...doc, header: { ...doc.header, ...op.fields } }, inverse };
+      const nextHeader = { ...doc.header, ...op.fields };
+      // The byte writer splices story/winText as '_'-multi-parts (splitMultiString); keep the
+      // VERBATIM parts in sync so the model matches the reparse AND a later model rebuild
+      // doesn't replay stale parts (the raw-staleness class of bug).
+      const f = op.fields as { winText?: unknown; story?: unknown };
+      if (typeof f.winText === "string") nextHeader.winTextParts = splitMultiString(f.winText, 5);
+      if (typeof f.story === "string") nextHeader.storyParts = splitMultiString(f.story, 5);
+      return { doc: { ...doc, header: nextHeader }, inverse };
     }
 
     case "setDiplomacy": {
