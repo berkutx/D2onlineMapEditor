@@ -34,6 +34,7 @@ import {
   activeOps,
   foldOps,
   applyOps,
+  completeExportModel,
   pushCommit,
   applyEditsToBytes,
   roundTripSemantic,
@@ -77,10 +78,20 @@ function buildAndValidate(
   // Tier 1: base pass-through is byte-exact (BlockComparator equivalent).
   const identity = roundTripIdentity(baseBytes);
 
+  // EXPORT = MODEL-REBUILD. The loaded .sg is only a codec; the model is the source of truth.
+  //   1. applyEditsToBytes builds the block-LIST skeleton — which blocks exist + order,
+  //      adds/deletes + cascades. (The last piece still driven off the byte layer.)
+  //   2. applyOps + completeExportModel produce the serialization-complete live model: object
+  //      edits/terrain from applyOps, and the MidgardPlan occupancy DERIVED in the model layer
+  //      (applyOps alone doesn't — that was the reload/placement export gap).
+  //   3. rebuildBytes re-emits EVERY block PAYLOAD from that model, so nothing is opaque raw.
+  // A block the model can't reproduce fails the validator below (422), never ships silently.
   let bytes: Uint8Array | undefined;
   let buildError: string | undefined;
   try {
-    bytes = applyEditsToBytes(raw, ops, { talismanTemplates, landmarkSize });
+    const skeleton = applyEditsToBytes(raw, ops, { talismanTemplates, landmarkSize });
+    const editedDoc = completeExportModel(doc, applyOps(doc, ops), landmarkSize);
+    bytes = rebuildBytes(skeleton, editedDoc);
   } catch (e) {
     buildError = e instanceof Error ? e.message : String(e);
   }
@@ -455,7 +466,7 @@ export async function registerMapRoutes(
   // POST /validate and /export share the same build+validate pipeline.
   for (const action of ["validate", "export"] as const) {
     const url = action === "validate" ? REST.mapValidate(":id") : REST.mapExport(":id");
-    app.post<{ Params: { id: string }; Querystring: { rebuild?: string } }>(url, async (req, reply) => {
+    app.post<{ Params: { id: string } }>(url, async (req, reply) => {
       const { id } = req.params;
 
       const parsed = EditorProject.safeParse(req.body);
@@ -479,31 +490,18 @@ export async function registerMapRoutes(
       if (action === "validate") {
         return reply.send(report);
       }
-      // export: gate bytes on a clean report
+      // export: `bytes` is already the MODEL-REBUILT output (see buildAndValidate). Gate on a
+      // clean report — a map the model can't faithfully reproduce fails here, never ships.
       if (!report.ok || !bytes) {
         return reply.code(422).send(report);
-      }
-      // EXPERIMENT (?rebuild=1): full-rebuild export — re-serialize the proven block types from the
-      // model (rest raw) instead of returning the patch-in-place bytes. Currently byte-identical
-      // (only 0-diff types are model-serialized); the toggle exists so the rebuild path grows
-      // type-by-type without disturbing the default patch export. Falls back to patch on any error.
-      let out = bytes;
-      let rebuilt = false;
-      if (req.query.rebuild === "1") {
-        try {
-          out = rebuildBytes(bytes, parseScenario(bytes));
-          rebuilt = true;
-        } catch {
-          out = bytes; // rebuild failed — ship the safe patch-in-place bytes
-        }
       }
       const fileName = `${project.meta.name ?? id}-edited.sg`;
       return reply
         .header("content-type", "application/octet-stream")
         .header("content-disposition", `attachment; filename="${encodeURIComponent(fileName)}"`)
         .header("x-validation-ok", "1")
-        .header("x-export-mode", rebuilt ? "rebuild" : "patch")
-        .send(Buffer.from(out));
+        .header("x-export-mode", "rebuild")
+        .send(Buffer.from(bytes));
     });
   }
 
