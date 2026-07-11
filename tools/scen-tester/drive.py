@@ -29,12 +29,20 @@ u32.PostMessageA.argtypes = [wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM]
 u32.GetClientRect.argtypes = [wt.HWND, ctypes.POINTER(wt.RECT)]
 u32.SetForegroundWindow.argtypes = [wt.HWND]
 u32.IsWindow.argtypes = [wt.HWND]
+u32.IsWindowVisible.argtypes = [wt.HWND]
+u32.IsWindowEnabled.argtypes = [wt.HWND]
 u32.ShowWindow.argtypes = [wt.HWND, ctypes.c_int]
+WNDENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+u32.EnumWindows.argtypes = [WNDENUMPROC, wt.LPARAM]
 
 WM_MOUSEMOVE = 0x0200
 WM_LBUTTONDOWN = 0x0201
 WM_LBUTTONUP = 0x0202
 WM_LBUTTONDBLCLK = 0x0203
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+VK_RETURN = 0x0D
+VK_ESCAPE = 0x1B
 MK_LBUTTON = 0x0001
 SW_RESTORE = 9
 
@@ -46,6 +54,8 @@ POINTS = {
     "list_ok":    (0.450, 0.847),   # load list: "Ok"
     "opt":        (0.919, 0.056),   # map view: "ОПЦИИ" (top-right)
     "opt_save":   (0.494, 0.444),   # options popup: "Сохранить"
+    "opt_exit":   (0.494, 0.492),   # options popup: "Выход" (leave scenario -> main menu)
+    "dialog_ok":  (0.500, 0.620),   # СООБЩ. message box: "Ok"
 }
 
 
@@ -115,6 +125,15 @@ def _find_titled(title, pid=None):
     return None
 
 
+def main_window_disabled(main_hwnd):
+    """A modal error dialog (e.g. a load that threw 'Missing modifier ...') DISABLES its owner.
+    That's the reliable 'the editor is wedged' signal — note the mod's always-present plugin
+    overlay is a second visible top-level, so 'an extra window exists' is NOT a modal signal.
+    We do NOT try to click/key the modal shut: posting keys into D2's SHW32 custom UI
+    access-violates the process. The batch relaunches the editor instead."""
+    return bool(main_hwnd) and not u32.IsWindowEnabled(main_hwnd)
+
+
 def find_ready_hwnd(title, timeout, log, pid=None):
     """Find the editor's REAL window: at startup a small stub window with the same title
     briefly exists and is then destroyed/recreated at full size. Re-find on invalidation
@@ -131,29 +150,30 @@ def find_ready_hwnd(title, timeout, log, pid=None):
     return None
 
 
-def run_sequence(title="Scenario Editor", log=print, wait_window=60,
-                 loaded_check=None, list_check=None, pid=None):
-    """Drive the whole load+save flow by posted messages. Feedback-driven so it can't
-    desync: retry the Load click until the list actually opens (list_check), then wait for
-    the scenario to finish loading (loaded_check) before OPTIONS/Save. Both checks are wired
-    by the debugger from its scenario_read_header / scenario_open_read breakpoints.
-    `pid` binds the window lookup to ONE editor process (required for parallel runs)."""
+def open_editor(title, wait_window, log, pid=None):
+    """Locate the editor's real window (past the startup stub), restore + foreground it."""
     hwnd = find_ready_hwnd(title, wait_window, log, pid)
     if not hwnd:
-        log("[drive] window '%s' not found" % title); return False
+        log("[drive] window '%s' not found" % title); return None
     log("[drive] hwnd=0x%X client=%dx%d" % (hwnd, *client_size(hwnd)))
     u32.ShowWindow(hwnd, SW_RESTORE); u32.SetForegroundWindow(hwnd)
     time.sleep(1.0)
+    return hwnd
 
-    # 1) open the Load list — retry until the editor's menu is ready and the list populates.
-    # The window may still be destroyed/recreated under us early on — re-find, don't give up.
+
+def do_load(hwnd, log, list_check, loaded_check, pid=None, title="Scenario Editor"):
+    """From the MAIN MENU: open the Load list, pick the first row, Ok, wait for the load.
+    Feedback-driven — retries the Load click until the list (re)populates (list_check), then
+    waits for the scenario to finish loading (loaded_check). For RE-loads pass DELTA checks
+    (fresh closures over the current counts) so a second load is detected, not the first.
+    Returns (hwnd, loaded_bool); hwnd may change if the window was recreated."""
     opened = False
     for attempt in range(20):
         if not u32.IsWindow(hwnd):
             log("[drive] window recreated -- re-finding")
             hwnd = find_ready_hwnd(title, 20, log, pid)
             if not hwnd:
-                log("[drive] window gone for good"); return False
+                log("[drive] window gone for good"); return hwnd, False
             log("[drive] re-found hwnd=0x%X client=%dx%d" % (hwnd, *client_size(hwnd)))
             u32.ShowWindow(hwnd, SW_RESTORE)
         click(hwnd, *POINTS["menu_load"])
@@ -161,10 +181,8 @@ def run_sequence(title="Scenario Editor", log=print, wait_window=60,
             opened = True
             log("[drive] load list opened (attempt %d)" % (attempt + 1)); break
     if list_check and not opened:
-        log("[drive] load list never opened"); return False
+        log("[drive] load list never opened"); return hwnd, False
 
-    # 2) pick first scenario + Ok, then wait for it to actually load. Under parallel
-    # runs a load can stall on the shared-DB lock — retry the pick+Ok once.
     loaded = False
     for _ in range(2):
         click(hwnd, *POINTS["list_item0"]); time.sleep(0.6)
@@ -176,10 +194,34 @@ def run_sequence(title="Scenario Editor", log=print, wait_window=60,
         click(hwnd, *POINTS["menu_load"]); time.sleep(1.0)
     log("[drive] load confirmed=%s" % loaded)
     time.sleep(1.0)
+    return hwnd, loaded
 
-    # 3) OPTIONS -> Save
+
+def do_save(hwnd, log):
+    """From the MAP VIEW: ОПЦИИ -> Сохранить (triggers the editor's validate+save path)."""
     click(hwnd, *POINTS["opt"]); time.sleep(1.5)
     click(hwnd, *POINTS["opt_save"]); time.sleep(3.0)
+    log("[drive] Save clicked")
+
+
+def to_main_menu(hwnd, log):
+    """From the MAP VIEW: ОПЦИИ -> Выход (leave the open scenario, back to the main menu),
+    so a new scenario can be loaded. Blind (no BP feedback here) — do_load's list-open retry
+    is what actually confirms we reached the menu."""
+    log("[drive] leaving scenario -> main menu (OPTIONS/Exit)")
+    click(hwnd, *POINTS["opt"]); time.sleep(1.5)
+    click(hwnd, *POINTS["opt_exit"]); time.sleep(2.0)
+
+
+def run_sequence(title="Scenario Editor", log=print, wait_window=60,
+                 loaded_check=None, list_check=None, pid=None):
+    """One-shot: find the editor, load the first scenario, Save. Feedback-driven throughout.
+    `pid` binds the window lookup to ONE editor process (required for parallel runs)."""
+    hwnd = open_editor(title, wait_window, log, pid)
+    if not hwnd:
+        return False
+    hwnd, _loaded = do_load(hwnd, log, list_check, loaded_check, pid, title)
+    do_save(hwnd, log)
     log("[drive] sequence done")
     return True
 

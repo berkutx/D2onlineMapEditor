@@ -26,6 +26,7 @@ import ctypes
 import ctypes.wintypes as wt
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -85,6 +86,26 @@ kernel32.DebugActiveProcessStop.argtypes = [DWORD]
 kernel32.DebugActiveProcessStop.restype = BOOL
 kernel32.GetFinalPathNameByHandleA.argtypes = [HANDLE, wt.LPSTR, DWORD, DWORD]
 kernel32.GetFinalPathNameByHandleA.restype = DWORD
+# remote-thread injection (Level-2 direct checkObjects call)
+kernel32.VirtualAllocEx.argtypes = [HANDLE, LPVOID, ctypes.c_size_t, DWORD, DWORD]
+kernel32.VirtualAllocEx.restype = LPVOID
+kernel32.VirtualFreeEx.argtypes = [HANDLE, LPVOID, ctypes.c_size_t, DWORD]
+kernel32.VirtualFreeEx.restype = BOOL
+kernel32.CreateRemoteThread.argtypes = [HANDLE, LPVOID, ctypes.c_size_t, LPVOID, LPVOID, DWORD, LPVOID]
+kernel32.CreateRemoteThread.restype = HANDLE
+kernel32.GetExitCodeThread.argtypes = [HANDLE, ctypes.POINTER(DWORD)]
+kernel32.GetExitCodeThread.restype = BOOL
+
+MEM_COMMIT = 0x1000
+MEM_RESERVE = 0x2000
+MEM_RELEASE = 0x8000
+PAGE_EXECUTE_READWRITE = 0x40
+STILL_ACTIVE = 259
+
+# checkObjects(CMidgardScenarioMap*) in ScenEdit.exe — the editor's whole per-object validation
+# (the mod hooks it and logs "Scenario object <id> is invalid"). Address from D2ModdingToolset's
+# "Scenario Editor" address table (game.cpp / midgardscenariomap.cpp), confirmed at runtime.
+CHECKOBJECTS_VA = 0x4DC157
 
 CONTEXT_i386 = 0x00010000
 CONTEXT_FULL = CONTEXT_i386 | 0x07   # control | integer | segments
@@ -213,6 +234,12 @@ class Debugger(object):
         self._hotsite_seen = set()                # de-dup hot call sites
         self.loaded_files = []                   # scenarios the editor opened for read
         self.headers_read = 0                    # scenario headers parsed (load list populated)
+        self.checkobj_addr = None                # BP at checkObjects (recipe capture for Level-2)
+        self.recipe = None                       # {editorCtx, getMap, map} for the injected call
+        self.want_recipe = False                 # arm the checkObjects BP (Level-2 reuse mode)
+        self.last_invalid = None                 # last "Scenario object <ID> is invalid" id (batch attribution)
+        self.checkobj_hits = 0                    # times checkObjects ran (validation-ran signal for batch)
+        self.proc_exited = False                  # set when the editor process exits (batch relaunch)
         self._first_bp_seen = False
 
     # -- process memory helpers ---------------------------------------------
@@ -283,6 +310,82 @@ class Debugger(object):
         if not planted:
             self.log("  ! BP write FAILED @ 0x%X (%s)" % (abs_addr, name))
         return bool(planted)
+
+    def remove_bp(self, abs_addr):
+        """Un-plant a breakpoint: restore the original byte (here, the mod's hook jmp) so the
+        code runs untouched. Used to drop the checkObjects BP after the recipe is captured, so
+        the injected call reaches the mod hook cleanly."""
+        if abs_addr in self.bps:
+            self.write(abs_addr, bytes(bytearray([self.bps[abs_addr]])))
+            kernel32.FlushInstructionCache(self.hProcess, LPVOID(abs_addr), 1)
+            del self.bps[abs_addr]
+            self.bp_meta.pop(abs_addr, None)
+
+    # -- Level 2: capture the checkObjects call recipe, then call it by injection ---
+    def capture_recipe(self, tid, ctx):
+        """Fires once, at a natural checkObjects call (a UI Save warmup). At entry:
+        ecx = the CMidgardScenarioMap, esi = the editor singleton (preserved across the
+        `mov ecx,esi; call getMap; mov ecx,eax; call checkObjects` sequence). Decode getMap
+        from the caller bytes so later we can re-fetch the CURRENT map for any loaded scenario."""
+        self.checkobj_hits += 1     # fires on EVERY load (validation ran) — the batch's "done" signal
+        editor_ctx = ctx.Esi
+        mapptr = ctx.Ecx
+        retaddr = self.read_u32(ctx.Esp) or 0
+        get_map = None
+        pre = self.read(retaddr - 12, 12) if retaddr else None
+        if pre and len(pre) == 12:
+            b = bytearray(pre)
+            # e8 <rel4> | 8b c8 | e8 <rel4>   (call getMap; mov ecx,eax; call checkObjects)
+            if b[0] == 0xE8 and b[5] == 0x8B and b[6] == 0xC8 and b[7] == 0xE8:
+                rel = struct.unpack_from("<i", pre, 1)[0]
+                get_map = (retaddr - 7 + rel) & 0xFFFFFFFF
+        if self.recipe is None:
+            self.recipe = {"editorCtx": editor_ctx, "map": mapptr, "getMap": get_map}
+            self.log("[recipe] editorCtx=0x%X map=0x%X getMap=%s  (caller ret 0x%X)"
+                     % (editor_ctx, mapptr, ("0x%X" % get_map) if get_map else "None", retaddr))
+
+    def call_validate(self, timeout=20.0):
+        """Inject a tiny stub that calls  checkObjects(getMap(editorCtx))  on a fresh remote
+        thread and returns its bool (1=all objects valid, 0=an object is invalid — the mod also
+        logs which via OutputDebugString, captured by the debug loop). No UI, no Save."""
+        r = self.recipe
+        if not r or not r.get("getMap"):
+            self.log("[call] no recipe (getMap) — cannot inject"); return None
+        checkobjects = self.base + (CHECKOBJECTS_VA - S.IMAGE_BASE)
+        stub = (b"\xB9" + struct.pack("<I", r["editorCtx"]) +   # mov ecx, editorCtx
+                b"\xB8" + struct.pack("<I", r["getMap"]) +       # mov eax, getMap
+                b"\xFF\xD0" +                                    # call eax           -> eax=map
+                b"\x8B\xC8" +                                    # mov ecx, eax
+                b"\xB8" + struct.pack("<I", checkobjects) +      # mov eax, checkObjects
+                b"\xFF\xD0" +                                    # call eax           -> eax=bool
+                b"\xC2\x04\x00")                                 # ret 4  (stdcall ThreadProc)
+        addr = kernel32.VirtualAllocEx(self.hProcess, None, len(stub),
+                                       MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+        if not addr:
+            self.log("[call] VirtualAllocEx failed"); return None
+        self.write(addr, stub)
+        kernel32.FlushInstructionCache(self.hProcess, LPVOID(addr), len(stub))
+        hthr = kernel32.CreateRemoteThread(self.hProcess, None, 0, LPVOID(addr), None, 0, None)
+        if not hthr:
+            self.log("[call] CreateRemoteThread failed err=%d" % kernel32.GetLastError())
+            kernel32.VirtualFreeEx(self.hProcess, LPVOID(addr), 0, MEM_RELEASE)
+            return None
+        code = DWORD(STILL_ACTIVE)
+        end = time.time() + timeout
+        while time.time() < end:
+            kernel32.GetExitCodeThread(hthr, ctypes.byref(code))
+            if code.value != STILL_ACTIVE:
+                break
+            time.sleep(0.03)
+        kernel32.CloseHandle(hthr)
+        kernel32.VirtualFreeEx(self.hProcess, LPVOID(addr), 0, MEM_RELEASE)
+        # checkObjects returns a C++ bool in AL; the thread-exit dword keeps eax's junk high
+        # bytes, so mask to the low byte. 1 = every object valid, 0 = an object is invalid.
+        valid = code.value & 0xFF
+        self.log("[call] checkObjects -> %s  (%s)  [raw exit 0x%X]"
+                 % (valid, "map OK, saveable" if valid == 1 else "INVALID object present",
+                    code.value))
+        return valid
 
     # -- module / symbol -----------------------------------------------------
     def _image_size(self, base):
@@ -392,6 +495,8 @@ class Debugger(object):
         ctx = self.get_ctx(tid)
         if not ctx:
             return
+        if abs_addr == self.checkobj_addr:
+            return self.capture_recipe(tid, ctx)
         if abs_addr == self.logger_addr:
             return self._on_logger(tid, ctx)
         if abs_addr == self.invalid_obj_addr:
@@ -639,6 +744,9 @@ class Debugger(object):
             abs_addr = self.base + (va - S.IMAGE_BASE)
             if self.set_bp(abs_addr, name="reason", va=va):
                 self.reason_addrs[abs_addr] = reason
+        # NB: do NOT arm checkObjects (0x4DC157) here — the mod hooks it DURING init and reads
+        # the original bytes to build its trampoline; a 0xCC planted first corrupts that and
+        # crashes the editor. Armed later, on the "All hooks are set" debug string (see run loop).
         self.log("[*] armed %d breakpoints at base 0x%X (%d trace, %d reason)" %
                  (len(self.bps), self.base, len(self.trace_addrs), len(self.reason_addrs)))
 
@@ -714,12 +822,24 @@ class Debugger(object):
                                     or "несовмест" in low or "invalid plan" in low
                                     or "invalid object" in low):
                                 self._dbgstr_reject(tid, s)
+                                m = re.search(r"[Ss]cenario object\s+(\S+)\s+is invalid", s)
+                                if m:
+                                    self.last_invalid = m.group(1)
+                            # arm the checkObjects BP only NOW — the mod has finished building its
+                            # trampoline from the clean bytes, so our 0xCC won't corrupt it.
+                            if (self.want_recipe and self.checkobj_addr is None
+                                    and "all hooks are set" in low):
+                                a = self.base + (CHECKOBJECTS_VA - S.IMAGE_BASE)
+                                if self.set_bp(a, name="checkObjects", va=CHECKOBJECTS_VA):
+                                    self.checkobj_addr = a
+                                    self.log("[*] armed checkObjects BP @ 0x%X (post-hook)" % a)
 
                 elif code == EXCEPTION_DEBUG_EVENT:
                     status = self._on_exception(ev)
 
                 elif code == EXIT_PROCESS_DEBUG_EVENT:
                     self.log("[*] editor exited (code %d)" % ev.u.ExitProcess.dwExitCode)
+                    self.proc_exited = True
                     kernel32.ContinueDebugEvent(ev.dwProcessId, tid, DBG_CONTINUE)
                     return
             except Exception as e:
@@ -872,6 +992,237 @@ def stage_map(src, exports_dir, log):
     return dst, base
 
 
+STASH_DIR = "_scentest_stash"
+
+
+def _recover_stash(exports, log):
+    """If a previous batch crashed mid-run, its stashed scenarios are still in the stash
+    subdir — move them back before doing anything else, so nothing is ever lost."""
+    bak = os.path.join(exports, STASH_DIR)
+    if not os.path.isdir(bak):
+        return
+    n = 0
+    for fn in os.listdir(bak):
+        src = os.path.join(bak, fn); dst = os.path.join(exports, fn)
+        try:
+            if os.path.exists(dst):
+                os.remove(src)
+            else:
+                os.rename(src, dst); n += 1
+        except Exception as e:
+            log("[batch] recover: could not restore %s: %r" % (fn, e))
+    try:
+        os.rmdir(bak)
+    except Exception:
+        pass
+    if n:
+        log("[batch] recovered %d scenario(s) from a previous crashed run" % n)
+
+
+def isolate_exports(exports, log):
+    """Move every real *.sg out of the load folder so the staged test map is the ONLY row in
+    the editor's Load list — then a first-row click always selects OUR map (the list sorts by
+    the scenario's internal name, which differs per map, so isolation is the only robust way to
+    pin the selection). Returns a restore() closure; call it in a finally. Robust to crashes:
+    the stash is a fixed dir that _recover_stash puts back on the next run."""
+    _recover_stash(exports, log)
+    bak = os.path.join(exports, STASH_DIR)
+    if not os.path.isdir(bak):
+        os.makedirs(bak)
+    moved, purged = [], 0
+    for fn in os.listdir(exports):
+        low = fn.lower()
+        if not low.endswith(".sg"):
+            continue
+        if fn.startswith("_scentest"):
+            # leftover staged throwaways from earlier (possibly crashed) runs — a stale one in the
+            # list would be picked by the first-row click, so delete them all before we stage fresh.
+            try:
+                os.remove(os.path.join(exports, fn)); purged += 1
+            except Exception as e:
+                log("[batch] could not purge stale staged %s: %r" % (fn, e))
+            continue
+        src = os.path.join(exports, fn); dst = os.path.join(bak, fn)
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+            os.rename(src, dst); moved.append(fn)
+        except Exception as e:
+            log("[batch] could not stash %s: %r" % (fn, e))
+    log("[batch] stashed %d scenario(s), purged %d stale staged — Load list isolated"
+        % (len(moved), purged))
+
+    def restore():
+        if not os.path.isdir(bak):
+            return
+        for fn in os.listdir(bak):
+            src = os.path.join(bak, fn); dst = os.path.join(exports, fn)
+            try:
+                if os.path.exists(dst):
+                    os.remove(src)
+                else:
+                    os.rename(src, dst)
+            except Exception as e:
+                log("[batch] could not restore %s: %r" % (fn, e))
+        try:
+            os.rmdir(bak)
+        except Exception:
+            pass
+        log("[batch] restored stashed scenarios")
+    return restore
+
+
+def _first_reason(findings):
+    """First field-stream exception reason among new findings (skip the 'is invalid' diagnostics,
+    which are reported separately via last_invalid)."""
+    for f in findings:
+        r = f.get("reason") or ""
+        if r and "is invalid" not in r.lower():
+            return r
+    return None
+
+
+def _validate_session(dbg, maps, idx, results, staged, log, title, wait_window):
+    """Drive ONE editor process through as many maps as it survives. KEY FACT (reverse-engineered):
+    the mod validates every scenario ON LOAD — checkObjects runs on the main thread inside the load
+    handler (sub_404DCF) and logs 'Scenario object <ID> is invalid' per bad object. So we neither
+    save nor inject (a captured editorCtx is freed on unload — reusing it access-violates): we load
+    each map and read the verdict the loader already produced. A map whose load merely has invalid
+    objects (checkObjects) still opens, so we keep reusing; a map whose load THROWS pops a fatal
+    modal — we record it and RETURN so run_batch relaunches a fresh editor for the rest.
+    `idx[0]` is the shared cursor into `maps`; only advance it once a map is fully accounted for."""
+    import drive
+    hwnd = drive.open_editor(title, wait_window, log, dbg.pid)
+    if not hwnd:
+        log("[batch] editor window never appeared"); return
+    in_map_view = False
+    while idx[0] < len(maps):
+        mp = maps[idx[0]]
+        name = os.path.basename(mp)
+        log("[batch] ---- (%d/%d) %s ----" % (idx[0] + 1, len(maps), name))
+        try:
+            shutil.copyfile(mp, staged)
+        except Exception as e:
+            log("[batch] stage failed: %r" % e)
+            results.append({"map": name, "status": "STAGE_FAIL", "error": repr(e)})
+            idx[0] += 1; in_map_view = False; continue
+
+        base_h, base_l = dbg.headers_read, len(dbg.loaded_files)
+        base_hits, base_f = dbg.checkobj_hits, len(dbg.findings)
+        dbg.last_invalid = None
+        list_check = (lambda bh=base_h: dbg.headers_read > bh)
+        loaded_check = (lambda bl=base_l: len(dbg.loaded_files) > bl)
+
+        if in_map_view:
+            drive.to_main_menu(hwnd, log)   # leave the open scenario so a new one can be loaded
+        hwnd, loaded = drive.do_load(hwnd, log, list_check, loaded_check, dbg.pid, title)
+        if not loaded:
+            # editor wedged (fatal modal) or died — record whatever the load managed to say, then
+            # advance past this map and return so a fresh editor picks up the rest.
+            reason = _first_reason(dbg.findings[base_f:])
+            if dbg.last_invalid:
+                results.append({"map": name, "status": "REJECT", "invalid_obj": dbg.last_invalid})
+                log("[batch] %-44s REJECT  (%s)  [editor wedged]" % (name, dbg.last_invalid))
+            elif reason:
+                results.append({"map": name, "status": "REJECT", "reason": reason})
+                log("[batch] %-44s REJECT  (%s)  [editor wedged]" % (name, reason[:70]))
+            else:
+                results.append({"map": name, "status": "LOAD_FAIL"})
+                log("[batch] %-44s LOAD_FAIL  [editor wedged]" % name)
+            idx[0] += 1
+            log("[batch] editor unresponsive -> relaunching for the remaining maps")
+            return
+
+        # loader runs checkObjects on the main thread (positive 'validated' signal); wait for it.
+        for _ in range(40):
+            if dbg.checkobj_hits > base_hits:
+                break
+            time.sleep(0.3)
+        validated = dbg.checkobj_hits > base_hits
+        time.sleep(1.5)
+
+        reason = _first_reason(dbg.findings[base_f:])
+        if dbg.last_invalid:
+            results.append({"map": name, "status": "REJECT", "invalid_obj": dbg.last_invalid})
+            log("[batch] %-44s REJECT  (%s)" % (name, dbg.last_invalid))
+            idx[0] += 1; in_map_view = True                 # loaded into view, just invalid — keep reusing
+        elif reason:
+            results.append({"map": name, "status": "REJECT", "reason": reason})
+            log("[batch] %-44s REJECT  (%s)" % (name, reason[:70]))
+            idx[0] += 1
+            log("[batch] load threw (fatal modal) -> relaunching for the remaining maps")
+            return                                          # exception wedges the editor -> relaunch
+        elif not validated:
+            results.append({"map": name, "status": "UNKNOWN", "note": "checkObjects did not run"})
+            log("[batch] %-44s UNKNOWN (validation did not run)" % name)
+            idx[0] += 1; in_map_view = False
+        else:
+            results.append({"map": name, "status": "PASS"})
+            log("[batch] %-44s PASS" % name)
+            idx[0] += 1; in_map_view = True
+
+
+def run_batch(editor, workdir, exports, maps, log, title="Scenario Editor",
+              wait_window=90, deadline=None):
+    """Validate every map in `maps`, reusing one editor for as long as it stays healthy and
+    relaunching a fresh one whenever a map's load wedges/kills it. Returns a per-map result list.
+    Owns the editor lifecycle: each session launches an editor on THIS thread (the debug API ties
+    the debuggee to its launching thread), drives it on a side thread, and stops when the session
+    ends (all maps done, or one wedged the editor)."""
+    import threading
+    results = []
+    idx = [0]
+    session = 0
+    # ONE fixed staged name for the whole (sequential) batch: exactly one scenario is ever in the
+    # isolated Load list, so the first-row click always selects the map we just wrote.
+    staged = os.path.join(exports, "_scentest_batch.sg")
+    while idx[0] < len(maps):
+        if deadline and time.time() > deadline:
+            log("[batch] overall deadline reached — %d map(s) left unprocessed" % (len(maps) - idx[0]))
+            break
+        session += 1
+        start_at = idx[0]
+        log("[batch] === editor session %d (from map %d/%d) ===" % (session, start_at + 1, len(maps)))
+        dbg = Debugger(editor, workdir, log)
+        dbg.want_recipe = True
+        dbg.launch()
+
+        def _drive(dbg=dbg):
+            try:
+                _validate_session(dbg, maps, idx, results, staged, log, title, wait_window)
+            except Exception as e:
+                import traceback
+                log("[batch] session drive error: %r" % e); log(traceback.format_exc())
+            finally:
+                time.sleep(1)
+                dbg.soft_stop = True
+
+        t = threading.Thread(target=_drive, daemon=True)
+        t.start()
+        try:
+            dbg.run(deadline=deadline)
+        except Exception as e:
+            import traceback
+            log("[batch] debug loop error: %r" % e); log(traceback.format_exc())
+        dbg.kill_target()
+        t.join(timeout=8)
+
+        if idx[0] == start_at:
+            # the session made NO progress (window never came up, or died instantly) — don't spin
+            log("[batch] session %d made no progress on map %d — marking LOAD_FAIL, skipping" %
+                (session, start_at + 1))
+            results.append({"map": os.path.basename(maps[start_at]), "status": "LOAD_FAIL",
+                            "note": "editor did not come up"})
+            idx[0] += 1
+
+    try:
+        os.remove(staged)
+    except Exception:
+        pass
+    log("[batch] done: %d result(s)" % len(results))
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser(description="ScenEdit save-rejection tester")
     ap.add_argument("--editor", default=r"C:\GOG Games\slasher_mns_2_4 - C4dll\ScenEdit.exe")
@@ -886,6 +1237,12 @@ def main():
     ap.add_argument("--no-stage", action="store_true", help="load --map path as-is (must be in Exports)")
     ap.add_argument("--kill-exit", action="store_true",
                     help="terminate the editor on exit (batch runs; a deadline DETACH leaves it alive)")
+    ap.add_argument("--call", action="store_true",
+                    help="Level-2: warmup Save captures the checkObjects recipe, then validate by "
+                         "INJECTION (checkObjects(getMap(editorCtx)) on a remote thread) — no Save UI")
+    ap.add_argument("--batch", default=None, metavar="FOLDER",
+                    help="Level-2 batch: reuse ONE editor to validate every *.sg in FOLDER "
+                         "(warmup Save on the first, INJECT the rest). Writes --result summary.")
     args = ap.parse_args()
 
     if struct.calcsize("P") * 8 != 32:
@@ -896,6 +1253,40 @@ def main():
     editor = os.path.abspath(args.editor)
     workdir = os.path.dirname(editor)
     exports = args.exports or os.path.join(workdir, "Exports")
+
+    if args.batch:
+        folder = os.path.abspath(args.batch)
+        maps = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                      if f.lower().endswith(".sg") and not f.startswith("_scentest"))
+        if not maps:
+            raise SystemExit("no *.sg found in %s" % folder)
+        log("[batch] %d map(s) from %s" % (len(maps), folder))
+        restore = isolate_exports(exports, log)
+        results = []
+        try:
+            deadline = time.time() + args.timeout if args.timeout else None
+            results = run_batch(editor, workdir, exports, maps, log, deadline=deadline)
+        except KeyboardInterrupt:
+            log("[batch] interrupted")
+        except Exception as e:
+            import traceback
+            log("[batch][FATAL] %r" % e); log(traceback.format_exc())
+        finally:
+            restore()   # put the stashed scenarios back (run_batch already killed each session editor)
+            npass = sum(1 for r in results if r.get("status") == "PASS")
+            nrej = sum(1 for r in results if r.get("status") == "REJECT")
+            nerr = len(results) - npass - nrej
+            log("[batch] SUMMARY: %d PASS / %d REJECT / %d error  (of %d)"
+                % (npass, nrej, nerr, len(maps)))
+            for r in results:
+                if r.get("status") != "PASS":
+                    log("[batch]   %-8s %s %s" % (r.get("status"), r.get("map"),
+                                                  ("(%s)" % r["invalid_obj"]) if r.get("invalid_obj") else ""))
+            out = args.result or os.path.join(folder, "batch_summary.json")
+            with open(out, "w") as f:
+                json.dump(results, f, indent=2, ensure_ascii=False)
+            log("[batch] wrote summary -> %s" % out)
+        return
 
     staged_name = None
     staged_path = None
@@ -909,8 +1300,9 @@ def main():
     log("[*] then Save -> the debugger prints the exact rejection reason below.")
 
     dbg = Debugger(editor, workdir, log)
+    dbg.want_recipe = args.call
     dbg.launch()
-    if args.auto:
+    if args.auto or args.call:
         import threading
         import drive
         def _auto_drive():
@@ -920,6 +1312,20 @@ def main():
                                # bind the UI drive to OUR editor process — with parallel
                                # runs a title-only lookup would grab an arbitrary editor
                                pid=dbg.pid)
+            # Level-2: the UI Save above validated once AND tripped the checkObjects BP (recipe
+            # captured). Drop the BP and re-run the validation by INJECTION — proves the no-UI
+            # direct-call path reproduces the exact result (and is what a batch would loop on).
+            if args.call:
+                for _ in range(30):
+                    if dbg.recipe:
+                        break
+                    time.sleep(0.3)
+                if dbg.recipe and dbg.checkobj_addr:
+                    dbg.remove_bp(dbg.checkobj_addr)
+                    log("[call] ===== injected checkObjects (NO UI) =====")
+                    dbg.call_validate()
+                else:
+                    log("[call] recipe not captured (no Save happened?) — cannot inject")
             # give the save + validator diagnostics a moment, then stop the debug loop —
             # idling until the full deadline wastes most of every batch slot
             time.sleep(8)
