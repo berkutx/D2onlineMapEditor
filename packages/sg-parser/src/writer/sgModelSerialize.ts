@@ -77,6 +77,8 @@ export function serializeTypedBlock(
       // carry key+slot, the leader is the leaderCell member's key, item lists carry their keys.
       const slots = slotsFromGarrison(obj.garrison);
       if (!slots) return null; // placed/edited garrison (no keys) — applyBytes mints, not us
+      // same for a placed/edited INVENTORY: template inventory but no minted instance keys.
+      if ((obj.inventory?.length ?? 0) > 0 && (obj.inventoryKeys?.length ?? 0) === 0) return null;
       const leaderId = obj.leaderCell != null ? obj.garrison?.[obj.leaderCell]?.key : undefined;
       return stackFrame(version, secondOf(obj.id), {
         owner: obj.owner ?? NIL,
@@ -137,6 +139,8 @@ export function serializeTypedBlock(
       // RIOT_T/PROTECT_B/P_O_* are invariant on shipped maps (villageFrame's constants).
       const slots = slotsFromGarrison(obj.garrison);
       if (!slots) return null;
+      // placed/edited captured-loot list without minted instance keys → skeleton fallback
+      if ((obj.items?.length ?? 0) > 0 && (obj.itemKeys?.length ?? 0) === 0) return null;
       return villageFrame(version, secondOf(obj.id), {
         posX: obj.pos.x,
         posY: obj.pos.y,
@@ -175,6 +179,10 @@ export function serializeTypedBlock(
     }
     case "MidBag": {
       if (obj.type !== "treasure") return null;
+      // A freshly-PLACED chest carries template `items` but no `itemKeys` (instance ids are
+      // minted by the byte writer, not applyOp) — like the garrison guard above, fall back to
+      // the skeleton's own block rather than emit an empty ITEM_ID list.
+      if ((obj.items?.length ?? 0) > 0 && (obj.itemKeys?.length ?? 0) === 0) return null;
       return bagFrame(version, secondOf(obj.id), {
         posX: obj.pos.x,
         posY: obj.pos.y,
