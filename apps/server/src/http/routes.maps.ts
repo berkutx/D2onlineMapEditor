@@ -22,6 +22,7 @@ import {
   verifyBlockIntegrity,
   parsePlanEntries,
   rebuildBytes,
+  EXPORT_REBUILD_TYPES,
   createBlankMap,
   TERRAIN_FILLS,
   RACE_KEYS,
@@ -34,7 +35,6 @@ import {
   activeOps,
   foldOps,
   applyOps,
-  completeExportModel,
   pushCommit,
   applyEditsToBytes,
   roundTripSemantic,
@@ -78,20 +78,23 @@ function buildAndValidate(
   // Tier 1: base pass-through is byte-exact (BlockComparator equivalent).
   const identity = roundTripIdentity(baseBytes);
 
-  // EXPORT = MODEL-REBUILD. The loaded .sg is only a codec; the model is the source of truth.
-  //   1. applyEditsToBytes builds the block-LIST skeleton — which blocks exist + order,
-  //      adds/deletes + cascades. (The last piece still driven off the byte layer.)
-  //   2. applyOps + completeExportModel produce the serialization-complete live model: object
-  //      edits/terrain from applyOps, and the MidgardPlan occupancy DERIVED in the model layer
-  //      (applyOps alone doesn't — that was the reload/placement export gap).
-  //   3. rebuildBytes re-emits EVERY block PAYLOAD from that model, so nothing is opaque raw.
-  // A block the model can't reproduce fails the validator below (422), never ships silently.
+  // EXPORT = MODEL-REBUILD. The loaded .sg is only a codec; the model is the source of truth for
+  // all CONTENT.
+  //   1. applyEditsToBytes builds the block-LIST skeleton (which blocks exist + order, adds/
+  //      deletes/cascades) AND, for the SERIALIZATION-DERIVED blocks, the byte-correct payloads
+  //      (MidgardPlan occupancy, MidRoad, MidTalismanCharges) that the in-memory model doesn't
+  //      maintain.
+  //   2. rebuildBytes re-serialises every CONTENT block payload from the live model
+  //      (EXPORT_REBUILD_TYPES = all proven types EXCEPT those 3 derived ones, which are kept
+  //      verbatim from the skeleton). So content is model-driven; the derived indexes stay the
+  //      serialiser's job (as the reference editor mints them at save) — no stale/dropped plan or
+  //      charge entries.
+  // A CONTENT block the model can't reproduce fails the validator below (422), never ships silently.
   let bytes: Uint8Array | undefined;
   let buildError: string | undefined;
   try {
     const skeleton = applyEditsToBytes(raw, ops, { talismanTemplates, landmarkSize });
-    const editedDoc = completeExportModel(doc, applyOps(doc, ops), landmarkSize);
-    bytes = rebuildBytes(skeleton, editedDoc);
+    bytes = rebuildBytes(skeleton, applyOps(doc, ops), EXPORT_REBUILD_TYPES);
   } catch (e) {
     buildError = e instanceof Error ? e.message : String(e);
   }

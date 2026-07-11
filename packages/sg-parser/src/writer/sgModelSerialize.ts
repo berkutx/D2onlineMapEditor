@@ -502,6 +502,25 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * EXPORT rebuild set = REBUILD_TYPES MINUS the SERIALIZATION-DERIVED blocks. When exporting an
+ * EDITED map (skeleton = the byte writer's output, doc = the live model), these blocks are DERIVED
+ * by the byte writer at save time and the in-memory model does NOT maintain them — so serialising
+ * them from the (stale) model would drop/dup/mis-derive entries. Instead they are kept VERBATIM
+ * from the skeleton (which is byte-correct — it IS the gold-checked patch output for those blocks):
+ *   - MidgardPlan       — occupancy index: object footprints + one RA entry per MidRoad cell.
+ *   - MidRoad           — road blocks: appended for new roads, retuned/nulled on wash.
+ *   - MidTalismanCharges— per-talisman charge rows: minted on add, purged on delete.
+ * Everything else (objects, terrain, events, templates, players, scenario info, …) IS re-serialised
+ * from the live model. This keeps the export byte-identical to patch while making the model the
+ * source of truth for all CONTENT; the derived indexes stay the serializer's job (as in the
+ * reference editor, which mints/derives them at save). Used ONLY for edit export — the pristine
+ * byte-exact round-trip (rebuildBytes with the full set) is unaffected.
+ */
+export const EXPORT_REBUILD_TYPES: ReadonlySet<string> = new Set(
+  [...REBUILD_TYPES].filter((t) => t !== "MidgardPlan" && t !== "MidRoad" && t !== "MidTalismanCharges"),
+);
+
+/**
  * STEP 4 — full-rebuild export: decompose `bytes`, re-serialize the proven block types from `doc`'s
  * model (rest raw), and re-assemble with a re-stamped OB0000 count. `doc` MUST be the parse of the
  * SAME `bytes` (or an edit of it whose object ids/fields align). Since every type in `types` is

@@ -15,7 +15,7 @@ export {
   type ScenarioBlocks,
 } from "./sgBlocks.js";
 
-export { serializeTypedBlock, rebuildFromModel, rebuildBytes, REBUILD_TYPES } from "./sgModelSerialize.js";
+export { serializeTypedBlock, rebuildFromModel, rebuildBytes, REBUILD_TYPES, EXPORT_REBUILD_TYPES } from "./sgModelSerialize.js";
 
 export {
   parseScenarioRaw,
