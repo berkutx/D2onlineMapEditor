@@ -21,8 +21,7 @@ import {
   validateMap,
   verifyBlockIntegrity,
   parsePlanEntries,
-  rebuildBytes,
-  EXPORT_REBUILD_TYPES,
+  serializeMapFromModelBytes,
   createBlankMap,
   TERRAIN_FILLS,
   RACE_KEYS,
@@ -36,7 +35,7 @@ import {
   foldOps,
   applyOps,
   pushCommit,
-  applyEditsToBytes,
+  materializeForExport,
   roundTripSemantic,
   buildWallSet,
   buildDecorSet,
@@ -69,32 +68,30 @@ function buildAndValidate(
   talismanTemplates?: ReadonlySet<string>,
   landmarkSize?: (baseType: string) => readonly [number, number] | undefined,
 ): { report: ValidationReport; bytes?: Uint8Array } {
-  const { doc, raw } = parseScenarioRaw(baseBytes);
-  // Fold add→delete pairs (a collab undo of a placement) BEFORE the byte writer: it cannot
-  // delete pre-existing blocks (M4), but a never-appended object needs no delete at all.
-  // Semantics-preserving, and the SAME folded ops feed the semantic tier for consistency.
+  const { doc } = parseScenarioRaw(baseBytes);
+  // Fold add→delete pairs (a collab undo of a placement) into the model rebuild: a never-appended
+  // object needs no delete at all. The SAME folded ops feed the semantic tier for consistency.
   const ops = foldOps(activeOps(project));
 
   // Tier 1: base pass-through is byte-exact (BlockComparator equivalent).
   const identity = roundTripIdentity(baseBytes);
 
-  // EXPORT = MODEL-REBUILD. The loaded .sg is only a codec; the model is the source of truth for
-  // all CONTENT.
-  //   1. applyEditsToBytes builds the block-LIST skeleton (which blocks exist + order, adds/
-  //      deletes/cascades) AND, for the SERIALIZATION-DERIVED blocks, the byte-correct payloads
-  //      (MidgardPlan occupancy, MidRoad, MidTalismanCharges) that the in-memory model doesn't
-  //      maintain.
-  //   2. rebuildBytes re-serialises every CONTENT block payload from the live model
-  //      (EXPORT_REBUILD_TYPES = all proven types EXCEPT those 3 derived ones, which are kept
-  //      verbatim from the skeleton). So content is model-driven; the derived indexes stay the
-  //      serialiser's job (as the reference editor mints them at save) — no stale/dropped plan or
-  //      charge entries.
-  // A CONTENT block the model can't reproduce fails the validator below (422), never ships silently.
+  // EXPORT = FULL MODEL-REBUILD. The loaded .sg is a codec only — after loading, the MODEL is the
+  // single source of truth and the whole file is rebuilt FROM it. No byte patch, no skeleton
+  // fallback:
+  //   1. materializeForExport turns the edited model into a self-describing one — mints the
+  //      serialization-derived state the live model doesn't hold (MidItem/MidUnit instance ids,
+  //      MidgardPlan footprints, MidRoad, MidTalismanCharges rows, template slots), as the
+  //      reference editor mints at save.
+  //   2. serializeMapFromModelBytes re-serialises EVERY block payload from that model (drops
+  //      deleted, appends added), reusing `baseBytes` only for the header + original block order.
+  // Every content block comes from the model; a block it can't reproduce THROWS (never a silent
+  // fallback), failing the validator below (422). Byte-identical to the original on a no-op.
   let bytes: Uint8Array | undefined;
   let buildError: string | undefined;
   try {
-    const skeleton = applyEditsToBytes(raw, ops, { talismanTemplates, landmarkSize });
-    bytes = rebuildBytes(skeleton, applyOps(doc, ops), EXPORT_REBUILD_TYPES);
+    const materialized = materializeForExport(doc, ops, { talismanTemplates, landmarkSize });
+    bytes = serializeMapFromModelBytes(baseBytes, materialized);
   } catch (e) {
     buildError = e instanceof Error ? e.message : String(e);
   }

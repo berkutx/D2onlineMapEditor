@@ -502,25 +502,6 @@ export const REBUILD_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * EXPORT rebuild set = REBUILD_TYPES MINUS the SERIALIZATION-DERIVED blocks. When exporting an
- * EDITED map (skeleton = the byte writer's output, doc = the live model), these blocks are DERIVED
- * by the byte writer at save time and the in-memory model does NOT maintain them — so serialising
- * them from the (stale) model would drop/dup/mis-derive entries. Instead they are kept VERBATIM
- * from the skeleton (which is byte-correct — it IS the gold-checked patch output for those blocks):
- *   - MidgardPlan       — occupancy index: object footprints + one RA entry per MidRoad cell.
- *   - MidRoad           — road blocks: appended for new roads, retuned/nulled on wash.
- *   - MidTalismanCharges— per-talisman charge rows: minted on add, purged on delete.
- * Everything else (objects, terrain, events, templates, players, scenario info, …) IS re-serialised
- * from the live model. This keeps the export byte-identical to patch while making the model the
- * source of truth for all CONTENT; the derived indexes stay the serializer's job (as in the
- * reference editor, which mints/derives them at save). Used ONLY for edit export — the pristine
- * byte-exact round-trip (rebuildBytes with the full set) is unaffected.
- */
-export const EXPORT_REBUILD_TYPES: ReadonlySet<string> = new Set(
-  [...REBUILD_TYPES].filter((t) => t !== "MidgardPlan" && t !== "MidRoad" && t !== "MidTalismanCharges"),
-);
-
-/**
  * STEP 4 — full-rebuild export: decompose `bytes`, re-serialize the proven block types from `doc`'s
  * model (rest raw), and re-assemble with a re-stamped OB0000 count. `doc` MUST be the parse of the
  * SAME `bytes` (or an edit of it whose object ids/fields align). Since every type in `types` is
@@ -535,3 +516,104 @@ export function rebuildBytes(
 ): Uint8Array {
   return rebuildScenario(rebuildFromModel(splitScenario(bytes), doc, types));
 }
+
+/** MapObject.type → its block decl TypeName (the inverse of the parser's dispatch). */
+function objTypeName(o: MapObject): string {
+  switch (o.type) {
+    case "stack": return "MidStack";
+    case "village": return "MidVillage";
+    case "capital": return "Capital";
+    case "ruin": return "MidRuin";
+    case "treasure": return "MidBag";
+    case "merchant": return "MidSiteMerchant";
+    case "mage": return "MidSiteMage";
+    case "trainer": return "MidSiteTrainer";
+    case "mercenary": return "MidSiteMercs";
+    case "resourceMarket": return "MidSiteResourceMarket";
+    case "landmark": return "MidLandmark";
+    case "location": return "MidLocation";
+    case "crystal": return "MidCrystal";
+    case "rod": return "MidRod";
+    case "tomb": return "MidTomb";
+    case "mountains": return "MidMountains";
+    case "generic": return o.blockType;
+    default: return "";
+  }
+}
+
+/**
+ * FULL from-model export container. Unlike rebuildBytes (payload-swap over a byte skeleton — which
+ * for an EDITED map must be fed the byte-patch output), this drives the block SET from the MODEL:
+ *   - payload-swap every base block whose entity is still live (via rebuildFromModel);
+ *   - DROP base blocks whose entity is gone (deleted object / cascaded instance / washed road /
+ *     deleted event or template / emptied mountains block);
+ *   - APPEND a synthesized frame for every model entity with no base block (added objects + their
+ *     minted MidItem/MidUnit instances, new MidRoad, new events/templates).
+ * `doc` MUST be materializeForExport'd (all instance keys minted, plan/roads/charges derived) — every
+ * live block then serialises from the model with NO raw fallback. `s` supplies only the header +
+ * original block order (unchanged blocks stay in place; new ones append). NO byte patch anywhere.
+ */
+export function serializeMapFromModel(s: ScenarioBlocks, doc: MapDocument): ScenarioBlocks {
+  const version = doc.header.version || "S143";
+  const byId = new Map<string, MapObject>(doc.objects.map((o) => [o.id, o]));
+  const { itemsByKey, unitsByKey } = buildEntityIndexes(doc);
+  const roadById = new Map((doc.roads ?? []).map((r) => [r.id, r] as const));
+  const eventIds = new Set((doc.events ?? []).map((e) => e.id));
+  const templateIds = new Set((doc.templates ?? []).map((t) => t.id));
+
+  // A base block whose model entity no longer exists → drop it from the output.
+  // MidMountains is NOT droppable: it is a singleton-ish block (one per map, N children, legally
+  // EMPTY on some maps) — rebuildFromModel rebuilds its payload from the children and keeps it raw
+  // when empty, so it is never removed (deleteMountainOps rebuilds the block, never deletes it).
+  const isDead = (b: ScenarioBlock): boolean => {
+    if (!b.id) return false;
+    switch (b.typeName) {
+      case "MidItem": return !itemsByKey.has(b.id);
+      case "MidUnit": return !unitsByKey.has(b.id);
+      case "MidRoad": return !roadById.has(b.id);
+      case "MidEvent": return !eventIds.has(b.id);
+      case "MidStackTemplate": return !templateIds.has(b.id);
+      default:
+        // object blocks (the discriminated placed types) are dead when the object is gone.
+        return REBUILD_OBJECT_TYPES.has(b.typeName) && !byId.has(b.id);
+    }
+  };
+
+  const swapped = rebuildFromModel(s, doc, REBUILD_TYPES).blocks.filter((b) => !isDead(b));
+
+  const baseIds = new Set(s.blocks.map((b) => b.id).filter(Boolean));
+  const add: ScenarioBlock[] = [];
+  const emit = (typeName: string, id: string, bytes: Uint8Array | null): void => {
+    if (!bytes) throw new Error(`serializeMapFromModel: cannot serialise new ${typeName} ${id} from the model`);
+    add.push({ typeName, id, bytes });
+  };
+  // new placed objects (mountains handled below via their block id)
+  for (const o of doc.objects) {
+    if (o.type === "mountains" || baseIds.has(o.id)) continue;
+    const tn = objTypeName(o);
+    emit(tn, o.id, serializeTypedBlock(tn, o, version));
+  }
+  // new instance blocks (minted for added/edited item lists + garrisons)
+  for (const [key] of itemsByKey) if (!baseIds.has(key)) emit("MidItem", key, serializeInstanceBlock("MidItem", key, itemsByKey, unitsByKey, version));
+  for (const [key] of unitsByKey) if (!baseIds.has(key)) emit("MidUnit", key, serializeInstanceBlock("MidUnit", key, itemsByKey, unitsByKey, version));
+  // new roads
+  for (const r of doc.roads ?? []) if (!baseIds.has(r.id)) emit("MidRoad", r.id, roadFrame(version, secondOf(r.id), r.x, r.y, r.index, r.variant));
+  // new events / templates
+  for (const e of doc.events ?? []) if (!baseIds.has(e.id)) emit("MidEvent", e.id, eventFrame(version, e));
+  for (const t of doc.templates ?? []) if (!baseIds.has(t.id)) emit("MidStackTemplate", t.id, stackTemplateFrame(version, t));
+
+  return { ...s, blocks: [...swapped, ...add] };
+}
+
+/** Export the whole `.sg` from a materialized model — no byte patch, no skeleton fallback.
+ *  `originalBytes` supplies only the header + block order of the unchanged blocks. */
+export function serializeMapFromModelBytes(originalBytes: Uint8Array, doc: MapDocument): Uint8Array {
+  return rebuildScenario(serializeMapFromModel(splitScenario(originalBytes), doc));
+}
+
+/** The placed-object block TypeNames (dead when their MapObject is deleted). */
+const REBUILD_OBJECT_TYPES: ReadonlySet<string> = new Set([
+  "MidStack", "MidVillage", "Capital", "MidRuin", "MidBag",
+  "MidSiteMerchant", "MidSiteMage", "MidSiteTrainer", "MidSiteMercs", "MidSiteResourceMarket",
+  "MidLandmark", "MidLocation", "MidCrystal", "MidRod", "MidTomb",
+]);
