@@ -12,9 +12,16 @@ import {
 import { Plus, Delete } from "@element-plus/icons-vue";
 import { useEditStore } from "../stores/editStore";
 import { useLordStore } from "../stores/lordStore";
+import { assetUrl } from "../services/api";
 import {
   RACES, RACE_KEYS, raceAlreadyPresent, mintPlayerIds, findFreeCapitalSpot, type EditOp,
 } from "@d2/map-edit";
+
+/** Lord portrait PNG (built offline from Lords.ff by build_lord_icons.py). */
+const lordUrl = (id: string | null | undefined): string => (id ? assetUrl(`lordicons/${id.toLowerCase()}.png`) : "");
+/** Hide a portrait <img> whose file is missing (neutral lords / not-yet-built icons) rather than
+ *  show a broken-image glyph. */
+const onImgErr = (e: Event): void => { (e.target as HTMLImageElement).style.visibility = "hidden"; };
 
 const edit = useEditStore();
 const lord = useLordStore();
@@ -147,11 +154,14 @@ async function removeFaction(p: { id: string; name?: string; race: number }): Pr
         </div>
         <div v-if="!isNeutral(p)" class="pl-row">
           <label>Лорд</label>
+          <img v-if="lordUrl(p.lordId)" class="lord-pic" :src="lordUrl(p.lordId)" alt="" @error="onImgErr" />
           <el-select
             :model-value="p.lordId" size="small" placeholder="—" class="pl-lord"
             @update:model-value="(v: string) => patch(p.id, { lordId: v })"
           >
-            <el-option v-for="l in lordOptions(p.raceId)" :key="l.id" :label="`${l.categoryName} — ${l.name}`" :value="l.id" />
+            <el-option v-for="l in lordOptions(p.raceId)" :key="l.id" :label="`${l.categoryName} — ${l.name}`" :value="l.id">
+              <span class="lord-opt"><img class="lord-pic-sm" :src="lordUrl(l.id)" alt="" @error="onImgErr" />{{ l.categoryName }} — {{ l.name }}</span>
+            </el-option>
           </el-select>
         </div>
         <div class="pl-row pl-bank">
@@ -179,8 +189,11 @@ async function removeFaction(p: { id: string; name?: string; race: number }): Pr
       </div>
       <div class="add-row">
         <label>Лорд</label>
+        <img v-if="lordUrl(addLordId)" class="lord-pic" :src="lordUrl(addLordId)" alt="" @error="onImgErr" />
         <el-select v-model="addLordId" size="small" style="width: 220px">
-          <el-option v-for="l in addLordOptions" :key="l.id" :label="`${l.categoryName} — ${l.name}`" :value="l.id" />
+          <el-option v-for="l in addLordOptions" :key="l.id" :label="`${l.categoryName} — ${l.name}`" :value="l.id">
+            <span class="lord-opt"><img class="lord-pic-sm" :src="lordUrl(l.id)" alt="" @error="onImgErr" />{{ l.categoryName }} — {{ l.name }}</span>
+          </el-option>
         </el-select>
       </div>
       <p class="add-hint muted">Игрок создаётся со столицей, героем и стражем (порт addRace). Столица встанет на свободную сушу.</p>
@@ -206,6 +219,9 @@ async function removeFaction(p: { id: string; name?: string; race: number }): Pr
 .pl-race { font-size: 11px; }
 .pl-del { margin-left: auto; color: var(--el-color-danger); }
 .pl-lord { flex: 1; max-width: 360px; }
+.lord-pic { width: 34px; height: 42px; object-fit: cover; border-radius: 4px; border: 1px solid var(--el-border-color-lighter); flex: 0 0 auto; }
+.lord-opt { display: inline-flex; align-items: center; gap: 8px; }
+.lord-pic-sm { width: 26px; height: 32px; object-fit: cover; border-radius: 3px; flex: 0 0 auto; }
 .pl-att { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .pl-att > label { color: var(--el-text-color-secondary); }
 .pl-bank { flex-wrap: wrap; }
