@@ -78,7 +78,7 @@ const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.
 const SITE_TYPES = ["merchant", "mage", "trainer", "mercenary"];
 const editable = computed(
   () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", "location",
-    "rod", "landmark", "mountains", ...SITE_TYPES].includes(obj.value.type),
+    "rod", "landmark", "mountains", "unit", ...SITE_TYPES].includes(obj.value.type),
 );
 
 /** MidLocation radius is a size step r → a (2r+1)×(2r+1) cell square. */
@@ -365,6 +365,21 @@ function mercSetLevel(i: number, v: number): void {
 }
 function mercSetUnique(i: number, v: boolean): void {
   patch({ units: mercUnits.value.map((u, k) => (k === i ? { ...u, unique: v } : u)) });
+}
+
+/** ── Merchant BUY_* — which item categories the merchant buys back (omitted = all true). Index
+ *  order is FROZEN (schema/parser/writer agree): armor/jewel/weapon/banner/potion/scroll/wand/value. */
+const BUY_LABELS = ["Броня", "Драгоценности", "Оружие", "Штандарты", "Зелья", "Свитки", "Жезлы", "Ценности"];
+const merchantBuy = computed<boolean[]>(() => {
+  const o = obj.value;
+  const buy = o?.type === "merchant" ? o.buy : undefined;
+  return BUY_LABELS.map((_, i) => buy?.[i] ?? true);
+});
+function setMerchantBuy(i: number, v: boolean): void {
+  if (obj.value?.type !== "merchant") return;
+  const next = merchantBuy.value.slice();
+  next[i] = v;
+  patch({ buy: next });
 }
 
 /** ── Stack («Отряд»): formation (with leader) + order + leader equipment + inventory.
@@ -778,6 +793,21 @@ function close(): void {
           <ItemPicker class="item-add" trigger-label="+ Добавить товар" title="Добавить товар торговцу" @pick="merchantAddItem" />
         </div>
 
+        <!-- Торговец: что скупает (BUY_*) + флаг задания (MISSION) -->
+        <div v-if="obj.type === 'merchant'" class="ro-block">
+          <div class="d2-sec">Скупка <span class="muted">(категории, что торговец покупает)</span></div>
+          <div class="buy-grid">
+            <el-checkbox
+              v-for="(lbl, i) in BUY_LABELS" :key="lbl" :model-value="merchantBuy[i]" size="small"
+              @change="(v: boolean) => setMerchantBuy(i, v)"
+            >{{ lbl }}</el-checkbox>
+          </div>
+          <div class="row">
+            <label>Задание</label>
+            <el-switch :model-value="!!obj.mission" size="small" @change="(v: boolean) => patch({ mission: v })" />
+          </div>
+        </div>
+
         <!-- Маг: список заклинаний -->
         <div v-else-if="obj.type === 'mage'" class="ro-block">
           <div class="d2-sec">Заклинания <span class="muted">({{ mageSpells.length }})</span></div>
@@ -914,6 +944,22 @@ function close(): void {
         <div class="row">
           <label>Приоритет ИИ</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
+        </div>
+      </template>
+
+      <!-- 🧍 UNIT (одиночный юнит на карте — редок; выбирается из списка/по ссылке) -->
+      <template v-else-if="obj.type === 'unit'">
+        <div class="row">
+          <label>Юнит</label>
+          <UnitPicker :model-value="obj.implId ?? null" title="Тип юнита" @update:model-value="(v: string | null) => patch({ implId: v })" />
+        </div>
+        <div class="row">
+          <label>Уровень</label>
+          <el-input-number :model-value="obj.level ?? 1" :min="1" :max="50" size="small" controls-position="right" @change="(v: number) => patch({ level: v ?? 1 })" />
+        </div>
+        <div class="row">
+          <label>Здоровье</label>
+          <el-input-number :model-value="obj.hp ?? 0" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ hp: v ?? 0 })" />
         </div>
       </template>
 
@@ -1388,6 +1434,12 @@ function close(): void {
   gap: 2px;
   max-height: 200px;
   overflow-y: auto;
+}
+.buy-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 10px;
+  padding: 2px 0 4px;
 }
 /* .d2-row owns hover wash + radius */
 .item-line {
