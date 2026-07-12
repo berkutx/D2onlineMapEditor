@@ -252,6 +252,22 @@ export function placeChestOps(
  *  The object mirrors readVillage + the assemble post-pass exactly: neutral owner (OWNER =
  *  the nil sentinel -> key omitted, no race), empty 6-cell garrison, desc "" and the always-
  *  written scalars at their frame defaults. The inspector edits everything after placement. */
+/** The NEUTRAL player + one of its subraces. Every valid fort/village needs a REAL owner (a
+ *  MidPlayer ref) AND a subrace (a MidSubRace ref — the banner); the game's fort isValid rejects a
+ *  fort with nil owner/subrace (proven in the ScenEdit gold-check). Mirrors the reference
+ *  FortObject, whose `owner`/`subrace` MapLinks are always assigned at placement. The neutral player
+ *  is race 4 ("Нейтральные", always scenario slot 0) and owns the neutral subrace variants — we take
+ *  its first. */
+function neutralOwner(doc: MapDocument): { owner?: string; subRace?: string } {
+  const neutral =
+    doc.players.find((p) => p.race === 4) ??
+    doc.players.find((p) => p.playerNo === 0) ??
+    doc.players[0];
+  if (!neutral) return {};
+  const sr = (doc.subraces ?? []).find((s) => s.playerId === neutral.id);
+  return { owner: neutral.id, subRace: sr?.id };
+}
+
 export function placeVillageOps(
   doc: MapDocument,
   cx: number,
@@ -273,6 +289,8 @@ export function placeVillageOps(
     morale: 0,
     regen: 0,
     growth: 0,
+    // a neutral fort needs a valid owner + subrace or the game rejects it (gold-checked).
+    ...neutralOwner(doc),
     garrison: [null, null, null, null, null, null] as null[],
     items: [] as string[], // captured loot — the reader always emits the (possibly empty) list
   };

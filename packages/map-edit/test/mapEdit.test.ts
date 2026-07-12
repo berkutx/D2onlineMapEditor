@@ -1897,8 +1897,11 @@ describe("@d2/map-edit addObject writers (chest / village / stack) + MidgardPlan
     expect(v).toBeTruthy();
     expect(v.name).toBe("Тестбург"); // CP1251 survives
     expect(v.tier).toBe(1);
-    expect(v.owner).toBeUndefined(); // race-neutral
-    expect(v.race).toBeUndefined();
+    // a placed village belongs to the NEUTRAL player + its subrace (a fort with nil owner/subrace
+    // is rejected by the game — gold-checked); race is derived from that owner.
+    const neutral = doc.players.find((p) => p.race === 4) ?? doc.players[0]!;
+    expect(v.owner).toBe(neutral.id);
+    expect(v.race).toBe(neutral.race);
     expect((v.garrison ?? []).filter(Boolean).length).toBe(0);
     expect(v.pos).toEqual({ x: 20, y: 30 });
     expect(validateMap(re).ok).toBe(true);

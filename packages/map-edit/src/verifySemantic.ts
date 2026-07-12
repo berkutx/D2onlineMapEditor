@@ -16,12 +16,21 @@ import type { EditOp } from "./ops.js";
  * pre-export op can't know. Everything semantic (units/levels/hp/xp/names/items/scalars) still
  * compares exactly.
  */
+/** Render-DERIVED fields the reader computes at parse (race from the owner player's Grace race,
+ *  bannerIndex from the subrace, image/footprint/z/looter from catalogs) — never persisted, never
+ *  carried by an EditOp, so the byte writer omits them (its own DERIVED set). A freshly PLACED
+ *  object whose op omits them still reparses WITH them (derived from its owner/subrace), so the
+ *  semantic round-trip must ignore them. Stripping is a no-op for original objects (both sides
+ *  derive identically). */
+const DERIVED_FIELDS = ["race", "bannerIndex", "imageName", "footprint", "z", "looted", "leaderImage"] as const;
+
 function stripEntityIdentity(objs: readonly MapObject[]): MapObject[] {
   return objs.map((o) => {
     const clone: Record<string, unknown> = { ...o };
     delete clone.itemKeys;
     delete clone.inventoryKeys;
     delete clone.idMount;
+    for (const f of DERIVED_FIELDS) delete clone[f];
     const g = clone.garrison as ({ key?: string; slot?: number } | null)[] | undefined;
     if (Array.isArray(g)) {
       clone.garrison = g.map((m) => {
