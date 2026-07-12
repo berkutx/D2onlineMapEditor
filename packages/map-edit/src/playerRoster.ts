@@ -15,6 +15,7 @@
  */
 import type { MapDocument, MapObject, GarrisonUnit } from "@d2/map-schema";
 import { RACES, RACE_KEYS } from "@d2/sg-parser";
+import { ID_BAND, ID_SLOTS } from "./place.js";
 
 export type RaceKey = keyof typeof RACES;
 export { RACES, RACE_KEYS };
@@ -55,10 +56,29 @@ function allIds(doc: MapDocument): Set<string> {
   }
   return s;
 }
-function nextSecond(ids: Set<string>, pre: string): number {
-  let max = -1;
-  for (const id of ids) if (id.startsWith(pre) && id.length === pre.length + 4) max = Math.max(max, parseInt(id.slice(pre.length), 16));
-  return max + 1;
+/** Next free hex4 index of family `pre` inside `slot`'s disjoint band — the SAME collab id-
+ *  namespacing place.ts's nextTypedId uses (M4), so two clients adding a player concurrently mint
+ *  non-overlapping PL/SR/FG/…/UN/IM ids. Band full → lowest globally-free (an interior gap). */
+function nextSecond(ids: Set<string>, pre: string, slot = 0): number {
+  const s = Number.isInteger(slot) && slot >= 0 && slot < ID_SLOTS ? slot : 0;
+  const bandStart = s * ID_BAND;
+  const bandEnd = bandStart + ID_BAND;
+  let bandMax = bandStart - 1;
+  const used = new Set<number>();
+  for (const id of ids) {
+    if (id.startsWith(pre) && id.length === pre.length + 4) {
+      const idx = parseInt(id.slice(pre.length), 16);
+      used.add(idx);
+      if (idx >= bandStart && idx < bandEnd && idx > bandMax) bandMax = idx;
+    }
+  }
+  let next = bandMax + 1;
+  if (next >= bandEnd) {
+    next = -1;
+    for (let i = 0; i <= 0xffff; i++) if (!used.has(i)) { next = i; break; }
+    if (next < 0) throw new Error(`${pre}: id space exhausted (65536)`);
+  }
+  return next;
 }
 
 /** The minted on-disk id cluster for a new player (one id per block the addRace port emits). */
@@ -68,21 +88,22 @@ export interface PlayerIds {
 }
 
 /** Mint a full collision-free id cluster for a new player (call at op-build time; baked into the op
- *  so every collab peer applies the identical ids — no re-minting drift). */
-export function mintPlayerIds(doc: MapDocument): PlayerIds {
+ *  so every collab peer applies the identical ids — no re-minting drift). `slot` = the client's collab
+ *  id band (M4); solo/offline = 0. UN needs 2 consecutive ids, IM needs 3 — both fit a 4096 band. */
+export function mintPlayerIds(doc: MapDocument, slot = 0): PlayerIds {
   const ver = doc.header.version || VER_DEFAULT;
   const ids = allIds(doc);
   const id = (short: string, n: number): string => ver + short + hex4(n);
-  const un = nextSecond(ids, ver + "UN");
-  const im = nextSecond(ids, ver + "IM");
+  const un = nextSecond(ids, ver + "UN", slot);
+  const im = nextSecond(ids, ver + "IM", slot);
   return {
-    pl: id("PL", nextSecond(ids, ver + "PL")),
-    sr: id("SR", nextSecond(ids, ver + "SR")),
-    fg: id("FG", nextSecond(ids, ver + "FG")),
-    ks: id("KS", nextSecond(ids, ver + "KS")),
-    pb: id("PB", nextSecond(ids, ver + "PB")),
-    ft: id("FT", nextSecond(ids, ver + "FT")),
-    kc: id("KC", nextSecond(ids, ver + "KC")),
+    pl: id("PL", nextSecond(ids, ver + "PL", slot)),
+    sr: id("SR", nextSecond(ids, ver + "SR", slot)),
+    fg: id("FG", nextSecond(ids, ver + "FG", slot)),
+    ks: id("KS", nextSecond(ids, ver + "KS", slot)),
+    pb: id("PB", nextSecond(ids, ver + "PB", slot)),
+    ft: id("FT", nextSecond(ids, ver + "FT", slot)),
+    kc: id("KC", nextSecond(ids, ver + "KC", slot)),
     guard: id("UN", un),
     hero: id("UN", un + 1),
     items: [id("IM", im), id("IM", im + 1), id("IM", im + 2)],

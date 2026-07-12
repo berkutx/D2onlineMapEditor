@@ -91,6 +91,24 @@ describe("player roster — add / remove a faction", () => {
     expect(d4.players.some((p) => p.id === ids.pl)).toBe(true);
   });
 
+  it("mintPlayerIds namespaces every id family by collab slot (concurrent adds don't collide)", () => {
+    const BAND = 4096;
+    const secondOf = (id: string): number => parseInt(id.slice(-4), 16);
+    const inBand = (id: string, slot: number): boolean => secondOf(id) >= slot * BAND && secondOf(id) < (slot + 1) * BAND;
+    const a = mintPlayerIds(doc, 0);
+    const b = mintPlayerIds(doc, 5);
+    for (const k of ["pl", "sr", "fg", "ks", "pb", "ft", "kc", "guard", "hero"] as const) {
+      expect(inBand(a[k], 0)).toBe(true);
+      expect(inBand(b[k], 5)).toBe(true);
+      expect(a[k]).not.toBe(b[k]);
+    }
+    for (const it of a.items) expect(inBand(it, 0)).toBe(true);
+    for (const it of b.items) expect(inBand(it, 5)).toBe(true);
+    expect(new Set([...a.items, ...b.items]).size).toBe(6); // all six distinct
+    // slot 0 (solo) mints the low band — unchanged from the old max+1 for a small map
+    expect(secondOf(a.pl)).toBeLessThan(BAND);
+  });
+
   it("refuses a synthesized add of a race the map already has (one player per race)", () => {
     const present = RACE_KEYS.find((k) => raceAlreadyPresent(doc, k));
     if (!present) return; // Riders has an absent race in every slot — skip if all-absent (unlikely)

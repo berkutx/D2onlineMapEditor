@@ -12,6 +12,7 @@ import {
 import { Plus, Delete } from "@element-plus/icons-vue";
 import { useEditStore } from "../stores/editStore";
 import { useLordStore } from "../stores/lordStore";
+import { useCollabStore } from "../stores/collabStore";
 import { assetUrl } from "../services/api";
 import {
   RACES, RACE_KEYS, raceAlreadyPresent, mintPlayerIds, findFreeCapitalSpot, type EditOp,
@@ -25,6 +26,7 @@ const onImgErr = (e: Event): void => { (e.target as HTMLImageElement).style.visi
 
 const edit = useEditStore();
 const lord = useLordStore();
+const collab = useCollabStore();
 const players = computed(() => edit.liveDoc?.players ?? []);
 onMounted(() => { if (!lord.loaded && !lord.loading) void lord.load(); });
 
@@ -87,7 +89,7 @@ function confirmAdd(): void {
   if (!doc || !key) return;
   const spot = findFreeCapitalSpot(doc);
   if (!spot) { ElMessage.warning("На карте нет свободного места 5×5 (суша) для новой столицы"); return; }
-  const ids = mintPlayerIds(doc);
+  const ids = mintPlayerIds(doc, collab.idSlot); // collab id band (M4) — concurrent adds don't collide
   const name = availableRaces.value.find((r) => r.key === key)?.name;
   try {
     edit.commit([{ kind: "addPlayer", spec: { race: key, x: spot.x, y: spot.y, lordId: addLordId.value ?? undefined, name, ids } } as unknown as EditOp]);
