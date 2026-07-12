@@ -250,7 +250,7 @@ export const MountainsObject = z.object({
 export const CrystalObject = z.object({
   ...base,
   type: z.literal("crystal"),
-  resource: z.number().int().optional(), // mana type+amount packed
+  resource: z.number().int().optional(), // RESOURCE — mana SCHOOL enum 0..5 (gold/inferno/life/death/runic/grove); NOT packed (verified: all 1649 corpus crystals are 0..5)
   priority: z.number().int().optional(), // AIPRIORITY — AI collection priority (default 3)
 });
 export const LandmarkObject = z.object({

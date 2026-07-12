@@ -499,12 +499,47 @@ const reward = computed(() => {
     .filter((e) => e.label);
 });
 
-/** Change a city's owner; also refresh the live race/banner sprite (race is derived, not stored). */
+/** Change a city/stack owner; ALSO keep SUBRACE consistent (it drives the banner + the faction of
+ *  units the fort produces) and refresh the live race/banner sprite. A fort whose SUBRACE belongs to
+ *  a different player than its OWNER is an inconsistent .sg (wrong banner in-game). We reassign
+ *  subRace only when the CURRENT one isn't already owned by the new owner (so a deliberate neutral-
+ *  faction pick survives re-selecting the same owner). race/bannerIndex are DERIVED (live render
+ *  only; the byte writer skips them). */
 function setOwner(v: string): void {
   const fields: Record<string, number | string> = { owner: v };
-  const pr = (editStore.liveDoc?.players ?? []).find((p) => p.id === v)?.race;
-  if (pr !== undefined) fields.race = pr; // live re-render only; applyBytes skips derived fields
+  const subs = editStore.liveDoc?.subraces ?? [];
+  const player = (editStore.liveDoc?.players ?? []).find((p) => p.id === v);
+  if (player?.race !== undefined) fields.race = player.race;
+  const cur = (obj.value as { subRace?: string } | null)?.subRace;
+  if (!subs.some((s) => s.id === cur && s.playerId === v)) {
+    const sr = subs.find((s) => s.playerId === v);
+    if (sr) { fields.subRace = sr.id; fields.bannerIndex = sr.banner; }
+  }
   patch(fields);
+}
+
+/** LSubRace enum → RU faction name (base-game order; the neutral player owns 5..13, real factions
+ *  1..4/6). Falls back to the raw enum for unknown values. Used to label the banner picker. */
+const SUBRACE_NAMES: Record<number, string> = {
+  0: "Нейтралы", 1: "Империя", 2: "Нежить", 3: "Легионы", 4: "Кланы", 5: "Болотные",
+  6: "Эльфы", 7: "Мертвецы", 8: "Гоблины", 9: "Люди", 10: "Гномы", 11: "Драконы",
+  12: "Стражи", 13: "Прочие",
+};
+const subraceLabel = (n: number): string => SUBRACE_NAMES[n] ?? `Фракция ${n}`;
+
+/** Subraces owned by the selected object's OWNER — the faction/banner options for a fort/stack.
+ *  A real faction player owns exactly ONE (so setOwner auto-sets it, picker hidden); the NEUTRAL
+ *  player owns several (swamp/greenskins/…), so the picker lets the author choose the banner. */
+const subraceOptions = computed(() => {
+  const owner = (obj.value as { owner?: string } | null)?.owner;
+  if (!owner) return [] as { id: string; banner: number; label: string }[];
+  return (editStore.liveDoc?.subraces ?? [])
+    .filter((s) => s.playerId === owner)
+    .map((s) => ({ id: s.id, banner: s.banner, label: subraceLabel(s.subrace) }));
+});
+function setSubRace(v: string): void {
+  const sr = (editStore.liveDoc?.subraces ?? []).find((s) => s.id === v);
+  patch(sr ? { subRace: v, bannerIndex: sr.banner } : { subRace: v }); // bannerIndex derived (render)
 }
 
 /** Set a ruin's looter (a player, or neutral = not looted). `looted` is derived for the
@@ -919,6 +954,19 @@ function close(): void {
         </div>
         <ThumbPreview ref="decorPreview" />
       </template>
+
+      <!-- 🏳 FACTION BANNER (subrace) — a fort/stack's SUBRACE drives its banner + produced-unit
+           faction. Shown only when the owner owns >1 subrace (the neutral player owns several
+           neutral factions); a real faction player owns one, so setOwner auto-sets it. -->
+      <div
+        v-if="(obj.type === 'village' || obj.type === 'capital' || obj.type === 'stack') && subraceOptions.length > 1"
+        class="row"
+      >
+        <label>Знамя</label>
+        <el-select :model-value="obj.subRace" size="small" class="owner-sel" @change="setSubRace">
+          <el-option v-for="s in subraceOptions" :key="s.id" :label="s.label" :value="s.id" />
+        </el-select>
+      </div>
 
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
       <template v-if="obj.type === 'village' || obj.type === 'capital'">

@@ -108,6 +108,24 @@ export function validateMechanics(doc: MapDocument, _opts: MechanicsOptions = {}
     }
   }
 
+  // 4) fort/stack whose SUBRACE belongs to a DIFFERENT player than its OWNER. The SUBRACE drives the
+  // banner + the faction of units the fort produces, so a mismatch flies the wrong flag in-game. Both
+  // ids resolve (not a dangling ref), so no other tier catches it — this is the net for the setOwner-
+  // desync class. CALIBRATED SILENT: 8986/8986 shipped fort/stack subRace-owner pairs are consistent.
+  const NIL = "G000000000";
+  const subById = new Map((doc.subraces ?? []).map((s) => [s.id, s]));
+  for (const o of doc.objects) {
+    if (o.type !== "village" && o.type !== "capital" && o.type !== "stack") continue;
+    const sr = o.subRace, owner = o.owner;
+    if (!sr || !owner || sr === NIL || owner === NIL) continue;
+    const rec = subById.get(sr);
+    if (rec && rec.playerId && rec.playerId !== NIL && rec.playerId !== owner) {
+      warnings.push(
+        `mechanics: ${o.type} ${o.id} — знамя (${sr}) принадлежит игроку ${rec.playerId}, а владелец ${owner} (несогласованное знамя)`,
+      );
+    }
+  }
+
   return warnings;
 }
 

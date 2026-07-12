@@ -390,7 +390,7 @@ export function readSite(type: SiteType) {
   };
 }
 
-/** MidCrystal: a mana crystal node. RESOURCE packs mana type+amount. */
+/** MidCrystal: a mana crystal node. RESOURCE = mana SCHOOL enum 0..5 (NOT packed). */
 export function readCrystal(buf: ByteBuffer, obj: FramedObject): MapObject {
   const { fieldsFrom: f, fieldsEnd: e } = obj;
   const resource = readDefaultInt(buf, "RESOURCE", f, e);

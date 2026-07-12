@@ -97,7 +97,7 @@ export function locationFrame(
 /**
  * MidCrystal frame (code 0x12, short CR): CRYSTAL_ID(self) · RESOURCE · POS_X · POS_Y · AIPRIORITY.
  * Field order + code byte + short verified against Riders (`CR0000`: RESOURCE/POS_X/POS_Y/AIPRIORITY,
- * priority defaults to 3). resource packs mana school+amount; priority = AI collection priority.
+ * priority defaults to 3). resource = mana SCHOOL enum 0..5 (NOT packed); priority = AI collection priority.
  */
 export function crystalFrame(
   version: string,
