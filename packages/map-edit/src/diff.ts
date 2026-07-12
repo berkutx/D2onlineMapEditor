@@ -156,6 +156,11 @@ export function opKeys(op: EditOp): string[] {
       return [`O:${op.id}`];
     case "patchPlayer":
       return [`P:${op.id}`]; // one player = one conflict key (edits to different players don't clash)
+    case "addPlayer":
+    case "removePlayer":
+      // roster mutations touch the whole player table (_playersData / PLAYER_n / diplomacy) — one
+      // coarse key so a rare add/remove never interleaves with another roster op.
+      return ["ROSTER"];
     case "upsertEvent":
       return [`E:${op.event.id}`];
     case "deleteEvent":

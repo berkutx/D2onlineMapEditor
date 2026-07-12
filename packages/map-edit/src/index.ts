@@ -19,6 +19,7 @@ export { roadOverlay, type RoadOverlay, type CellPatch } from "./roadOverlay.js"
 export * from "./roadSelect.js";
 export * from "./zones.js";
 export * from "./place.js";
+export * from "./playerRoster.js";
 export * from "./generate.js";
 export * from "./applyBytes.js";
 export * from "./verifySemantic.js";

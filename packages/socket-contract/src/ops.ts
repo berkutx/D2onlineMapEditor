@@ -57,6 +57,28 @@ export const EditOp = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("setScenarioInfo"), fields: ScenarioInfoPatch }),
   // diplomacy lives in ONE MidDiplomacy block, so the whole list is set at once.
   z.object({ kind: z.literal("setDiplomacy"), diplomacy: z.array(DiplomacyEntry) }),
+  // add a whole playable faction (player + subrace + capital + hero + fog/spells/buildings) as ONE
+  // undoable cluster. `spec` synthesizes a fresh faction from the reference RACES data (ids minted at
+  // op-build time so every collab peer applies identical ids); `snapshot` re-inserts a captured
+  // cluster verbatim (the inverse of removePlayer, and redo of an add). One player per race — the game
+  // keys players by race, so a synthesized add refuses a race the map already has.
+  z.object({
+    kind: z.literal("addPlayer"),
+    spec: z
+      .object({
+        race: z.enum(["empire", "legions", "clans", "undead", "elves"]),
+        x: z.number().int(),
+        y: z.number().int(),
+        lordId: z.string().optional(),
+        name: z.string().optional(),
+        ids: z.record(z.unknown()),
+      })
+      .optional(),
+    snapshot: z.record(z.unknown()).optional(),
+  }),
+  // remove a faction and everything it owns (capital + armies + subrace + satellites); the inverse
+  // captures the full cluster so undo restores it verbatim. Refuses the last non-neutral player.
+  z.object({ kind: z.literal("removePlayer"), id: z.string() }),
 ]);
 export type EditOp = z.infer<typeof EditOp>;
 

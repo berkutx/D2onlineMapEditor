@@ -1916,6 +1916,28 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "patchPlayer"
+            },
+            "id": {
+              "type": "string"
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "fields"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "upsertEvent"
             },
             "event": {
@@ -2333,6 +2355,10 @@
                             "type": "number",
                             "default": 0
                           },
+                          "relation": {
+                            "type": "number",
+                            "default": 0
+                          },
                           "var2": {
                             "type": "number",
                             "default": 0
@@ -2342,10 +2368,6 @@
                             "default": 0
                           },
                           "max2": {
-                            "type": "number",
-                            "default": 0
-                          },
-                          "relation": {
                             "type": "number",
                             "default": 0
                           }
@@ -2421,11 +2443,11 @@
                             "type": "number",
                             "default": 0
                           },
-                          "var2": {
+                          "cmp": {
                             "type": "number",
                             "default": 0
                           },
-                          "cmp": {
+                          "var2": {
                             "type": "number",
                             "default": 0
                           }
@@ -3493,6 +3515,78 @@
           "required": [
             "kind",
             "diplomacy"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "addPlayer"
+            },
+            "spec": {
+              "type": "object",
+              "properties": {
+                "race": {
+                  "type": "string",
+                  "enum": [
+                    "empire",
+                    "legions",
+                    "clans",
+                    "undead",
+                    "elves"
+                  ]
+                },
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                },
+                "lordId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "ids": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "race",
+                "x",
+                "y",
+                "ids"
+              ],
+              "additionalProperties": false
+            },
+            "snapshot": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "removePlayer"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
           ],
           "additionalProperties": false
         }

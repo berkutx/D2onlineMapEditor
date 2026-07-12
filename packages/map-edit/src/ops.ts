@@ -11,6 +11,10 @@ import { MapEvent } from "@d2/map-schema";
 import { EditOp } from "@d2/socket-contract";
 import { splitMultiString } from "@d2/sg-parser";
 import { makeCell } from "./bits.js";
+import {
+  synthesizeCluster, insertCluster, extractCluster, removeCluster, raceAlreadyPresent,
+  type PlayerCluster, type AddPlayerSpec, type RaceKey,
+} from "./playerRoster.js";
 
 export { EditOp };
 
@@ -98,6 +102,34 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       players[i] = { ...(p as object), ...op.fields } as (typeof players)[number];
       const inverse: EditOp = { kind: "patchPlayer", id: op.id, fields: prevFields };
       return { doc: { ...doc, players }, inverse };
+    }
+
+    case "addPlayer": {
+      // synthesize a fresh faction from RACES (with the guard) or restore a captured cluster verbatim.
+      let cluster: PlayerCluster;
+      if (op.snapshot) {
+        cluster = op.snapshot as unknown as PlayerCluster;
+      } else if (op.spec) {
+        const race = op.spec.race as RaceKey;
+        if (raceAlreadyPresent(doc, race)) {
+          throw new Error(`applyOp addPlayer: race ${race} is already on the map (one player per race)`);
+        }
+        cluster = synthesizeCluster(doc, op.spec as unknown as AddPlayerSpec);
+      } else {
+        throw new Error("applyOp addPlayer: needs `spec` or `snapshot`");
+      }
+      const plId = (cluster.player as { id: string }).id;
+      if (doc.players.some((p) => p.id === plId)) {
+        throw new Error(`applyOp addPlayer: player ${plId} already exists`);
+      }
+      const inverse: EditOp = { kind: "removePlayer", id: plId };
+      return { doc: insertCluster(doc, cluster), inverse };
+    }
+
+    case "removePlayer": {
+      const snapshot = extractCluster(doc, op.id); // capture for the inverse BEFORE removing
+      const inverse: EditOp = { kind: "addPlayer", snapshot: snapshot as unknown as Record<string, unknown> };
+      return { doc: removeCluster(doc, op.id), inverse };
     }
 
     case "addObject": {
