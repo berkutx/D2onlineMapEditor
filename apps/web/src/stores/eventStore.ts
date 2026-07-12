@@ -49,7 +49,7 @@ export const useEventStore = defineStore("events", () => {
   const listHoverId = ref<string | null>(null);
   /** Active tab of the scenario window — in the store so «где используется» jumps
    *  (variables → event, graph var-node → variables tab) can switch it from outside. */
-  const panelTab = ref<"events" | "vars" | "templates" | "settings" | "diplomacy">("events");
+  const panelTab = ref<"events" | "vars" | "templates" | "settings" | "diplomacy" | "players">("events");
 
   const events = computed<MapEvent[]>(() => edit.liveDoc?.events ?? []);
 
@@ -82,12 +82,12 @@ export const useEventStore = defineStore("events", () => {
   // --- navigation history («хлебные крошки» + назад) ------------------------------------
   // Every jump inside the scenario window (graph satellite, variable chip, list click,
   // map context menu) goes through navigate(); goBack() restores the previous stop.
-  type PanelTab = "events" | "vars" | "templates" | "settings" | "diplomacy";
+  type PanelTab = "events" | "vars" | "templates" | "settings" | "diplomacy" | "players";
   interface NavEntry { tab: PanelTab; eventId: string | null }
   const navStack = ref<NavEntry[]>([]);
   const TAB_LABELS: Record<PanelTab, string> = {
     events: "События", vars: "Переменные", templates: "Шаблоны",
-    settings: "Настройки", diplomacy: "Дипломатия",
+    settings: "Настройки", diplomacy: "Дипломатия", players: "Игроки",
   };
   function navLabel(e: NavEntry): string {
     if (e.tab === "events" && e.eventId) {

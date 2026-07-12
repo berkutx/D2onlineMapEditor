@@ -154,6 +154,8 @@ export function opKeys(op: EditOp): string[] {
     case "patchObject":
     case "deleteObject":
       return [`O:${op.id}`];
+    case "patchPlayer":
+      return [`P:${op.id}`]; // one player = one conflict key (edits to different players don't clash)
     case "upsertEvent":
       return [`E:${op.event.id}`];
     case "deleteEvent":

@@ -88,6 +88,18 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       return { doc: replaceObjects(doc, objects), inverse };
     }
 
+    case "patchPlayer": {
+      const players = doc.players.slice();
+      const i = players.findIndex((p) => p.id === op.id);
+      if (i < 0) throw new Error(`applyOp patchPlayer: unknown player ${op.id}`);
+      const p = players[i]! as Record<string, unknown>;
+      const prevFields: Record<string, unknown> = {};
+      for (const k of Object.keys(op.fields)) prevFields[k] = p[k];
+      players[i] = { ...(p as object), ...op.fields } as (typeof players)[number];
+      const inverse: EditOp = { kind: "patchPlayer", id: op.id, fields: prevFields };
+      return { doc: { ...doc, players }, inverse };
+    }
+
     case "addObject": {
       if (doc.objects.some((o) => o.id === op.object.id)) {
         throw new Error(`applyOp addObject: id ${op.object.id} already exists`);

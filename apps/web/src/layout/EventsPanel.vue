@@ -26,6 +26,7 @@ import VariablesEditor from "./VariablesEditor.vue";
 import TemplatesEditor from "./TemplatesEditor.vue";
 import ScenarioSettingsEditor from "./ScenarioSettingsEditor.vue";
 import DiplomacyEditor from "./DiplomacyEditor.vue";
+import PlayerEditor from "./PlayerEditor.vue";
 
 const store = useEventStore();
 const editStore = useEditStore();
@@ -260,6 +261,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
     <el-tabs v-model="store.panelTab" class="ev-tabs">
       <el-tab-pane label="События" name="events" />
       <el-tab-pane label="Настройки" name="settings" />
+      <el-tab-pane label="Игроки" name="players" />
       <el-tab-pane label="Дипломатия" name="diplomacy" />
       <el-tab-pane label="Переменные" name="vars" />
       <el-tab-pane label="Шаблоны" name="templates" />
@@ -293,6 +295,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 
     <div class="sc-body">
       <ScenarioSettingsEditor v-if="store.panelTab === 'settings'" class="ev-sub" />
+      <PlayerEditor v-else-if="store.panelTab === 'players'" class="ev-sub" />
       <DiplomacyEditor v-else-if="store.panelTab === 'diplomacy'" class="ev-sub" />
       <VariablesEditor v-else-if="store.panelTab === 'vars'" class="ev-sub" />
       <TemplatesEditor v-else-if="store.panelTab === 'templates'" class="ev-sub" />

@@ -45,6 +45,9 @@ export const EditOp = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("patchObject"), id: z.string(), fields: z.record(z.unknown()) }),
   z.object({ kind: z.literal("deleteObject"), id: z.string() }),
+  // edit an existing MidPlayer's fields (isHuman / bank resources / lordId / attitude / …); the
+  // player roster itself (add/remove) is a later op. `id` = the player uid; `fields` = partial PlayerInfo.
+  z.object({ kind: z.literal("patchPlayer"), id: z.string(), fields: z.record(z.unknown()) }),
   z.object({ kind: z.literal("upsertEvent"), event: MapEvent }),
   z.object({ kind: z.literal("deleteEvent"), id: z.string() }),
   // scenario variables live in ONE MidScenVariables block, so the whole list is set at once.
