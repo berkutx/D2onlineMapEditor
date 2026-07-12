@@ -1162,13 +1162,14 @@ def _validate_session(dbg, maps, idx, results, staged, log, title, wait_window):
             idx[0] += 1; in_map_view = True
 
 
-def run_batch(editor, workdir, exports, maps, log, title="Scenario Editor",
-              wait_window=90, deadline=None):
-    """Validate every map in `maps`, reusing one editor for as long as it stays healthy and
-    relaunching a fresh one whenever a map's load wedges/kills it. Returns a per-map result list.
-    Owns the editor lifecycle: each session launches an editor on THIS thread (the debug API ties
-    the debuggee to its launching thread), drives it on a side thread, and stops when the session
-    ends (all maps done, or one wedged the editor)."""
+def _run_sessions(editor, workdir, exports, maps, log, title="Scenario Editor",
+                  wait_window=90, deadline=None):
+    """Run `maps` through relaunching editor sessions: reuse one editor for as long as it stays
+    healthy, relaunching a fresh one whenever a map's load wedges/kills it. Returns a per-map result
+    list. Owns the editor lifecycle: each session launches an editor on THIS thread (the debug API
+    ties the debuggee to its launching thread), drives it on a side thread, and stops when the
+    session ends (all maps done, or one wedged the editor). Extracted so run_batch can reuse it to
+    RE-TEST a LOAD_FAIL in isolation."""
     import threading
     results = []
     idx = [0]
@@ -1219,6 +1220,42 @@ def run_batch(editor, workdir, exports, maps, log, title="Scenario Editor",
         os.remove(staged)
     except Exception:
         pass
+    return results
+
+
+def run_batch(editor, workdir, exports, maps, log, title="Scenario Editor",
+              wait_window=90, deadline=None):
+    """Validate every map, then AUTO-RETRY any LOAD_FAIL in an isolated fresh editor. A batch
+    LOAD_FAIL is almost always COLLATERAL: a prior map wedged/crashed the editor (e.g. a REJECT that
+    pops a fatal modal, a DB-lock, a slow relaunch), so the NEXT map couldn't even be attempted. The
+    loader logs a REJECT for a genuinely-invalid map (checkObjects on the load path), never a
+    LOAD_FAIL — so a LOAD_FAIL means 'we could not drive the editor here', not 'this map is broken'.
+    Re-testing the map ALONE disambiguates: pass/reject in isolation => it was a wedge (recovered);
+    still LOAD_FAIL alone => a GENUINE load failure worth investigating."""
+    results = _run_sessions(editor, workdir, exports, maps, log, title, wait_window, deadline)
+    load_fails = [r for r in results if r.get("status") == "LOAD_FAIL"]
+    if load_fails:
+        log("[batch] --- auto-retrying %d LOAD_FAIL map(s) in an isolated fresh editor ---"
+            % len(load_fails))
+        by_name = {os.path.basename(m): m for m in maps}
+        for r in load_fails:
+            mp = by_name.get(r["map"])
+            if not mp:
+                continue
+            iso = _run_sessions(editor, workdir, exports, [mp], log, title, wait_window, deadline)
+            v = iso[0] if iso else {"status": "LOAD_FAIL"}
+            if v.get("status") != "LOAD_FAIL":
+                log("[batch] %-44s RECOVERED -> %s  (isolated retry; batch LOAD_FAIL was collateral)"
+                    % (r["map"], v["status"]))
+                r["status"] = v["status"]
+                r["note"] = "recovered on isolated retry (batch wedge was collateral, not this map)"
+                for k in ("invalid_obj", "reason"):
+                    if k in v:
+                        r[k] = v[k]
+            else:
+                log("[batch] %-44s GENUINE LOAD_FAIL  (still fails to load ALONE in a fresh editor)"
+                    % r["map"])
+                r["note"] = "genuine: fails to load even in an isolated fresh editor — investigate"
     log("[batch] done: %d result(s)" % len(results))
     return results
 

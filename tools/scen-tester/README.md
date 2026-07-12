@@ -58,11 +58,21 @@ same one that blocks a save). Prints a running line per map and writes `summary.
 | `REJECT` + `invalid_obj` | a scenario object is invalid — e.g. a plan/footprint mismatch (`S143MM0005`) |
 | `REJECT` + `reason` | the load threw — e.g. `MidUnit: Missing modifier 'G201UM9378'` |
 | `UNKNOWN` | the load landed but validation never ran (rare) |
-| `LOAD_FAIL` | the load never landed / the editor didn't come up |
+| `LOAD_FAIL` | could not drive the editor here (wedge/collateral) — see below; a GENUINE one survives an isolated retry |
 
 A map that merely has invalid objects keeps the reused editor going; a map whose load **throws**
 pops a fatal modal, so the batch records it and **relaunches a fresh editor for the rest** — fully
-automatic, no per-map restart needed for the common case. The batch **isolates the Load list**: it
+automatic, no per-map restart needed for the common case.
+
+**`LOAD_FAIL` is never "this map is broken" by itself.** A genuinely-invalid map produces a
+`REJECT` (the loader's `checkObjects` logs the bad object) — a `LOAD_FAIL` only means the harness
+couldn't drive the editor at that point, almost always **collateral**: the *previous* map wedged/
+crashed the editor (a REJECT that popped a fatal modal, a DB-lock, a slow relaunch), so the next
+map couldn't even be attempted. So the batch **auto-retries every `LOAD_FAIL` in an isolated fresh
+editor** at the end: if it PASSes/REJECTs alone the verdict is corrected (`note: recovered on
+isolated retry`); if it *still* `LOAD_FAIL`s alone it's a **GENUINE** load failure worth
+investigating (`note: fails even in an isolated fresh editor`). In practice every observed
+`LOAD_FAIL` on the from-model corpus recovered on retry — the maps load; the editor was just wedged. The batch **isolates the Load list**: it
 stashes the real scenarios into `Exports\_scentest_stash\` (and purges stale staged copies) so the
 first-row click always selects the map it just wrote, then **restores them on exit** — crash-safe
 (a later run recovers a stash left behind).
