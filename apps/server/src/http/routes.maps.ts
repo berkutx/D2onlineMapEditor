@@ -87,11 +87,21 @@ function buildAndValidate(
   //      deleted, appends added), reusing `baseBytes` only for the header + original block order.
   // Every content block comes from the model; a block it can't reproduce THROWS (never a silent
   // fallback), failing the validator below (422). Byte-identical to the original on a no-op.
+  // the scenario name/desc/author also live at fixed offsets in the FILE HEADER (the game's
+  // map-select list reads them there); collect any that an edit changed so serializeMapFromModel
+  // re-stamps ONLY those (an unedited field keeps its exact original header bytes).
+  const headerText: { name?: string; description?: string; author?: string } = {};
+  for (const op of ops) {
+    if (op.kind !== "setScenarioInfo") continue;
+    if (op.fields.name !== undefined) headerText.name = op.fields.name;
+    if (op.fields.description !== undefined) headerText.description = op.fields.description;
+    if (op.fields.author !== undefined) headerText.author = op.fields.author;
+  }
   let bytes: Uint8Array | undefined;
   let buildError: string | undefined;
   try {
     const materialized = materializeForExport(doc, ops, { talismanTemplates, landmarkSize });
-    bytes = serializeMapFromModelBytes(baseBytes, materialized);
+    bytes = serializeMapFromModelBytes(baseBytes, materialized, headerText);
   } catch (e) {
     buildError = e instanceof Error ? e.message : String(e);
   }

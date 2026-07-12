@@ -118,4 +118,30 @@ describe("full model-rebuild export", () => {
     // compares the metric to patch's, so we only need the 16 plan entries + block to match.
     expectEquivalentToPatch(placeVillageOps(doc, 44, 44, "Град"), /*expectClean*/ false);
   });
+
+  // ---- adversarial-review regression pins ----
+
+  it("delete-then-re-add a landmark (collab undo) keeps its plan footprint — NOT purged", () => {
+    // journal = [delete(id), add({...same,id})]; foldOps keeps both. The survivor must retain its
+    // ORIGINAL MidgardPlan entries (a landmark with no footprint fails planCoverageErrors → 422).
+    const lm = doc.objects.find((o) => o.type === "landmark")!;
+    const out = fromModel([{ kind: "deleteObject", id: lm.id }, { kind: "addObject", object: lm }]);
+    const built = parseScenario(out);
+    expect(built.objects.some((o) => o.id === lm.id), "landmark survives").toBe(true);
+    expect(planCoverageErrors(built, parsePlanEntries(out), {}).length, "footprint intact").toBe(0);
+    expect(verifyBlockIntegrity(out).ok).toBe(true);
+  });
+
+  it("deleting a Capital is REFUSED (throws → 422, race integrity)", () => {
+    const cap = doc.objects.find((o) => o.type === "capital");
+    expect(cap, "Riders has a capital").toBeTruthy();
+    expect(() => fromModel([{ kind: "deleteObject", id: cap!.id }])).toThrow(/Capital/);
+  });
+
+  it("talisman placed → the charge row is present in the output (even with no base charges block)", () => {
+    const baseCharges = (d: MapDocument): number => chargeCount(d);
+    const before = baseCharges(parseScenario(fromModel([])));
+    const out = fromModel(placeChestOps(doc, 49, 49, 0, [talismanId]));
+    expect(chargeCount(parseScenario(out)), "one new charge row").toBe(before + 1);
+  });
 });

@@ -21,6 +21,30 @@ import {
 } from "./sgRebuild.js";
 import { eventFrame, scenVariablesFrame, stackTemplateFrame, diplomacyFrame } from "./eventFrame.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
+import { encodeCp1251 } from "./cp1251.js";
+
+/** The name/desc/author ALSO live in the FILE HEADER at fixed zero-padded offsets (the
+ *  D2EESFISIG MapHeaderBlock, before every block frame — desc@43×256, author@299×21, name@321×64).
+ *  The game's map-select list reads them from HERE, so an EDITED scenario name/desc/author must be
+ *  re-stamped (the ScenarioInfo block alone leaves the header stale). ONLY the actually-edited
+ *  fields are patched (mirrors applyBytes): an unedited field keeps its exact original bytes —
+ *  including any trailing non-zero padding a zero-fill would clobber — so an unedited map stays
+ *  byte-identical. */
+export interface HeaderTextEdit { name?: string; description?: string; author?: string }
+function patchHeaderText(header: Uint8Array, t: HeaderTextEdit): Uint8Array {
+  if (t.name === undefined && t.description === undefined && t.author === undefined) return header;
+  const out = header.slice();
+  const put = (at: number, len: number, val: string | undefined): void => {
+    if (val === undefined || out.length < at + len) return;
+    const enc = encodeCp1251(val);
+    out.fill(0, at, at + len);
+    out.set(enc.subarray(0, len), at);
+  };
+  put(43, 256, t.description);
+  put(299, 21, t.author);
+  put(321, 64, t.name);
+  return out;
+}
 
 /** The numeric `second` (uid) a frame-writer needs = the 4-hex tail of the compound id. */
 function secondOf(id: string): number {
@@ -274,7 +298,10 @@ function buildEntityIndexes(doc: MapDocument): {
     for (const k of keys) {
       if (!k || k === NIL || k === "000000") continue;
       const template = templates?.[t++];
-      if (template) itemsByKey.set(k, template);
+      // record EVERY non-sentinel key — even if its template didn't resolve — so an owner that still
+      // references it never has its MidItem block dropped (isDead keys off this map). An unresolved
+      // template serialises to null → the block is kept RAW (its original bytes), not lost.
+      itemsByKey.set(k, template ?? "");
     }
   };
   for (const o of doc.objects) {
@@ -553,7 +580,11 @@ function objTypeName(o: MapObject): string {
  * live block then serialises from the model with NO raw fallback. `s` supplies only the header +
  * original block order (unchanged blocks stay in place; new ones append). NO byte patch anywhere.
  */
-export function serializeMapFromModel(s: ScenarioBlocks, doc: MapDocument): ScenarioBlocks {
+export function serializeMapFromModel(
+  s: ScenarioBlocks,
+  doc: MapDocument,
+  headerText: HeaderTextEdit = {},
+): ScenarioBlocks {
   const version = doc.header.version || "S143";
   const byId = new Map<string, MapObject>(doc.objects.map((o) => [o.id, o]));
   const { itemsByKey, unitsByKey } = buildEntityIndexes(doc);
@@ -587,12 +618,22 @@ export function serializeMapFromModel(s: ScenarioBlocks, doc: MapDocument): Scen
     if (!bytes) throw new Error(`serializeMapFromModel: cannot serialise new ${typeName} ${id} from the model`);
     add.push({ typeName, id, bytes });
   };
-  // new placed objects (mountains handled below via their block id)
+  // new placed objects (mountains handled separately — they live N-per-block)
   for (const o of doc.objects) {
     if (o.type === "mountains" || baseIds.has(o.id)) continue;
     const tn = objTypeName(o);
     emit(tn, o.id, serializeTypedBlock(tn, o, version));
   }
+  // a MidMountains block minted THIS session (the map had none, or a new block id): its children
+  // are `${blockId}#n`; gather each new block id and synthesise it (existing blocks are swapped
+  // in place above by rebuildFromModel).
+  const newMountainBlocks = new Set<string>();
+  for (const o of doc.objects) {
+    if (o.type !== "mountains") continue;
+    const blockId = o.id.slice(0, o.id.indexOf("#"));
+    if (blockId && !baseIds.has(blockId)) newMountainBlocks.add(blockId);
+  }
+  for (const blockId of newMountainBlocks) emit("MidMountains", blockId, serializeMountainsBlock(blockId, doc, version));
   // new instance blocks (minted for added/edited item lists + garrisons)
   for (const [key] of itemsByKey) if (!baseIds.has(key)) emit("MidItem", key, serializeInstanceBlock("MidItem", key, itemsByKey, unitsByKey, version));
   for (const [key] of unitsByKey) if (!baseIds.has(key)) emit("MidUnit", key, serializeInstanceBlock("MidUnit", key, itemsByKey, unitsByKey, version));
@@ -601,14 +642,24 @@ export function serializeMapFromModel(s: ScenarioBlocks, doc: MapDocument): Scen
   // new events / templates
   for (const e of doc.events ?? []) if (!baseIds.has(e.id)) emit("MidEvent", e.id, eventFrame(version, e));
   for (const t of doc.templates ?? []) if (!baseIds.has(t.id)) emit("MidStackTemplate", t.id, stackTemplateFrame(version, t));
+  // a MidTalismanCharges block MINTED this session (a talisman placed on a map that had no charges
+  // block) — materializeForExport creates it in doc.satellites; without this it is silently dropped.
+  for (const tc of doc.satellites?.talismanCharges ?? [])
+    if (!baseIds.has(tc.id)) emit("MidTalismanCharges", tc.id, talismanChargesFrame(version, secondOf(tc.id), tc.entries));
 
-  return { ...s, blocks: [...swapped, ...add] };
+  return { ...s, header: patchHeaderText(s.header, headerText), blocks: [...swapped, ...add] };
 }
 
 /** Export the whole `.sg` from a materialized model — no byte patch, no skeleton fallback.
- *  `originalBytes` supplies only the header + block order of the unchanged blocks. */
-export function serializeMapFromModelBytes(originalBytes: Uint8Array, doc: MapDocument): Uint8Array {
-  return rebuildScenario(serializeMapFromModel(splitScenario(originalBytes), doc));
+ *  `originalBytes` supplies only the header + block order of the unchanged blocks. `headerText`
+ *  names the scenario name/desc/author fields an edit changed (so the FILE HEADER is re-stamped;
+ *  unedited fields keep their exact original bytes). */
+export function serializeMapFromModelBytes(
+  originalBytes: Uint8Array,
+  doc: MapDocument,
+  headerText: HeaderTextEdit = {},
+): Uint8Array {
+  return rebuildScenario(serializeMapFromModel(splitScenario(originalBytes), doc, headerText));
 }
 
 /** The placed-object block TypeNames (dead when their MapObject is deleted). */

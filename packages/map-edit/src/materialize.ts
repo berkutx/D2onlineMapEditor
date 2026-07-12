@@ -31,6 +31,7 @@ export interface MaterializeOptions {
   landmarkSize?: (baseType: string) => readonly [number, number] | undefined;
 }
 
+const NIL = "G000000000";
 const DEFAULT_TALISMAN_CHARGES = 5;
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
 
@@ -155,6 +156,29 @@ export function materializeForExport(
     else if (op.kind === "setCell" && op.roadType !== undefined) roadCells.push({ x: op.x, y: op.y });
   }
 
+  // SURVIVORS — a delete + re-add of the SAME id in one journal (a collab undo of a delete; foldOps
+  // only folds add-BEFORE-delete, so both survive). The object stays live: keep its ORIGINAL plan
+  // entries and do NOT add fresh ones (mirrors the byte writer's reAdded survivor-skip). Without
+  // this the purge below strips both the fresh AND the original footprint → an object with no plan.
+  const survivors = new Set([...addedIds].filter((id) => deletedIds.has(id)));
+
+  // DELETION REFUSALS — port the byte writer's guards so the export REFUSES (→ 422) rather than
+  // silently shipping a race-broken / dangling map: a Capital delete (every race must keep one, the
+  // live game crashes on hire otherwise), or deleting a city's visiting-hero stack / a city hosting
+  // one (would dangle the STACK/INSIDE link). Enforced here because the from-model path replaced
+  // applyEditsToBytes, which used to throw these.
+  for (const id of deletedIds) {
+    if (survivors.has(id)) continue; // a re-add cancels the delete
+    const o = baseDoc.objects.find((x) => x.id === id);
+    if (!o) continue;
+    if (o.type === "capital")
+      throw new Error(`materializeForExport: deleteObject refused for Capital ${id} (race integrity)`);
+    if (o.type === "stack" && o.inside && o.inside !== NIL)
+      throw new Error(`materializeForExport: ${id} is a city's visiting hero — remove it via the city, not a map delete`);
+    if (o.type === "village" && o.stackRef && o.stackRef !== NIL)
+      throw new Error(`materializeForExport: ${id} hosts a visiting hero — remove the visitor first`);
+  }
+
   const newCharges: { talisman: string; charges: number }[] = [];
 
   // 1) INSTANCES — mint keys for every keyless list/garrison (state-based: only placed/edited
@@ -183,15 +207,19 @@ export function materializeForExport(
   const size = applied.size;
   if (plan) {
     for (const id of addedIds) {
+      if (survivors.has(id)) continue; // re-added object keeps its ORIGINAL plan entries
       const o = objById.get(id);
       if (!o) continue;
       const fp = footprintOf(o, opts);
       if (!fp) continue;
       const [w, h] = fp;
+      // ONLY the landmark footprint is edge-clipped (matches the byte writer: village/ruin/site push
+      // unconditionally); a footprint-bearing object never sits past the edge in practice.
+      const clip = o.type === "landmark";
       for (let dy = 0; dy < h; dy++)
         for (let dx = 0; dx < w; dx++) {
           const px = o.pos.x + dx, py = o.pos.y + dy;
-          if (px < size && py < size) plan.entries.push({ x: px, y: py, element: id });
+          if (!clip || (px < size && py < size)) plan.entries.push({ x: px, y: py, element: id });
         }
     }
   }
@@ -229,10 +257,11 @@ export function materializeForExport(
     return keep;
   });
 
-  // Purge plan entries whose element is a deleted object or a washed road.
+  // Purge plan entries whose element is a deleted object or a washed road. A SURVIVOR (deleted then
+  // re-added in the same journal) is NOT purged — its original entries stay (see above).
   if (plan) {
     plan.entries = plan.entries.filter((e) => {
-      if (deletedIds.has(e.element)) return false;
+      if (deletedIds.has(e.element) && !survivors.has(e.element)) return false;
       if (/RA[0-9a-fA-F]{4}$/.test(e.element) && !liveRoadIds.has(e.element)) return false;
       return true;
     });
