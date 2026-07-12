@@ -103,6 +103,33 @@ export function raceAlreadyPresent(doc: MapDocument, race: RaceKey): boolean {
   return (doc.players ?? []).some((p) => p.raceId === RACES[race].raceId);
 }
 
+/** RACE_ID (e.g. "G000RR0001") → the RaceKey whose RACES entry carries it (for a UI that presents
+ *  races by their game name/id and dispatches addPlayer by key). */
+export function raceKeyOfId(raceId: string): RaceKey | undefined {
+  return RACE_KEYS.find((k) => RACES[k].raceId === raceId);
+}
+
+/** Find a free 5×5 land spot for a new capital (no water/mountain, no MidgardPlan occupancy). The
+ *  add-player op needs a valid land anchor; the user can drag the capital afterward. Null = the map
+ *  has no open 5×5 land block (a full map). */
+export function findFreeCapitalSpot(doc: MapDocument): { x: number; y: number } | null {
+  const n = doc.size;
+  const occ = new Set<number>();
+  for (const e of doc.plan?.entries ?? []) occ.add(e.y * n + e.x);
+  const land = (x: number, y: number): boolean => {
+    for (let dx = 0; dx < 5; dx++) for (let dy = 0; dy < 5; dy++) {
+      const cx = x + dx, cy = y + dy;
+      if (cx >= n || cy >= n || occ.has(cy * n + cx)) return false;
+      const g = ((doc.terrain.cells[cy * n + cx]?.value ?? 0) >> 3) & 7;
+      if (g === 3 || g === 4) return false; // water / mountain
+    }
+    return true;
+  };
+  // spiral-ish scan from the centre outward so a new capital lands away from the edges when possible
+  for (let y = 2; y < n - 6; y++) for (let x = 2; x < n - 6; x++) if (land(x, y)) return { x, y };
+  return null;
+}
+
 /** A captured player cluster — enough to re-insert verbatim (undo of a remove, redo of an add). */
 export interface PlayerCluster {
   player: Record<string, unknown>;

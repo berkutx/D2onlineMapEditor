@@ -1,25 +1,34 @@
 <script setup lang="ts">
-/** Player roster editor — edits an EXISTING MidPlayer's authorable fields (человек/ИИ, отношение
- *  к игроку, стартовые ресурсы = BANK). Each change commits an undoable `patchPlayer` op; the export
- *  re-serialises the MidPlayer block from the model. Adding/removing a player (which needs a capital
- *  + subrace) is a later op — this edits the players a scenario already has. Race is derived from the
- *  faction's forts/subrace, so it is shown read-only here (change it via the fort/subrace, not here). */
-import { computed } from "vue";
-import { ElSwitch, ElInputNumber, ElEmpty, ElTooltip } from "element-plus";
+/** Player roster editor — edits existing MidPlayers (человек/ИИ, отношение, стартовые ресурсы, ЛОРД)
+ *  and ADDS / REMOVES a whole playable faction. A patch commits an undoable `patchPlayer`; add/remove
+ *  commit `addPlayer` / `removePlayer` (the from-model export synthesises the player + subrace +
+ *  capital + hero + satellites, and re-stamps the header `_playersData` / PLAYER_n — gold-checked in
+ *  native ScenEdit). One player per race (the game keys players by race), so the add dialog only lists
+ *  the races the map doesn't already have. Race stays derived (read-only) — change it via add/remove. */
+import { computed, ref, watch, onMounted } from "vue";
+import {
+  ElSwitch, ElInputNumber, ElEmpty, ElTooltip, ElButton, ElSelect, ElOption, ElDialog, ElMessage, ElMessageBox,
+} from "element-plus";
+import { Plus, Delete } from "@element-plus/icons-vue";
 import { useEditStore } from "../stores/editStore";
-import type { EditOp } from "@d2/map-edit";
+import { useLordStore } from "../stores/lordStore";
+import {
+  RACES, RACE_KEYS, raceAlreadyPresent, mintPlayerIds, findFreeCapitalSpot, type EditOp,
+} from "@d2/map-edit";
 
 const edit = useEditStore();
+const lord = useLordStore();
 const players = computed(() => edit.liveDoc?.players ?? []);
+onMounted(() => { if (!lord.loaded && !lord.loading) void lord.load(); });
 
 /** Grace race index → RU name (base-game order; the owner IS its race, 1:1 per scenario). */
 const RACE_NAMES: Record<number, string> = {
   0: "Империя", 1: "Нежить", 2: "Легионы", 3: "Кланы", 4: "Нейтралы", 5: "Эльфы",
 };
 const raceName = (r: number): string => RACE_NAMES[r] ?? `Раса ${r}`;
+const isNeutral = (p: { race: number }): boolean => p.race === 4;
 
 // BANK / стартовые ресурсы: "G####:R####:Y####:E####:W####:B####" (letter + 4-digit amount).
-// Letter order = the resource enum (same as a ruin CASH reward): Gold, Inferno, Life, Death, Runic, Nature.
 const BANK_ORDER = ["G", "R", "Y", "E", "W", "B"] as const;
 const BANK_LABELS: Record<string, string> = { G: "Золото", R: "Инферно", Y: "Жизнь", E: "Смерть", W: "Руны", B: "Природа" };
 const parseBank = (s: string | undefined): number[] => {
@@ -37,11 +46,73 @@ function setBankResource(p: { id: string; bank?: string }, idx: number, v: numbe
   vals[idx] = v;
   patch(p.id, { bank: buildBank(vals) });
 }
+/** The three lords (mage/warrior/diplomat) of a player's race — its lord-picker options. */
+const lordOptions = (raceId: string | undefined): ReturnType<typeof lord.byRace> => lord.byRace(raceId);
+
+// ── Add faction ──────────────────────────────────────────────────────────────
+const addOpen = ref(false);
+const addRaceKey = ref<string | null>(null);
+const addLordId = ref<string | null>(null);
+/** Playable races the map does NOT already have, labelled by their game (Grace) name. */
+const availableRaces = computed(() => {
+  const doc = edit.liveDoc;
+  if (!doc) return [] as { key: string; raceId: string; name: string }[];
+  return RACE_KEYS.filter((k) => !raceAlreadyPresent(doc, k)).map((k) => {
+    const raceId = RACES[k].raceId;
+    return { key: k, raceId, name: lord.byRace(raceId)[0]?.raceName || RACES[k].name };
+  });
+});
+const addLordOptions = computed(() => (addRaceKey.value ? lord.byRace(RACES[addRaceKey.value as keyof typeof RACES].raceId) : []));
+watch(addRaceKey, () => {
+  const opts = addLordOptions.value;
+  addLordId.value = opts.find((l) => l.category === 0)?.id ?? opts[0]?.id ?? null; // default = the race's mage
+});
+function openAdd(): void {
+  const avail = availableRaces.value;
+  if (!avail.length) { ElMessage.info("Все расы уже на карте — по одному игроку на расу (максимум 5 + нейтрал)"); return; }
+  addRaceKey.value = avail[0]!.key;
+  addOpen.value = true;
+}
+function confirmAdd(): void {
+  const doc = edit.liveDoc;
+  const key = addRaceKey.value;
+  if (!doc || !key) return;
+  const spot = findFreeCapitalSpot(doc);
+  if (!spot) { ElMessage.warning("На карте нет свободного места 5×5 (суша) для новой столицы"); return; }
+  const ids = mintPlayerIds(doc);
+  const name = availableRaces.value.find((r) => r.key === key)?.name;
+  try {
+    edit.commit([{ kind: "addPlayer", spec: { race: key, x: spot.x, y: spot.y, lordId: addLordId.value ?? undefined, name, ids } } as unknown as EditOp]);
+    addOpen.value = false;
+    ElMessage.success(`Фракция добавлена — столица на клетке ${spot.x},${spot.y} (можно перетащить)`);
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e));
+  }
+}
+
+// ── Remove faction ───────────────────────────────────────────────────────────
+async function removeFaction(p: { id: string; name?: string; race: number }): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `Удалить фракцию «${p.name || raceName(p.race)}» вместе со всем, чем она владеет (столица, города, армии)?`,
+      "Удаление игрока",
+      { type: "warning", confirmButtonText: "Удалить", cancelButtonText: "Отмена" },
+    );
+  } catch { return; }
+  try {
+    edit.commit([{ kind: "removePlayer", id: p.id } as unknown as EditOp]);
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e));
+  }
+}
 </script>
 
 <template>
   <div class="pl">
-    <div class="pl-head"><span class="pl-sub">{{ players.length }} игрок(ов)</span></div>
+    <div class="pl-head">
+      <span class="pl-sub">{{ players.length }} игрок(ов)</span>
+      <el-button size="small" :icon="Plus" @click="openAdd">Добавить фракцию</el-button>
+    </div>
     <div class="pl-body">
       <el-empty v-if="players.length === 0" description="В сценарии нет игроков" :image-size="60" />
       <div v-for="p in players" :key="p.id" class="pl-card">
@@ -51,6 +122,10 @@ function setBankResource(p: { id: string; bank?: string }, idx: number, v: numbe
             {{ p.name || `Игрок ${p.playerNo}` }}
           </span>
           <span class="pl-race muted">{{ raceName(p.race) }}</span>
+          <el-button
+            v-if="!isNeutral(p)" class="pl-del" size="small" text :icon="Delete"
+            title="Удалить фракцию" @click="removeFaction(p)"
+          />
         </div>
         <div class="pl-row">
           <label>Управление</label>
@@ -69,6 +144,15 @@ function setBankResource(p: { id: string; bank?: string }, idx: number, v: numbe
             </span>
           </el-tooltip>
         </div>
+        <div v-if="!isNeutral(p)" class="pl-row">
+          <label>Лорд</label>
+          <el-select
+            :model-value="p.lordId" size="small" placeholder="—" class="pl-lord"
+            @update:model-value="(v: string) => patch(p.id, { lordId: v })"
+          >
+            <el-option v-for="l in lordOptions(p.raceId)" :key="l.id" :label="`${l.categoryName} — ${l.name}`" :value="l.id" />
+          </el-select>
+        </div>
         <div class="pl-row pl-bank">
           <label>Казна</label>
           <span v-for="(amt, i) in parseBank(p.bank)" :key="BANK_ORDER[i]" class="pl-res">
@@ -83,26 +167,51 @@ function setBankResource(p: { id: string; bank?: string }, idx: number, v: numbe
         </div>
       </div>
     </div>
-    <p class="pl-hint">Раса игрока меняется через владельца/знамя форта. Добавление игрока — отдельный шаг.</p>
+    <p class="pl-hint">Раса меняется добавлением/удалением фракции. Новая столица ставится на свободную сушу — перетащите её на нужное место.</p>
+
+    <el-dialog v-model="addOpen" title="Добавить фракцию" width="380px" append-to-body>
+      <div class="add-row">
+        <label>Раса</label>
+        <el-select v-model="addRaceKey" size="small" style="width: 220px">
+          <el-option v-for="r in availableRaces" :key="r.key" :label="r.name" :value="r.key" />
+        </el-select>
+      </div>
+      <div class="add-row">
+        <label>Лорд</label>
+        <el-select v-model="addLordId" size="small" style="width: 220px">
+          <el-option v-for="l in addLordOptions" :key="l.id" :label="`${l.categoryName} — ${l.name}`" :value="l.id" />
+        </el-select>
+      </div>
+      <p class="add-hint muted">Игрок создаётся со столицей, героем и стражем (порт addRace). Столица встанет на свободную сушу.</p>
+      <template #footer>
+        <el-button size="small" @click="addOpen = false">Отмена</el-button>
+        <el-button size="small" type="primary" :disabled="!addRaceKey" @click="confirmAdd">Добавить</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .pl { display: flex; flex-direction: column; height: 100%; font-size: 12px; }
-.pl-head { padding: 10px 12px 4px; }
+.pl-head { padding: 10px 12px 4px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .pl-sub { color: var(--el-text-color-secondary); font-size: 11px; }
 .pl-body { flex: 1; overflow-y: auto; padding: 0 12px; max-width: 560px; }
 .pl-card { border: 1px solid var(--el-border-color-lighter); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
 .pl-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .pl-row > label { min-width: 78px; color: var(--el-text-color-secondary); }
-.pl-title { justify-content: space-between; }
+.pl-title { justify-content: flex-start; }
 .pl-name { font-weight: 600; }
 .pl-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: baseline; }
 .pl-race { font-size: 11px; }
+.pl-del { margin-left: auto; color: var(--el-color-danger); }
+.pl-lord { flex: 1; max-width: 360px; }
 .pl-att { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .pl-att > label { color: var(--el-text-color-secondary); }
 .pl-bank { flex-wrap: wrap; }
 .pl-res { display: inline-flex; }
 .pl-hint { color: var(--el-text-color-secondary); font-size: 11px; padding: 8px 12px; margin: 0; }
+.add-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.add-row > label { min-width: 48px; color: var(--el-text-color-secondary); }
+.add-hint { font-size: 11px; margin: 6px 0 0; }
 .muted { color: var(--el-text-color-secondary); }
 </style>
