@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
- * Object property inspector. Shows the selected object's properties and edits the ones
- * we can already persist to the .sg (fixed-width int32 fields: image / tier / priority /
- * morale / regen / growth) via an undoable patchObject. Variable-length fields (name,
- * description, reward, items, owner) are shown read-only until the M4 growable writer
- * lands. Scope: chests / ruins / cities — capitals + units are view-only here.
+ * Object property inspector. Shows the selected object's properties and edits them via an
+ * undoable patchObject — every field (scalars, name/desc/reward strings, item + garrison
+ * lists, owner/subrace) persists through the from-model export (serializeMapFromModelBytes).
+ * Scope: chests / ruins / cities / capitals / sites / stacks / crystals / decor / locations.
  */
 import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
@@ -250,6 +249,23 @@ function chestMoveItem(idx: number, dir: number): void {
   if (j < 0 || j >= items.length) return;
   [items[idx], items[j]] = [items[j]!, items[idx]!];
   patch({ items });
+}
+
+/** ── City loot: a village/capital's stored ITEM_ID list (same shape as a chest — global GItem
+ *  template ids; a capital seeds 3× starter items). Reuses the chest list row UI. */
+const cityLoot = computed<string[]>(() => {
+  const o = obj.value;
+  return o && (o.type === "village" || o.type === "capital") ? o.items ?? [] : [];
+});
+function cityAddItem(template: string): void {
+  const o = obj.value;
+  if (o?.type !== "village" && o?.type !== "capital") return;
+  patch({ items: [...(o.items ?? []), template] });
+}
+function cityRemoveItem(idx: number): void {
+  const o = obj.value;
+  if (o?.type !== "village" && o?.type !== "capital") return;
+  patch({ items: (o.items ?? []).filter((_, i) => i !== idx) });
 }
 
 /** ── Garrisons. A city/capital has TWO armies (verified vs toolsqt + Riders bytes):
@@ -645,6 +661,17 @@ function close(): void {
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
+        <!-- Стражи руины — embedded GROUP_ID + UNIT_/POS_ (like a fort's defense); soldiers only. -->
+        <div class="d2-sec">Стражи <span class="muted">({{ defenseCount }}/6)</span></div>
+        <GarrisonEditor
+          :garrison="defenseGarrison"
+          :count="defenseCount"
+          roster="soldiers"
+          @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
+          @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
+          @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"
+          @set-mods="(c, m) => setGarrisonModsOn(obj.id, defenseGarrison, c, m)"
+        />
       </template>
 
       <!-- 🏘 CITY -->
@@ -718,6 +745,14 @@ function close(): void {
         <div class="row">
           <label>Картинка</label>
           <ImagePicker :object-id="obj.id" :key-fn="siteImageKey" :count="20" />
+        </div>
+        <div v-if="obj.desc !== undefined" class="col">
+          <label>Описание</label>
+          <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" placeholder="текст при посещении" @change="(v: string) => patch({ desc: v })" />
+        </div>
+        <div class="row">
+          <label>Приоритет ИИ</label>
+          <el-input-number :model-value="obj.aiPriority ?? 0" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ aiPriority: v ?? 0 })" />
         </div>
 
         <!-- Торговец: список товаров (предмет + количество) -->
@@ -823,6 +858,11 @@ function close(): void {
           <label>Приоритет ИИ</label>
           <el-input-number :model-value="obj.priority" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
+        <div class="row">
+          <label>Флаги</label>
+          <el-checkbox :model-value="!!obj.invisible" size="small" title="Отряд скрыт от игроков на карте" @change="(v: boolean) => patch({ invisible: v })">Невидим</el-checkbox>
+          <el-checkbox :model-value="!!obj.aiIgnore" size="small" title="ИИ не реагирует на этот отряд" @change="(v: boolean) => patch({ aiIgnore: v })">ИИ игнорирует</el-checkbox>
+        </div>
 
         <div class="d2-sec">Состав отряда <span class="muted">({{ stackCount }}/6)</span></div>
         <GarrisonEditor
@@ -870,6 +910,10 @@ function close(): void {
           <el-select :model-value="obj.resource ?? 0" size="small" class="owner-sel" @change="(v: number) => patch({ resource: v })">
             <el-option v-for="(lbl, i) in CRYSTAL_LABELS" :key="i" :label="lbl" :value="i" />
           </el-select>
+        </div>
+        <div class="row">
+          <label>Приоритет ИИ</label>
+          <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
       </template>
 
@@ -933,6 +977,10 @@ function close(): void {
             <div v-if="decorEntry" class="muted xs">{{ decorEntry.cx }}×{{ decorEntry.cy }} клеток</div>
           </div>
         </div>
+        <div v-if="obj.type === 'landmark'" class="col">
+          <label>Подпись <span class="muted xs">(имя декорации, DESC_TXT)</span></label>
+          <el-input :model-value="obj.desc ?? ''" size="small" placeholder="без имени" @change="(v: string) => patch({ desc: v })" />
+        </div>
         <div v-if="decorVariantCount > 1" class="decor-variants-head">
           <span class="d2-sec">Вид <span class="muted">— выберите ({{ decorVariantCount }})</span></span>
           <el-button size="small" text title="Случайный вид" @click="rerollDecor()">⟳</el-button>
@@ -966,6 +1014,21 @@ function close(): void {
         <el-select :model-value="obj.subRace" size="small" class="owner-sel" @change="setSubRace">
           <el-option v-for="s in subraceOptions" :key="s.id" :label="s.label" :value="s.id" />
         </el-select>
+      </div>
+
+      <!-- 💰 CITY LOOT (stored ITEM_ID list) — shared by city + capital -->
+      <div v-if="obj.type === 'village' || obj.type === 'capital'" class="ro-block">
+        <div class="d2-sec">Хранилище <span class="muted">({{ cityLoot.length }})</span></div>
+        <div v-if="cityLoot.length" class="items-list">
+          <div v-for="(it, i) in cityLoot" :key="`${it}#${i}`" class="item-line d2-row">
+            <ItemIcon :id="it" :cat="itemStore.get(it)?.cat ?? -1" :size="24" />
+            <span class="item-name" :title="itemStore.nameOf(it) || it">{{ itemStore.nameOf(it) || it }}</span>
+            <span v-if="itemStore.get(it)?.gold" class="item-gold">{{ itemStore.get(it)?.gold }}</span>
+            <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="cityRemoveItem(i)" />
+          </div>
+        </div>
+        <div v-else class="muted sm">пусто</div>
+        <ItemPicker class="item-add" trigger-label="+ Добавить предмет" title="Добавить предмет в хранилище города" @pick="cityAddItem" />
       </div>
 
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
