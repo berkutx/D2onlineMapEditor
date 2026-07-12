@@ -423,6 +423,12 @@ export const useCollabStore = defineStore("collab", () => {
    *  recognize ops sent by an earlier session or another tab of the same browser. */
   let knownOpIds = new Set<string>();
 
+  /** Op uids the ROOM's server log already carries, gathered from the ops:since catch-up at join.
+   *  Distinct from knownOpIds (which also holds my LOCAL-only journal ops): a pre-join draft offer
+   *  must propose ONLY ops the room lacks, else it re-offers a draft I already pushed (harmless —
+   *  the server dedups the resend — but confusing). Reset per join; filled in foldEntries. */
+  let roomOpUids = new Set<string>();
+
   /** The outgoing hook editStore calls on every local commit / undo / redo.
    *  `inverses[i]` (captured at apply time) rides into the history entry of ops[i];
    *  `uids[i]` is ops[i]'s journal-persisted uid, sent as clientOpId. */
@@ -813,6 +819,7 @@ export const useCollabStore = defineStore("collab", () => {
         const bid = en.batchId;
         const run: typeof entries[number][] = [];
         while (i < entries.length && entries[i]!.batchId === bid) { run.push(entries[i]!); lastSeq = Math.max(lastSeq, entries[i]!.seq); i++; }
+        for (const r of run) if (r.clientOpId) roomOpUids.add(r.clientOpId); // room log carries these
         const fresh = run.filter((r) => !(r.clientOpId && knownOpIds.has(r.clientOpId)));
         const mine = (run[0]!.author ?? "") === myClientId;
         if (fresh.length === 0) {
@@ -843,6 +850,7 @@ export const useCollabStore = defineStore("collab", () => {
         continue;
       }
       i++;
+      if (en.clientOpId) roomOpUids.add(en.clientOpId); // room log carries this uid
       const mine = (en.author ?? "") === myClientId;
       if (en.clientOpId && knownOpIds.has(en.clientOpId)) {
         const row = rowByUid.get(en.clientOpId);
@@ -884,6 +892,7 @@ export const useCollabStore = defineStore("collab", () => {
     // draft sent to the room in THIS session is recognizable after the next reload)
     edit.ensureJournalUids();
     knownOpIds = edit.project ? allOpUids(edit.project) : new Set();
+    roomOpUids = new Set(); // rebuilt from the ops:since catch-up below (for the pre-join draft filter)
     await new Promise<void>((resolve) => {
       socket.emit("room:join", { mapId: id, channel: chan, user: { name: userName.value } }, (r) => {
         if (!r.ok) {
@@ -905,9 +914,13 @@ export const useCollabStore = defineStore("collab", () => {
         const after = reconnect ? lastSeq : 0;
         if (!reconnect) lastSeq = serverHead;
         if (serverHead > after) {
+          // resolve AFTER the fold so join()'s pre-join-draft offer sees the room's op log
+          // (roomOpUids); always resolve even on !res.ok so a failed ops:since can't hang the join.
           socket.emit("ops:since", { mapId: id, afterSeq: after }, (res) => {
             if (res.ok) foldEntries(res.entries);
+            resolve();
           });
+          return;
         } else if (serverHead < after) {
           // Сервер перезапустился и потерял лог — мой журнал полнее. Принимаем новый отсчёт,
           // и если лог ПУСТ (0) — RE-SEED его моим журналом, чтобы гость/второй таб снова могли
@@ -953,9 +966,18 @@ export const useCollabStore = defineStore("collab", () => {
     // capture NOW: peer ops folding into the journal while the dialog is open must not ride along.
     // The uids ride along too — the room log must carry the SAME uids the journal holds,
     // or the next reload would re-apply the sent draft (the double-apply crash).
-    const draft = activeOps(p);
-    const draftUids = activeOpUids(p);
-    if (!draft.length) return;
+    // offer ONLY ops the room's log doesn't already carry (roomOpUids, gathered in the catch-up
+    // fold above) — else a draft I pushed in a PRIOR session (still in my journal) is re-offered on
+    // every fresh join. Uid-less legacy ops (none after ensureJournalUids) are treated as un-synced.
+    const allDraft = activeOps(p);
+    const allUids = activeOpUids(p);
+    const draft: typeof allDraft = [];
+    const draftUids: typeof allUids = [];
+    for (let i = 0; i < allDraft.length; i++) {
+      const u = allUids[i];
+      if (!u || !roomOpUids.has(u)) { draft.push(allDraft[i]!); draftUids.push(u); }
+    }
+    if (!draft.length) return; // everything's already in the room — nothing to offer
     const key = `d2.collab.draftOffered.${id}#${channel.value ?? ""}`;
     try {
       if (sessionStorage.getItem(key)) return;
