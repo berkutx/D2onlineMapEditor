@@ -78,7 +78,7 @@ const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.
 const SITE_TYPES = ["merchant", "mage", "trainer", "mercenary"];
 const editable = computed(
   () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", "location",
-    "rod", "landmark", "mountains", "unit", ...SITE_TYPES].includes(obj.value.type),
+    "rod", "landmark", "mountains", ...SITE_TYPES].includes(obj.value.type),
 );
 
 /** MidLocation radius is a size step r → a (2r+1)×(2r+1) cell square. */
@@ -944,22 +944,6 @@ function close(): void {
         <div class="row">
           <label>Приоритет ИИ</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
-        </div>
-      </template>
-
-      <!-- 🧍 UNIT (одиночный юнит на карте — редок; выбирается из списка/по ссылке) -->
-      <template v-else-if="obj.type === 'unit'">
-        <div class="row">
-          <label>Юнит</label>
-          <UnitPicker :model-value="obj.implId ?? null" title="Тип юнита" @update:model-value="(v: string | null) => patch({ implId: v })" />
-        </div>
-        <div class="row">
-          <label>Уровень</label>
-          <el-input-number :model-value="obj.level ?? 1" :min="1" :max="50" size="small" controls-position="right" @change="(v: number) => patch({ level: v ?? 1 })" />
-        </div>
-        <div class="row">
-          <label>Здоровье</label>
-          <el-input-number :model-value="obj.hp ?? 0" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ hp: v ?? 0 })" />
         </div>
       </template>
 

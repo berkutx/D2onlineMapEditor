@@ -163,10 +163,13 @@ export function synthesizeCluster(doc: MapDocument, spec: AddPlayerSpec): Player
   const { ids } = spec;
   const raceType = race.raceType;
   const graceIdx = parseInt(race.raceId.slice(6), 16);
-  const playerIndex = (doc.players ?? []).length; // block-order slot for this player
+  const playerIndex = (doc.players ?? []).length; // block-order slot (PLAYER_n / _playersData position)
+  // The reader DERIVES playerNo from the PLAYER id's hex4 (parseCompoundId), NOT the array position —
+  // on a map with gappy player ids these differ, so match the id or the semantic round-trip fails.
+  const playerNo = parseInt(ids.pl.slice(-4), 16);
 
   const player: Record<string, unknown> = {
-    id: ids.pl, playerNo: playerIndex, race: graceIdx, name: spec.name || race.name, isHuman: false,
+    id: ids.pl, playerNo, race: graceIdx, name: spec.name || race.name, isHuman: false,
     desc: "", lordId: spec.lordId || race.lord, raceId: race.raceId,
     fogId: ids.fg, knownId: ids.ks, buildsId: ids.pb, face: 0, qtyBreaks: 0,
     bank: "G0100:R0000:Y0000:E0000:W0000:B0000", spellBank: "G0000:R0000:Y0000:E0000:W0000:B0000",
@@ -180,7 +183,10 @@ export function synthesizeCluster(doc: MapDocument, spec: AddPlayerSpec): Player
   const spells = { id: ids.ks, spells: [] as string[] };
   const buildings = { id: ids.pb, buildings: [] as string[] };
 
-  const guard: GarrisonUnit = { unit: race.guardian, level: 1, hp: race.guardianHp, name: "", key: ids.guard, slot: 0 };
+  // NB: field shapes MUST match what the reader produces on reparse (the semantic round-trip gate
+  // compares them) — empty NAME_TXT omitted (no `name:""`), a garrisoned stack always reads back
+  // garrisoned:true + equip:{} + inventory:[], and LEADR_ALIV=true is the default the reader omits.
+  const guard: GarrisonUnit = { unit: race.guardian, level: 1, hp: race.guardianHp, key: ids.guard, slot: 0 };
   const hero: GarrisonUnit = { unit: race.leader, level: 1, hp: race.leaderHp, name: "Герой", key: ids.hero, slot: 0 };
   const cell2 = (m: GarrisonUnit): (GarrisonUnit | null)[] => [null, null, m, null, null, null];
 
@@ -192,8 +198,9 @@ export function synthesizeCluster(doc: MapDocument, spec: AddPlayerSpec): Player
   } as unknown as MapObject;
   const stack = {
     type: "stack" as const, id: ids.kc, pos: { x: spec.x, y: spec.y },
-    owner: ids.pl, subRace: ids.sr, inside: ids.ft, leaderCell: 2, garrison: cell2(hero),
-    order: 1, move: 35, aiOrder: 1, priority: 3, creatLvl: 1, facing: 0, morale: 0, leaderAlive: true,
+    owner: ids.pl, subRace: ids.sr, inside: ids.ft, garrisoned: true, leaderCell: 2, garrison: cell2(hero),
+    order: 1, move: 35, aiOrder: 1, priority: 3, creatLvl: 1, facing: 0, morale: 0,
+    equip: {}, inventory: [],
   } as unknown as MapObject;
 
   const planEntries: { x: number; y: number; element: string }[] = [];

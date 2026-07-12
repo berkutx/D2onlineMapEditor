@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { parseScenario, serializeMapFromModelBytes, validateMap, verifyBlockIntegrity } from "@d2/sg-parser";
 import type { MapDocument } from "@d2/map-schema";
 import {
-  applyOp, materializeForExport, mintPlayerIds, raceAlreadyPresent, RACE_KEYS, type EditOp,
+  applyOp, materializeForExport, mintPlayerIds, raceAlreadyPresent, roundTripSemantic, RACE_KEYS, type EditOp,
 } from "@d2/map-edit";
 import { campaignMap } from "../../../test-helpers/gameDir";
 
@@ -57,6 +57,10 @@ describe("player roster — add / remove a faction", () => {
     const bytes = serializeMapFromModelBytes(base, materializeForExport(doc, [op], {}));
     expect(verifyBlockIntegrity(bytes).ok).toBe(true);
     expect(validateMap(parseScenario(bytes)).ok).toBe(true);
+    // the SERVER's /export gate: the reparse must equal the model (synthesized cluster fields must
+    // match exactly what the reader produces — empty names omitted, garrisoned/equip/inventory set,
+    // playerNo derived from the id, not the array index).
+    expect(roundTripSemantic(doc, bytes, [op]).ok).toBe(true);
     const re = parseScenario(bytes);
     expect(re.players.some((p) => p.id === ids.pl)).toBe(true);
     expect(re.players.length).toBe(doc.players.length + 1);
