@@ -195,9 +195,9 @@ const newMap = ref<{ size: number; fill: string; name: string; races: string[] }
 const raceOptions = [
   { value: "empire", label: "Империя" },
   { value: "undead", label: "Орды Нежити" },
+  { value: "clans", label: "Кланы Гор" },
   { value: "legions", label: "Легионы Проклятых" },
-  { value: "clans", label: "Горные Кланы" },
-  { value: "elves", label: "Эльфы" },
+  { value: "elves", label: "Эльфийский Союз" },
 ];
 const fillOptions = [
   { value: "default", label: "Нейтральная земля" },

@@ -89,10 +89,15 @@ export interface RaceDef {
   terrain: number;
   name: string;
 }
+// NB: in the TARGET mod (last_version) Grace, RR0001 = «Кланы Гор» and RR0002 = «Легионы Проклятых»
+// — the OPPOSITE of the base game the table was first lifted from (#123). Verified against Grace
+// NAME_TXT + the guardian units (UU3002 = Витар/Кланы, UU3003 = Ашкаэль/Легионы). So the `clans`/
+// `legions` keys carry each other's raceId/units/lord/terrain here — corrected so key == faction,
+// with the Grace name + Lterrain (Кланы Гор → 2 snow-mountain, Легионы → 3).
 export const RACES: Record<RaceKey, RaceDef> = {
   empire: { raceId: "G000RR0000", raceType: 0, guardian: "G000UU3001", guardianHp: 900, leader: "G000UU0019", leaderHp: 135, lord: "G000LR0003", terrain: 1, name: "Империя" },
-  legions: { raceId: "G000RR0001", raceType: 3, guardian: "G000UU3002", guardianHp: 900, leader: "G000UU0044", leaderHp: 200, lord: "G000LR0006", terrain: 3, name: "Легионы Проклятых" },
-  clans: { raceId: "G000RR0002", raceType: 2, guardian: "G000UU3003", guardianHp: 900, leader: "G000UU0070", leaderHp: 150, lord: "G000LR0009", terrain: 2, name: "Горные Кланы" },
+  clans: { raceId: "G000RR0001", raceType: 3, guardian: "G000UU3002", guardianHp: 900, leader: "G000UU0044", leaderHp: 200, lord: "G000LR0006", terrain: 2, name: "Кланы Гор" },
+  legions: { raceId: "G000RR0002", raceType: 2, guardian: "G000UU3003", guardianHp: 900, leader: "G000UU0070", leaderHp: 150, lord: "G000LR0009", terrain: 3, name: "Легионы Проклятых" },
   undead: { raceId: "G000RR0003", raceType: 1, guardian: "G000UU3004", guardianHp: 900, leader: "G000UU0096", leaderHp: 135, lord: "G000LR0012", terrain: 4, name: "Орды Нежити" },
   elves: { raceId: "G000RR0005", raceType: 5, guardian: "G000UU8040", guardianHp: 900, leader: "G000UU8009", leaderHp: 135, lord: "G000LR0018", terrain: 6, name: "Эльфийский Союз" },
 };

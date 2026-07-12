@@ -21,9 +21,10 @@ const lord = useLordStore();
 const players = computed(() => edit.liveDoc?.players ?? []);
 onMounted(() => { if (!lord.loaded && !lord.loading) void lord.load(); });
 
-/** Grace race index → RU name (base-game order; the owner IS its race, 1:1 per scenario). */
+/** Grace race INDEX (RR#### number, = p.race) → RU name, per the TARGET mod's Grace.dbf:
+ *  1 = Кланы Гор, 2 = Легионы Проклятых, 3 = Орды Нежити (NOT the base-game order — #123). */
 const RACE_NAMES: Record<number, string> = {
-  0: "Империя", 1: "Нежить", 2: "Легионы", 3: "Кланы", 4: "Нейтралы", 5: "Эльфы",
+  0: "Империя", 1: "Кланы Гор", 2: "Легионы Проклятых", 3: "Орды Нежити", 4: "Нейтралы", 5: "Эльфийский Союз",
 };
 const raceName = (r: number): string => RACE_NAMES[r] ?? `Раса ${r}`;
 const isNeutral = (p: { race: number }): boolean => p.race === 4;
