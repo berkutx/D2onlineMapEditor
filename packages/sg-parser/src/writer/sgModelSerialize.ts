@@ -22,6 +22,72 @@ import {
 import { eventFrame, scenVariablesFrame, stackTemplateFrame, diplomacyFrame } from "./eventFrame.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
 import { encodeCp1251 } from "./cp1251.js";
+import { RACES, RACE_KEYS } from "./createBlankMap.js";
+
+/** RACE_ID → RACE_TYPE (the value stored in the header `_playersData`, ScenarioInfo PLAYER_n and
+ *  diplomacy — NOT the same as the Grace race INDEX for legions/clans/undead). Neutral RR0004 = 4. */
+const RACEID_TO_TYPE = new Map<string, number>([
+  ["G000RR0004", 4],
+  ...RACE_KEYS.map((k) => [RACES[k].raceId, RACES[k].raceType] as [string, number]),
+]);
+
+/** ASCII lastIndexOf over a byte array (find the header's OB0000 marker). */
+function lastIndexOfAscii(buf: Uint8Array, needle: string): number {
+  outer: for (let i = buf.length - needle.length; i >= 0; i--) {
+    for (let k = 0; k < needle.length; k++) if (buf[i + k] !== needle.charCodeAt(k)) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+/**
+ * Re-stamp the FILE HEADER's `_playersData` blob when the player roster changes size. The blob
+ * (`i32 count` + count×40-byte records, first i32 = race_type) sits right before the `<ver>OB0000`
+ * marker; an `offset` i32 at byte 16 = headerLength − 30. Both MUST track the roster or the native
+ * game crashes (empty/short blob) or mis-seeks (stale offset). SURGICAL: preserve every existing
+ * 40-byte record verbatim (only its first i32 is decoded; the trailing 36 bytes may carry data we
+ * don't model), splice per `transform`, fix the count, and recompute offset from the new length.
+ * Bails (returns header unchanged) if the layout doesn't match the invariants — so a map we can't
+ * safely edit is never corrupted (the gold-check catches a needed-but-skipped restamp).
+ */
+function restampPlayersHeader(
+  header: Uint8Array,
+  oldCount: number,
+  transform: (records: Uint8Array[]) => Uint8Array[],
+): Uint8Array {
+  const ob = lastIndexOfAscii(header, "OB0000");
+  if (ob < 4) return header;
+  const recordsEnd = ob - 4; // the 4-char version literal ("S143") precedes OB0000
+  const countPos = recordsEnd - oldCount * 40 - 4;
+  if (countPos < 0) return header;
+  const dv = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  if (dv.getInt32(countPos, true) !== oldCount) return header; // blob layout ≠ expected → bail
+  if (dv.getInt32(16, true) !== header.length - 30) return header; // offset invariant ≠ expected → bail
+  const records: Uint8Array[] = [];
+  for (let i = 0; i < oldCount; i++) records.push(header.slice(countPos + 4 + i * 40, countPos + 4 + (i + 1) * 40));
+  const next = transform(records);
+  if (next.length === oldCount && next.every((r, i) => r === records[i])) return header; // unchanged
+  const prefix = header.slice(0, countPos);
+  const suffix = header.slice(recordsEnd);
+  const body = new Uint8Array(4 + next.length * 40);
+  new DataView(body.buffer).setInt32(0, next.length, true);
+  next.forEach((r, i) => body.set(r.subarray(0, 40), 4 + i * 40));
+  const out = new Uint8Array(prefix.length + body.length + suffix.length);
+  out.set(prefix, 0);
+  out.set(body, prefix.length);
+  out.set(suffix, prefix.length + body.length);
+  // offset field @16 = firstObjectOffset − 30 = new headerLength − 30 (invariant on every real map)
+  new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(16, out.length - 30, true);
+  return out;
+}
+
+/** A fresh 40-byte `_playersData` record for an added player: first i32 = race_type, rest zero
+ *  (mirrors createBlankMap's `w.i32(rt).repitable(0, 36)`). */
+function newPlayerRecord(raceType: number): Uint8Array {
+  const r = new Uint8Array(40);
+  new DataView(r.buffer).setInt32(0, raceType, true);
+  return r;
+}
 
 /** The name/desc/author ALSO live in the FILE HEADER at fixed zero-padded offsets (the
  *  D2EESFISIG MapHeaderBlock, before every block frame — desc@43×256, author@299×21, name@321×64).
@@ -596,6 +662,12 @@ export function serializeMapFromModel(
   // MidMountains is NOT droppable: it is a singleton-ish block (one per map, N children, legally
   // EMPTY on some maps) — rebuildFromModel rebuilds its payload from the children and keeps it raw
   // when empty, so it is never removed (deleteMountainOps rebuilds the block, never deletes it).
+  const playerIds = new Set(doc.players.map((p) => p.id));
+  const subraceIds = new Set((doc.subraces ?? []).map((s) => s.id));
+  const sat = doc.satellites;
+  const fogIds = new Set((sat?.fogs ?? []).map((f) => f.id));
+  const spellIds = new Set((sat?.playerSpells ?? []).map((k) => k.id));
+  const buildingIds = new Set((sat?.playerBuildings ?? []).map((p) => p.id));
   const isDead = (b: ScenarioBlock): boolean => {
     if (!b.id) return false;
     switch (b.typeName) {
@@ -604,6 +676,12 @@ export function serializeMapFromModel(
       case "MidRoad": return !roadById.has(b.id);
       case "MidEvent": return !eventIds.has(b.id);
       case "MidStackTemplate": return !templateIds.has(b.id);
+      // roster blocks — dead when the player/subrace/satellite was removed (removePlayer cascade).
+      case "MidPlayer": return !playerIds.has(b.id);
+      case "MidSubRace": return !subraceIds.has(b.id);
+      case "MidgardMapFog": return sat != null && !fogIds.has(b.id);
+      case "PlayerKnownSpells": return sat != null && !spellIds.has(b.id);
+      case "PlayerBuildings": return sat != null && !buildingIds.has(b.id);
       default:
         // object blocks (the discriminated placed types) are dead when the object is gone.
         return REBUILD_OBJECT_TYPES.has(b.typeName) && !byId.has(b.id);
@@ -647,7 +725,41 @@ export function serializeMapFromModel(
   for (const tc of doc.satellites?.talismanCharges ?? [])
     if (!baseIds.has(tc.id)) emit("MidTalismanCharges", tc.id, talismanChargesFrame(version, secondOf(tc.id), tc.entries));
 
-  return { ...s, header: patchHeaderText(s.header, headerText), blocks: [...swapped, ...add] };
+  // new ROSTER blocks (addPlayer): the player + its subrace + its 3 satellites. The added player's
+  // Capital/hero MidStack/guardian+hero MidUnit/3 MidItem already append via the object + instance
+  // loops above (they carry key+slot+itemKeys). fog/spells/buildings are per-player state blocks.
+  for (const p of doc.players)
+    if (!baseIds.has(p.id)) emit("MidPlayer", p.id, playerFrame(version, secondOf(p.id), p));
+  for (const sr of doc.subraces ?? [])
+    if (!baseIds.has(sr.id)) emit("MidSubRace", sr.id, subraceFrame(version, secondOf(sr.id), sr));
+  for (const f of doc.satellites?.fogs ?? [])
+    if (!baseIds.has(f.id)) emit("MidgardMapFog", f.id, fogFrame(version, secondOf(f.id), f.rows));
+  for (const k of doc.satellites?.playerSpells ?? [])
+    if (!baseIds.has(k.id)) emit("PlayerKnownSpells", k.id, playerSpellsFrame(version, secondOf(k.id), k.spells));
+  for (const pb of doc.satellites?.playerBuildings ?? [])
+    if (!baseIds.has(pb.id)) emit("PlayerBuildings", pb.id, playerBuildingsFrame(version, secondOf(pb.id), pb.buildings));
+
+  // FILE-HEADER `_playersData` — re-stamp only when the roster size changed (an unchanged roster
+  // keeps the header byte-identical). Preserve every surviving record verbatim (block order), drop
+  // removed ones, append a fresh record per added player.
+  let header = patchHeaderText(s.header, headerText);
+  const origPlayerIds = s.blocks.filter((b) => b.typeName === "MidPlayer").map((b) => b.id);
+  if (doc.players.length !== origPlayerIds.length) {
+    const origSet = new Set(origPlayerIds);
+    const survivingIds = new Set(doc.players.map((p) => p.id));
+    const added = doc.players.filter((p) => !origSet.has(p.id));
+    const raceTypeOf = (raceId: string | undefined): number => {
+      const rt = RACEID_TO_TYPE.get(raceId ?? "");
+      if (rt === undefined) throw new Error(`serializeMapFromModel: unknown RACE_ID '${raceId}' for a new player's _playersData record`);
+      return rt;
+    };
+    header = restampPlayersHeader(header, origPlayerIds.length, (records) => {
+      const kept = origPlayerIds.map((id, i) => (survivingIds.has(id) ? records[i]! : null)).filter((r): r is Uint8Array => r != null);
+      return [...kept, ...added.map((p) => newPlayerRecord(raceTypeOf(p.raceId)))];
+    });
+  }
+
+  return { ...s, header, blocks: [...swapped, ...add] };
 }
 
 /** Export the whole `.sg` from a materialized model — no byte patch, no skeleton fallback.
