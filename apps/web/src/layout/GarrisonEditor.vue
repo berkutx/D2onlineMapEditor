@@ -39,9 +39,24 @@ const emit = defineEmits<{
 
 const unitStore = useUnitStore();
 
-// Row-major order for a 2-col grid: each row = one formation column (cell/2); left=back (odd),
-// right=front (even). Row0=[1,0], row1=[3,2], row2=[5,4].
-const CELLS = [1, 0, 3, 2, 5, 4];
+// Layout slots in DOM order (row-major, 2 cols; left=back/odd, right=front/even). Normally a
+// formation row is two cells [back, front]. A 2-cell "double" unit (dragon, big hero) is ONE
+// entity filling BOTH cells of a row (they share a `key`); it is shown as a SINGLE WIDE slot
+// spanning both columns — physically one unit, so one picker + one set of stats (edits sync both
+// cells via the parent's entityCells). A freshly-placed unit has no `key` yet → shown as normal.
+const slots = computed<{ cell: number; wide: boolean }[]>(() => {
+  const g = props.garrison;
+  const keyOf = (i: number): string | undefined => (g[i] as { key?: string } | null)?.key ?? undefined;
+  const out: { cell: number; wide: boolean }[] = [];
+  for (let r = 0; r < 3; r++) {
+    const front = 2 * r;
+    const back = 2 * r + 1;
+    const k = keyOf(front);
+    if (g[front] && g[back] && k && keyOf(back) === k) out.push({ cell: front, wide: true });
+    else { out.push({ cell: back, wide: false }); out.push({ cell: front, wide: false }); }
+  }
+  return out;
+});
 
 /** Stack mode: does the formation already have a LEADER-category unit in the leader cell?
  *  Mirrors the reference Stack.qml binding `unitsView.leader: !garrison.hasLeader`. */
@@ -72,7 +87,8 @@ function onPick(cell: number, v: string | null): void {
   <div class="ro-block">
     <div class="garr-cols"><span>Тыл</span><span>Фронт</span></div>
     <div class="garr-grid">
-      <div v-for="cell in CELLS" :key="cell" class="garr-cell" :class="{ filled: !!garrison[cell], ro: readonly }">
+      <div v-for="{ cell, wide } in slots" :key="cell" class="garr-cell" :class="{ filled: !!garrison[cell], ro: readonly, wide }">
+        <span v-if="wide" class="garr-double" title="Двойной юнит — занимает обе линии формации; правки применяются к нему целиком">⇔ двойной</span>
         <template v-if="readonly">
           <div class="garr-ro">
             <UnitIcon
@@ -98,7 +114,7 @@ function onPick(cell: number, v: string | null): void {
               v-if="leaderCell !== undefined && garrison[cell]"
               type="button"
               class="garr-leader"
-              :class="{ active: leaderCell === cell, blocked: !starAllowed(cell) }"
+              :class="{ active: leaderCell === cell || (wide && leaderCell === cell + 1), blocked: !starAllowed(cell) }"
               :disabled="!starAllowed(cell)"
               :title="
                 leaderCell === cell ? 'Лидер отряда'
@@ -178,6 +194,16 @@ function onPick(cell: number, v: string | null): void {
 }
 .garr-cell.filled {
   background: var(--el-fill-color-light);
+}
+/* a 2-cell "double" unit is shown as ONE slot spanning both formation lines */
+.garr-cell.wide { grid-column: 1 / -1; }
+.garr-double {
+  align-self: flex-start;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--el-color-warning);
+  opacity: 0.85;
 }
 .garr-cell.ro {
   gap: 2px;

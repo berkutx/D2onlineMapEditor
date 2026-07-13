@@ -300,6 +300,9 @@ function commitGarrison(targetId: string, g: (GarrUnit | null)[]): void {
 }
 function setGarrisonUnitOn(targetId: string, cur: (GarrUnit | null)[], cell: number, unitId: string): void {
   const g = cur.map((c) => (c ? { ...c } : null));
+  // replacing a cell that held a BIG (2-cell) unit: clear its OTHER cell too, or a ghost half of
+  // the old unit lingers (inconsistent entity → export semantic fail; the wide slot half-shows it)
+  for (const i of entityCells(g, cell)) if (i !== cell) g[i] = null;
   g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
   commitGarrison(targetId, g);
 }
