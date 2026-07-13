@@ -303,16 +303,28 @@ function setGarrisonUnitOn(targetId: string, cur: (GarrUnit | null)[], cell: num
   g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
   commitGarrison(targetId, g);
 }
+/** Cells occupied by the SAME entity as `cell`. A BIG (2-cell) unit is ONE unit spanning two
+ *  garrison cells that share one identity (`key`); a per-cell edit/clear must hit them ALL, or the
+ *  model splits into an inconsistent pair (one unit, two levels) that the serializer collapses back
+ *  — silently dropping the edit, which the export's semantic round-trip then rejects. Falls back to
+ *  just `cell` for a keyless (freshly-placed, not-yet-serialized) unit. */
+function entityCells(g: (GarrUnit | null)[], cell: number): number[] {
+  const key = (g[cell] as { key?: string } | null)?.key;
+  if (!key) return [cell];
+  const out: number[] = [];
+  g.forEach((x, i) => { if (x && (x as { key?: string }).key === key) out.push(i); });
+  return out.length ? out : [cell];
+}
 function clearGarrisonCellOn(targetId: string, cur: (GarrUnit | null)[], cell: number): void {
   const g = cur.map((c) => (c ? { ...c } : null));
-  g[cell] = null;
+  for (const i of entityCells(g, cell)) g[i] = null; // clear the whole big unit, not half of it
   commitGarrison(targetId, g);
 }
 function setGarrisonStatOn(targetId: string, cur: (GarrUnit | null)[], cell: number, key: "level" | "hp", v: number): void {
   const g = cur.map((c) => (c ? { ...c } : null));
-  const c = g[cell];
-  if (!c) return;
-  g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  if (!g[cell]) return;
+  const nv = Math.max(0, Math.round(v || 0));
+  for (const i of entityCells(g, cell)) g[i] = { ...(g[i] as GarrUnit), [key]: nv }; // keep both cells of a big unit in sync
   commitGarrison(targetId, g);
 }
 /** unit-with-updated-modifiers; the key is DELETED when the list empties (an explicit
@@ -325,9 +337,8 @@ function withMods(c: GarrUnit, mods: string[]): GarrUnit {
 }
 function setGarrisonModsOn(targetId: string, cur: (GarrUnit | null)[], cell: number, mods: string[]): void {
   const g = cur.map((c) => (c ? { ...c } : null));
-  const c = g[cell];
-  if (!c) return;
-  g[cell] = withMods(c, mods);
+  if (!g[cell]) return;
+  for (const i of entityCells(g, cell)) g[i] = withMods(g[i] as GarrUnit, mods); // both cells of a big unit
   commitGarrison(targetId, g);
 }
 
