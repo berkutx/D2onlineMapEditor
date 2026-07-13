@@ -17,6 +17,7 @@ import {
   validateMap, verifyBlockIntegrity, parsePlanEntries,
 } from "@d2/sg-parser";
 import type { MapDocument } from "@d2/map-schema";
+import { MapEvent } from "@d2/map-schema";
 import {
   materializeForExport, applyEditsToBytes, occupancyErrors, planCoverageErrors,
   placeChestOps, placeVillageOps, placeLocationOps, type EditOp,
@@ -143,5 +144,66 @@ describe("full model-rebuild export", () => {
     const before = baseCharges(parseScenario(fromModel([])));
     const out = fromModel(placeChestOps(doc, 49, 49, 0, [talismanId]));
     expect(chargeCount(parseScenario(out)), "one new charge row").toBe(before + 1);
+  });
+});
+
+/**
+ * Popup SOUND/MUSIC extension strip (the prod crash: a name like "AbeyRw1.mp3" makes the game
+ * look up a non-existent file and NULL-crash on playback). The user's report was identity✓ /
+ * semantic✗: the value must be canonicalized IDENTICALLY on both sides — the model
+ * (MapEvent.parse in applyOps) and the byte writer (applyBytes stores op.event RAW). Riders'
+ * event S143EV0115 carries a real popup sound "cfw_l2"; we re-attach an extension and expect it
+ * gone everywhere. `.MP3` (upper-case) also proves the strip is case-insensitive while the
+ * NAME's case is preserved.
+ */
+const AUDIO_EV = "S143EV0115";
+function popupAudio(d: MapDocument, evId: string): { sound: string; music: string } {
+  const ev = (d.events ?? []).find((e) => e.id === evId)!;
+  const pop = ev.effects.find((e) => e.kind === "popup") as { sound?: string; music?: string };
+  return { sound: pop.sound ?? "", music: pop.music ?? "" };
+}
+/** Clone the event with an extension-bearing sound/music — a RAW op.event (NOT MapEvent.parse'd),
+ *  matching what the editor emits and what applyBytes serialises verbatim. */
+function eventWithExtAudio(): MapEvent {
+  const src = (doc.events ?? []).find((e) => e.id === AUDIO_EV)!;
+  const ev = structuredClone(src) as MapEvent & { effects: { kind: string; sound?: string; music?: string }[] };
+  const pop = ev.effects.find((e) => e.kind === "popup")!;
+  pop.sound = "cfw_l2.MP3";
+  pop.music = "trevoga.wav";
+  return ev as MapEvent;
+}
+
+describe("popup SOUND/MUSIC extension is stripped (prod crash-name fix)", () => {
+  it("MapEvent.parse canonicalizes the live-doc value (bare name, case preserved)", () => {
+    const ev = MapEvent.parse(eventWithExtAudio());
+    const pop = ev.effects.find((e) => e.kind === "popup") as { sound: string; music: string };
+    expect(pop.sound).toBe("cfw_l2");
+    expect(pop.music).toBe("trevoga");
+  });
+
+  it("full model-rebuild writes the bare name (schema transform + writer)", () => {
+    const out = fromModel([{ kind: "upsertEvent", event: eventWithExtAudio() }]);
+    expect(popupAudio(parseScenario(out), AUDIO_EV)).toEqual({ sound: "cfw_l2", music: "trevoga" });
+    expect(verifyBlockIntegrity(out).ok).toBe(true);
+  });
+
+  it("byte-patch export strips it too, though op.event bypasses MapEvent.parse (applyBytes → writer)", () => {
+    const raw = parseScenarioRaw(base).raw;
+    const patch = applyEditsToBytes(raw, [{ kind: "upsertEvent", event: eventWithExtAudio() }], opts);
+    expect(popupAudio(parseScenario(patch), AUDIO_EV)).toEqual({ sound: "cfw_l2", music: "trevoga" });
+    expect(verifyBlockIntegrity(patch).ok).toBe(true);
+  });
+
+  it("both export paths AGREE (the identity✓/semantic✗ mismatch is gone)", () => {
+    const op: EditOp = { kind: "upsertEvent", event: eventWithExtAudio() };
+    const fm = popupAudio(parseScenario(fromModel([op])), AUDIO_EV);
+    const patch = popupAudio(parseScenario(applyEditsToBytes(parseScenarioRaw(base).raw, [op], opts)), AUDIO_EV);
+    expect(fm).toEqual(patch);
+  });
+
+  it("a pristine bare sound is untouched by the round-trip (no-op → byte-exact safe)", () => {
+    // S143EV0115.sound is already "cfw_l2" on disk; UNEDITED rebuild must reproduce it verbatim.
+    expect(popupAudio(doc, AUDIO_EV).sound).toBe("cfw_l2");
+    expect(popupAudio(parseScenario(fromModel([])), AUDIO_EV).sound).toBe("cfw_l2");
   });
 });

@@ -559,6 +559,18 @@ watch(
     />
   </el-select>
 
+  <!-- звук / музыка: голое имя файла БЕЗ расширения (игра сама достраивает путь и .wav;
+       имя с ".mp3"/".wav" крашит игру при проигрыше). Расширение срезается при сохранении. -->
+  <div v-else-if="field.type === 'audio'" class="ev-audio">
+    <CommitInput
+      :model-value="(modelValue as string) ?? ''"
+      size="small"
+      :placeholder="field.key === 'sound' ? 'имя из SoundsP, напр. abbey' : 'имя из MusicP, напр. trevoga'"
+      @update:model-value="set($event)"
+    />
+    <span class="ev-audio-hint">без расширения (.mp3/.wav срезается автоматически)</span>
+  </div>
+
   <!-- код (Lua-скрипт) — с подсветкой синтаксиса -->
   <CodeInput
     v-else-if="field.key === 'code'"
@@ -590,4 +602,6 @@ watch(
 .ev-loc-btn:hover { opacity: 1; }
 .ev-loc-map { align-self: flex-start; }
 .ev-decor-opt { display: flex; align-items: center; gap: 8px; }
+.ev-audio { display: flex; flex-direction: column; gap: 2px; }
+.ev-audio-hint { font-size: 10px; color: var(--el-text-color-placeholder); }
 </style>

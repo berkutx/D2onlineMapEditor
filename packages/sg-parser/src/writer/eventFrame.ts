@@ -9,7 +9,7 @@ import { ByteWriter } from "./byteWriter.js";
 import { encodeCp1251 } from "./cp1251.js";
 import { emitBlock } from "./sgRebuild.js";
 import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate, DiplomacyEntry } from "@d2/map-schema";
-import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
+import { CONDITION_BY_KIND, EFFECT_BY_KIND, normalizeAudioRef } from "@d2/map-schema";
 import {
   COND_CODEC,
   EFF_CODEC,
@@ -25,6 +25,9 @@ function writeField(w: ByteWriter, fld: CodecField, src: Record<string, unknown>
     case "bool": w.bool(fld.tag, v === true); break;
     case "ref": w.refField(fld.tag, (v as string) || EMPTY_REF); break;
     case "str": w.stringField(fld.tag, (v as string) ?? ""); break;
+    // audioStr: strip a stray ".mp3"/".wav" even when the op bypassed MapEvent.parse (applyBytes
+    // stores op.event raw) — the last gate before bytes, so a crash-name can never reach disk.
+    case "audioStr": w.stringField(fld.tag, normalizeAudioRef((v as string) ?? "")); break;
     case "existInt": w.defaultInt(fld.tag, v === true ? 0 : 1); break; // mustExist => MISC_INT 0
     case "popupShow": w.stringField(fld.tag, POPUP_SHOW_TO_STR[Number(v) || 0] ?? "TRI"); break;
   }

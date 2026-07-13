@@ -44,6 +44,7 @@ export {
   CONDITION_BY_CODE,
   EFFECT_BY_KIND,
   EFFECT_BY_CODE,
+  normalizeAudioRef,
 } from "./events.js";
 export type { EventTypeSpec, EventFieldSpec } from "./events.js";
 

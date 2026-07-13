@@ -15,6 +15,19 @@
 
 import { z } from "zod";
 
+/**
+ * Canonicalize a SOUND/MUSIC reference to the engine's on-disk convention: the BARE file
+ * name with NO audio extension. The engine builds the real path itself (SoundsP/MusicP + its
+ * own extension), so a name carrying ".mp3"/".wav" makes it look up a non-existent file and
+ * NULL-crash on playback. Verified against the shipped corpus: 0/575 SOUND and 0/258 MUSIC
+ * carry an extension, so stripping one is a no-op on every pristine map (byte-exact safe).
+ * Case is PRESERVED — the `.ff` name table matches the real name and Windows lookups are
+ * case-insensitive, so lowercasing buys nothing and would only risk a mixed-case mod asset.
+ */
+export function normalizeAudioRef(name: string): string {
+  return name.trim().replace(/\.(mp3|wav|wave|ogg|flac|wma)$/i, "");
+}
+
 /** A single editable field of a condition/effect, driving both zod and the editor form. */
 export interface EventFieldSpec {
   key: string;
@@ -25,6 +38,7 @@ export interface EventFieldSpec {
     | "int"
     | "bool"
     | "text"
+    | "audio" // sound/music file reference — bare name, no extension (see normalizeAudioRef)
     | "ref-loc"
     | "ref-stack"
     | "ref-city"
@@ -227,8 +241,8 @@ export const EFFECT_SPECS: readonly EventTypeSpec[] = [
     { key: "text", label: "Текст", type: "text" },
     { key: "image", label: "Портрет", type: "text" },
     { key: "image2", label: "Портрет 2", type: "text" },
-    { key: "sound", label: "Звук", type: "text" },
-    { key: "music", label: "Музыка", type: "text" },
+    { key: "sound", label: "Звук", type: "audio" },
+    { key: "music", label: "Музыка", type: "audio" },
     { key: "leftSide", label: "Слева", type: "bool" },
     { key: "popupShow", label: "Кому", type: "enum", options: [
       { value: 0, label: "Инициатору (TRI)" }, { value: 1, label: "Всем (ALL)" }, { value: 2, label: "Затронутым (AFF)" } ] },
@@ -279,10 +293,16 @@ export const EFFECT_BY_CODE: Record<number, EventTypeSpec> = Object.fromEntries(
 // A field's value type in the model. Every field carries a DEFAULT so that events captured
 // before a spec gained a field (older journals / collab peers) normalize instead of failing —
 // the defaults match what the byte codec writes for an absent tag (false / 0 / "").
-const fieldZod = (f: EventFieldSpec): z.ZodTypeAny =>
-  f.type === "bool" ? z.boolean().default(false) : f.type === "text" || f.type.startsWith("ref-") || f.type === "template" || f.type === "item" || f.type === "spell"
-    ? z.string().default("")
-    : z.number().default(0); // int / enum / var
+const fieldZod = (f: EventFieldSpec): z.ZodTypeAny => {
+  if (f.type === "bool") return z.boolean().default(false);
+  // audio: a length-string that is ALWAYS canonicalized to the bare name (no extension) —
+  // this is the authoritative normalization point (MapEvent.parse runs in applyOps, so the
+  // live doc never carries a crash-inducing ".mp3"; the byte writer strips it too, in step).
+  if (f.type === "audio") return z.string().default("").transform(normalizeAudioRef);
+  if (f.type === "text" || f.type.startsWith("ref-") || f.type === "template" || f.type === "item" || f.type === "spell")
+    return z.string().default("");
+  return z.number().default(0); // int / enum / var
+};
 
 function specToZod(specs: readonly EventTypeSpec[], discr: "cond" | "eff"): z.ZodTypeAny {
   const variants = specs.map((s) => {

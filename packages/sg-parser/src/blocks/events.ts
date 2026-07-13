@@ -8,7 +8,7 @@
 import { ByteBuffer, stripTrailingNul } from "../bytebuffer.js";
 import type { FramedObject } from "../framing.js";
 import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate, TemplateUnit } from "@d2/map-schema";
-import { CONDITION_BY_CODE, EFFECT_BY_CODE } from "@d2/map-schema";
+import { CONDITION_BY_CODE, EFFECT_BY_CODE, normalizeAudioRef } from "@d2/map-schema";
 import {
   COND_CODEC,
   EFF_CODEC,
@@ -72,6 +72,7 @@ function readField(c: Cursor, fld: CodecField, out: Record<string, unknown>): vo
     case "bool": out[fld.key] = c.bool(fld.tag); break;
     case "ref": out[fld.key] = refNorm(c.str(fld.tag)); break;
     case "str": out[fld.key] = c.str(fld.tag); break;
+    case "audioStr": out[fld.key] = normalizeAudioRef(c.str(fld.tag)); break; // bare SOUND/MUSIC name
     case "existInt": out[fld.key] = c.int(fld.tag) === 0; break; // MISC_INT 0 => mustExist
     case "popupShow": out[fld.key] = POPUP_SHOW_TO_INT[c.str(fld.tag)] ?? 0; break;
   }

@@ -10,6 +10,9 @@
  *  - bool     : tag + 1 byte (0/1)
  *  - ref      : tag + int32(11) + 10-char id + NUL  (empty id <-> "" via EMPTY_REF)
  *  - str      : tag + int32(len+1) + CP1251 bytes + NUL  (variable-length string)
+ *  - audioStr : like `str`, but the value is canonicalized to the bare SOUND/MUSIC name (no
+ *               audio extension) on read AND write via normalizeAudioRef — a ".mp3"/".wav"
+ *               name NULL-crashes the game on playback. No-op on every shipped map (all bare).
  *  - existInt : STACK_EXISTANCE MISC_INT — stored int, 0 => true (mustExist)
  *  - popupShow: DISPLAY_POPUP_MESSAGE POPUP_SHOW — stored string "TRI"/"ALL"/"AFF" <-> 0/1/2
  *
@@ -17,7 +20,7 @@
  * are handled explicitly by the reader/writer, not by this table (special: true).
  */
 
-export type CodecIo = "int" | "bool" | "ref" | "str" | "existInt" | "popupShow";
+export type CodecIo = "int" | "bool" | "ref" | "str" | "audioStr" | "existInt" | "popupShow";
 
 export interface CodecField {
   key: string;
@@ -85,7 +88,7 @@ export const EFF_CODEC: Record<string, TypeCodec> = {
   removeLandmark: { fields: [f("lmarkId", "ID_LMARK", "ref"), f("boolVal", "BOOLVALUE", "bool")] },
   changeObjective: { fields: [f("text", "OBJECT_TXT", "str")] },
   popup: { fields: [
-    f("text", "POPUP_TXT", "str"), f("music", "MUSIC", "str"), f("sound", "SOUND", "str"),
+    f("text", "POPUP_TXT", "str"), f("music", "MUSIC", "audioStr"), f("sound", "SOUND", "audioStr"),
     f("image", "IMAGE", "str"), f("image2", "IMAGE2", "str"), f("leftSide", "LEFT_SIDE", "bool"),
     f("popupShow", "POPUP_SHOW", "popupShow"), f("boolValue", "BOOLVALUE", "bool") ] },
   changeStackOrder: { fields: [f("stackId", "ID_STACK", "ref"), f("orderTarget", "ORDER_TARG", "ref"), f("firstOnly", "FIRST_ONLY", "bool"), f("order", "ORDER", "int")] },
