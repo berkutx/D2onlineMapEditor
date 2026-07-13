@@ -489,19 +489,32 @@ export const useCollabStore = defineStore("collab", () => {
    * hold them) — peers dedup by uid, so no double-apply. Called only when serverHead === 0.
    */
   const RESEED_CHUNK = 20_000; // < server MAX_BATCH (50k); each chunk ≪ the 8 MB socket buffer
-  let reseedInFlight = false; // reconnect can flap several times — re-seed at most ONCE per loss
-  function reseedRoom(id: string): void {
+  let reseedInFlight = false; // reconnect can flap / two joins race — push at most ONCE per window
+
+  /** Chunked push of (ops, uids) into the room log WITHOUT recording history rows (I already hold
+   *  them; peers dedup by uid). The shared mechanism behind both journal→room reconciles:
+   *   • reseedRoom — a server restart emptied the log and my journal is fuller (reconnect branch);
+   *   • the fresh-join own-room draft (offerPreJoinDraft) — edits made before the socket joined.
+   *  Chunks under the server's MAX_BATCH so a large journal isn't rejected wholesale and lost.
+   *  reseedInFlight is per-tab, so two tabs racing an empty room can each push the same uids — the
+   *  server's EditLog is idempotent over clientOpId (appendBatch skips an already-logged uid), so
+   *  the second push is a no-op: no duplicate lines, and the log stays injective for the
+   *  doc-rebuild folds (materialize / revert) that would otherwise throw on a duplicate add. */
+  /** Returns true iff the push actually started (false if the guard tripped — another reseed in
+   *  flight, no socket/identity, or nothing to send — so callers don't report a false success). */
+  function pushJournalToLog(
+    id: string,
+    ops: readonly EditOp[],
+    uids: readonly (string | undefined)[],
+    reason: string,
+  ): boolean {
     const socket = getSocket();
-    const p = edit.project;
-    if (reseedInFlight || !socket || !me.value || !p) return;
-    const ops = activeOps(p);
-    const uids = activeOpUids(p);
-    if (ops.length === 0) return;
+    if (reseedInFlight || !socket || !me.value || ops.length === 0) return false;
     reseedInFlight = true;
     window.setTimeout(() => { reseedInFlight = false; }, 30_000); // safety release
     const meId = me.value.socketId;
     // eslint-disable-next-line no-console
-    console.info(`[collab] re-seeding room log from journal (${ops.length} ops) after server restart`);
+    console.info(`[collab] ${reason} (${ops.length} ops)`);
     let pending = 0;
     for (let i = 0; i < ops.length; i += RESEED_CHUNK) {
       const chunkOps = ops.slice(i, i + RESEED_CHUNK);
@@ -515,10 +528,19 @@ export const useCollabStore = defineStore("collab", () => {
       pending++;
       socket.emit("edit:ops", { mapId: id, batchId, baseSeq: lastSeq, ops: payload }, (ack) => {
         if (ack.ok) lastSeq = Math.max(lastSeq, ack.seqEnd);
-        else console.warn("[collab] re-seed chunk rejected:", ack.reason); // eslint-disable-line no-console
+        else console.warn(`[collab] ${reason} chunk rejected:`, ack.reason); // eslint-disable-line no-console
         if (--pending === 0) reseedInFlight = false;
       });
     }
+    return true;
+  }
+
+  /** A server restart emptied the room log while my journal is fuller — re-seed it (serverHead===0)
+   *  so a guest / second tab can catch up to the full state instead of a truncated map. */
+  function reseedRoom(id: string): void {
+    const p = edit.project;
+    if (!p) return;
+    pushJournalToLog(id, activeOps(p), activeOpUids(p), "re-seeding room log from journal after server restart");
   }
 
   // --- history revert («откатить») -------------------------------------------------------
@@ -952,23 +974,31 @@ export const useCollabStore = defineStore("collab", () => {
     offerPreJoinDraft(id);
   }
 
-  /** Pre-join local draft: edits made OUTSIDE the room (offline / before ever joining) live
-   *  only in my journal — peers can't see them. When joining a room WITH peers, offer to
-   *  broadcast the draft as regular room ops (my journal keeps them — it stays the full
-   *  op list for export). Declining keeps the draft local-on-top; either way the offer is
-   *  made once per room per session (no nagging on every map open). NOT on reconnects —
-   *  doJoin from the reconnect handler bypasses this. */
+  /** Pre-join local draft reconciliation. Edits made before the socket joined the room (the
+   *  editor is local-first: every op journals immediately, but broadcasts only once in a room)
+   *  live only in my journal. roomOpUids — gathered in the catch-up fold — is what the room's
+   *  log already carries; the rest of my journal is un-synced draft.
+   *
+   *  - Own room (my persistent private channel — a normal open, incl. my OTHER tab of the same
+   *    map, or a rejoin after the room log was reset): silently reconcile via the chunked reseed
+   *    pusher (no modal, no history-row spam, safe for a huge journal). It's my map, my room — a
+   *    confirm is pure friction. Self-limiting: the next join folds these into roomOpUids, so the
+   *    draft is then empty and nothing re-sends.
+   *  - A share link into someone else's channel (?map=X&room=Y): my journal still holds my own
+   *    private edits to map X, and silently pushing them would LEAK my local draft into their
+   *    live session. That's a real decision, so ask first (once per room per session, and only
+   *    when a peer is actually there to receive it).
+   *  NOT on reconnects — doJoin from the reconnect handler bypasses this. */
   function offerPreJoinDraft(id: string): void {
     if (!connected.value || mapId.value !== id) return;
-    if (peers.size === 0) return; // solo room — no one to share the draft with
     const p = edit.project;
     if (!p || p.baseScenarioId !== id) return;
-    // capture NOW: peer ops folding into the journal while the dialog is open must not ride along.
-    // The uids ride along too — the room log must carry the SAME uids the journal holds,
-    // or the next reload would re-apply the sent draft (the double-apply crash).
-    // offer ONLY ops the room's log doesn't already carry (roomOpUids, gathered in the catch-up
-    // fold above) — else a draft I pushed in a PRIOR session (still in my journal) is re-offered on
-    // every fresh join. Uid-less legacy ops (none after ensureJournalUids) are treated as un-synced.
+    // capture NOW: peer ops folding into the journal while the (possible) dialog is open must not
+    // ride along. The uids ride along too — the room log must carry the SAME uids the journal
+    // holds, or the next reload would re-apply the sent draft (the double-apply crash). Take ONLY
+    // ops the room's log doesn't already carry (roomOpUids) — else a draft pushed in a PRIOR
+    // session (still in my journal) is re-sent on every fresh join. Uid-less legacy ops (none
+    // after ensureJournalUids) count as un-synced.
     const allDraft = activeOps(p);
     const allUids = activeOpUids(p);
     const draft: typeof allDraft = [];
@@ -977,7 +1007,21 @@ export const useCollabStore = defineStore("collab", () => {
       const u = allUids[i];
       if (!u || !roomOpUids.has(u)) { draft.push(allDraft[i]!); draftUids.push(u); }
     }
-    if (!draft.length) return; // everything's already in the room — nothing to offer
+    if (!draft.length) return; // everything's already in the room — nothing to reconcile
+
+    // My own room → silently reconcile via the chunked reseed pusher, no modal. getChannelId() is
+    // this client's persistent private channel; a foreign channel only happens via a share link.
+    // Skip the degraded "anonymous" channel (clientId.ts fallback when storage is blocked): there
+    // getChannelId() collapses to a shared constant, so a foreign share-link room could masquerade
+    // as "own" — fall through to the confirm instead of a silent push.
+    const myChannel = getChannelId();
+    if (channel.value === myChannel && myChannel !== "anonymous") {
+      pushJournalToLog(id, draft, draftUids, "reconciling pre-join draft into own room");
+      return;
+    }
+
+    // Foreign (share-link) room → asking guards against leaking my private draft into it.
+    if (peers.size === 0) return; // no one there to receive it
     const key = `d2.collab.draftOffered.${id}#${channel.value ?? ""}`;
     try {
       if (sessionStorage.getItem(key)) return;
@@ -991,8 +1035,16 @@ export const useCollabStore = defineStore("collab", () => {
       { confirmButtonText: "Отправить в комнату", cancelButtonText: "Оставить локально", type: "info" },
     )
       .then(() => {
-        sendOps(draft, undefined, draftUids); // no captured inverses (applied long ago) — their revert rows come disabled
-        ElMessage.success(`Черновик отправлен: участники теперь видят ваши правки (${draft.length})`);
+        // Route through the SAME chunked pusher as the own-room path (NOT sendOps): it goes through
+        // the server's idempotent appendBatch (confirming in two tabs can't duplicate lines), chunks
+        // a large draft under MAX_BATCH, and records no local history rows. A draft is a bulk import
+        // I already hold — seating revert rows on it is unnecessary, and an all-duplicate ack would
+        // otherwise seat them on a phantom seq. Peers still receive the ops via the broadcast.
+        if (pushJournalToLog(id, draft, draftUids, "sharing pre-join draft into room")) {
+          ElMessage.success(`Черновик отправлен: участники теперь видят ваши правки (${draft.length})`);
+        } else {
+          ElMessage.warning("Синхронизация занята — попробуйте отправить черновик ещё раз через несколько секунд.");
+        }
       })
       .catch(() => {
         /* оставить локально (текущее поведение: черновик поверх, только у меня) */

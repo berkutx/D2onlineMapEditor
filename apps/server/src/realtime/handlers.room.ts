@@ -211,11 +211,16 @@ export function registerRoomHandlers(
         return;
       }
       const author = socket.data.clientId ?? socket.id;
+      const headBefore = log.head(key);
       const entry = log.append(key, parsed.data, socket.id, p.clientOpId, Date.now(), p.batchId, author);
       ack({ ok: true, seq: entry.seq });
-      socket
-        .to(roomId(key))
-        .emit("edit:applied", { seq: entry.seq, by: socket.id, author, clientOpId: p.clientOpId, op: parsed.data, batchId: p.batchId });
+      // A fresh append gets seq = head+1; an idempotent dedup hit returns an EXISTING entry
+      // (seq <= headBefore) — peers already hold it, so don't re-broadcast a duplicate.
+      if (entry.seq > headBefore) {
+        socket
+          .to(roomId(key))
+          .emit("edit:applied", { seq: entry.seq, by: socket.id, author, clientOpId: p.clientOpId, op: parsed.data, batchId: p.batchId });
+      }
     });
   });
 
@@ -257,6 +262,13 @@ export function registerRoomHandlers(
       }
       const author = socket.data.clientId ?? socket.id;
       const entries = log.appendBatch(key, validated, socket.id, p.batchId, Date.now(), author);
+      if (entries.length === 0) {
+        // every op was a duplicate the log already holds (idempotent re-send / two-tab reconcile
+        // race) — nothing new to broadcast; ack the current head so the sender advances its cursor.
+        const head = log.head(key);
+        ack({ ok: true, seqStart: head, seqEnd: head });
+        return;
+      }
       ack({ ok: true, seqStart: entries[0]!.seq, seqEnd: entries[entries.length - 1]!.seq });
       socket.to(roomId(key)).emit("edit:opsApplied", {
         batchId: p.batchId,

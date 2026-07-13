@@ -55,6 +55,14 @@ export interface LogEntry {
 
 export class EditLog {
   private logs = new Map<string, LogEntry[]>();
+  /** roomKey -> (clientOpId -> its entry): the idempotency index. Guarantees the log is an
+   *  INJECTIVE set over clientOpId, so a re-sent batch (two tabs racing an empty room to reseed
+   *  their shared-localStorage journal; a reconnect re-seed flap) never lands a DUPLICATE line.
+   *  This matters because the server-side doc-rebuild folds (RoomSnapshots.materialize, the two
+   *  revert handlers) apply the raw log via applyOps WITHOUT deduping by uid — a duplicate
+   *  addObject line would throw "id already exists" there and permanently break revert/catch-up.
+   *  Lazily rebuilt from the in-memory log; kept current by append/appendBatch; dropped on clear. */
+  private seenIdx = new Map<string, Map<string, LogEntry>>();
   /** roomKey -> the in-flight/settled load promise (idempotent lazy load). */
   private loads = new Map<string, Promise<void>>();
   /** roomKey -> the serialized append-write chain (keeps disk lines in order). */
@@ -124,7 +132,14 @@ export class EditLog {
     let sawSentinel = false;
     let pending: LogEntry[] = [];
     let pendingBatch: string | undefined;
+    const acceptedIds = new Set<string>();
     const accept = (e: LogEntry): void => {
+      // HEAL a legacy duplicate line: a log written before source-dedup (e.g. the pre-fix two-tab
+      // reseed race) can hold two lines with the same clientOpId. Keep the FIRST, drop the rest —
+      // otherwise the un-deduped doc-rebuild folds (materialize / revert / export) throw on the
+      // duplicate addObject. Its seq becomes a preserved gap, which head/since already tolerate.
+      if (e.clientOpId && acceptedIds.has(e.clientOpId)) return;
+      if (e.clientOpId) acceptedIds.add(e.clientOpId);
       // PRESERVE the stored seq (clients recorded it in their journals). A single dropped
       // line must NOT renumber every later op — that would shift the whole `ops:since`
       // window and re-send/skip ops on catch-up. Only repair anomalies (NaN / non-monotonic)
@@ -266,6 +281,18 @@ export class EditLog {
     return log;
   }
 
+  /** The room's clientOpId→entry index, lazily built from the in-memory log (which load() has
+   *  already populated before any append). Callers keep it current via append/appendBatch. */
+  private seen(roomKey: string): Map<string, LogEntry> {
+    let s = this.seenIdx.get(roomKey);
+    if (!s) {
+      s = new Map();
+      for (const e of this.mem(roomKey)) if (e.clientOpId) s.set(e.clientOpId, e);
+      this.seenIdx.set(roomKey, s);
+    }
+    return s;
+  }
+
   /** The highest seq currently in memory for a room (0 = empty). Seq — NOT array length — so
    *  a preserved gap from a dropped line does not shift the client-facing sequence. */
   private lastSeq(log: LogEntry[]): number {
@@ -283,8 +310,17 @@ export class EditLog {
     author?: string,
   ): LogEntry {
     const log = this.mem(roomKey);
+    const seen = this.seen(roomKey);
+    // Idempotent, exactly like appendBatch: a re-sent single op (same clientOpId) is already logged
+    // — return the EXISTING entry (its seq), never append a duplicate line. Keeps the log injective
+    // over clientOpId on BOTH append paths, so the doc-rebuild folds (materialize / revert / export)
+    // that apply the raw log without deduping never hit a duplicate addObject. The caller detects a
+    // dedup hit (entry.seq <= headBefore) and skips the redundant re-broadcast.
+    const dup = clientOpId ? seen.get(clientOpId) : undefined;
+    if (dup) return dup;
     const entry: LogEntry = { seq: this.lastSeq(log) + 1, op, by, author: author ?? by, clientOpId, batchId, ts };
     log.push(entry);
+    if (clientOpId) seen.set(clientOpId, entry);
     this.persist(roomKey, JSON.stringify(entry) + "\n");
     return entry;
   }
@@ -302,12 +338,20 @@ export class EditLog {
     author?: string,
   ): LogEntry[] {
     const log = this.mem(roomKey);
+    const seen = this.seen(roomKey);
     const entries: LogEntry[] = [];
     let seq = this.lastSeq(log);
     let lines = "";
     for (const { clientOpId, op } of ops) {
+      // Idempotent: skip an op whose clientOpId is already in the log (a re-sent reconcile/reseed
+      // batch — two tabs racing an empty room, a reconnect flap). Appending it again would put a
+      // DUPLICATE addObject line in the durable log, which throws in the doc-rebuild folds that do
+      // NOT dedup by uid (materialize / revert). Skipping keeps the log injective over clientOpId.
+      // No seq is consumed for a skipped op, so kept seqs stay contiguous with prior appends.
+      if (clientOpId && seen.has(clientOpId)) continue;
       const entry: LogEntry = { seq: ++seq, op, by, author: author ?? by, clientOpId, batchId, ts };
       log.push(entry);
+      if (clientOpId) seen.set(clientOpId, entry);
       entries.push(entry);
       lines += JSON.stringify(entry) + "\n";
     }
@@ -315,7 +359,7 @@ export class EditLog {
       const sentinel: CommitSentinel = { commit: batchId, n: entries.length };
       lines += JSON.stringify(sentinel) + "\n";
     }
-    this.persist(roomKey, lines);
+    if (lines) this.persist(roomKey, lines); // all-duplicate batch → nothing new to write
     return entries;
   }
 
@@ -366,6 +410,7 @@ export class EditLog {
    *  the append handle is closed after its queued writes settle (reopened on next append). */
   clear(roomKey: string): void {
     this.logs.delete(roomKey);
+    this.seenIdx.delete(roomKey); // rebuilt from the reloaded log on next access
     this.loads.delete(roomKey);
     this.dirty.delete(roomKey);
     const prev = this.writes.get(roomKey) ?? Promise.resolve();

@@ -27,9 +27,10 @@ describe("EditLog", () => {
 
   it("isolates logs per map id", () => {
     const log = new EditLog();
-    log.append("a", setCell(0, 0, 1), "s", "c", 0);
-    log.append("a", setCell(0, 0, 1), "s", "c", 0);
-    log.append("b", setCell(0, 0, 1), "s", "c", 0);
+    // distinct clientOpIds — each real op carries a fresh uid; reusing one would (correctly) dedup
+    log.append("a", setCell(0, 0, 1), "s", "a1", 0);
+    log.append("a", setCell(0, 0, 1), "s", "a2", 0);
+    log.append("b", setCell(0, 0, 1), "s", "b1", 0);
     expect(log.head("a")).toBe(2);
     expect(log.head("b")).toBe(1);
     expect(log.head("c")).toBe(0);
@@ -259,6 +260,110 @@ describe("EditLog durability hardening (phase 1)", () => {
       await log.flush(key);
       expect(log.isDegraded(key)).toBe(false);
       expect(log.degradedCount()).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("EditLog idempotency (clientOpId dedup — reseed / two-tab reconcile safety)", () => {
+  // Two tabs share the same localStorage journal, so both can race an empty room and push the
+  // SAME uids. Appending a duplicate addObject line would later throw in the server-side
+  // doc-rebuild folds (materialize / revert) that do not dedup by uid. The log must stay
+  // injective over clientOpId at the SOURCE so those consumers are safe by construction.
+  const setCellOp = (x: number, y: number, v: number): EditOp => setCell(x, y, v);
+
+  it("appendBatch skips ops whose clientOpId is already logged (a whole-batch re-send is a no-op)", () => {
+    const log = new EditLog();
+    const batch = [
+      { clientOpId: "u1", op: setCellOp(0, 0, 1) },
+      { clientOpId: "u2", op: setCellOp(1, 1, 2) },
+    ];
+    expect(log.appendBatch("m", batch, "tabA", "B1", 0).map((e) => e.seq)).toEqual([1, 2]);
+    const second = log.appendBatch("m", batch, "tabB", "B2", 1); // the other tab replays the journal
+    expect(second).toHaveLength(0);
+    expect(log.head("m")).toBe(2); // no duplicate lines
+    expect(log.all("m").map((e) => e.clientOpId)).toEqual(["u1", "u2"]);
+  });
+
+  it("skips only the DUPLICATE ops in a partial-overlap batch, without burning a seq on them", () => {
+    const log = new EditLog();
+    log.appendBatch("m", [
+      { clientOpId: "u1", op: setCellOp(0, 0, 1) },
+      { clientOpId: "u2", op: setCellOp(1, 1, 2) },
+    ], "s", "B1", 0);
+    const out = log.appendBatch("m", [
+      { clientOpId: "u2", op: setCellOp(1, 1, 2) }, // already logged
+      { clientOpId: "u3", op: setCellOp(2, 2, 3) }, // new
+    ], "s", "B2", 1);
+    expect(out.map((e) => e.clientOpId)).toEqual(["u3"]);
+    expect(out.map((e) => e.seq)).toEqual([3]); // contiguous — the skipped u2 consumed no seq
+    expect(log.all("m").map((e) => e.clientOpId)).toEqual(["u1", "u2", "u3"]);
+  });
+
+  it("dedups a batch against a prior single append() (and against another op in the same batch)", () => {
+    const log = new EditLog();
+    log.append("m", setCellOp(0, 0, 1), "s", "u1", 0); // single op first
+    const out = log.appendBatch("m", [
+      { clientOpId: "u1", op: setCellOp(0, 0, 1) }, // dup of the single append
+      { clientOpId: "u2", op: setCellOp(1, 1, 2) },
+      { clientOpId: "u2", op: setCellOp(9, 9, 9) }, // intra-batch dup of u2
+    ], "s", "B1", 1);
+    expect(out.map((e) => e.clientOpId)).toEqual(["u2"]);
+    expect(log.head("m")).toBe(2);
+    expect(log.all("m").map((e) => e.op)).toEqual([setCellOp(0, 0, 1), setCellOp(1, 1, 2)]);
+  });
+
+  it("rebuilds the dedup index from disk on reload — a re-sent batch after a restart is still skipped", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-idem-"));
+    try {
+      const key = "idem#c";
+      const a = new EditLog(dir);
+      await a.ensureLoaded(key);
+      a.appendBatch(key, [
+        { clientOpId: "u1", op: setCellOp(0, 0, 1) },
+        { clientOpId: "u2", op: setCellOp(1, 1, 2) },
+      ], "s", "B1", 0, "auth");
+      await a.flush(key);
+      const b = new EditLog(dir); // server restart: fresh instance, index rebuilt from disk
+      await b.ensureLoaded(key);
+      const out = b.appendBatch(key, [
+        { clientOpId: "u1", op: setCellOp(0, 0, 1) },
+        { clientOpId: "u2", op: setCellOp(1, 1, 2) },
+      ], "s", "B2", 1, "auth");
+      expect(out).toHaveLength(0);
+      expect(b.head(key)).toBe(2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("append() is idempotent too — a re-sent single op returns the existing entry, no duplicate line", () => {
+    const log = new EditLog();
+    const a = log.append("m", setCellOp(0, 0, 1), "tabA", "u1", 0);
+    const b = log.append("m", setCellOp(0, 0, 1), "tabB", "u1", 1); // the other tab re-sends the same uid
+    expect(b.seq).toBe(a.seq); // the existing entry, not a new one
+    expect(log.head("m")).toBe(1);
+    expect(log.all("m")).toHaveLength(1);
+    // and a batch that includes that uid still skips it
+    expect(log.appendBatch("m", [{ clientOpId: "u1", op: setCellOp(0, 0, 1) }], "s", "B", 2)).toHaveLength(0);
+  });
+
+  it("load() heals a legacy duplicate clientOpId line (a log written before source-dedup)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-heal-"));
+    try {
+      const key = "heal#c";
+      const file = join(dir, createHash("sha1").update(key).digest("hex") + ".jsonl");
+      const line = (seq: number, uid: string, x: number): string =>
+        JSON.stringify({ seq, op: setCellOp(x, 0, x), by: "s", author: "a", clientOpId: uid, ts: 0 }) + "\n";
+      // the pre-fix two-tab race durably wrote u1 twice (seq 1 and 3), with u2 between
+      await writeFile(file, line(1, "u1", 1) + line(2, "u2", 2) + line(3, "u1", 9));
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      expect(log.all(key).map((e) => e.clientOpId)).toEqual(["u1", "u2"]); // duplicate u1 dropped, FIRST kept
+      expect(log.all(key).map((e) => e.op)).toEqual([setCellOp(1, 0, 1), setCellOp(2, 0, 2)]); // first u1's payload
+      // the rebuilt index reflects the healed log — a re-sent u1 is still skipped
+      expect(log.appendBatch(key, [{ clientOpId: "u1", op: setCellOp(1, 0, 1) }], "s", "B", 0)).toHaveLength(0);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
