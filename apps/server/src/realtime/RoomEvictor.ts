@@ -39,10 +39,12 @@ export class RoomEvictor {
     const t = setTimeout(() => {
       this.timers.delete(roomKey);
       if (this.rooms.hasMembers(roomKey)) return; // someone rejoined in the window
-      // A DEGRADED room's in-memory tail is the ONLY copy of ops the disk refused (disk full /
-      // IO dead) — evicting + reloading from disk would silently lose them. Keep it in RAM (a
-      // degraded room is rare and the box is already unhealthy; a small leak beats data loss).
-      if (this.log.isDegraded(roomKey)) return;
+      // Do NOT evict a room whose durable tail isn't fully on disk yet — clearing its in-memory
+      // log would lose ops that were acked but not written. `isFlushing` covers a healthy-but-slow
+      // or HUNG write still in flight (the buffer holds the only copy); `isDegraded` covers a write
+      // that already failed. Evicting + reloading either would silently drop those acked ops. Keep
+      // it in RAM (both are rare and the box is already unhealthy; a small leak beats data loss).
+      if (this.log.isDegraded(roomKey) || this.log.isFlushing(roomKey)) return;
       this.log.clear(roomKey); // drop parsed entries; the durable .jsonl stays
       this.snapshots?.clear(roomKey);
     }, this.delayMs);

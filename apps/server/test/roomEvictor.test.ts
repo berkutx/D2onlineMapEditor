@@ -12,9 +12,10 @@ import { RoomManager } from "../src/realtime/RoomManager";
 
 type Cleared = { log: string[]; snap: string[] };
 
-/** Minimal fakes standing in for EditLog / RoomSnapshots: they only need clear() + isDegraded(),
- *  and record which rooms were cleared so a test can assert eviction happened (or didn't). */
-function fakes(degraded = new Set<string>()): {
+/** Minimal fakes standing in for EditLog / RoomSnapshots: they only need clear() + isDegraded() +
+ *  isFlushing(), and record which rooms were cleared so a test can assert eviction happened (or
+ *  didn't). */
+function fakes(degraded = new Set<string>(), flushing = new Set<string>()): {
   log: never;
   snapshots: never;
   cleared: Cleared;
@@ -23,6 +24,7 @@ function fakes(degraded = new Set<string>()): {
   const log = {
     clear: (k: string) => cleared.log.push(k),
     isDegraded: (k: string) => degraded.has(k),
+    isFlushing: (k: string) => flushing.has(k),
   };
   const snapshots = { clear: (k: string) => cleared.snap.push(k) };
   return { log: log as never, snapshots: snapshots as never, cleared };
@@ -80,6 +82,17 @@ describe("RoomEvictor", () => {
     evictor.schedule("r1");
     vi.advanceTimersByTime(DELAY);
     expect(cleared.log).toEqual([]); // degraded → kept in RAM
+    expect(cleared.snap).toEqual([]);
+  });
+
+  it("does NOT evict a room whose durable tail is still in flight (isFlushing veto)", () => {
+    const rooms = new RoomManager();
+    const { log, snapshots, cleared } = fakes(new Set(), new Set(["r1"]));
+    const evictor = new RoomEvictor(rooms, log, snapshots, DELAY);
+
+    evictor.schedule("r1");
+    vi.advanceTimersByTime(DELAY);
+    expect(cleared.log).toEqual([]); // un-persisted bytes not yet on disk → keep in RAM, no loss
     expect(cleared.snap).toEqual([]);
   });
 

@@ -54,6 +54,7 @@ async function main(): Promise<void> {
       // eslint-disable-next-line no-console
       console.error("[@d2/server] EditLog flush failed on shutdown:", e);
     }
+    log.dispose(); // stop the retry/fsync timers now that the tail is flushed
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));

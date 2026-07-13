@@ -35,6 +35,14 @@ const isSentinel = (v: unknown): v is CommitSentinel =>
  *  KERNEL-level loss (power cut / host reset) without paying an fsync per brush op. */
 const FSYNC_INTERVAL_MS = 200;
 
+/** How often a degraded room re-attempts to flush its un-persisted tail. Degraded rooms reject new
+ *  edits, so without a background retry a room that hit a transient disk error would stay degraded
+ *  (and its acked-but-unwritten ops in limbo) until a restart. This lets it recover on its own.
+ *  The interval backs off exponentially up to RETRY_MAX_MS while the disk stays dead, so a
+ *  persistent outage doesn't churn the IO / error log every second. */
+const RETRY_INTERVAL_MS = 1000;
+const RETRY_MAX_MS = 30_000;
+
 export interface LogEntry {
   /** 1-based monotonic sequence within the room's log. */
   seq: number;
@@ -73,6 +81,12 @@ export class EditLog {
   /** rooms with un-fsynced bytes; drained by the group-commit timer. */
   private dirty = new Set<string>();
   private fsyncTimer: ReturnType<typeof setTimeout> | undefined;
+  /** roomKey -> JSONL bytes accepted into memory but NOT yet durably on disk. A failed write keeps
+   *  its bytes here (never drops them into a disk gap); they are retried by the next persist and by
+   *  the background retry timer until they land. A room stays degraded until its buffer drains. */
+  private unpersisted = new Map<string, string>();
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private retryDelay = RETRY_INTERVAL_MS;
   /** rooms whose durability FAILED even after retries (disk full / IO dead): memory keeps
    *  serving reads, but callers must REJECT new edits — an ack without durability is a
    *  silent-divergence promise we refuse to make. */
@@ -84,6 +98,15 @@ export class EditLog {
   /** True when the room's durable file stopped accepting writes — reject new edits. */
   isDegraded(roomKey: string): boolean {
     return this.degradedRooms.has(roomKey);
+  }
+
+  /** True while the room holds bytes accepted into memory but NOT yet durably on disk (a write is
+   *  in flight, hung, or failed). The evictor must NOT drop such a room — clearing it would lose the
+   *  un-written acked ops (and a later write-failure would strand the room permanently degraded).
+   *  Covers the window a healthy-but-slow write opens that `isDegraded` (set only on failure) does
+   *  not. */
+  isFlushing(roomKey: string): boolean {
+    return this.unpersisted.has(roomKey);
   }
 
   /** Count of degraded rooms (health route). */
@@ -252,24 +275,71 @@ export class EditLog {
     this.fsyncTimer.unref?.();
   }
 
-  /** Append entries' JSONL to disk, serialized per room (no interleaving), with retry. */
+  /** Accept `lines` for durable write. The bytes are held in `unpersisted` until a write actually
+   *  LANDS: a failed write keeps them (and degrades the room) so they are retried by the next
+   *  persist and by the background retry timer — never dropped into a disk GAP under a later
+   *  successful write. The room is un-degraded only once its whole un-persisted tail is on disk, and
+   *  RoomEvictor skips any room that isDegraded OR isFlushing (buffer non-empty), so it can never
+   *  evict a room holding acked-but-unwritten ops, and a reload therefore never loses them. */
   private persist(roomKey: string, lines: string): void {
     if (!this.dataDir) return;
+    this.unpersisted.set(roomKey, (this.unpersisted.get(roomKey) ?? "") + lines);
+    this.flushRoom(roomKey);
+  }
+
+  /** Chain a write of the room's whole un-persisted buffer onto its serialized write queue. */
+  private flushRoom(roomKey: string): void {
     const prev = this.writes.get(roomKey) ?? Promise.resolve();
-    const next = prev
-      .then(() => this.writeWithRetry(roomKey, lines))
-      .then(() => {
-        this.degradedRooms.delete(roomKey); // disk recovered → lift the write freeze
+    const next = prev.then(async () => {
+      const toWrite = this.unpersisted.get(roomKey);
+      if (!toWrite) return; // a coalesced earlier flush already wrote everything
+      try {
+        await this.writeWithRetry(roomKey, toWrite);
+        // Remove exactly the prefix we wrote; bytes appended during the await stay for the next
+        // flush (its own persist() chained one). If the buffer no longer STARTS with what we wrote
+        // (the evictor now prevents this — a flushing room isn't cleared — but be defensive), KEEP
+        // it rather than drop it: a re-written line is deduped on load() by clientOpId, so retrying
+        // is always safe while dropping an acked op never is.
+        const buf = this.unpersisted.get(roomKey) ?? "";
+        const rest = buf.startsWith(toWrite) ? buf.slice(toWrite.length) : buf;
+        if (rest) this.unpersisted.set(roomKey, rest);
+        else this.unpersisted.delete(roomKey);
         this.scheduleFsync(roomKey);
-      })
-      .catch((err) => {
-        // Durability failed even after retries (disk full / IO dead). Memory keeps serving
-        // READS, but the room is marked DEGRADED so handlers REJECT new edits — acking an
-        // edit we cannot persist is a silent-divergence promise we refuse to make.
+        // Un-degrade ONLY when the whole tail is durable — a remaining buffer keeps the freeze until
+        // a later flush lands it (so the room is never un-degraded with un-written ops).
+        if (!this.unpersisted.has(roomKey)) this.degradedRooms.delete(roomKey);
+        if (this.unpersisted.size === 0) this.retryDelay = RETRY_INTERVAL_MS; // disk healed → reset backoff
+      } catch (err) {
+        // Durability failed even after retries (disk full / IO dead). Memory keeps serving READS,
+        // the bytes stay in `unpersisted` (retried by scheduleRetry when the disk heals), and the
+        // room is DEGRADED so handlers REJECT new edits — acking an edit we cannot persist is a
+        // silent-divergence promise we refuse to make. Log only on the healthy→degraded EDGE so a
+        // persistently dead disk doesn't spam an error per room per retry.
+        if (!this.degradedRooms.has(roomKey)) {
+          console.error(`[EditLog] persist FAILED (room degraded, edits rejected) for ${roomKey}:`, (err as Error).message);
+        }
         this.degradedRooms.add(roomKey);
-        console.error(`[EditLog] persist FAILED (room degraded, edits rejected) for ${roomKey}:`, (err as Error).message);
-      });
+        this.scheduleRetry();
+      }
+    });
     this.writes.set(roomKey, next);
+  }
+
+  /** While any room has an un-persisted tail, re-attempt to flush so a degraded room recovers on its
+   *  own once the disk heals — without a new edit (it rejects those). The delay backs off
+   *  exponentially (RETRY_INTERVAL_MS → RETRY_MAX_MS) so a persistent outage doesn't churn; it
+   *  resets to the base on a successful drain. Self-stops when every buffer has drained. unref()
+   *  keeps it from holding the process open. */
+  private scheduleRetry(): void {
+    if (this.retryTimer || this.unpersisted.size === 0) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = undefined;
+      if (this.unpersisted.size === 0) { this.retryDelay = RETRY_INTERVAL_MS; return; }
+      for (const key of this.unpersisted.keys()) this.flushRoom(key);
+      this.retryDelay = Math.min(this.retryDelay * 2, RETRY_MAX_MS);
+      this.scheduleRetry();
+    }, this.retryDelay);
+    this.retryTimer.unref?.();
   }
 
   private mem(roomKey: string): LogEntry[] {
@@ -395,6 +465,11 @@ export class EditLog {
    *  After a full flush every acked op is on stable storage — a SIGTERM redeploy loses zero. */
   async flush(roomKey?: string): Promise<void> {
     const sync = async (key: string): Promise<void> => {
+      // A degraded room that healed just before shutdown still holds its tail in `unpersisted` with
+      // only a background retry pending — issue one final flush so those acked bytes land instead of
+      // dying with the process (else the "loses zero" contract breaks). If the disk is still dead
+      // the write fails again and the bytes are unavoidably lost, same as before.
+      if (this.unpersisted.has(key)) this.flushRoom(key);
       await this.writes.get(key);
       const h = this.handles.get(key);
       if (h) await h.datasync().catch(() => undefined);
@@ -403,7 +478,17 @@ export class EditLog {
       await sync(roomKey);
       return;
     }
-    await Promise.all([...this.writes.keys()].map(sync));
+    const keys = new Set([...this.writes.keys(), ...this.unpersisted.keys()]);
+    await Promise.all([...keys].map(sync));
+  }
+
+  /** Stop the background timers (retry + group-commit fsync) so the instance is quiescent. Call at
+   *  graceful shutdown AFTER flush() (prod exits anyway; this matters for tests / embedding, where a
+   *  lingering unref'd timer could otherwise re-touch the data dir). Does NOT drop `unpersisted` —
+   *  flush() should have drained it; anything left was un-writable and is lost with the process. */
+  dispose(): void {
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = undefined; }
+    if (this.fsyncTimer) { clearTimeout(this.fsyncTimer); this.fsyncTimer = undefined; }
   }
 
   /** Drop a room's log from MEMORY (e.g. when its room empties). The durable file is kept;
@@ -411,6 +496,7 @@ export class EditLog {
   clear(roomKey: string): void {
     this.logs.delete(roomKey);
     this.seenIdx.delete(roomKey); // rebuilt from the reloaded log on next access
+    this.unpersisted.delete(roomKey); // evictor only clears non-degraded rooms → tail already drained
     this.loads.delete(roomKey);
     this.dirty.delete(roomKey);
     const prev = this.writes.get(roomKey) ?? Promise.resolve();

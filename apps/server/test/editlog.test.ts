@@ -264,6 +264,113 @@ describe("EditLog durability hardening (phase 1)", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("does NOT lose a failed write's ops — the next successful flush writes the whole tail, survives evict+reload", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-degrec-"));
+    try {
+      const key = "degrec#c";
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      // batch1: poison the write → room degraded, ops live ONLY in memory + the un-persisted buffer
+      const real = (log as unknown as { writeWithRetry: (k: string, l: string) => Promise<void> }).writeWithRetry.bind(log);
+      (log as unknown as { writeWithRetry: unknown }).writeWithRetry = () => Promise.reject(new Error("ENOSPC"));
+      log.append(key, setCell(0, 0, 1), "s", "u1", 0, undefined, "auth");
+      await log.flush(key);
+      expect(log.isDegraded(key)).toBe(true);
+      // disk heals; batch2's successful flush must ALSO land batch1's un-persisted tail (no gap)
+      (log as unknown as { writeWithRetry: unknown }).writeWithRetry = real;
+      log.append(key, setCell(1, 1, 2), "s", "u2", 1, undefined, "auth");
+      await log.flush(key);
+      expect(log.isDegraded(key)).toBe(false);
+      // evict (room empties) + reload from disk — BOTH ops must survive; before the fix batch1 was gone
+      log.clear(key);
+      const fresh = new EditLog(dir);
+      await fresh.ensureLoaded(key);
+      expect(fresh.all(key).map((e) => e.clientOpId)).toEqual(["u1", "u2"]);
+      expect(fresh.all(key).map((e) => e.op)).toEqual([setCell(0, 0, 1), setCell(1, 1, 2)]);
+      expect(fresh.head(key)).toBe(2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("background retry recovers a degraded room on its own once the disk heals (no new edit needed)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-retry-"));
+    try {
+      const key = "retry#c";
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      let fail = true;
+      const real = (log as unknown as { writeWithRetry: (k: string, l: string) => Promise<void> }).writeWithRetry.bind(log);
+      (log as unknown as { writeWithRetry: unknown }).writeWithRetry = (k: string, l: string) =>
+        fail ? Promise.reject(new Error("ENOSPC")) : real(k, l);
+      log.append(key, setCell(0, 0, 1), "s", "u1", 0, undefined, "auth");
+      await log.flush(key);
+      expect(log.isDegraded(key)).toBe(true);
+      // heal the disk WITHOUT a new edit — the background retry must flush the tail and un-degrade
+      fail = false;
+      const deadline = Date.now() + 4000;
+      while (log.isDegraded(key) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      expect(log.isDegraded(key)).toBe(false);
+      await log.flush(key);
+      const fresh = new EditLog(dir);
+      await fresh.ensureLoaded(key);
+      expect(fresh.all(key).map((e) => e.clientOpId)).toEqual(["u1"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("isFlushing stays true while a write is in flight/HUNG, so the evictor keeps the tail in RAM", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-flush-"));
+    try {
+      const key = "flushing#c";
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      // hang the write (disk wedged, h.write never returns) — NOT a failure, so not degraded
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const real = (log as unknown as { writeWithRetry: (k: string, l: string) => Promise<void> }).writeWithRetry.bind(log);
+      (log as unknown as { writeWithRetry: unknown }).writeWithRetry = async (k: string, l: string) => { await gate; return real(k, l); };
+      log.append(key, setCell(0, 0, 1), "s", "u1", 0, undefined, "auth");
+      expect(log.isDegraded(key)).toBe(false); // no write has FAILED
+      expect(log.isFlushing(key)).toBe(true); // but the buffer holds the only copy → evictor must skip
+      release(); // let the write land
+      await log.flush(key);
+      expect(log.isFlushing(key)).toBe(false);
+      const fresh = new EditLog(dir);
+      await fresh.ensureLoaded(key);
+      expect(fresh.all(key).map((e) => e.clientOpId)).toEqual(["u1"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("flush() drains a healed room's un-persisted tail on shutdown (SIGTERM loses zero)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "d2-editlog-flushdrain-"));
+    try {
+      const key = "flushdrain#c";
+      const log = new EditLog(dir);
+      await log.ensureLoaded(key);
+      let fail = true;
+      const real = (log as unknown as { writeWithRetry: (k: string, l: string) => Promise<void> }).writeWithRetry.bind(log);
+      (log as unknown as { writeWithRetry: unknown }).writeWithRetry = (k: string, l: string) =>
+        fail ? Promise.reject(new Error("EIO")) : real(k, l);
+      log.append(key, setCell(0, 0, 1), "s", "u1", 0, undefined, "auth");
+      await log.flush(key); // write fails → degraded, tail held in the buffer
+      expect(log.isDegraded(key)).toBe(true);
+      // disk heals; the shutdown flush() must re-issue the buffered write rather than let it die
+      fail = false;
+      await log.flush(key);
+      expect(log.isDegraded(key)).toBe(false);
+      expect(log.isFlushing(key)).toBe(false);
+      const fresh = new EditLog(dir);
+      await fresh.ensureLoaded(key);
+      expect(fresh.all(key).map((e) => e.clientOpId)).toEqual(["u1"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("EditLog idempotency (clientOpId dedup — reseed / two-tab reconcile safety)", () => {
