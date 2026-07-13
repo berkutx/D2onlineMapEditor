@@ -5,6 +5,7 @@
  *  the file header on export (handled in the writer). */
 import { computed } from "vue";
 import { ElInput, ElInputNumber, ElSelect, ElOption } from "element-plus";
+import CommitInput from "./CommitInput.vue";
 import { useEventStore } from "../stores/eventStore";
 
 const store = useEventStore();
@@ -27,24 +28,24 @@ const DIFF = [
   <div v-if="h" class="ss">
     <div class="ss-body">
       <label class="ss-f"><span>Название</span>
-        <el-input :model-value="h.name" size="small" @update:model-value="set({ name: $event })" /></label>
+        <CommitInput :model-value="h.name" size="small" @update:model-value="set({ name: $event })" /></label>
       <label class="ss-f"><span>Автор</span>
-        <el-input :model-value="h.author" size="small" maxlength="21" @update:model-value="set({ author: $event })" /></label>
+        <CommitInput :model-value="h.author" size="small" maxlength="21" @update:model-value="set({ author: $event })" /></label>
       <label class="ss-f col"><span>Описание</span>
-        <el-input :model-value="h.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" size="small"
+        <CommitInput :model-value="h.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" size="small"
           @update:model-value="set({ description: $event })" /></label>
 
       <label class="ss-f col"><span>Цель (кратко)</span>
-        <el-input :model-value="h.objective ?? ''" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" size="small"
+        <CommitInput :model-value="h.objective ?? ''" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" size="small"
           @update:model-value="set({ objective: $event })" /></label>
       <label class="ss-f col"><span>Вступление / сюжет</span>
-        <el-input :model-value="h.story ?? ''" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" size="small"
+        <CommitInput :model-value="h.story ?? ''" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" size="small"
           @update:model-value="set({ story: $event })" /></label>
       <label class="ss-f col"><span>Текст победы</span>
-        <el-input :model-value="h.winText ?? ''" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" size="small"
+        <CommitInput :model-value="h.winText ?? ''" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" size="small"
           @update:model-value="set({ winText: $event })" /></label>
       <label class="ss-f col"><span>Текст поражения</span>
-        <el-input :model-value="h.loseText ?? ''" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" size="small"
+        <CommitInput :model-value="h.loseText ?? ''" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" size="small"
           @update:model-value="set({ loseText: $event })" /></label>
 
       <div class="d2-sec">Сложность и уровни</div>

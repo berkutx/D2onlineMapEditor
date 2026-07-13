@@ -6,6 +6,7 @@
  *  every variable shows its role in the scenario. */
 import { computed, ref } from "vue";
 import { ElInput, ElInputNumber, ElButton, ElScrollbar, ElEmpty, ElTag, ElTooltip } from "element-plus";
+import CommitInput from "./CommitInput.vue";
 import type { MapEvent, ScenarioVariable } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
@@ -107,7 +108,7 @@ function jump(ev: MapEvent): void {
           <div v-for="v in g.vars" :key="v.id" class="var-card d2-card">
             <div class="var-row">
               <span class="var-id">#{{ v.id }}</span>
-              <el-input :model-value="v.name" size="small" placeholder="имя"
+              <CommitInput :model-value="v.name" size="small" placeholder="имя"
                 @update:model-value="store.patchVariable(v.id, { name: $event })" />
               <el-input-number :model-value="v.value" size="small" controls-position="right" style="width: 110px"
                 @update:model-value="store.patchVariable(v.id, { value: ($event as number) ?? 0 })" />

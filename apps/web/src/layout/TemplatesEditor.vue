@@ -14,6 +14,7 @@ import type { StackTemplate, TemplateUnit } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
 import { useUnitStore } from "../stores/unitStore";
+import CommitInput from "./CommitInput.vue";
 import UnitPicker from "./UnitPicker.vue";
 import ModifierListEditor from "./ModifierListEditor.vue";
 
@@ -143,7 +144,7 @@ function setCellMods(i: number, mods: string[]): void {
     </el-scrollbar>
 
     <el-scrollbar v-if="sel" class="tpl-form">
-      <el-input :model-value="sel.name" size="small" placeholder="Название шаблона"
+      <CommitInput :model-value="sel.name" size="small" placeholder="Название шаблона"
         @update:model-value="patch({ name: $event })" />
       <div class="tpl-props">
         <label>приказ

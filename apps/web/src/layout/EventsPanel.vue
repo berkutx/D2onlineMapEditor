@@ -19,6 +19,7 @@ import { useEditStore } from "../stores/editStore";
 import { useViewStore } from "../stores/viewStore";
 import { useUnitStore } from "../stores/unitStore";
 import { eventBadges } from "../services/scenarioRoles";
+import CommitInput from "./CommitInput.vue";
 import EventFieldInput from "./EventFieldInput.vue";
 import EventGraph from "./EventGraph.vue";
 import EventSummaryCard from "./EventSummaryCard.vue";
@@ -395,10 +396,10 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 
         <div ref="editorCol" class="ev-col ev-col-editor d2-rail--left">
           <el-scrollbar v-if="sel" class="ev-editor">
-            <el-input :model-value="sel.name" size="small" placeholder="Название события (игровое)"
+            <CommitInput :model-value="sel.name" size="small" placeholder="Название события (игровое)"
               @update:model-value="patch({ name: $event })" />
             <!-- editor-only note: подробное описание рядом с игровым именем; в .sg НЕ пишется -->
-            <el-input type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" class="ev-desc"
+            <CommitInput type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" class="ev-desc"
               :model-value="editStore.eventDescs[sel.id] || ''" placeholder="Описание (только в редакторе)"
               @update:model-value="editStore.setEventDesc(sel.id, $event)" />
 

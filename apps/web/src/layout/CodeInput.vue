@@ -7,7 +7,7 @@
  * Тема Prism не импортируется: токены раскрашены переменными Element Plus,
  * так что и светлый, и тёмный chrome выглядят нативно.
  */
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Prism from "prismjs";
 import "prismjs/components/prism-lua";
 
@@ -15,6 +15,14 @@ const props = defineProps<{ modelValue: string }>();
 const emit = defineEmits<{ (e: "update:modelValue", v: string): void }>();
 
 const preEl = ref<HTMLElement | null>(null);
+
+// Local draft drives the LIVE highlight while typing but does NOT commit — the edit is emitted
+// once on blur, so editing code in a big scenario doesn't fire the recompute cascade per keystroke.
+const draft = ref(props.modelValue ?? "");
+watch(() => props.modelValue, (v) => { draft.value = v ?? ""; });
+function commit(): void {
+  if (draft.value !== (props.modelValue ?? "")) emit("update:modelValue", draft.value);
+}
 
 const MIN_ROWS = 4;
 const MAX_ROWS = 14;
@@ -24,7 +32,7 @@ function escapeHtml(s: string): string {
 }
 
 const highlighted = computed<string>(() => {
-  const code = props.modelValue ?? "";
+  const code = draft.value ?? "";
   const lua = Prism.languages["lua"];
   const html = lua ? Prism.highlight(code, lua, "lua") : escapeHtml(code);
   // Хвостовой \n схлопывается в <pre> — добиваем пробелом, чтобы высоты слоёв совпадали.
@@ -33,12 +41,12 @@ const highlighted = computed<string>(() => {
 
 /** Авторост по строкам: wrap="off" ⇒ визуальных строк ровно столько, сколько \n. */
 const rows = computed<number>(() => {
-  const n = (props.modelValue ?? "").split("\n").length;
+  const n = (draft.value ?? "").split("\n").length;
   return Math.min(MAX_ROWS, Math.max(MIN_ROWS, n));
 });
 
 function onInput(e: Event): void {
-  emit("update:modelValue", (e.target as HTMLTextAreaElement).value);
+  draft.value = (e.target as HTMLTextAreaElement).value; // live highlight only; commit on blur
 }
 
 /** Держим слой подсветки приклеенным к позиции скролла textarea. */
@@ -57,12 +65,13 @@ function onScroll(e: Event): void {
     <pre ref="preEl" class="ci-pre" aria-hidden="true"><code class="ci-code" v-html="highlighted"></code></pre>
     <textarea
       class="ci-ta"
-      :value="modelValue ?? ''"
+      :value="draft"
       spellcheck="false"
       autocomplete="off"
       autocapitalize="off"
       wrap="off"
       @input="onInput"
+      @blur="commit"
       @scroll="onScroll"
     ></textarea>
   </div>

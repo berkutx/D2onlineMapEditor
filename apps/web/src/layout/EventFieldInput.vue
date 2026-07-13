@@ -23,6 +23,7 @@ import { useEventStore } from "../stores/eventStore";
 import { useRefNames } from "../services/refNames";
 import { locationRoleCounts, ROLE_META, type RoleClass, type RoleCounts } from "../services/scenarioRoles";
 import CodeInput from "./CodeInput.vue";
+import CommitInput from "./CommitInput.vue";
 import DecorThumb from "./DecorThumb.vue";
 import MiniMap from "./MiniMap.vue";
 import RegionPreview from "./RegionPreview.vue";
@@ -565,8 +566,8 @@ watch(
     @update:model-value="set($event)"
   />
 
-  <!-- free text -->
-  <el-input
+  <!-- free text — commits on blur/Enter (not per keystroke) so a big scenario stays responsive -->
+  <CommitInput
     v-else
     :model-value="(modelValue as string) ?? ''"
     size="small"
