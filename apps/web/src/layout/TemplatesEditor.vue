@@ -103,18 +103,15 @@ function entityFill(units: readonly (TemplateUnit | null)[]): number {
   }
   return n;
 }
-const soldierCount = computed(() => entityFill(sel.value?.units ?? []) - (hasLeader.value ? 1 : 0));
-
-/** Ячейку лидера нельзя опустошить, пока в отряде есть другие юниты. */
-const cellClearable = (i: number): boolean =>
-  i !== leaderCellIdx.value || soldierCount.value === 0;
-
 // ── Адаптер под GarrisonEditor: тот же презентационный компонент, что у гарнизона (2 колонки
 // Тыл/Фронт, широкий слот большого юнита, ⇔-бейдж, ★-лидер, гард «не выселять лидера»). Шаблон
 // поставляет данные в форме гарнизонного `GarrUnit[]`; размещение/эвикцию по-прежнему делают
-// setCell/setCellLevel/setCellMods (родитель владеет моделью). Отличия шаблона: нет HP (hideHp),
-// уровень ≤10, модификаторы лежат в отдельном списке (cellMods), большой юнит — по флагу `big`,
-// который здесь превращаем в ОБЩИЙ синтетический `key` пары → GarrisonEditor рисует широкий слот.
+// setCell/setCellLevel/setCellMods (родитель владеет моделью). Отличия шаблона: нет HP (hideHp —
+// эталон HP не редактирует, у шаблона его в данных нет), модификаторы лежат в отдельном списке
+// (cellMods), большой юнит — по флагу `big`, который здесь превращаем в ОБЩИЙ синтетический `key`
+// пары → GarrisonEditor рисует широкий слот. Cap уровня и лидер-лок НЕ ставим: эталон (UnitView.qml)
+// капает по личному `unitMaxLvl()` (в каталоге нет — берём гарнизонный дефолт 50) и удаляет ЛЮБУЮ
+// клетку включая лидера (лидер деривится в setCell), так что оба параметра — гарнизонные дефолты.
 type GView = { unit: string; level: number; hp: number; modifiers?: string[]; key?: string };
 const garrisonView = computed<(GView | null)[]>(() => {
   const out: (GView | null)[] = [null, null, null, null, null, null];
@@ -247,8 +244,6 @@ function setCellMods(i: number, mods: string[]): void {
           :leader-cell="leaderCellIdx"
           roster="soldiers"
           hide-hp
-          :max-level="10"
-          :cell-clearable="cellClearable"
           @set-unit="(c, u) => setCell(c, u)"
           @clear="(c) => setCell(c, null)"
           @set-stat="(c, k, v) => { if (k === 'level') setCellLevel(c, v); }"
