@@ -53,6 +53,33 @@ tar czf - -C public/assets . | ssh <USER>@<HOST> \
 Re-run this whenever the asset pipeline regenerates the atlases. (The container reads them
 read-only; a deploy never touches the volume.)
 
+### 3b. Update a CATALOG (unit / item / spell / decor / lord / modifier)
+The `*Catalog.json` files under `public/assets/` are **also gitignored + volume-only** — they're
+built offline by `tools/asset-pipeline/build_*_catalog.py` from the **target mod's** game `.dbf`
+tables, so they are NOT in the image and a code deploy never updates them. To update one:
+
+```sh
+# 1) rebuild locally from the target mod's Game dir (example: unit catalog)
+python tools/asset-pipeline/build_unit_catalog.py --game "<TARGET_MOD>/Game" --out public/assets
+# 2) push JUST that file into the volume (single-file tar → leaves atlases untouched)
+scp public/assets/unitCatalog.json <USER>@<HOST>:/tmp/unitCatalog.json
+ssh <USER>@<HOST> 'docker run --rm -v d2editor_assets:/dst -v /tmp:/src:ro alpine \
+  cp /src/unitCatalog.json /dst/unitCatalog.json; rm -f /tmp/unitCatalog.json'
+# 3) BUMP the ?v in that catalog's store fetch (e.g. unitStore.ts `?v=2`) and `git push origin main`
+```
+
+**Why the `?v` bump is mandatory:** Cloudflare caches these JSONs `max-age=86400` (24h) + 7-day SWR,
+and `assetUrl()` requests them with no version — so after a volume update the edge keeps serving the
+STALE copy for up to a day. Bumping `?v=N` in the store's fetch makes clients request a new URL (cache
+MISS → origin) on the next code deploy. There is no Cloudflare API purge token wired up; the `?v` bump
+is the cache-bust. (`modifierStore` and `unitStore` already carry a `?v`.)
+
+**`unitCatalog.json` specifically** must carry the `large` flag (Gunits `SIZE_SMALL` false = a 2-cell
+big unit). It drives the big-unit merged formation slot + placing a fresh big unit across both cells.
+If the volume catalog lacks `large` (old build), the client falls back to the on-disk `POS_i==POS_j`
+flag: existing big units still merge + never split (correctness holds), but the size-gate for two
+identical small units + fresh big-unit placement stay inactive until the sized catalog is on the volume.
+
 ## Deploy
 `git push origin main` → the **Deploy** workflow builds + restarts `d2editor`. First deploy:
 push, wait for the build, confirm the Cloudflare rule, then open `https://d2mapeditor.online/map`.

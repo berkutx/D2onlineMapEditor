@@ -79,7 +79,10 @@ export const useUnitStore = defineStore("unit", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("unitCatalog.json"));
+      // ?v cache-bust: the catalog lives on the d2editor_assets volume (gitignored, built offline)
+      // and Cloudflare caches it max-age=24h. BUMP this when the volume catalog is re-uploaded, or
+      // clients keep the stale edge copy. v2 = adds the `large` (2-cell unit) flag. See deploy/README.
+      const res = await fetch(assetUrl("unitCatalog.json") + "?v=2");
       if (!res.ok) throw new Error(`unitCatalog.json ${res.status}`);
       const arr = (await res.json()) as UnitEntry[];
       const map: Record<string, UnitEntry> = {};
