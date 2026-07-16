@@ -59,15 +59,17 @@ interface SymbolGrid {
 
 /** Build the symbol grid for one step: uniform fill, or run the MJ program (at region size,
  *  or `scale`× coarser for coarse recipes like the 2×2 wall maze). */
-/** Does `symbol` touch at least two DISTINCT edges of the grid (a ribbon crossing it)? */
+/** Does `symbol` connect two OPPOSITE edges of the grid (top↔bottom or left↔right)?
+ *  «Two ANY edges» was the v1 check — a Voronoi frontier whose seed owned a corner produced
+ *  a tiny arc touching top+left, passed, and shipped as the «river across the zone». Only
+ *  opposite edges make a ribbon that actually CROSSES what the mapmaker selected. */
 export function spansGrid(grid: SymbolGrid, symbol: string): boolean {
-  let edges = 0;
   const hasIn = (s: string): boolean => s.includes(symbol);
-  if (hasIn(grid.rows[0] ?? "")) edges++;
-  if (grid.height > 1 && hasIn(grid.rows[grid.height - 1] ?? "")) edges++;
-  if (grid.rows.some((r) => r[0] === symbol)) edges++;
-  if (grid.width > 1 && grid.rows.some((r) => r[grid.width - 1] === symbol)) edges++;
-  return edges >= 2;
+  const top = hasIn(grid.rows[0] ?? "");
+  const bottom = grid.height > 1 && hasIn(grid.rows[grid.height - 1] ?? "");
+  const left = grid.rows.some((r) => r[0] === symbol);
+  const right = grid.width > 1 && grid.rows.some((r) => r[grid.width - 1] === symbol);
+  return (top && bottom) || (left && right);
 }
 
 /**
@@ -135,13 +137,20 @@ async function buildGrid(
       const k = typeof recipe.seedsFrac === "number" ? recipe.seedsFrac : 0.01;
       xml = xml.split("SEEDS").join(String(Math.max(2, Math.round(gw * gh * k))));
     }
-    // ribbon recipes must CROSS the zone; a degenerate Voronoi border (both growth seeds
-    // near one edge) hugs a corner instead — re-roll the seed a few times
-    const attempts = recipe.spanSymbol ? 8 : 1;
+    // ribbon recipes must CROSS the zone (opposite edges); a random two-seed Voronoi border
+    // exits via adjacent edges (a corner arc) roughly half the time — re-roll the seed until
+    // it crosses. Each run is milliseconds; 16 tries make a non-crossing outcome ~1e-5.
+    const attempts = recipe.spanSymbol ? 16 : 1;
     let grid: SymbolGrid | undefined;
     for (let i = 0; i < attempts; i++) {
       grid = await runRecipe(xml, gw, gh, seed + i * 101);
       if (!recipe.spanSymbol || spansGrid(grid, recipe.spanSymbol)) break;
+    }
+    if (recipe.spanSymbol && grid && !spansGrid(grid, recipe.spanSymbol)) {
+      // degenerate zone (e.g. 1×N) or a pathological seed streak — ship the last grid but
+      // leave a trace so a «river didn't cross» report is diagnosable from docker logs
+      // eslint-disable-next-line no-console
+      console.warn(`[generate] ribbon did not span after ${attempts} attempts (${gw}x${gh}, seed=${seed})`);
     }
     if (recipe.sealMaze) grid = sealMazeGrid(grid!, seed);
     return grid!;

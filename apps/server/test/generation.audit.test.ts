@@ -165,16 +165,17 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
             for (const k of footprint(op.object as never)) cells.add(k);
           }
         }
-        let edges = 0;
         const touches = (pred: (x: number, y: number) => boolean): boolean =>
           [...cells].some((k) => { const [x, y] = k.split(",").map(Number) as [number, number]; return pred(x, y); });
         // tolerance 3: the occupancy guard may legitimately eat the ribbon's edge cells
-        // (a 3×3 site at the border) — a few cells shy of the border still "crosses"
-        if (touches((_, y) => y <= REGION.y + 3)) edges++;
-        if (touches((_, y) => y >= REGION.y + REGION.h - 4)) edges++;
-        if (touches((x) => x <= REGION.x + 3)) edges++;
-        if (touches((x) => x >= REGION.x + REGION.w - 4)) edges++;
-        expect(edges, `${recipeId} seed=${seed}: ribbon does not cross the zone`).toBeGreaterThanOrEqual(2);
+        // (a 3×3 site at the border) — a few cells shy of the border still "crosses".
+        // OPPOSITE edges required: «two ANY edges» let a corner arc (top+left) ship as the
+        // «river across the zone» — the exact bug of the v1 span check.
+        const top = touches((_, y) => y <= REGION.y + 3);
+        const bottom = touches((_, y) => y >= REGION.y + REGION.h - 4);
+        const left = touches((x) => x <= REGION.x + 3);
+        const right = touches((x) => x >= REGION.x + REGION.w - 4);
+        expect((top && bottom) || (left && right), `${recipeId} seed=${seed}: ribbon does not CROSS the zone (corner arc?)`).toBe(true);
         void after;
       }
     }
@@ -183,6 +184,45 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
   it("water_isles produces water even on a small zone (deterministic seeding)", async () => {
     const { ops } = await run("water_isles", 3, { x: 30, y: 30, w: 10, h: 8 });
     expect(ops.filter((o) => o.kind === "setCell").length).toBeGreaterThan(4);
+  });
+
+  it("water_islands floods PART of the zone but leaves dry land islands inside", async () => {
+    // «острова» = суша среди воды: real water must land, yet a real INNER dry area must
+    // survive — the inverse of water_isles. Bounds are deliberately loose: the region sits
+    // on live Riders content, so the occupancy guard legitimately eats many wet cells (the
+    // SHAPE itself is asserted by the pure-grid audit in tools; here we prove decode+guard).
+    for (const seed of SEEDS) {
+      const region = { x: 20, y: 20, w: 20, h: 16 };
+      const { ops } = await run("water_islands", seed, region);
+      const wet = new Set(
+        ops.filter((o): o is Extract<EditOp, { kind: "setCell" }> => o.kind === "setCell").map((o) => `${o.x},${o.y}`),
+      );
+      expect(wet.size, `seed=${seed}: no water at all`).toBeGreaterThan((region.w * region.h) / 8);
+      // a real INNER dry area = islands (not just the border)
+      let innerDry = 0;
+      for (let y = region.y + 2; y < region.y + region.h - 2; y++)
+        for (let x = region.x + 2; x < region.x + region.w - 2; x++)
+          if (!wet.has(`${x},${y}`)) innerDry++;
+      expect(innerDry, `seed=${seed}: no dry islands survived`).toBeGreaterThan(4);
+    }
+  });
+
+  it("mountain_blob is an ORGANIC massif — fills part of the zone, not the full rectangle", async () => {
+    for (const seed of SEEDS) {
+      const region = { x: 20, y: 20, w: 18, h: 14 };
+      const { ops } = await run("mountain_blob", seed, region);
+      const cells = new Set<string>();
+      for (const op of ops) {
+        if (op.kind === "addObject" && op.object.type === "mountains") {
+          for (const k of footprint(op.object as never)) cells.add(k);
+        }
+      }
+      const area = region.w * region.h;
+      // loose lower bound (the guard skips occupied/water cells of the live map); the key
+      // assertion is the UPPER one — a fill would cover ~everything, a blob must not
+      expect(cells.size, `seed=${seed}: produced no mountains`).toBeGreaterThan(area * 0.08);
+      expect(cells.size, `seed=${seed}: covered the whole rectangle (that's mountain_fill)`).toBeLessThan(area * 0.85);
+    }
   });
 
   it("sealMazeGrid seals the perimeter and cuts 1–2 doors into corridors", () => {

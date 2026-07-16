@@ -316,7 +316,7 @@ const COPILOT_RESPONSE_SPEC = {
     steps:
       "array — each step paints one region. Use a registered recipe OR an inline recipe you author.",
   },
-  step_registered: { recipeId: "water_lake|water_isles|river|decor_forest|forest_scatter|forest_clearings|mountain_fill|relief_ridge|relief_hills|wall_maze|road_path|decor_rocks|decor_bushes|decor_ruins|decor_graves|snow_overlay|snow_patches|snow_scatter|grass_fill", region: { x: 0, y: 0, w: 10, h: 10 } },
+  step_registered: { recipeId: "water_lake|water_isles|water_islands|river|decor_forest|forest_scatter|forest_clearings|mountain_fill|mountain_blob|relief_ridge|relief_hills|wall_maze|road_path|decor_rocks|decor_bushes|decor_ruins|decor_graves|snow_overlay|snow_patches|snow_scatter|grass_fill", region: { x: 0, y: 0, w: 10, h: 10 } },
   step_inline_fill: {
     recipe: { kind: "fill", fillSymbol: "X" },
     decode: { X: { kind: "terrain", terrain: 4 } },
@@ -675,9 +675,11 @@ export async function registerMapRoutes(
       terrain: terrainAscii(liveDoc),
       objects: objectsSummary(liveDoc),
       registeredRecipes: [
-        "water_lake (organic blob)", "water_isles (archipelago)", "river (winding)",
-        "decor_forest (groves)", "forest_scatter (sparse trees)", "forest_clearings (forest+glades)",
-        "mountain_fill (massif)", "relief_ridge (mountain ridge)", "relief_hills (scattered hills)",
+        "water_lake (organic blob)", "water_isles (several lakes)",
+        "water_islands (water with dry land islands)", "river (crosses the zone)",
+        "decor_forest (groves)", "forest_scatter (sparse trees)", "forest_clearings (dense forest+glades)",
+        "mountain_fill (solid fill — frame/border)", "mountain_blob (organic massif)",
+        "relief_ridge (mountain ridge)", "relief_hills (scattered hills)",
         "wall_maze (stone-wall labyrinth, 2×2 walls + towers)",
         "road_path (winding road)", "decor_rocks", "decor_bushes", "decor_ruins", "decor_graves",
         "snow_overlay (solid wash)", "snow_patches (organic)", "snow_scatter (sparse)",

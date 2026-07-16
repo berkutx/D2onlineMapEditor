@@ -49,6 +49,8 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   // Organic water (MJ growth): W = water, B = untouched land.
   water_lake: { W: { kind: "water" } },
   water_isles: { W: { kind: "water" } },
+  // Islands: the region floods (W), grown B blobs stay DRY — untouched original terrain.
+  water_islands: { W: { kind: "water" } },
   // River = the U-marked border of a two-seed Voronoi (canonical mxgmn River): crosses the
   // zone by construction. W/R are the competing growth colours — scaffolding, not water.
   river: { U: { kind: "water" } },
@@ -59,6 +61,7 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   // Mountains / hills (MJ): M = a 1×1 mountain; ridge = Voronoi border (U), greedy-packed
   // into 2×2/3×3 peaks by the decoder.
   mountain_fill: { M: { kind: "mountain" } },
+  mountain_blob: { M: { kind: "mountain" } }, // organic massif (grown blob)
   relief_ridge: { U: { kind: "mountain" } },
   relief_hills: { M: { kind: "mountain" } },
   // Road = the thin (one-sided) Voronoi border, auto-tiled by roadBrush.

@@ -62,17 +62,33 @@ export const RECIPES: Record<string, Recipe> = {
     inputMode: "zone",
     notes: "An organic (non-square) lake grown from the centre.",
   },
-  // Archipelago: a FIXED number of seeds (SEEDS token — prl p=0.006 yielded zero seeds on
-  // small zones and merged blobs on big ones), then grow each into a blob.
+  // Several lakes: a FIXED number of seeds (SEEDS token — prl p=0.006 yielded zero seeds on
+  // small zones), then grow each into a blob. Tuned to MORE seeds + LESS growth than v1
+  // (0.006/0.32): on a 26×26 zone the old numbers merged everything into one giant lake,
+  // which is what water_lake already does — "несколько озёр" must stay plural.
   water_isles: {
     id: "water_isles",
     kind: "mj",
     xml: `<sequence values="BW"><one in="B" out="W" steps="SEEDS"/><one in="WB" out="WW" steps="STEPS"/></sequence>`,
-    fillFrac: 0.32,
-    seedsFrac: 0.006,
+    fillFrac: 0.22,
+    seedsFrac: 0.012,
     alphabet: "BW",
     inputMode: "zone",
-    notes: "Several scattered organic lakes (an archipelago of water).",
+    notes: "Several scattered organic lakes.",
+  },
+  // ISLANDS (the inverse of water_isles): the region floods with water, but grown LAND blobs
+  // survive as dry islands keeping their original terrain/objects. This is what a mapmaker
+  // means by "острова/архипелаг" — the old menu routed it to water_isles (scattered LAKES),
+  // the exact opposite of the request.
+  water_islands: {
+    id: "water_islands",
+    kind: "mj",
+    xml: `<sequence values="WB"><one in="W" out="B" steps="SEEDS"/><one in="BW" out="BB" steps="STEPS"/></sequence>`,
+    fillFrac: 0.45,
+    seedsFrac: 0.01,
+    alphabet: "WB",
+    inputMode: "zone",
+    notes: "Water with dry organic islands (архипелаг: суша среди воды).",
   },
   // River — canonical mxgmn River: two competing growths (W/R) fill the zone; their
   // contact line becomes the river (U), widened by 1 and diagonally smoothed. Crosses
@@ -135,7 +151,9 @@ export const RECIPES: Record<string, Recipe> = {
   },
 
   // --- mountains & hills (decoded to 1×1 mountain objects) -------------------
-  // Solid mountains over the zone (use with the ▢ frame mode for a mountain border).
+  // Solid mountains over the zone/mask. Kept for the ▢ frame mode + «горы по краю» (the band
+  // mask needs a FILL, not a blob); bare «горы/массив» routes to mountain_blob instead — a
+  // mapmaker asking for a massif does not want a razor-edged solid rectangle.
   mountain_fill: {
     id: "mountain_fill",
     kind: "fill",
@@ -143,7 +161,18 @@ export const RECIPES: Record<string, Recipe> = {
     fillSymbol: "M",
     alphabet: "M",
     inputMode: "zone",
-    notes: "Fill the zone with mountains (a massif / border).",
+    notes: "Fill the zone/mask with mountains (frame border, solid wall).",
+  },
+  // An ORGANIC massif: one blob grown from the centre (the water_lake program with M) —
+  // ragged natural edges instead of the fill's perfect rectangle.
+  mountain_blob: {
+    id: "mountain_blob",
+    kind: "mj",
+    xml: `<one values="BM" origin="True" in="MB" out="MM" steps="STEPS"/>`,
+    fillFrac: 0.45,
+    alphabet: "BM",
+    inputMode: "zone",
+    notes: "Горный массив с рваными краями (органическая клякса, не прямоугольник).",
   },
   // A continuous mountain ridge across the zone: the same Voronoi border as the river
   // (the old walk snaked into a dense serpentine and died mid-zone), widened by 1 —
