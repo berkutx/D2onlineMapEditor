@@ -16,7 +16,7 @@ import {
   parseScenario, parseScenarioRaw, serializeMapFromModelBytes,
   validateMap, verifyBlockIntegrity, parsePlanEntries,
 } from "@d2/sg-parser";
-import type { MapDocument } from "@d2/map-schema";
+import type { MapDocument, StackTemplate } from "@d2/map-schema";
 import { MapEvent } from "@d2/map-schema";
 import {
   materializeForExport, applyEditsToBytes, occupancyErrors, planCoverageErrors,
@@ -205,5 +205,124 @@ describe("popup SOUND/MUSIC extension is stripped (prod crash-name fix)", () => 
     // S143EV0115.sound is already "cfw_l2" on disk; UNEDITED rebuild must reproduce it verbatim.
     expect(popupAudio(doc, AUDIO_EV).sound).toBe("cfw_l2");
     expect(popupAudio(parseScenario(fromModel([])), AUDIO_EV).sound).toBe("cfw_l2");
+  });
+});
+
+/**
+ * Template BIG (2-cell) unit: an edit must NOT split it into two units. On disk a big unit is
+ * ONE slot referenced by both cells of its formation column (POS_i==POS_j); before the fix any
+ * edit dropped that layout and re-packed one-slot-per-cell → split, and the semantic gate was
+ * BLIND (it strips slots/slotOfCell and compares the [U,U] cell view, identical either way).
+ * The reader now flags both cells `big` from the POS structure, the shared packTemplateSlots
+ * re-pack keeps it one slot, and `big` in the cell view makes a split visible to the gate.
+ */
+function bigUnitTemplate(): StackTemplate {
+  const t = (doc.templates ?? []).find((x) => {
+    const pos = x.slotOfCell ?? []; const seen = new Set<number>();
+    for (const s of pos) { if (s >= 0) { if (seen.has(s)) return true; seen.add(s); } }
+    return false;
+  });
+  if (!t) throw new Error("no big-unit template in Riders");
+  return t;
+}
+/** The two cells that share a slot in the on-disk POS (the big unit's column pair). */
+function bigPair(t: StackTemplate): [number, number] {
+  const pos = t.slotOfCell ?? [];
+  for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) if (pos[i]! >= 0 && pos[i] === pos[j]) return [i, j];
+  throw new Error("no shared-slot pair");
+}
+const tmplOf = (bytes: Uint8Array, id: string): StackTemplate =>
+  parseScenario(bytes).templates!.find((t) => t.id === id)!;
+const filledSlots = (t: StackTemplate): number => (t.slots ?? []).filter(Boolean).length;
+
+describe("template big-unit is not split by an edit", () => {
+  it("editing a big-unit template keeps ONE slot (POS_i==POS_j) on BOTH export paths", () => {
+    const t = bigUnitTemplate();
+    const [a, b] = bigPair(t);
+    // reader flagged both cells of the big pair (the model self-describes the 2-cell unit)
+    expect(t.units[a]?.big && t.units[b]?.big, "reader marks both cells big").toBe(true);
+    const op: EditOp = { kind: "upsertTemplate", template: { ...structuredClone(t), name: `${t.name} EDIT` } };
+    const paths: [string, Uint8Array][] = [
+      ["model-rebuild", fromModel([op])],
+      ["byte-patch", applyEditsToBytes(parseScenarioRaw(base).raw, [op], opts)],
+    ];
+    for (const [label, bytes] of paths) {
+      const rt = tmplOf(bytes, t.id);
+      expect(rt.slotOfCell![a], `${label}: POS_${a} === POS_${b}`).toBe(rt.slotOfCell![b]);
+      expect(rt.slotOfCell![a], `${label}: real slot`).toBeGreaterThanOrEqual(0);
+      expect(rt.units![a]?.big && rt.units![b]?.big, `${label}: big flag survives`).toBe(true);
+      expect(filledSlots(rt), `${label}: no extra slot`).toBe(filledSlots(t));
+    }
+  });
+
+  it("both export paths AGREE on the edited big-unit template (semantic parity)", () => {
+    const t = bigUnitTemplate();
+    const op: EditOp = { kind: "upsertTemplate", template: { ...structuredClone(t), name: `${t.name} X` } };
+    const fm = tmplOf(fromModel([op]), t.id);
+    const patch = tmplOf(applyEditsToBytes(parseScenarioRaw(base).raw, [op], opts), t.id);
+    expect(fm.units, "units cell view").toEqual(patch.units);
+    expect(fm.slotOfCell, "POS layout").toEqual(patch.slotOfCell);
+  });
+
+  it("two IDENTICAL small units in a column stay TWO slots (no false merge)", () => {
+    const t = bigUnitTemplate();
+    const small = "G000UU0001";
+    const edited: StackTemplate = {
+      ...structuredClone(t), name: "two small", leader: "", modifiers: [],
+      units: [{ unit: small, level: 1 }, { unit: small, level: 1 }, null, null, null, null],
+    };
+    const rt = tmplOf(fromModel([{ kind: "upsertTemplate", template: edited }]), t.id);
+    expect(rt.slotOfCell![0], "distinct slots").not.toBe(rt.slotOfCell![1]);
+    expect(filledSlots(rt), "two slots").toBe(2);
+    expect(rt.units![0]?.big, "not flagged big").toBeFalsy();
+  });
+
+  it("an UNEDITED big-unit template rebuilds byte-identically (no-op)", () => {
+    const t = bigUnitTemplate();
+    const out = fromModel([]);
+    const rt = tmplOf(out, t.id);
+    expect(rt.slotOfCell).toEqual(t.slotOfCell); // verbatim slots path, POS unchanged
+  });
+});
+
+/**
+ * GARRISON big-unit must NOT split when the garrison is edited. A big garrison unit is TWO cell
+ * objects sharing ONE `key` (POS_i==POS_j). Adding a unit to an empty cell makes a keyless member
+ * → garrisonNeedsMint → mintGarrison re-mints the WHOLE garrison; the old object-identity dedup
+ * never matched the two distinct cell literals, splitting the big unit into two 1-cell MidUnits
+ * (the gate is blind — it strips key/slot). Now deduped by the shared key string.
+ */
+type GU = { unit: string; level: number; hp: number; key?: string; slot?: number } | null;
+function garrisonBigUnit(): { id: string; a: number; b: number; empty: number } {
+  for (const o of doc.objects) {
+    const g = (o as { garrison?: GU[] }).garrison;
+    if (!Array.isArray(g)) continue;
+    const byKey = new Map<string, number[]>();
+    g.forEach((m, i) => { if (m?.key) { const arr = byKey.get(m.key) ?? []; arr.push(i); byKey.set(m.key, arr); } });
+    for (const [, cells] of byKey) {
+      if (cells.length === 2) {
+        const empty = g.findIndex((m, i) => !m && !cells.includes(i));
+        if (empty >= 0) return { id: o.id, a: cells[0]!, b: cells[1]!, empty };
+      }
+    }
+  }
+  throw new Error("no garrison big-unit with an empty cell in Riders");
+}
+
+describe("garrison big-unit is not split by an edit", () => {
+  it("adding a unit to an edited garrison keeps the big unit ONE MidUnit (shared key)", () => {
+    const { id, a, b, empty } = garrisonBigUnit();
+    const src = doc.objects.find((o) => o.id === id)!;
+    const g = ((src as { garrison: GU[] }).garrison).map((m) => (m ? { ...m } : null));
+    // sanity: the two cells share a key on disk (the big unit)
+    expect(g[a]!.key).toBe(g[b]!.key);
+    g[empty] = { unit: "G000UU0001", level: 1, hp: 10 }; // keyless → forces a whole-garrison re-mint
+    const out = fromModel([{ kind: "patchObject", id, fields: { garrison: g } }]);
+    const built = parseScenario(out);
+    const bg = (built.objects.find((o) => o.id === id) as { garrison: GU[] }).garrison;
+    expect(bg[a]?.key, "big unit cell a keyed").toBeTruthy();
+    expect(bg[a]?.key, "both cells share ONE minted key (not split)").toBe(bg[b]?.key);
+    expect(bg[empty]?.key, "added unit is a DISTINCT unit").not.toBe(bg[a]?.key);
+    expect(verifyBlockIntegrity(out).ok, "structurally valid").toBe(true);
   });
 });

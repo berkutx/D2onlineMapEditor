@@ -44,6 +44,14 @@ export type GarrisonUnit = z.infer<typeof GarrisonUnit>;
 export const TemplateUnit = z.object({
   unit: z.string(), // global Gunit id
   level: z.number().int().default(1),
+  /** true when this cell is HALF of a 2-cell BIG unit (dragon/giant/big hero): a big unit
+   *  occupies both cells of its formation column and is ONE on-disk slot referenced by two
+   *  equal POS_ (POS_i==POS_j). Set on read from that POS structure and on fresh placement
+   *  from the Gunit size flag; both cells of the pair carry it. Absent = normal 1-cell unit.
+   *  The re-pack (packTemplateSlots) keys off it to merge the pair into one slot instead of
+   *  splitting the big unit in two — a split is silent data corruption the semantic gate,
+   *  which compares this cell view, now catches (big:true vs a split's big:false). */
+  big: z.boolean().optional(),
 });
 export type TemplateUnit = z.infer<typeof TemplateUnit>;
 

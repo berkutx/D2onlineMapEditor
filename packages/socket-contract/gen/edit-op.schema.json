@@ -3289,6 +3289,9 @@
                           "level": {
                             "type": "integer",
                             "default": 1
+                          },
+                          "big": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -3348,6 +3351,9 @@
                           "level": {
                             "type": "integer",
                             "default": 1
+                          },
+                          "big": {
+                            "type": "boolean"
                           }
                         },
                         "required": [

@@ -2522,6 +2522,10 @@
                           "type": "number",
                           "default": 0
                         },
+                        "relation": {
+                          "type": "number",
+                          "default": 0
+                        },
                         "var2": {
                           "type": "number",
                           "default": 0
@@ -2531,10 +2535,6 @@
                           "default": 0
                         },
                         "max2": {
-                          "type": "number",
-                          "default": 0
-                        },
-                        "relation": {
                           "type": "number",
                           "default": 0
                         }
@@ -2610,11 +2610,11 @@
                           "type": "number",
                           "default": 0
                         },
-                        "var2": {
+                        "cmp": {
                           "type": "number",
                           "default": 0
                         },
-                        "cmp": {
+                        "var2": {
                           "type": "number",
                           "default": 0
                         }
@@ -3416,6 +3416,9 @@
                         "level": {
                           "type": "integer",
                           "default": 1
+                        },
+                        "big": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -3475,6 +3478,9 @@
                         "level": {
                           "type": "integer",
                           "default": 1
+                        },
+                        "big": {
+                          "type": "boolean"
                         }
                       },
                       "required": [

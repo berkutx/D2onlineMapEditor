@@ -50,7 +50,8 @@ function patch(partial: Partial<StackTemplate>): void {
   store.upsertTemplate({ ...sel.value, ...partial });
 }
 
-/** Ячейка лидера = та, чей юнит совпадает с LEADER (семантика импорта эталона). */
+/** Ячейка лидера = та, чей юнит совпадает с LEADER (семантика импорта эталона). Для БОЛЬШОГО
+ *  юнита findIndex вернёт НИЖНЮЮ (чётную) клетку пары — она же primary объединённого слота. */
 const leaderCellIdx = computed(() => {
   const t = sel.value;
   if (!t?.leader) return -1;
@@ -59,9 +60,62 @@ const leaderCellIdx = computed(() => {
 const hasLeader = computed(() => leaderCellIdx.value >= 0);
 /** Заготовка старого образца: LEADER задан, но в ячейках его нет — чинится кликом. */
 const orphanLeader = computed(() => !!sel.value?.leader && !hasLeader.value);
-const soldierCount = computed(
-  () => (sel.value?.units.filter(Boolean).length ?? 0) - (hasLeader.value ? 1 : 0),
-);
+
+// ── БОЛЬШОЙ (2-клеточный) юнит в шаблоне занимает ОБЕ клетки линии формации (пара cell^1 =
+// (0,1)/(2,3)/(4,5)), общий id + флаг `big`; на диске это один слот с POS_i==POS_j. Показываем
+// его ОДНИМ широким слотом и правим ЦЕЛИКОМ — иначе клетки рассинхронятся (уровень) и экспорт
+// схлопнет пару обратно (semantic-фейл) либо большой юнит распадётся надвое.
+const partnerOf = (cell: number): number => cell ^ 1;
+/** Пара клеток колонки = ОДИН большой юнит ТОЛЬКО если юнит КРУПНЫЙ (SIZE_SMALL=false). Парсер
+ *  провизорно ставит `big` на любую пару с общим слотом (POS_i==POS_j) — а так эталон хранит и
+ *  ДВА ОДИНАКОВЫХ мелких юнита (дедуп в один слот); это ДВЕ сущности, показываем/правим порознь.
+ *  Пока каталог не загружен — верим ридер-флагу, чтобы не «разъединить» настоящего большого. */
+function isBigPrimary(cell: number): boolean {
+  const u = sel.value?.units ?? [];
+  const ua = u[cell], ub = u[partnerOf(cell)];
+  if (!ua || !ub || ua.unit !== ub.unit) return false;
+  return unitStore.loaded ? unitStore.isLarge(ua.unit) : !!(ua.big || ub.big);
+}
+/** Клетки, которые двигаются ВМЕСТЕ с `cell`: обе клетки большого юнита, иначе — только сама. */
+const entityCells = (cell: number): number[] => (isBigPrimary(cell) ? [cell, partnerOf(cell)] : [cell]);
+/** Привести `big`-флаги к ПРАВДЕ по размеру: колонка-пара = big ⇔ обе клетки — один КРУПНЫЙ юнит.
+ *  Так правка снимает провизорный ридер-флаг с пары одинаковых мелких (эталон их не сливает) →
+ *  packTemplateSlots не схлопнет их в один слот и не потеряет разные уровни. Работает лишь при
+ *  загруженном каталоге — иначе неизвестный размер не должен сбрасывать флаг настоящего большого. */
+function withSizedBig(units: (TemplateUnit | null)[]): (TemplateUnit | null)[] {
+  if (!unitStore.loaded) return units;
+  const out = units.map((u) => (u ? { ...u } : null));
+  for (let r = 0; r < 3; r++) {
+    const a = 2 * r, b = 2 * r + 1, ua = out[a], ub = out[b];
+    const big = !!(ua && ub && ua.unit === ub.unit && unitStore.isLarge(ua.unit));
+    if (ua) { if (big) ua.big = true; else delete ua.big; }
+    if (ub) { if (big) ub.big = true; else delete ub.big; }
+  }
+  return out;
+}
+/** Число СУЩНОСТЕЙ (большой юнит = 1, а не 2 занятые клетки). */
+function entityFill(units: readonly (TemplateUnit | null)[]): number {
+  let n = 0;
+  for (let r = 0; r < 3; r++) {
+    const a = 2 * r, b = 2 * r + 1, ua = units[a], ub = units[b];
+    if (ua && ub && ua.unit === ub.unit && (ua.big || ub.big)) n += 1;
+    else { if (ua) n++; if (ub) n++; }
+  }
+  return n;
+}
+const soldierCount = computed(() => entityFill(sel.value?.units ?? []) - (hasLeader.value ? 1 : 0));
+
+/** Слоты рендера: пара клеток большого юнита сливается в ОДИН широкий слот (primary = нижняя
+ *  чётная клетка); обычные юниты — по слоту на клетку. Порядок сверху вниз: 0..5. */
+const rows = computed<{ cell: number; wide: boolean }[]>(() => {
+  const out: { cell: number; wide: boolean }[] = [];
+  for (let r = 0; r < 3; r++) {
+    const a = 2 * r, b = 2 * r + 1;
+    if (isBigPrimary(a)) out.push({ cell: a, wide: true });
+    else { out.push({ cell: a, wide: false }); out.push({ cell: b, wide: false }); }
+  }
+  return out;
+});
 
 /** Пока лидера нет — ЛЮБАЯ ячейка предлагает лидера; ячейка лидера меняет лидера. */
 const cellRoster = (i: number): "leaders" | "soldiers" =>
@@ -81,35 +135,56 @@ function setCell(i: number, unit: string | null): void {
   const units = sel.value.units.slice();
   while (units.length < 6) units.push(null);
   const level = units[i]?.level ?? 1;
-  units[i] = unit ? { unit, level } : null;
-  // опустевшая ячейка теряет и свои модификаторы (unitPos указывал бы в пустоту)
-  const modsPatch = unit
-    ? {}
-    : { modifiers: (sel.value.modifiers ?? []).filter((m) => m.unitPos !== i) };
-  if (!hasLeader.value || i === leaderCellIdx.value) {
-    // лидер-путь: LEADER/LEADER_LVL — производные от ячейки лидера
-    patch({ units, leader: unit ?? "", leaderLevel: unit ? level : 1, ...modsPatch });
+  const dropMods = new Set<number>();
+  if (unit && unitStore.isLarge(unit)) {
+    // БОЛЬШОЙ юнит занимает ОБЕ клетки своей колонки (чётная a + нечётная b), вытесняя прежних
+    // жильцов обеих клеток; моды пары сбрасываются — это новая сущность
+    const a = i & ~1, b = a + 1;
+    for (const c of new Set<number>([...entityCells(i), a, b])) { dropMods.add(c); units[c] = null; }
+    units[a] = { unit, level, big: true };
+    units[b] = { unit, level, big: true };
   } else {
-    patch({ units, ...modsPatch });
+    // одиночный юнит или очистка; если правим primary большого юнита — разъединяем пару
+    if (isBigPrimary(i)) { units[partnerOf(i)] = null; dropMods.add(partnerOf(i)); } // призрак-партнёр
+    units[i] = unit ? { unit, level } : null;
+    if (!unit) dropMods.add(i); // опустевшая клетка теряет свои модификаторы (unitPos в пустоту)
   }
+  const modsPatch = dropMods.size
+    ? { modifiers: (sel.value.modifiers ?? []).filter((m) => !dropMods.has(m.unitPos)) }
+    : {};
+  const uu = withSizedBig(units);
+  // Reconcile the derived LEADER: it must be a unit id sitting in some cell. If THIS edit
+  // displaced the leader — replaced/cleared its cell OR a big unit stomped the leader's column
+  // partner cell (footprint {a,b}, not just the clicked i) — adopt the placed unit as leader when
+  // it CAN lead, else drop the leader. (Keying only on the clicked cell orphaned LEADER: a large
+  // unit placed at the leader-column partner evicted the hero but left LEADER dangling.)
+  const leaderGone = !sel.value.leader || !uu.some((u) => u?.unit === sel.value!.leader);
+  const leaderFields = (!hasLeader.value || leaderGone)
+    ? { leader: unit && unitStore.isLeaderCategory(unit) ? unit : "", leaderLevel: unit && unitStore.isLeaderCategory(unit) ? level : 1 }
+    : {};
+  patch({ units: uu, ...leaderFields, ...modsPatch });
 }
 function setCellLevel(i: number, level: number): void {
   if (!sel.value) return;
   const units = sel.value.units.slice();
-  if (units[i]) units[i] = { ...(units[i] as TemplateUnit), level };
-  patch(i === leaderCellIdx.value ? { units, leaderLevel: level } : { units });
+  for (const c of entityCells(i)) if (units[c]) units[c] = { ...(units[c] as TemplateUnit), level };
+  const uu = withSizedBig(units);
+  patch(i === leaderCellIdx.value ? { units: uu, leaderLevel: level } : { units: uu });
 }
 const cell = (i: number): TemplateUnit | null => sel.value?.units[i] ?? null;
-const unitCount = (t: StackTemplate): number => t.units.filter(Boolean).length;
+const unitCount = (t: StackTemplate): number => entityFill(t.units);
 
 /** Модификаторы ячейки: в шаблоне это плоский список {unitPos (индекс ЯЧЕЙКИ), modifId} —
- *  семантика эталона (mod.index = grid index). Правка пересобирает список: чужие ячейки
- *  как были, свои — в новом порядке. */
-const cellMods = (i: number): string[] =>
-  (sel.value?.modifiers ?? []).filter((m) => m.unitPos === i).map((m) => m.modifId);
+ *  семантика эталона (mod.index = grid index). Большой юнит = одна сущность: показываем моды
+ *  обеих его клеток и держим их на primary-клетке. Правка пересобирает список. */
+const cellMods = (i: number): string[] => {
+  const cells = entityCells(i);
+  return (sel.value?.modifiers ?? []).filter((m) => cells.includes(m.unitPos)).map((m) => m.modifId);
+};
 function setCellMods(i: number, mods: string[]): void {
   if (!sel.value) return;
-  const others = (sel.value.modifiers ?? []).filter((m) => m.unitPos !== i);
+  const cells = entityCells(i); // большой юнит: обе клетки → моды консолидируются на primary (i)
+  const others = (sel.value.modifiers ?? []).filter((m) => !cells.includes(m.unitPos));
   const next = [...others, ...mods.map((modifId) => ({ unitPos: i, modifId }))];
   // канонично: эталонный экспорт сортирует список по ячейке (внутри ячейки — порядок выбора)
   next.sort((a, b) => a.unitPos - b.unitPos);
@@ -161,21 +236,22 @@ function setCellMods(i: number, mods: string[]): void {
             ? "Лидер выбран, но не размещён в отряде — кликните ячейку, чтобы поставить его ★"
             : "Отряд начинается с лидера: кликните любую ячейку — сперва выбирается герой или вор ★" }}
         </p>
-        <div v-for="i in 6" :key="i" class="tpl-cell">
-          <span class="tpl-cell-n" :class="{ leader: i - 1 === leaderCellIdx }">{{
-            i - 1 === leaderCellIdx ? "★" : i - 1
+        <div v-for="row in rows" :key="row.cell" class="tpl-cell" :class="{ wide: row.wide }">
+          <span class="tpl-cell-n" :class="{ leader: row.cell === leaderCellIdx }">{{
+            row.cell === leaderCellIdx ? "★" : row.cell
           }}</span>
-          <UnitPicker :model-value="cell(i - 1)?.unit ?? null" :nullable="cellClearable(i - 1)"
-            :roster="cellRoster(i - 1)" :title="cellTitle(i - 1)"
-            @update:model-value="setCell(i - 1, $event)" />
-          <el-input-number v-if="cell(i - 1)" :model-value="cell(i - 1)!.level" :min="1" :max="10"
+          <span v-if="row.wide" class="tpl-double" title="Двойной юнит — занимает обе линии формации; правится целиком">⇔</span>
+          <UnitPicker :model-value="cell(row.cell)?.unit ?? null" :nullable="cellClearable(row.cell)"
+            :roster="cellRoster(row.cell)" :title="cellTitle(row.cell)"
+            @update:model-value="setCell(row.cell, $event)" />
+          <el-input-number v-if="cell(row.cell)" :model-value="cell(row.cell)!.level" :min="1" :max="10"
             size="small" controls-position="right" style="width: 84px"
-            @update:model-value="setCellLevel(i - 1, ($event as number) ?? 1)" />
-          <ModifierListEditor v-if="cell(i - 1)" :model-value="cellMods(i - 1)"
-            :title="`${unitStore.nameOf(cell(i - 1)!.unit)} — модификаторы`"
-            :leader="i - 1 === leaderCellIdx" compact
-            @update:model-value="setCellMods(i - 1, $event)" />
-          <el-tooltip v-if="i - 1 === leaderCellIdx && soldierCount > 0"
+            @update:model-value="setCellLevel(row.cell, ($event as number) ?? 1)" />
+          <ModifierListEditor v-if="cell(row.cell)" :model-value="cellMods(row.cell)"
+            :title="`${unitStore.nameOf(cell(row.cell)!.unit)} — модификаторы`"
+            :leader="row.cell === leaderCellIdx" compact
+            @update:model-value="setCellMods(row.cell, $event)" />
+          <el-tooltip v-if="row.cell === leaderCellIdx && soldierCount > 0"
             content="Лидера нельзя убрать, пока в отряде есть юниты — можно только заменить другим героем">
             <span class="tpl-lock">🔒</span>
           </el-tooltip>
@@ -206,6 +282,9 @@ function setCellMods(i: number, mods: string[]): void {
 .tpl-props { margin: 8px 0; }
 .tpl-props label { color: var(--el-text-color-secondary); margin-right: 6px; }
 .tpl-cell { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+/* a merged BIG-unit slot: one row for the 2-cell pair, softly boxed + ⇔ badge */
+.tpl-cell.wide { background: var(--el-fill-color-lighter); border-radius: var(--d2-radius, 4px); padding: 3px 5px; }
+.tpl-double { color: var(--el-color-warning); font-size: 12px; line-height: 1; }
 .tpl-cell-n { width: 16px; color: var(--el-text-color-secondary); font-family: monospace; font-size: 11px; }
 .tpl-cell-n.leader { color: var(--el-color-warning); font-size: 13px; }
 .tpl-need-leader { color: var(--el-color-warning); font-size: 11px; margin: 4px 0 8px; }

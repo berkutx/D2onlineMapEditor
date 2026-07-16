@@ -183,6 +183,18 @@ export function readStackTemplate(buf: ByteBuffer, obj: FramedObject): StackTemp
       units[cell] = { unit: slotUnits[slot]!, level: slotLevels[slot] ?? 1 };
     }
   }
+  // PROVISIONAL big flag: a shared slot (POS_i == POS_(i^1)) means the two column cells hold ONE
+  // slot entry. That is a genuine 2-cell big unit when the unit is LARGE — but the reference ALSO
+  // dedups two IDENTICAL SMALL units into one slot, so slot-sharing alone over-includes those.
+  // We flag both cells `big` here (no unit-size DB at parse time); the re-pack keeps a shared slot
+  // one slot either way (lossless — both cells read the same level), and the UI refines big by
+  // unit SIZE so identical smalls show as two cells. Pairs = (0,1)/(2,3)/(4,5), like the garrison.
+  for (let cell = 0; cell < 6; cell++) {
+    const partner = cell ^ 1;
+    if (units[cell] && units[partner] && pos[cell]! >= 0 && pos[cell] === pos[partner]) {
+      units[cell]!.big = true;
+    }
+  }
   return {
     id: obj.id, name, owner, leader, leaderLevel, orderTarget, subRace, order, units,
     useFacing, facing, aiPriority, modifiers,

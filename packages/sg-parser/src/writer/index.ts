@@ -73,6 +73,7 @@ export {
   eventFrame,
   scenVariablesFrame,
   stackTemplateFrame,
+  packTemplateSlots,
   diplomacyFrame,
   splitMultiString,
 } from "./eventFrame.js";

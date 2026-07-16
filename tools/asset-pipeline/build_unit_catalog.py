@@ -71,6 +71,14 @@ def main():
         }
         if lead:
             entry["leaderKey"] = lleadc.get(lead, "")
+        # SIZE_SMALL (DBF logical): 'T' => 1-cell small unit; 'F' or blank => 2-cell BIG unit
+        # (dragons/giants/big heroes). Emitted only when large, to keep the JSON compact (like
+        # leaderKey/desc). Consumed by unitStore.isLarge for the merged formation slot + placing a
+        # fresh big unit across both column cells. NOTE: ~19 mod units leave SIZE_SMALL blank and
+        # are ambiguous (giants + a few smalls); `!= "T"` follows the engine's logical-false default
+        # and flags the blank giants (Cyclops/Grimthurs) correctly at the cost of a couple mod smalls.
+        if ascii_(r["SIZE_SMALL"]).strip().upper() != "T":
+            entry["large"] = True
         desc = clean_desc(texts, ascii_(r["DESC_TXT"]))
         if desc:
             entry["desc"] = desc

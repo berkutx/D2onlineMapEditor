@@ -23,6 +23,9 @@ export interface UnitEntry {
   leadership: number;
   leaderKey?: string;
   desc?: string;
+  /** true = a BIG 2-cell unit (Gunits SIZE_SMALL false): a dragon/giant/big hero that occupies
+   *  both cells of its formation column. Emitted only when large (catalog stays compact). */
+  large?: boolean;
 }
 
 export interface UnitGroup {
@@ -108,6 +111,14 @@ export const useUnitStore = defineStore("unit", () => {
     return !!e && (e.catKey === "L_LEADER" || e.catKey === "L_NOBLE");
   }
 
+  /** Is this a BIG 2-cell unit (Gunits SIZE_SMALL false)? Used to place a fresh big unit across
+   *  both column cells + render one merged slot. Per-TYPE answer (footprint never changes at
+   *  runtime); complements the placement-derived big detection (shared key / POS_i==POS_j) that
+   *  already handles units read from a map. Unknown ids → false. */
+  function isLarge(id: string | null | undefined): boolean {
+    return !!get(id)?.large;
+  }
+
   /** Units grouped by subrace (ascending subraceId) — the main way to find a faction's roster. */
   const bySubrace = computed<UnitGroup[]>(() => {
     const by = new Map<number, UnitEntry[]>();
@@ -157,5 +168,5 @@ export const useUnitStore = defineStore("unit", () => {
     return out;
   });
 
-  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, bySubrace, byCat, byLevel };
+  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, isLarge, bySubrace, byCat, byLevel };
 });

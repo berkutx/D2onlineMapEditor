@@ -21,6 +21,7 @@
 import type {
   MapDocument, MapObject, GarrisonUnit, MapPlan, RoadInfo, TalismanChargesInfo, StackTemplate,
 } from "@d2/map-schema";
+import { packTemplateSlots } from "@d2/sg-parser";
 import { applyOps, type EditOp } from "./ops.js";
 
 export interface MaterializeOptions {
@@ -112,20 +113,24 @@ function mintItemKeys(
 }
 
 /** Pack a garrison that has no on-disk identity yet: mint a UN key per filled cell (ascending) and
- *  assign its packed-low slot. A member shared across cells (a big unit) keeps ONE key+slot. Mirrors
- *  applyBytes packFormation (cell i → UNIT_[POS_i]; posOfCell derived at serialize from slot). */
+ *  assign its packed-low slot. A BIG (2-cell) unit is TWO distinct cell objects that SHARE one
+ *  on-disk `key` (POS_i==POS_j) — dedup by that key STRING (not object identity, which never
+ *  matches for the two literals the parser builds) so the whole big unit keeps ONE key+slot and is
+ *  not split into two overlapping 1-cell instances. Mirrors applyBytes packFormation. */
 function mintGarrison(
   garrison: readonly (GarrisonUnit | null)[],
   c: Counters,
 ): (GarrisonUnit | null)[] {
-  const seen = new Map<GarrisonUnit, GarrisonUnit>();
+  const seenByKey = new Map<string, GarrisonUnit>(); // original shared key → the ONE minted member
   let slot = 0;
   return garrison.map((m) => {
     if (!m || !m.unit) return m ?? null;
-    const already = seen.get(m);
-    if (already) return already;
+    if (m.key != null) {
+      const already = seenByKey.get(m.key);
+      if (already) return already; // second cell of a big unit → reuse the first cell's key+slot
+    }
     const minted: GarrisonUnit = { ...m, key: `${c.version}UN${hex4(c.UN++)}`, slot: slot++ };
-    seen.set(m, minted);
+    if (m.key != null) seenByKey.set(m.key, minted);
     return minted;
   });
 }
@@ -308,21 +313,13 @@ function emptySatellites(): NonNullable<MapDocument["satellites"]> {
   };
 }
 
-/** Canonical template slot layout: slot per filled cell (ascending), slotOfCell = cell→slot.
- *  A big unit shared across cells reuses one slot (mirrors the stack formation packing). */
+/** Canonical template slot layout via the SHARED re-pack (packTemplateSlots): one slot per
+ *  distinct unit, and a BIG (2-cell) unit — both column cells share `big` + the same id — is
+ *  ONE slot referenced by both cells (POS_i==POS_j). Same helper the byte writer's else-branch
+ *  runs, so the prod (model-rebuild) and parity (applyBytes) paths produce identical slots and
+ *  an edit never splits a big unit. (The old reference-identity dedup was dead for disk-loaded
+ *  templates — each cell is a distinct object — so it split every big unit.) */
 function withCanonicalSlots(t: StackTemplate): StackTemplate {
-  const slots = t.slots ? [...t.slots] : [];
-  const slotOfCell: number[] = [];
-  const seen = new Map<(typeof t.units)[number], number>();
-  const built: (typeof t.units)[number][] = [];
-  for (const cell of t.units) {
-    if (!cell) { slotOfCell.push(-1); continue; }
-    const already = seen.get(cell);
-    if (already !== undefined) { slotOfCell.push(already); continue; }
-    const s = built.length;
-    built.push(cell);
-    seen.set(cell, s);
-    slotOfCell.push(s);
-  }
-  return { ...t, slots: built, slotOfCell };
+  const { slots, slotOfCell } = packTemplateSlots(t.units);
+  return { ...t, slots, slotOfCell };
 }

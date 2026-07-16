@@ -8,7 +8,7 @@
 import { ByteWriter } from "./byteWriter.js";
 import { encodeCp1251 } from "./cp1251.js";
 import { emitBlock } from "./sgRebuild.js";
-import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate, DiplomacyEntry } from "@d2/map-schema";
+import type { MapEvent, EventCondition, EventEffect, ScenarioVariable, StackTemplate, TemplateUnit, DiplomacyEntry } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND, normalizeAudioRef } from "@d2/map-schema";
 import {
   COND_CODEC,
@@ -118,20 +118,41 @@ export function splitMultiString(text: string, slots: number, maxChars = 250): s
   return out;
 }
 
+/**
+ * Canonical MidStackTemplate slot packing: cells 0..5 → { slots (one entry per DISTINCT unit
+ * slot), slotOfCell (POS_i per cell, -1 = empty) }. A BIG (2-cell) unit — both column-paired
+ * cells (cell^1) hold the same unit id and carry `big` — becomes ONE slot referenced by BOTH
+ * cells (POS_i==POS_j), exactly as the reference D2StackTemplate stores it; two IDENTICAL small
+ * units in a column correctly stay TWO slots. This is the SINGLE re-pack both export paths run
+ * (the writer else-branch below + map-edit's materialize), so they can never disagree and an
+ * edit can never split a big unit in two (the pre-fix corruption the semantic gate was blind to). */
+export function packTemplateSlots(cells: readonly (TemplateUnit | null)[]): {
+  slots: TemplateUnit[];
+  slotOfCell: number[];
+} {
+  const slots: TemplateUnit[] = [];
+  const slotOfCell = [-1, -1, -1, -1, -1, -1];
+  for (let cell = 0; cell < 6; cell++) {
+    const u = cells[cell];
+    if (!u || !u.unit) continue;
+    const partner = cell ^ 1;
+    const p = cells[partner];
+    if (partner < cell && p && p.unit === u.unit && (u.big || p.big) && slotOfCell[partner]! >= 0) {
+      slotOfCell[cell] = slotOfCell[partner]!; // big unit: reuse the partner's slot (POS_i==POS_j)
+      continue;
+    }
+    slotOfCell[cell] = slots.length;
+    slots.push({ unit: u.unit, level: u.level });
+  }
+  return { slots, slotOfCell };
+}
+
 /** Serialize one MidStackTemplate block (code 0x18, short TM). `tmpl.id` is the final 10-char
  *  id. Packs the 6 formation cells back into UNIT_/POS_ slots (units are global Gunit ids, so
  *  no MidUnit instances are created). Modifiers + useFacing/facing/aiPriority are preserved. */
 export function stackTemplateFrame(version: string, tmpl: StackTemplate): Uint8Array {
   const second = parseInt(tmpl.id.slice(6), 16) || 0;
   const cells = tmpl.units ?? [];
-  // slot order = filled cells in cell order; POS_i = the slot index of cell i's unit (-1 empty)
-  const filled: { cell: number; unit: string; level: number }[] = [];
-  for (let cell = 0; cell < 6; cell++) {
-    const u = cells[cell];
-    if (u && u.unit) filled.push({ cell, unit: u.unit, level: u.level });
-  }
-  const slotOfCell = [-1, -1, -1, -1, -1, -1];
-  filled.forEach((f, slot) => (slotOfCell[f.cell] = slot));
 
   return emitBlock(version, "MidStackTemplate", 0x18, "TM", second, (w, full) => {
     w.refField("ID", full);
@@ -145,17 +166,17 @@ export function stackTemplateFrame(version: string, tmpl: StackTemplate): Uint8A
     // The typed SLOT layout when captured at load (slot packing is editing history + orphan
     // slots are real on-disk data); canonical re-pack for edited/fresh templates (upsertTemplate
     // drops slots/slotOfCell so a stale layout can never overwrite an edit).
-    if (tmpl.slots && tmpl.slots.length === 6 && tmpl.slotOfCell && tmpl.slotOfCell.length === 6) {
+    if (tmpl.slots && tmpl.slotOfCell && tmpl.slotOfCell.length === 6) {
       for (let s = 0; s < 6; s++) {
         w.refField(`UNIT_${s}`, tmpl.slots[s]?.unit || EMPTY_REF);
         w.defaultInt(`UNIT_${s}_LVL`, tmpl.slots[s]?.level ?? 0);
       }
       for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, tmpl.slotOfCell[i] ?? -1);
     } else {
+      const { slots, slotOfCell } = packTemplateSlots(cells); // big-aware re-pack (no split)
       for (let s = 0; s < 6; s++) {
-        const f = filled[s];
-        w.refField(`UNIT_${s}`, f ? f.unit : EMPTY_REF);
-        w.defaultInt(`UNIT_${s}_LVL`, f ? f.level : 0);
+        w.refField(`UNIT_${s}`, slots[s]?.unit || EMPTY_REF);
+        w.defaultInt(`UNIT_${s}_LVL`, slots[s]?.level ?? 0);
       }
       for (let i = 0; i < 6; i++) w.defaultInt(`POS_${i}`, slotOfCell[i]!);
     }

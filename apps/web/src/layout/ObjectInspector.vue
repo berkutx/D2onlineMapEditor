@@ -452,32 +452,36 @@ function commitStackFormation(st: StackLike, g: (GarrUnit | null)[], leaderCell:
   }
   editStore.commit([{ kind: "patchObject", id: st.id, fields: { garrison: g, leaderCell: lc, leaderImage } }]);
 }
+// A stack formation carries BIG (2-cell) units exactly like a garrison — the same entity spans
+// two cells sharing one `key`. Per-cell edits MUST hit both cells (entityCells), or the pair
+// desyncs (one unit, two levels): the serializer collapses it back and the export's semantic
+// gate rejects the edit — the standalone-stack twin of the garrison big-unit gotcha.
 function stackSetUnit(st: StackLike, cell: number, unitId: string): void {
   if (!st) return;
   const g = garr6(st).map((c) => (c ? { ...c } : null));
+  for (const i of entityCells(g, cell)) if (i !== cell) g[i] = null; // replacing a big unit: drop its ghost half
   g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
   commitStackFormation(st, g, st.leaderCell ?? -1);
 }
 function stackClearCell(st: StackLike, cell: number): void {
   if (!st) return;
   const g = garr6(st).map((c) => (c ? { ...c } : null));
-  g[cell] = null;
+  for (const i of entityCells(g, cell)) g[i] = null; // clear the whole big unit, not half of it
   commitStackFormation(st, g, st.leaderCell ?? -1);
 }
 function stackSetStat(st: StackLike, cell: number, key: "level" | "hp", v: number): void {
   if (!st) return;
   const g = garr6(st).map((c) => (c ? { ...c } : null));
-  const c = g[cell];
-  if (!c) return;
-  g[cell] = { ...c, [key]: Math.max(0, Math.round(v || 0)) };
+  if (!g[cell]) return;
+  const nv = Math.max(0, Math.round(v || 0));
+  for (const i of entityCells(g, cell)) g[i] = { ...(g[i] as GarrUnit), [key]: nv }; // keep both cells of a big unit in sync
   commitStackFormation(st, g, st.leaderCell ?? -1);
 }
 function stackSetMods(st: StackLike, cell: number, mods: string[]): void {
   if (!st) return;
   const g = garr6(st).map((c) => (c ? { ...c } : null));
-  const c = g[cell];
-  if (!c) return;
-  g[cell] = withMods(c, mods);
+  if (!g[cell]) return;
+  for (const i of entityCells(g, cell)) g[i] = withMods(g[i] as GarrUnit, mods); // both cells of a big unit
   commitStackFormation(st, g, st.leaderCell ?? -1);
 }
 function stackSetLeader(st: StackLike, cell: number): void {
