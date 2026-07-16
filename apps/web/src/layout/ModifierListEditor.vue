@@ -19,6 +19,8 @@ import { ref, computed, watch } from "vue";
 import { ElButton, ElDialog, ElInput, ElSelect, ElOption, ElSegmented } from "element-plus";
 import { Search } from "@element-plus/icons-vue";
 import { useModifierStore, type ModifierEntry, type ModifierGroup } from "../stores/modifierStore";
+import LuaView from "./LuaView.vue";
+import { assetUrl } from "../services/api";
 
 const props = withDefaults(
   defineProps<{
@@ -124,6 +126,38 @@ function removeAll(id: string): void {
   emit("update:modelValue", props.modelValue.filter((x) => x !== id));
 }
 
+// ── Lua source viewer: a scripted modifier's `.lua` lives on the asset volume (assets/modscripts/,
+// the game's Scripts/modifiers tree). Lazy-fetch ONE file on demand + cache; the catalog stays lean.
+const codeCache = new Map<string, string>();
+const codeOpen = ref(false);
+const codeMod = ref<ModifierEntry | null>(null);
+const codeText = ref("");
+const codeErr = ref("");
+const codeLoading = ref(false);
+async function viewCode(m: ModifierEntry, ev?: Event): Promise<void> {
+  ev?.stopPropagation(); // don't also add/step the modifier
+  if (!m.script) return;
+  codeMod.value = m;
+  codeErr.value = "";
+  codeOpen.value = true;
+  const cached = codeCache.get(m.script);
+  if (cached !== undefined) { codeText.value = cached; return; }
+  codeLoading.value = true;
+  codeText.value = "";
+  try {
+    const url = assetUrl("modscripts/" + m.script.split("/").map(encodeURIComponent).join("/"));
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const t = await res.text();
+    codeCache.set(m.script, t);
+    codeText.value = t;
+  } catch (e) {
+    codeErr.value = `Не удалось загрузить ${m.script}: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    codeLoading.value = false;
+  }
+}
+
 const tip = (m: ModifierEntry | undefined): string =>
   m
     ? [
@@ -177,6 +211,7 @@ const markTip = (m: ModifierEntry | undefined): string =>
                 :class="{ picked: countOf(m.id) > 0 }" :title="tip(m)" @click="addOne(m.id)">
                 <span class="ml-mark" :title="markTip(m)">{{ isStandard(m) ? "★" : isOutside(m) ? "🧪" : "" }}</span>
                 <span class="ml-name">{{ m.name }} <span class="ml-id">{{ m.id }}</span></span>
+                <span v-if="m.script" class="ml-code" title="Показать Lua-код модификатора" @click.stop="viewCode(m, $event)">📜</span>
                 <span v-if="countOf(m.id)" class="ml-x">×{{ countOf(m.id) }}</span>
                 <span class="ml-add">＋</span>
               </button>
@@ -192,6 +227,7 @@ const markTip = (m: ModifierEntry | undefined): string =>
             <div v-for="c in chosen" :key="c.id" class="ml-row chosen" :title="tip(store.get(c.id))">
               <span class="ml-mark" :title="markTip(store.get(c.id))">{{ isStandard(store.get(c.id)) ? "★" : isOutside(store.get(c.id)) ? "🧪" : "" }}</span>
               <span class="ml-name">{{ store.nameOf(c.id) }} <span class="ml-id">{{ c.id }}</span></span>
+              <span v-if="store.get(c.id)?.script" class="ml-code" title="Показать Lua-код модификатора" @click.stop="viewCode(store.get(c.id)!, $event)">📜</span>
               <span class="ml-step">
                 <button type="button" class="ml-stepbtn" title="Убрать одну" @click="removeOne(c.id)">−</button>
                 <span class="ml-x">×{{ c.count }}</span>
@@ -206,6 +242,24 @@ const markTip = (m: ModifierEntry | undefined): string =>
         <span class="ml-legend">★ набор редактора игры · 🧪 вне редактора (мод/скрипт)</span>
         <el-button size="small" type="primary" @click="open = false">Готово</el-button>
       </template>
+    </el-dialog>
+
+    <!-- Lua source of a scripted modifier — nested dialog, lazy-loaded on 📜 click. -->
+    <el-dialog
+      v-model="codeOpen"
+      :title="codeMod ? `${codeMod.name} — Lua` : 'Lua'"
+      width="720px"
+      align-center
+      append-to-body
+      class="ml-code-dialog"
+    >
+      <div v-if="codeMod" class="ml-code-head">
+        <span class="ml-id">{{ codeMod.id }}</span>
+        <span class="ml-code-path">{{ codeMod.script }}</span>
+      </div>
+      <div v-if="codeLoading" class="ml-status">Загрузка кода…</div>
+      <div v-else-if="codeErr" class="ml-status err">{{ codeErr }}</div>
+      <LuaView v-else :code="codeText" />
     </el-dialog>
   </span>
 </template>
@@ -332,6 +386,28 @@ button.ml-row:hover { background: var(--el-fill-color-light); }
 .ml-del:hover { color: var(--el-color-danger); }
 .ml-status { padding: 14px 8px; color: var(--el-text-color-secondary); font-size: 12px; }
 .ml-status.err { color: var(--el-color-danger); }
+/* 📜 — reveal the modifier's Lua source (only shown for scripted modifiers). */
+.ml-code {
+  flex: 0 0 auto;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.6;
+  padding: 0 2px;
+  line-height: 1;
+}
+.ml-code:hover { opacity: 1; }
+.ml-code-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ml-code-path {
+  font-family: var(--el-font-family-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  word-break: break-all;
+}
 .ml-legend {
   float: left;
   font-size: 11px;
