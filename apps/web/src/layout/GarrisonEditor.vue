@@ -26,8 +26,15 @@ const props = withDefaults(
      *  pass "soldiers" (the reference editor never offers heroes there). Default keeps the
      *  old unfiltered behavior for surfaces not yet audited. */
     roster?: "soldiers" | "all";
+    /** Hide the HP field — the stack-TEMPLATE format has no per-unit HP (level only). */
+    hideHp?: boolean;
+    /** Level cap for the ур. input (garrison 50, template 10). */
+    maxLevel?: number;
+    /** Optional per-cell clear gate: return false to forbid emptying a cell (the template's
+     *  leader lock — can't remove the leader while soldiers remain). Default: all clearable. */
+    cellClearable?: (cell: number) => boolean;
   }>(),
-  { readonly: false, leaderCell: undefined, roster: "all" },
+  { readonly: false, leaderCell: undefined, roster: "all", hideHp: false, maxLevel: 50, cellClearable: undefined },
 );
 const emit = defineEmits<{
   setUnit: [cell: number, unitId: string];
@@ -123,7 +130,7 @@ function bigBlockedReason(cell: number, unitId: string): string {
           <div class="garr-pick">
             <UnitPicker
               :model-value="garrison[cell]?.unit ?? null"
-              nullable
+              :nullable="cellClearable ? cellClearable(cell) : true"
               :roster="rosterFor(cell)"
               :disabled-reason="(id) => bigBlockedReason(cell, id)"
               :title="rosterFor(cell) === 'leaders' ? 'Лидер отряда — герой или вор' : `Юнит — ${cell % 2 === 0 ? 'передняя' : 'задняя'} линия`"
@@ -149,13 +156,13 @@ function bigBlockedReason(cell: number, unitId: string): string {
             <el-input-number
               :model-value="garrison[cell]!.level"
               :min="1"
-              :max="50"
+              :max="maxLevel"
               size="small"
               :controls="false"
               @change="(v: number) => emit('setStat', cell, 'level', v ?? 1)"
             />
           </span>
-          <span class="garr-stat">
+          <span v-if="!hideHp" class="garr-stat">
             <label>HP</label>
             <el-input-number
               :model-value="garrison[cell]!.hp"
@@ -165,8 +172,9 @@ function bigBlockedReason(cell: number, unitId: string): string {
               :controls="false"
               @change="(v: number) => emit('setStat', cell, 'hp', v ?? 0)"
             />
+          </span>
+          <span v-if="!readonly" class="garr-stat garr-mods">
             <ModifierListEditor
-              v-if="!readonly"
               :model-value="garrison[cell]!.modifiers ?? []"
               :title="`${unitStore.nameOf(garrison[cell]!.unit)} — модификаторы`"
               :leader="leaderCell === cell"

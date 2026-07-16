@@ -9,14 +9,13 @@
  *  facing are preserved on round-trip (equipment does not exist in the template format).
  *  Edits commit as upsertTemplate/deleteTemplate ops (undoable + collab). */
 import { computed, nextTick, watch } from "vue";
-import { ElInput, ElInputNumber, ElButton, ElScrollbar, ElEmpty, ElSelect, ElOption, ElTooltip } from "element-plus";
+import { ElButton, ElScrollbar, ElEmpty, ElSelect, ElOption } from "element-plus";
 import type { StackTemplate, TemplateUnit } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
 import { useUnitStore } from "../stores/unitStore";
 import CommitInput from "./CommitInput.vue";
-import UnitPicker from "./UnitPicker.vue";
-import ModifierListEditor from "./ModifierListEditor.vue";
+import GarrisonEditor from "./GarrisonEditor.vue";
 
 const store = useEventStore();
 const edit = useEditStore();
@@ -106,30 +105,35 @@ function entityFill(units: readonly (TemplateUnit | null)[]): number {
 }
 const soldierCount = computed(() => entityFill(sel.value?.units ?? []) - (hasLeader.value ? 1 : 0));
 
-/** Слоты рендера: пара клеток большого юнита сливается в ОДИН широкий слот (primary = нижняя
- *  чётная клетка); обычные юниты — по слоту на клетку. Порядок сверху вниз: 0..5. */
-const rows = computed<{ cell: number; wide: boolean }[]>(() => {
-  const out: { cell: number; wide: boolean }[] = [];
-  for (let r = 0; r < 3; r++) {
-    const a = 2 * r, b = 2 * r + 1;
-    if (isBigPrimary(a)) out.push({ cell: a, wide: true });
-    else { out.push({ cell: a, wide: false }); out.push({ cell: b, wide: false }); }
-  }
-  return out;
-});
-
-/** Пока лидера нет — ЛЮБАЯ ячейка предлагает лидера; ячейка лидера меняет лидера. */
-const cellRoster = (i: number): "leaders" | "soldiers" =>
-  !hasLeader.value || i === leaderCellIdx.value ? "leaders" : "soldiers";
-const cellTitle = (i: number): string =>
-  !hasLeader.value
-    ? "Сначала лидер — герой или вор возглавит отряд"
-    : i === leaderCellIdx.value
-      ? "Лидер отряда — герой или вор"
-      : "Выбор юнита";
 /** Ячейку лидера нельзя опустошить, пока в отряде есть другие юниты. */
 const cellClearable = (i: number): boolean =>
   i !== leaderCellIdx.value || soldierCount.value === 0;
+
+// ── Адаптер под GarrisonEditor: тот же презентационный компонент, что у гарнизона (2 колонки
+// Тыл/Фронт, широкий слот большого юнита, ⇔-бейдж, ★-лидер, гард «не выселять лидера»). Шаблон
+// поставляет данные в форме гарнизонного `GarrUnit[]`; размещение/эвикцию по-прежнему делают
+// setCell/setCellLevel/setCellMods (родитель владеет моделью). Отличия шаблона: нет HP (hideHp),
+// уровень ≤10, модификаторы лежат в отдельном списке (cellMods), большой юнит — по флагу `big`,
+// который здесь превращаем в ОБЩИЙ синтетический `key` пары → GarrisonEditor рисует широкий слот.
+type GView = { unit: string; level: number; hp: number; modifiers?: string[]; key?: string };
+const garrisonView = computed<(GView | null)[]>(() => {
+  const out: (GView | null)[] = [null, null, null, null, null, null];
+  const units = sel.value?.units ?? [];
+  for (let r = 0; r < 3; r++) {
+    const a = 2 * r, b = 2 * r + 1;
+    const key = isBigPrimary(a) ? `T${a}` : undefined; // общий key пары ⇒ один широкий слот
+    const ua = units[a], ub = units[b];
+    if (ua) out[a] = { unit: ua.unit, level: ua.level, hp: 0, modifiers: cellMods(a), key };
+    if (ub) out[b] = { unit: ub.unit, level: ub.level, hp: 0, modifiers: cellMods(b), key };
+  }
+  return out;
+});
+/** ★ на ячейке = сделать её юнита лидером (только герой/вор; звезда у GarrisonEditor и так
+ *  гейтит категорию). Лидер шаблона — производный LEADER/LEADER_LVL от юнита этой клетки. */
+function onSetLeader(c: number): void {
+  const u = cell(c);
+  if (u && unitStore.isLeaderCategory(u.unit)) patch({ leader: u.unit, leaderLevel: u.level });
+}
 
 function setCell(i: number, unit: string | null): void {
   if (!sel.value) return;
@@ -237,26 +241,20 @@ function setCellMods(i: number, mods: string[]): void {
             ? "Лидер выбран, но не размещён в отряде — кликните ячейку, чтобы поставить его ★"
             : "Отряд начинается с лидера: кликните любую ячейку — сперва выбирается герой или вор ★" }}
         </p>
-        <div v-for="row in rows" :key="row.cell" class="tpl-cell" :class="{ wide: row.wide }">
-          <span class="tpl-cell-n" :class="{ leader: row.cell === leaderCellIdx }">{{
-            row.cell === leaderCellIdx ? "★" : row.cell
-          }}</span>
-          <span v-if="row.wide" class="tpl-double" title="Двойной юнит — занимает обе линии формации; правится целиком">⇔</span>
-          <UnitPicker :model-value="cell(row.cell)?.unit ?? null" :nullable="cellClearable(row.cell)"
-            :roster="cellRoster(row.cell)" :title="cellTitle(row.cell)"
-            @update:model-value="setCell(row.cell, $event)" />
-          <el-input-number v-if="cell(row.cell)" :model-value="cell(row.cell)!.level" :min="1" :max="10"
-            size="small" controls-position="right" style="width: 84px"
-            @update:model-value="setCellLevel(row.cell, ($event as number) ?? 1)" />
-          <ModifierListEditor v-if="cell(row.cell)" :model-value="cellMods(row.cell)"
-            :title="`${unitStore.nameOf(cell(row.cell)!.unit)} — модификаторы`"
-            :leader="row.cell === leaderCellIdx" compact
-            @update:model-value="setCellMods(row.cell, $event)" />
-          <el-tooltip v-if="row.cell === leaderCellIdx && soldierCount > 0"
-            content="Лидера нельзя убрать, пока в отряде есть юниты — можно только заменить другим героем">
-            <span class="tpl-lock">🔒</span>
-          </el-tooltip>
-        </div>
+        <GarrisonEditor
+          :garrison="garrisonView"
+          :count="sel ? entityFill(sel.units) : 0"
+          :leader-cell="leaderCellIdx"
+          roster="soldiers"
+          hide-hp
+          :max-level="10"
+          :cell-clearable="cellClearable"
+          @set-unit="(c, u) => setCell(c, u)"
+          @clear="(c) => setCell(c, null)"
+          @set-stat="(c, k, v) => { if (k === 'level') setCellLevel(c, v); }"
+          @set-leader="onSetLeader"
+          @set-mods="(c, m) => setCellMods(c, m)"
+        />
       </div>
       <p class="tpl-hint">Шаблон — «рецепт» отряда: событие «Создать отряд» ставит его в выбранную локацию. Лидер (★) — часть отряда и занимает одну из 6 ячеек; модификаторы юнита — под ⚙ у ячейки. Снаряжения у шаблона не бывает — формат .sg его не хранит.</p>
     </el-scrollbar>
@@ -282,14 +280,7 @@ function setCellMods(i: number, mods: string[]): void {
 .tpl-form { min-height: 0; padding: 8px 12px; max-width: 560px; }
 .tpl-props { margin: 8px 0; }
 .tpl-props label { color: var(--el-text-color-secondary); margin-right: 6px; }
-.tpl-cell { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
-/* a merged BIG-unit slot: one row for the 2-cell pair, softly boxed + ⇔ badge */
-.tpl-cell.wide { background: var(--el-fill-color-lighter); border-radius: var(--d2-radius, 4px); padding: 3px 5px; }
-.tpl-double { color: var(--el-color-warning); font-size: 12px; line-height: 1; }
-.tpl-cell-n { width: 16px; color: var(--el-text-color-secondary); font-family: monospace; font-size: 11px; }
-.tpl-cell-n.leader { color: var(--el-color-warning); font-size: 13px; }
 .tpl-need-leader { color: var(--el-color-warning); font-size: 11px; margin: 4px 0 8px; }
-.tpl-lock { cursor: help; opacity: 0.7; }
 .tpl-hint { color: var(--el-text-color-secondary); font-size: 11px; margin-top: 12px; }
 .icon-btn { opacity: 0.6; transition: opacity 0.12s; }
 .icon-btn:hover { opacity: 1; }
