@@ -81,6 +81,24 @@ function onPick(cell: number, v: string | null): void {
   if (v) emit("setUnit", cell, v);
   else emit("clear", cell);
 }
+
+/** Reason a BIG (2-cell) unit can't be placed at `cell` ("" ⇒ allowed). A big unit fills both
+ *  cells of its formation row (partner = cell ^ 1); placing it evicts whatever sits in the
+ *  partner. That eviction is fine for a regular soldier (it happens honestly on export) — the ONE
+ *  case we forbid is evicting the crowned LEADER, which the reference never allows. Small units
+ *  are never blocked. Only fires in stack/visitor mode (city/ruin garrisons pass no leaderCell). */
+function bigBlockedReason(cell: number, unitId: string): string {
+  if (!unitStore.isLarge(unitId)) return ""; // only big candidates can ever be blocked
+  const partner = cell ^ 1;
+  const p = props.garrison[partner];
+  if (!p) return ""; // empty partner → the big unit claims both cells freely
+  const curKey = (props.garrison[cell] as { key?: string } | null)?.key;
+  const pKey = (p as { key?: string }).key;
+  if (curKey && pKey && curKey === pKey) return ""; // re-picking the SAME big entity (wide slot)
+  if (props.leaderCell === partner)
+    return "Соседняя линия занята лидером — большой юнит занял бы обе, а лидера выселять нельзя";
+  return ""; // a regular soldier partner IS evictable (placeUnitInCells drops it honestly)
+}
 </script>
 
 <template>
@@ -107,6 +125,7 @@ function onPick(cell: number, v: string | null): void {
               :model-value="garrison[cell]?.unit ?? null"
               nullable
               :roster="rosterFor(cell)"
+              :disabled-reason="(id) => bigBlockedReason(cell, id)"
               :title="rosterFor(cell) === 'leaders' ? 'Лидер отряда — герой или вор' : `Юнит — ${cell % 2 === 0 ? 'передняя' : 'задняя'} линия`"
               @update:model-value="(v) => onPick(cell, v)"
             />
@@ -230,7 +249,9 @@ function onPick(cell: number, v: string | null): void {
   padding-left: 27px;
 }
 .garr-cell :deep(.up-wrap) { width: 100%; }
-.garr-cell :deep(.up-trigger) { width: 100%; justify-content: flex-start; padding: 4px 6px; }
+/* min-width:0 lets the trigger shrink below its content (a long unit name) so the sibling
+ * ⊗ clear button stays inside the (half-width) cell instead of overlapping the neighbour. */
+.garr-cell :deep(.up-trigger) { width: 100%; min-width: 0; justify-content: flex-start; padding: 4px 6px; }
 .garr-cell :deep(.up-trigger-text) { max-width: 100%; }
 .garr-pick {
   display: flex;

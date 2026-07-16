@@ -40,8 +40,13 @@ const props = withDefaults(
      * 100% L_LEADER/L_NOBLE — nothing else ever leads.
      */
     roster?: "leaders" | "soldiers" | "all";
+    /** Per-candidate gate: return a non-empty reason to DISABLE that unit (shown as its tooltip),
+     *  or "" / null to leave it pickable. Used by the garrison to block a BIG unit whose second
+     *  formation line would evict a leader. Undefined ⇒ nothing is ever disabled (all other
+     *  callers unaffected). */
+    disabledReason?: (unitId: string) => string | null | undefined;
   }>(),
-  { modelValue: null, nullable: false, title: "Выбор юнита", triggerLabel: "", roster: "all" },
+  { modelValue: null, nullable: false, title: "Выбор юнита", triggerLabel: "", roster: "all", disabledReason: undefined },
 );
 const emit = defineEmits<{
   "update:modelValue": [string | null];
@@ -133,6 +138,10 @@ const triggerText = computed(() => {
   return unitStore.nameOf(props.modelValue) || "— пусто —";
 });
 
+/** Disable reason for a candidate row ("" ⇒ pickable). Kept a plain string so the template can
+ *  both gate the click and use it as the row's tooltip. */
+const rowReason = (u: UnitEntry): string => (props.disabledReason ? props.disabledReason(u.id) || "" : "");
+
 function choose(id: string): void {
   if (props.triggerLabel) emit("pick", id);
   else emit("update:modelValue", id);
@@ -196,10 +205,11 @@ function clear(): void {
             v-for="u in g.units"
             :key="u.id"
             class="up-row"
-            :class="{ active: u.id === modelValue }"
+            :class="{ active: u.id === modelValue, disabled: !!rowReason(u) }"
             type="button"
-            :title="u.desc || u.name"
-            @click="choose(u.id)"
+            :aria-disabled="!!rowReason(u)"
+            :title="rowReason(u) || u.desc || u.name"
+            @click="!rowReason(u) && choose(u.id)"
           >
             <UnitIcon :id="u.id" :level="u.level" :subrace-id="u.subraceId" :size="30" />
             <span class="up-text">
@@ -209,6 +219,7 @@ function clear(): void {
                 · ур.{{ u.level }} · {{ u.hp }} HP · бр.{{ u.armor }}<template v-if="u.leadership"> · лид.{{ u.leadership }}</template>
               </span>
             </span>
+            <span v-if="u.large" class="up-big" title="Большой юнит — занимает обе линии формации (двойной)">⇔</span>
           </button>
         </template>
       </div>
@@ -226,7 +237,7 @@ function clear(): void {
 
 <style scoped>
 .up-wrap { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
-.up-trigger { max-width: 100%; }
+.up-trigger { max-width: 100%; min-width: 0; }
 .up-trigger-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
 .up-trigger-text.empty { color: var(--el-text-color-secondary); }
 .up-trigger-icon { margin-right: 4px; vertical-align: -4px; }
@@ -251,6 +262,11 @@ function clear(): void {
 }
 .up-row:hover { background: var(--el-fill-color-light); }
 .up-row.active { background: var(--el-color-primary-light-9); outline: 1px solid var(--el-color-primary-light-5); }
+/* aria-disabled (not the native attr) so the reason tooltip still shows on hover */
+.up-row.disabled { opacity: 0.4; cursor: not-allowed; }
+.up-row.disabled:hover { background: transparent; }
+/* ⇔ big-unit (двойной) marker — a big unit fills BOTH formation lines of its row */
+.up-big { flex: 0 0 auto; align-self: center; margin-left: 6px; font-size: 15px; color: var(--el-color-warning); }
 .up-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .up-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .up-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--el-text-color-secondary); }
