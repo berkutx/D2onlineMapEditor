@@ -28,13 +28,10 @@ const props = withDefaults(
     roster?: "soldiers" | "all";
     /** Hide the HP field — the stack-TEMPLATE format has no per-unit HP (level only). */
     hideHp?: boolean;
-    /** Level cap for the ур. input (garrison 50, template 10). */
-    maxLevel?: number;
-    /** Optional per-cell clear gate: return false to forbid emptying a cell (the template's
-     *  leader lock — can't remove the leader while soldiers remain). Default: all clearable. */
+    /** Optional per-cell clear gate: return false to forbid emptying a cell. Default: all clearable. */
     cellClearable?: (cell: number) => boolean;
   }>(),
-  { readonly: false, leaderCell: undefined, roster: "all", hideHp: false, maxLevel: 50, cellClearable: undefined },
+  { readonly: false, leaderCell: undefined, roster: "all", hideHp: false, cellClearable: undefined },
 );
 const emit = defineEmits<{
   setUnit: [cell: number, unitId: string];
@@ -156,7 +153,7 @@ function bigBlockedReason(cell: number, unitId: string): string {
             <el-input-number
               :model-value="garrison[cell]!.level"
               :min="1"
-              :max="maxLevel"
+              :max="unitStore.levelCap"
               size="small"
               :controls="false"
               @change="(v: number) => emit('setStat', cell, 'level', v ?? 1)"

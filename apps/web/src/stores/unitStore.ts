@@ -105,6 +105,18 @@ export const useUnitStore = defineStore("unit", () => {
 
   const all = computed<UnitEntry[]>(() => Object.values(catalog.value));
 
+  /** Level SpinBox cap — PORTED verbatim from the reference GroupEditor::unitMaxLvl():
+   *  `65536 / getKeysList<Gunit>().count()`. It is a GLOBAL constant (NOT per-unit, NOT the
+   *  DYNUPG chain, NOT leader-vs-soldier) — the same value for every cell. `count` = number of
+   *  Gunit records; our catalog is exactly that set (target mod: 856 units → cap 76), and it
+   *  auto-scales to whatever mod the catalog was built from. Fallback 50 before load (empty
+   *  catalog) to avoid a degenerate div-by-count. The SpinBox MIN is the per-unit base level
+   *  (`UnitEntry.level`, reference `unitBaseLvl`). */
+  const levelCap = computed<number>(() => {
+    const n = Object.keys(catalog.value).length;
+    return n > 0 ? Math.floor(65536 / n) : 50;
+  });
+
   function get(id: string | null | undefined): UnitEntry | undefined {
     return id ? catalog.value[id] : undefined;
   }
@@ -178,5 +190,5 @@ export const useUnitStore = defineStore("unit", () => {
     return out;
   });
 
-  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, isLarge, bySubrace, byCat, byLevel };
+  return { catalog, loaded, loading, error, load, all, levelCap, get, nameOf, isLeaderCategory, isLarge, bySubrace, byCat, byLevel };
 });
