@@ -74,7 +74,10 @@ function isBigPrimary(cell: number): boolean {
   const u = sel.value?.units ?? [];
   const ua = u[cell], ub = u[partnerOf(cell)];
   if (!ua || !ub || ua.unit !== ub.unit) return false;
-  return unitStore.loaded ? unitStore.isLarge(ua.unit) : !!(ua.big || ub.big);
+  if (!(ua.big || ub.big)) return false; // must be a slot-shared pair (reader) or a fresh big
+  // size-gate to LARGE only when the catalog carries size data; a stale catalog (no `large`) must
+  // NOT un-merge — that would split a real big unit. Without sizes, the reader flag alone merges.
+  return !unitStore.hasSizes || unitStore.isLarge(ua.unit);
 }
 /** Клетки, которые двигаются ВМЕСТЕ с `cell`: обе клетки большого юнита, иначе — только сама. */
 const entityCells = (cell: number): number[] => (isBigPrimary(cell) ? [cell, partnerOf(cell)] : [cell]);
@@ -83,7 +86,7 @@ const entityCells = (cell: number): number[] => (isBigPrimary(cell) ? [cell, par
  *  packTemplateSlots не схлопнет их в один слот и не потеряет разные уровни. Работает лишь при
  *  загруженном каталоге — иначе неизвестный размер не должен сбрасывать флаг настоящего большого. */
 function withSizedBig(units: (TemplateUnit | null)[]): (TemplateUnit | null)[] {
-  if (!unitStore.loaded) return units;
+  if (!unitStore.hasSizes) return units; // no size data → keep reader/fresh big flags (never split)
   const out = units.map((u) => (u ? { ...u } : null));
   for (let r = 0; r < 3; r++) {
     const a = 2 * r, b = 2 * r + 1, ua = out[a], ub = out[b];

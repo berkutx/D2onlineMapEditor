@@ -118,6 +118,11 @@ export const useUnitStore = defineStore("unit", () => {
   function isLarge(id: string | null | undefined): boolean {
     return !!get(id)?.large;
   }
+  /** Does the loaded catalog actually carry unit SIZE data (any `large` flag)? An OLD/stale prod
+   *  catalog lacks it — callers MUST gate isLarge-based size logic on this, or a false isLarge on
+   *  a real big unit would wrongly un-merge/split it. Absent size data → fall back to the
+   *  placement-derived big flag (POS_i==POS_j), which never splits an existing big unit. */
+  const hasSizes = computed<boolean>(() => all.value.some((u) => u.large));
 
   /** Units grouped by subrace (ascending subraceId) — the main way to find a faction's roster. */
   const bySubrace = computed<UnitGroup[]>(() => {
@@ -168,5 +173,5 @@ export const useUnitStore = defineStore("unit", () => {
     return out;
   });
 
-  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, isLarge, bySubrace, byCat, byLevel };
+  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, isLarge, hasSizes, bySubrace, byCat, byLevel };
 });
