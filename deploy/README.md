@@ -75,10 +75,11 @@ MISS → origin) on the next code deploy. There is no Cloudflare API purge token
 is the cache-bust. (`modifierStore` and `unitStore` already carry a `?v`.)
 
 **`unitCatalog.json` specifically** must carry the `large` flag (Gunits `SIZE_SMALL` false = a 2-cell
-big unit). It drives the big-unit merged formation slot + placing a fresh big unit across both cells.
-If the volume catalog lacks `large` (old build), the client falls back to the on-disk `POS_i==POS_j`
-flag: existing big units still merge + never split (correctness holds), but the size-gate for two
-identical small units + fresh big-unit placement stay inactive until the sized catalog is on the volume.
+big unit) — it is a **HARD REQUIREMENT**. It drives the big-unit merged formation slot + placing a
+fresh big unit across both cells. `unitStore.load()` **FAILS LOUD** (throws → sets the store `error`
++ `console.error`) if the fetched catalog carries **zero** `large` entries: a sized catalog missing
+from the volume is not normal operation, so there is **no silent fallback**. Deploy the sized catalog
+(steps above) before or with the code — never ship the code against a size-less catalog.
 
 ## Deploy
 `git push origin main` → the **Deploy** workflow builds + restarts `d2editor`. First deploy:

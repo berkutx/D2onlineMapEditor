@@ -85,12 +85,19 @@ export const useUnitStore = defineStore("unit", () => {
       const res = await fetch(assetUrl("unitCatalog.json") + "?v=2");
       if (!res.ok) throw new Error(`unitCatalog.json ${res.status}`);
       const arr = (await res.json()) as UnitEntry[];
+      // HARD REQUIREMENT: the catalog MUST carry unit SIZE (`large` = 2-cell big unit). A catalog
+      // with zero `large` is a stale/wrong build on the asset volume — fail LOUD (a missing sized
+      // catalog is not normal operation), never silently fall back. See deploy/README §3b.
+      if (!arr.some((u) => u.large)) {
+        throw new Error("unitCatalog.json несёт 0 размеров юнитов (нет `large`) — на asset-volume старый каталог; см. deploy/README §3b");
+      }
       const map: Record<string, UnitEntry> = {};
       for (const e of arr) map[e.id] = e;
       catalog.value = map;
       loaded.value = true;
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e);
+      console.error("[unitStore] каталог юнитов не загружен:", error.value);
     } finally {
       loading.value = false;
     }
@@ -121,11 +128,6 @@ export const useUnitStore = defineStore("unit", () => {
   function isLarge(id: string | null | undefined): boolean {
     return !!get(id)?.large;
   }
-  /** Does the loaded catalog actually carry unit SIZE data (any `large` flag)? An OLD/stale prod
-   *  catalog lacks it — callers MUST gate isLarge-based size logic on this, or a false isLarge on
-   *  a real big unit would wrongly un-merge/split it. Absent size data → fall back to the
-   *  placement-derived big flag (POS_i==POS_j), which never splits an existing big unit. */
-  const hasSizes = computed<boolean>(() => all.value.some((u) => u.large));
 
   /** Units grouped by subrace (ascending subraceId) — the main way to find a faction's roster. */
   const bySubrace = computed<UnitGroup[]>(() => {
@@ -176,5 +178,5 @@ export const useUnitStore = defineStore("unit", () => {
     return out;
   });
 
-  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, isLarge, hasSizes, bySubrace, byCat, byLevel };
+  return { catalog, loaded, loading, error, load, all, get, nameOf, isLeaderCategory, isLarge, bySubrace, byCat, byLevel };
 });
