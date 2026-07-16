@@ -298,12 +298,26 @@ const visitorCount = computed(() => visitorGarrison.value.filter(Boolean).length
 function commitGarrison(targetId: string, g: (GarrUnit | null)[]): void {
   editStore.commit([{ kind: "patchObject", id: targetId, fields: { garrison: g } }]);
 }
+/** A fresh SHARED identity for a big unit's two cells: a client-unique string that mint replaces
+ *  with a real UN key at export (mintGarrison dedups by key → one MidUnit). Never reaches the .sg. */
+const freshBigKey = (): string =>
+  `NB-${typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`;
+/** Place a unit at `cell`; a BIG (2-cell) unit occupies BOTH cells of its column (front a + back
+ *  b) sharing one key so it exports as ONE MidUnit — parity with the template editor. */
+function placeUnitInCells(g: (GarrUnit | null)[], cell: number, unitId: string): void {
+  for (const i of entityCells(g, cell)) if (i !== cell) g[i] = null; // drop a replaced big unit's ghost half
+  if (unitStore.isLarge(unitId)) {
+    const a = cell & ~1, b = a + 1, hp = unitStore.get(unitId)?.hp ?? 0, key = freshBigKey();
+    for (const i of [a, b]) if (i !== cell) g[i] = null; // evict whatever sat in the sibling cell
+    g[a] = { unit: unitId, level: 1, hp, key } as GarrUnit;
+    g[b] = { unit: unitId, level: 1, hp, key } as GarrUnit;
+  } else {
+    g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
+  }
+}
 function setGarrisonUnitOn(targetId: string, cur: (GarrUnit | null)[], cell: number, unitId: string): void {
   const g = cur.map((c) => (c ? { ...c } : null));
-  // replacing a cell that held a BIG (2-cell) unit: clear its OTHER cell too, or a ghost half of
-  // the old unit lingers (inconsistent entity → export semantic fail; the wide slot half-shows it)
-  for (const i of entityCells(g, cell)) if (i !== cell) g[i] = null;
-  g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
+  placeUnitInCells(g, cell, unitId);
   commitGarrison(targetId, g);
 }
 /** Cells occupied by the SAME entity as `cell`. A BIG (2-cell) unit is ONE unit spanning two
@@ -459,8 +473,7 @@ function commitStackFormation(st: StackLike, g: (GarrUnit | null)[], leaderCell:
 function stackSetUnit(st: StackLike, cell: number, unitId: string): void {
   if (!st) return;
   const g = garr6(st).map((c) => (c ? { ...c } : null));
-  for (const i of entityCells(g, cell)) if (i !== cell) g[i] = null; // replacing a big unit: drop its ghost half
-  g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
+  placeUnitInCells(g, cell, unitId); // big unit → both column cells, one shared key
   commitStackFormation(st, g, st.leaderCell ?? -1);
 }
 function stackClearCell(st: StackLike, cell: number): void {

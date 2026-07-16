@@ -325,4 +325,20 @@ describe("garrison big-unit is not split by an edit", () => {
     expect(bg[empty]?.key, "added unit is a DISTINCT unit").not.toBe(bg[a]?.key);
     expect(verifyBlockIntegrity(out).ok, "structurally valid").toBe(true);
   });
+
+  it("placing a FRESH big unit across two garrison cells (shared temp key) exports as ONE MidUnit", () => {
+    const { id } = garrisonBigUnit();
+    const large = "G000UU0018"; // Титан (Gunits SIZE_SMALL=F); the UI mints a shared temp key
+    const g: GU[] = [
+      { unit: large, level: 1, hp: 100, key: "NB-test" },
+      { unit: large, level: 1, hp: 100, key: "NB-test" },
+      null, null, null, null,
+    ];
+    const out = fromModel([{ kind: "patchObject", id, fields: { garrison: g } }]);
+    const bg = (parseScenario(out).objects.find((o) => o.id === id) as { garrison: GU[] }).garrison;
+    expect(bg[0]?.key, "cell 0 keyed").toBeTruthy();
+    expect(bg[0]?.key, "both cells share ONE minted key (POS_i==POS_j)").toBe(bg[1]?.key);
+    expect(bg[2], "no phantom extra cell").toBeNull();
+    expect(verifyBlockIntegrity(out).ok, "structurally valid").toBe(true);
+  });
 });
