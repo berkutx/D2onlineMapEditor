@@ -81,6 +81,28 @@ fresh big unit across both cells. `unitStore.load()` **FAILS LOUD** (throws → 
 from the volume is not normal operation, so there is **no silent fallback**. Deploy the sized catalog
 (steps above) before or with the code — never ship the code against a size-less catalog.
 
+### 3c. Populate `modscripts/` — Lua modifier sources (NEW volume-only asset)
+The modifier dialog's **📜 button** shows a scripted modifier's Lua source (Prism-highlighted, lazy-
+fetched one file at a time). Those sources are the target mod's `Game/Scripts/modifiers` tree, copied
+verbatim into `public/assets/modscripts/` (~1153 `.lua`, ~1.7 MB). Like the atlases/catalogs they are
+**gitignored + volume-only** (not in the image); the catalog's `script` field is the path under this
+dir (e.g. `spells/buff_initiative_+10.lua`). A code deploy never touches them. To (re)deploy:
+
+```sh
+# from the repo root — directory-tar so ONLY modscripts/ lands, atlases/catalogs untouched
+tar czf - -C public/assets modscripts | ssh <USER>@<HOST> \
+  'docker run --rm -i -v d2editor_assets:/dst alpine sh -c "cd /dst && tar xzf -"'
+# (PowerShell can't binary-pipe: `tar czf %TEMP%\ms.tgz -C public/assets modscripts`,
+#  `scp` it to /tmp, then `ssh ... docker run -v /tmp:/src:ro alpine ... tar xzf /src/ms.tgz`.)
+```
+
+**No `?v` bump needed** (unlike catalogs): these files are immutable once shipped — the fetch uses the
+bare `assetUrl("modscripts/<script>")`, so Cloudflare caches each 200 for a day with nothing to stale.
+The only edge caveat is a **404 negative-cache**: if you probe a URL *before* populating the volume, that
+PoP holds the 404 until its TTL expires. Populate the volume **before** shipping the feature so the first
+real request for any file is a 200 — real users never see the 404. Rebuild source of the dir: the target
+mod's `Game/Scripts/modifiers` (see `build_modifier_catalog.py`, which stores the `.lua` *path*, not code).
+
 ## Deploy
 `git push origin main` → the **Deploy** workflow builds + restarts `d2editor`. First deploy:
 push, wait for the build, confirm the Cloudflare rule, then open `https://d2mapeditor.online/map`.
