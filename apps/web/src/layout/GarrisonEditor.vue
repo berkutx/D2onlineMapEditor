@@ -152,7 +152,7 @@ function bigBlockedReason(cell: number, unitId: string): string {
             <label>ур.</label>
             <el-input-number
               :model-value="garrison[cell]!.level"
-              :min="1"
+              :min="unitStore.get(garrison[cell]!.unit)?.level ?? 1"
               :max="unitStore.levelCap"
               size="small"
               :controls="false"

@@ -136,7 +136,9 @@ function setCell(i: number, unit: string | null): void {
   if (!sel.value) return;
   const units = sel.value.units.slice();
   while (units.length < 6) units.push(null);
-  const level = units[i]?.level ?? 1;
+  // a picked unit starts at its BASE level (reference unitBaseLvl = Gunit.level, the SpinBox min);
+  // picking resets the cell's level to the new unit's base, matching the native editor.
+  const level = unit ? unitStore.get(unit)?.level ?? 1 : 1;
   const dropMods = new Set<number>();
   if (unit && unitStore.isLarge(unit)) {
     // БОЛЬШОЙ юнит занимает ОБЕ клетки своей колонки (чётная a + нечётная b), вытесняя прежних

@@ -306,13 +306,16 @@ const freshBigKey = (): string =>
  *  b) sharing one key so it exports as ONE MidUnit — parity with the template editor. */
 function placeUnitInCells(g: (GarrUnit | null)[], cell: number, unitId: string): void {
   for (const i of entityCells(g, cell)) if (i !== cell) g[i] = null; // drop a replaced big unit's ghost half
+  // Fresh unit starts at its BASE level (reference unitBaseLvl = Gunit.level), not 1 — a level-1
+  // dragon is nonsense, and the level SpinBox min is that base, so a below-base value would clamp.
+  const lvl = unitStore.get(unitId)?.level ?? 1;
   if (unitStore.isLarge(unitId)) {
     const a = cell & ~1, b = a + 1, hp = unitStore.get(unitId)?.hp ?? 0, key = freshBigKey();
     for (const i of [a, b]) if (i !== cell) g[i] = null; // evict whatever sat in the sibling cell
-    g[a] = { unit: unitId, level: 1, hp, key } as GarrUnit;
-    g[b] = { unit: unitId, level: 1, hp, key } as GarrUnit;
+    g[a] = { unit: unitId, level: lvl, hp, key } as GarrUnit;
+    g[b] = { unit: unitId, level: lvl, hp, key } as GarrUnit;
   } else {
-    g[cell] = { unit: unitId, level: 1, hp: unitStore.get(unitId)?.hp ?? 0 };
+    g[cell] = { unit: unitId, level: lvl, hp: unitStore.get(unitId)?.hp ?? 0 };
   }
 }
 function setGarrisonUnitOn(targetId: string, cur: (GarrUnit | null)[], cell: number, unitId: string): void {
