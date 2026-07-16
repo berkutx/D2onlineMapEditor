@@ -141,15 +141,21 @@ watch(
 
 const yn = (b: boolean): string => (b ? "✓" : "✗");
 
+// The notification is rendered with dangerouslyUseHTMLString — the semantic reason + structural
+// messages now embed user-controlled VALUES (unit/player names, winText, descriptions), so escape
+// every dynamic part before it becomes HTML. The static prefixes carry no metacharacters.
+const escHtml = (s: string): string =>
+  s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c] as string);
+
 function showReport(r: ValidationReport): void {
   const lines = [
     `identity ${yn(r.identity)} · semantic ${yn(r.semantic.ok)} · structural ${yn(r.structural.ok)}`,
     `${r.opCount} правок · ${r.byteLength.toLocaleString()} байт`,
   ];
-  if (!r.semantic.ok && r.semantic.reason) lines.push(`semantic: ${r.semantic.reason}`);
-  if (r.structural.errors.length) lines.push(`ошибки: ${r.structural.errors.slice(0, 3).join("; ")}`);
+  if (!r.semantic.ok && r.semantic.reason) lines.push(`semantic: ${escHtml(r.semantic.reason)}`);
+  if (r.structural.errors.length) lines.push(`ошибки: ${escHtml(r.structural.errors.slice(0, 3).join("; "))}`);
   if (r.structural.warnings.length) {
-    lines.push(`предупреждения (${r.structural.warnings.length}): ${r.structural.warnings.slice(0, 2).join("; ")}`);
+    lines.push(`предупреждения (${r.structural.warnings.length}): ${escHtml(r.structural.warnings.slice(0, 2).join("; "))}`);
   }
   ElNotification({
     title: r.ok ? "Карта корректна" : "Карта не прошла проверку",
