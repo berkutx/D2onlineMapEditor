@@ -51,7 +51,7 @@ SW_RESTORE = 9
 POINTS = {
     "menu_load":  (0.497, 0.617),   # main menu: "Загрузить сценарий"
     "list_item0": (0.371, 0.158),   # load list: first scenario row
-    "list_ok":    (0.450, 0.847),   # load list: "Ok"
+    "list_ok":    (0.453, 0.858),   # load list: "Ok" (centre of the button at 1024x768)
     "opt":        (0.919, 0.056),   # map view: "ОПЦИИ" (top-right)
     "opt_save":   (0.494, 0.444),   # options popup: "Сохранить"
     "opt_exit":   (0.494, 0.492),   # options popup: "Выход" (leave scenario -> main menu)
@@ -183,15 +183,22 @@ def do_load(hwnd, log, list_check, loaded_check, pid=None, title="Scenario Edito
     if list_check and not opened:
         log("[drive] load list never opened"); return hwnd, False
 
+    # scenario_read_header() is our signal that the list has started populating, not that its
+    # custom controls have finished becoming interactive.  Clicking immediately after that signal
+    # is racy: the row becomes visibly selected, but an early Ok mouse-up is occasionally ignored.
+    time.sleep(1.5)
     loaded = False
-    for _ in range(2):
-        click(hwnd, *POINTS["list_item0"]); time.sleep(0.6)
+    for confirm_attempt in range(4):
+        click(hwnd, *POINTS["list_item0"]); time.sleep(0.9)
         click(hwnd, *POINTS["list_ok"])
-        loaded = _wait(loaded_check, 45.0)
+        # A successful Ok reaches scenario_open_read almost immediately, even when parsing the
+        # map itself takes longer.  Retry the same visible button instead of waiting 45 seconds or
+        # clicking menu coordinates while the list dialog is still open.
+        loaded = _wait(loaded_check, 5.0)
         if loaded or loaded_check is None:
             break
-        log("[drive] load did not start — re-picking")
-        click(hwnd, *POINTS["menu_load"]); time.sleep(1.0)
+        log("[drive] Ok was not accepted — re-picking (attempt %d/4)" %
+            (confirm_attempt + 1))
     log("[drive] load confirmed=%s" % loaded)
     time.sleep(1.0)
     return hwnd, loaded

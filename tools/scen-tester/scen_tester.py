@@ -24,6 +24,7 @@ from __future__ import print_function
 import argparse
 import ctypes
 import ctypes.wintypes as wt
+import io
 import json
 import os
 import re
@@ -1104,8 +1105,13 @@ def _validate_session(dbg, maps, idx, results, staged, log, title, wait_window):
             shutil.copyfile(mp, staged)
         except Exception as e:
             log("[batch] stage failed: %r" % e)
-            results.append({"map": name, "status": "STAGE_FAIL", "error": repr(e)})
-            idx[0] += 1; in_map_view = False; continue
+            # The editor can retain an open handle to the staged scenario after a failed/
+            # incomplete load.  Continuing in the same process only turns every remaining map
+            # into a collateral STAGE_FAIL.  Leave the cursor on this map and let the session
+            # runner kill/relaunch the editor; if this was the first map of the session it will
+            # become a LOAD_FAIL and receive the normal isolated retry below.
+            log("[batch] staged file is busy -> relaunching before retrying this map")
+            return
 
         base_h, base_l = dbg.headers_read, len(dbg.loaded_files)
         base_hits, base_f = dbg.checkobj_hits, len(dbg.findings)
@@ -1134,7 +1140,11 @@ def _validate_session(dbg, maps, idx, results, staged, log, title, wait_window):
             return
 
         # loader runs checkObjects on the main thread (positive 'validated' signal); wait for it.
-        for _ in range(40):
+        # loaded_check fires when scenario_open_read starts, while a large/complex scenario may
+        # still spend well over 12 seconds parsing before checkObjects runs.  Wait up to 36
+        # seconds, exiting immediately for normal maps, so slow-but-valid maps are not reported as
+        # UNKNOWN merely because validation arrived just after the old timeout.
+        for _ in range(120):
             if dbg.checkobj_hits > base_hits:
                 break
             time.sleep(0.3)
@@ -1153,9 +1163,11 @@ def _validate_session(dbg, maps, idx, results, staged, log, title, wait_window):
             log("[batch] load threw (fatal modal) -> relaunching for the remaining maps")
             return                                          # exception wedges the editor -> relaunch
         elif not validated:
-            results.append({"map": name, "status": "UNKNOWN", "note": "checkObjects did not run"})
             log("[batch] %-44s UNKNOWN (validation did not run)" % name)
-            idx[0] += 1; in_map_view = False
+            # Do not accept an unvalidated map and do not reuse a process that may still own the
+            # staged file.  Keep the cursor in place so a fresh editor retries it.
+            log("[batch] validation signal missing -> relaunching before retrying this map")
+            return
         else:
             results.append({"map": name, "status": "PASS"})
             log("[batch] %-44s PASS" % name)
@@ -1320,7 +1332,7 @@ def main():
                     log("[batch]   %-8s %s %s" % (r.get("status"), r.get("map"),
                                                   ("(%s)" % r["invalid_obj"]) if r.get("invalid_obj") else ""))
             out = args.result or os.path.join(folder, "batch_summary.json")
-            with open(out, "w") as f:
+            with io.open(out, "w", encoding="utf-8") as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
             log("[batch] wrote summary -> %s" % out)
         return
@@ -1383,7 +1395,7 @@ def main():
         if args.kill_exit:
             dbg.kill_target()
         if args.result:
-            with open(args.result, "w") as f:
+            with io.open(args.result, "w", encoding="utf-8") as f:
                 json.dump(dbg.findings, f, indent=2, ensure_ascii=False)
             log("[*] wrote %d finding(s) to %s" % (len(dbg.findings), args.result))
         if staged_path and os.path.isfile(staged_path):
