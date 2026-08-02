@@ -1,6 +1,9 @@
 name: Deploy
 
-# Push to main/master -> ship code to lastwar, rebuild & restart d2editor. Public access is
+# Push to main/master -> build on the GitHub runner, ship to lastwar, and restart d2editor.
+# The 2 GB VPS deliberately does not compile the Vite bundle: doing so under production load
+# causes memory reclaim / 100% I/O pressure and can stall the whole host.
+# Public access is
 # provided by the existing lastwar_nginx container on the server IP:
 #   http://151.115.56.12/map/ -> http://d2editor:3000
 # Both containers communicate only through the shared d2map_net Docker network.
@@ -22,7 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ship code (tar over ssh; server has no rsync)
+      - name: Build production image on runner
+        run: |
+          set -euo pipefail
+          docker build \
+            --build-arg VITE_BASE=/map/ \
+            --build-arg VITE_COPILOT_LLM=off \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag d2editor:local \
+            .
+
+      - name: Ship code and image (tar over ssh; server has no rsync)
         env:
           SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -46,6 +59,12 @@ jobs:
             --exclude='**/node_modules' --exclude='dist' --exclude='**/dist' \
             --exclude='public/assets' --exclude='var' --exclude='scratchpad' \
             . | ssh $SSHOPTS "$REMOTE" 'tar xzf - -C ~/d2editor'
+          # Stream the already-built image directly into Docker. No temporary archive is left on
+          # the small VPS disk, and the currently running container keeps serving during transfer.
+          docker save d2editor:local | gzip -1 | \
+            ssh $SSHOPTS "$REMOTE" 'gzip -d | docker load'
+          ssh $SSHOPTS "$REMOTE" \
+            "docker image inspect d2editor:local --format '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}'"
           EXIST=$(ssh $SSHOPTS "$REMOTE" 'cat ~/d2editor/.env 2>/dev/null' || true)
           keep(){ printf '%s\n' "$EXIST" | grep -E "^$1=" | head -1 | cut -d= -f2- || true; }
           D2_INTEGRATION_SECRET="${D2_INTEGRATION_SECRET:-$(keep D2_INTEGRATION_SECRET)}"
@@ -61,15 +80,15 @@ jobs:
           } > env.out
           ssh $SSHOPTS "$REMOTE" 'cat > ~/d2editor/.env && chmod 600 ~/d2editor/.env' < env.out
 
-      - name: Build & restart on server
+      - name: Restart on server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          # A clean Vite build on the 2 GB VPS takes 8-15 minutes. The action default is
-          # 10m and can kill a healthy build while Rollup is still rendering chunks.
-          command_timeout: 30m
+          # There is no compilation here; leave enough room for image unpacking and health checks
+          # on a busy host without permitting an indefinitely hung restart.
+          command_timeout: 15m
           script: |
             cd ~/d2editor
             # The data disk is fstab-nofail: after a reboot without it, /mnt/data is an EMPTY dir on
@@ -81,14 +100,11 @@ jobs:
             # missing dir → the container won't start). Idempotent; created via docker so it works
             # without host sudo (the daemon runs as root). `rooms` is the durable collab op-log.
             docker run --rm -v /mnt/data/d2editor:/d alpine mkdir -p /d/rooms /d/uploads /d/projects || true
-            # The VPS disk is small + shared with other stacks. Free build cache + dangling images
-            # BEFORE building (NEVER volumes — they hold both sites' data) so the build has room.
-            docker builder prune -af || true
-            docker image prune -f || true
-            # Build the new image while the OLD container keeps serving; --force-recreate swaps it in
-            # only AFTER a successful build (so a failed build never takes /map down). Project name
-            # "d2editor" is separate from "d2mapeditor"; --remove-orphans is scoped to THIS project.
-            docker compose up -d --build --force-recreate --remove-orphans
+            # The image was compiled on the GitHub runner and loaded in the previous step. The OLD
+            # container keeps serving until Compose recreates it from that complete local image.
+            # Project name "d2editor" is separate from "d2mapeditor"; --remove-orphans is scoped to
+            # THIS project. --no-build is intentional: production must never compile on this VPS.
+            docker compose up -d --no-build --force-recreate --remove-orphans
             # nginx owns the public ports. Reconnect it idempotently in case the lastwar stack
             # was recreated since the previous editor deployment.
             docker inspect lastwar_nginx >/dev/null 2>&1 || { echo "FATAL: lastwar_nginx is missing"; exit 1; }
