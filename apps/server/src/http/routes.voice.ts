@@ -55,6 +55,19 @@ export function prefixVoiceBrowserPath(raw: string, base = config.VOICE_PUBLIC_B
   return `${base}${path}`;
 }
 
+export function voiceBrowserUrl(
+  raw: string,
+  base = config.VOICE_PUBLIC_BASE_PATH,
+  origin = config.VOICE_PUBLIC_ORIGIN,
+): string {
+  const path = prefixVoiceBrowserPath(raw, base);
+  return origin ? new URL(path, `${origin}/`).toString() : path;
+}
+
+export function voiceLoginPath(next: string): string {
+  return `/login.html?from=editor&next=${encodeURIComponent(next)}`;
+}
+
 interface CurrentBuild { project: EditorProject; doc: MapDocument; bytes: Uint8Array }
 async function currentBuild(store: MapStore, id: string, raw: unknown): Promise<CurrentBuild | { error: unknown; status: number }> {
   const parsed = EditorProject.safeParse(raw);
@@ -176,13 +189,13 @@ export async function registerVoiceRoutes(app: FastifyInstance, store: MapStore)
     if (!response.ok) {
       if (response.status === 401) return reply.code(401).send({
         error: "Требуется вход в сервис озвучки",
-        loginUrl: prefixVoiceBrowserPath(`/login.html?next=${encodeURIComponent(payload.returnPath + (payload.returnPath.includes("?") ? "&" : "?") + "resumeVoice=1")}`),
+        loginUrl: voiceBrowserUrl(voiceLoginPath(payload.returnPath + (payload.returnPath.includes("?") ? "&" : "?") + "resumeVoice=1")),
       });
       return relayJson(reply, response);
     }
     const result = await response.json().catch(() => null) as Record<string, unknown> | null;
     if (!result || typeof result.launchUrl !== "string") return reply.code(502).send({ error: "Войсер не вернул адрес проекта" });
-    try { return reply.send({ ...result, launchUrl: prefixVoiceBrowserPath(result.launchUrl) }); }
+    try { return reply.send({ ...result, launchUrl: voiceBrowserUrl(result.launchUrl) }); }
     catch (e) { return reply.code(502).send({ error: e instanceof Error ? e.message : String(e) }); }
   });
 
@@ -259,7 +272,7 @@ export async function registerVoiceRoutes(app: FastifyInstance, store: MapStore)
       back.searchParams.set("resumeVoiceExport", "1");
       return reply.code(401).send({
         error: "Требуется вход в сервис озвучки",
-        loginUrl: prefixVoiceBrowserPath(`/login.html?next=${encodeURIComponent(back.pathname + back.search)}`),
+        loginUrl: voiceBrowserUrl(voiceLoginPath(back.pathname + back.search)),
       });
     }
     if (!response.ok) return relayJson(reply, response);

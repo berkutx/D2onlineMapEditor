@@ -43,6 +43,7 @@ jobs:
           D2_INTEGRATION_SECRET: ${{ secrets.D2_INTEGRATION_SECRET }}
           VOICE_INTEGRATION_ENABLED: ${{ vars.VOICE_INTEGRATION_ENABLED }}
           VOICE_INTEGRATION_CLIENTS: ${{ vars.VOICE_INTEGRATION_CLIENTS }}
+          VOICE_PUBLIC_ORIGIN: ${{ vars.VOICE_PUBLIC_ORIGIN }}
         run: |
           set -euo pipefail
           install -m 600 /dev/null key
@@ -71,12 +72,15 @@ jobs:
           VOICE_INTEGRATION_ENABLED="${VOICE_INTEGRATION_ENABLED:-$(keep VOICE_INTEGRATION_ENABLED)}"
           VOICE_INTEGRATION_ENABLED="${VOICE_INTEGRATION_ENABLED:-off}"
           VOICE_INTEGRATION_CLIENTS="${VOICE_INTEGRATION_CLIENTS:-$(keep VOICE_INTEGRATION_CLIENTS)}"
+          VOICE_PUBLIC_ORIGIN="${VOICE_PUBLIC_ORIGIN:-$(keep VOICE_PUBLIC_ORIGIN)}"
+          VOICE_PUBLIC_ORIGIN="${VOICE_PUBLIC_ORIGIN:-http://151.115.56.12}"
           test -n "$D2_INTEGRATION_SECRET" || { echo 'Missing GitHub secret D2_INTEGRATION_SECRET'; exit 1; }
           umask 077
           {
             printf 'D2_INTEGRATION_SECRET=%s\n' "$D2_INTEGRATION_SECRET"
             printf 'VOICE_INTEGRATION_ENABLED=%s\n' "$VOICE_INTEGRATION_ENABLED"
             printf 'VOICE_INTEGRATION_CLIENTS=%s\n' "$VOICE_INTEGRATION_CLIENTS"
+            printf 'VOICE_PUBLIC_ORIGIN=%s\n' "$VOICE_PUBLIC_ORIGIN"
           } > env.out
           ssh $SSHOPTS "$REMOTE" 'cat > ~/d2editor/.env && chmod 600 ~/d2editor/.env' < env.out
 

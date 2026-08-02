@@ -54,6 +54,17 @@ function envPath(name: string): string {
   return raw.startsWith("/") ? raw : `/${raw}`;
 }
 
+/** Normalize a browser-facing origin. Empty keeps relative URLs for local development. */
+function envOrigin(name: string): string {
+  const raw = (process.env[name] ?? "").trim();
+  if (!raw) return "";
+  const url = new URL(raw);
+  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error(`${name} must be an http(s) origin without a path`);
+  }
+  return url.origin;
+}
+
 export const config = {
   /** HTTP/socket.io port. */
   PORT: envInt("PORT", 3000),
@@ -76,6 +87,9 @@ export const config = {
   VOICE_INTERNAL_URL: (process.env.VOICE_INTERNAL_URL ?? "").replace(/\/+$/, ""),
   /** Browser-visible reverse-proxy prefix for voicer login/project pages. */
   VOICE_PUBLIC_BASE_PATH: envPath("VOICE_PUBLIC_BASE_PATH"),
+  /** Optional absolute origin. The direct-IP deployment pins this to HTTP because the old
+   *  domain certificate is not valid for the numeric host. */
+  VOICE_PUBLIC_ORIGIN: envOrigin("VOICE_PUBLIC_ORIGIN"),
   VOICE_INTEGRATION_SECRET: process.env.D2_INTEGRATION_SECRET ?? "dev-d2-integration",
   VOICE_INTEGRATION_ENABLED: process.env.VOICE_INTEGRATION_ENABLED !== "off",
   VOICE_INTEGRATION_CLIENTS: String(process.env.VOICE_INTEGRATION_CLIENTS ?? "").split(/[;,]/).map((x) => x.trim()).filter(Boolean),

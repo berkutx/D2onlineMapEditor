@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MapEvent, type MapEvent as Event } from "@d2/map-schema";
 import { DialogHandoffV1, DialogReturnV1 } from "@d2/socket-contract";
-import { mergeVoiceReturn, prefixVoiceBrowserPath, stableHash } from "../src/http/routes.voice";
+import { mergeVoiceReturn, prefixVoiceBrowserPath, stableHash, voiceBrowserUrl, voiceLoginPath } from "../src/http/routes.voice";
 
 const races = {};
 function ev(id: string, text: string, overrides: Record<string, unknown> = {}): Event {
@@ -90,6 +90,15 @@ describe("voice browser paths behind nginx", () => {
     expect(prefixVoiceBrowserPath("/login.html?next=%2Fmap%2F", "/dialogeditor"))
       .toBe("/dialogeditor/login.html?next=%2Fmap%2F");
     expect(prefixVoiceBrowserPath("/dialogeditor/?project=abc", "/dialogeditor"))
+      .toBe("/dialogeditor/?project=abc");
+  });
+
+  it("marks editor logins explicitly and pins direct-IP navigation to HTTP", () => {
+    const login = voiceLoginPath("/map/?map=abc&resumeVoice=1");
+    expect(login).toContain("from=editor");
+    expect(voiceBrowserUrl(login, "/dialogeditor", "http://151.115.56.12"))
+      .toBe("http://151.115.56.12/dialogeditor/login.html?from=editor&next=%2Fmap%2F%3Fmap%3Dabc%26resumeVoice%3D1");
+    expect(voiceBrowserUrl("/?project=abc", "/dialogeditor", ""))
       .toBe("/dialogeditor/?project=abc");
   });
 
