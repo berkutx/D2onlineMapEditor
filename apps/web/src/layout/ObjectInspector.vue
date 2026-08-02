@@ -895,8 +895,7 @@ function close(): void {
       <template v-else-if="obj.type === 'stack'">
         <div class="row">
           <label>Владелец</label>
-          <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="(v: string) => patch({ owner: v })">
-            <el-option label="Нейтрал" :value="NEUTRAL" />
+          <el-select :model-value="obj.owner" placeholder="Выберите владельца" size="small" class="owner-sel" @change="setOwner">
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>

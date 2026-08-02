@@ -140,6 +140,35 @@ describe("@d2/sg-parser writer — round-trip integrity", () => {
     broken.terrain.cells.pop(); // wrong cell count
     expect(validateMap(broken).ok).toBe(false);
   });
+
+  it("validateMap rejects a MidStack without a real player OWNER", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    const stackId = doc.objects.find((o) => o.type === "stack")!.id;
+
+    for (const invalidOwner of [undefined, "G000000000", "S143PLffff"] as const) {
+      const broken = structuredClone(doc);
+      const stack = broken.objects.find((o) => o.id === stackId && o.type === "stack")!;
+      if (invalidOwner === undefined) delete stack.owner;
+      else stack.owner = invalidOwner;
+      const res = validateMap(broken);
+      expect(res.ok).toBe(false);
+      expect(res.errors.some((e) => e.includes(`stack ${stackId}`) && e.includes("OWNER"))).toBe(true);
+    }
+  });
+
+  it("validateMap rejects a MidStack SUBRACE owned by another player", () => {
+    const { doc } = parseScenarioRaw(bytes);
+    const broken = structuredClone(doc);
+    const stack = broken.objects.find((o) => o.type === "stack" && o.owner)!;
+    const foreign = broken.subraces?.find(
+      (s) => s.playerId !== stack.owner && broken.players.some((p) => p.id === s.playerId),
+    );
+    expect(foreign).toBeTruthy();
+    stack.subRace = foreign!.id;
+    const res = validateMap(broken);
+    expect(res.ok).toBe(false);
+    expect(res.errors.some((e) => e.includes(`stack ${stack.id}`) && e.includes("SUBRACE"))).toBe(true);
+  });
 });
 
 describe("@d2/sg-parser writer — round-trip across campaign maps", () => {

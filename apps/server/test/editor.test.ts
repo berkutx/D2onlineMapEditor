@@ -15,7 +15,11 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 let app: FastifyInstance;
 let id: string;
-let mapDoc: { size: number; terrain: { cells: { value: number }[] } };
+let mapDoc: {
+  size: number;
+  terrain: { cells: { value: number }[] };
+  objects: { id: string; type: string; owner?: string }[];
+};
 
 const SG_MAGIC = "D2EESFISIG";
 
@@ -113,6 +117,17 @@ describe("POST /api/maps/:id/export", () => {
     expect(res.statusCode).toBe(422);
     const r = res.json() as ValidationReport;
     expect(r.ok).toBe(false);
+  });
+
+  it("fails closed (422) when a stack OWNER is nil", async () => {
+    const stack = mapDoc.objects.find((o) => o.type === "stack");
+    expect(stack).toBeTruthy();
+    const op = { kind: "patchObject", id: stack!.id, fields: { owner: "G000000000" } };
+    const res = await postJson(REST.mapExport(id), project({ journal: [[op]], cursor: 1 }));
+    expect(res.statusCode).toBe(422);
+    const r = res.json() as ValidationReport;
+    expect(r.ok).toBe(false);
+    expect(r.structural.errors.some((e) => e.includes(`stack ${stack!.id}`) && e.includes("OWNER"))).toBe(true);
   });
 });
 

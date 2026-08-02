@@ -20,6 +20,8 @@ export const MOUNTAIN_CELL = 37;
  *  mountain-removal restore value (MapStateHolder), i.e. bare mountain terrain, now passable. */
 export const MOUNTAIN_RESTORE = 5;
 
+const NIL_REF = "G000000000";
+
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
 
 /**
@@ -193,6 +195,7 @@ export function placeVisitorOps(
 ): EditOp[] {
   const version = doc.header.version || "S143";
   const id = nextTypedId(doc, version, "KC", slot);
+  const owner = city.owner && city.owner !== NIL_REF ? city.owner : neutralOwner(doc).owner;
   const visitor = {
     type: "stack" as const,
     id,
@@ -208,7 +211,7 @@ export function placeVisitorOps(
     equip: {},
     inventory: [] as string[],
     garrison: [null, null, null, null, null, null] as (null)[],
-    ...(city.owner ? { owner: city.owner } : {}),
+    owner,
   };
   return [
     { kind: "addObject", object: visitor as unknown as MapObject },
@@ -258,12 +261,12 @@ export function placeChestOps(
  *  FortObject, whose `owner`/`subrace` MapLinks are always assigned at placement. The neutral player
  *  is race 4 ("Нейтральные", always scenario slot 0) and owns the neutral subrace variants — we take
  *  its first. */
-function neutralOwner(doc: MapDocument): { owner?: string; subRace?: string } {
+function neutralOwner(doc: MapDocument): { owner: string; subRace?: string } {
   const neutral =
     doc.players.find((p) => p.race === 4) ??
     doc.players.find((p) => p.playerNo === 0) ??
     doc.players[0];
-  if (!neutral) return {};
+  if (!neutral) throw new Error("neutralOwner: map has no player to own the object");
   const sr = (doc.subraces ?? []).find((s) => s.playerId === neutral.id);
   return { owner: neutral.id, subRace: sr?.id };
 }
@@ -322,11 +325,15 @@ export function placeStackOps(
   if (!garrison[o.leaderCell]) {
     throw new Error(`placeStackOps: leaderCell ${o.leaderCell} names an empty formation cell`);
   }
+  const owner = o.owner && o.owner !== NIL_REF ? o.owner : neutralOwner(doc).owner;
+  if (!doc.players.some((p) => p.id === owner)) {
+    throw new Error(`placeStackOps: OWNER ${owner} does not resolve to a player`);
+  }
   const stack = {
     type: "stack" as const,
     id,
     pos: { x: cx, y: cy },
-    ...(o.owner ? { owner: o.owner } : {}),
+    owner,
     leaderCell: o.leaderCell,
     leaderImage: garrison[o.leaderCell]!.unit,
     facing: 0,

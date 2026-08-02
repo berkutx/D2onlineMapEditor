@@ -72,10 +72,14 @@ function ownerOf(o: MapObject): string | undefined {
   return "owner" in o && typeof o.owner === "string" ? o.owner : undefined;
 }
 
+const NIL_REF = "G000000000";
+
 /**
  * Tier 3 — structural + referential sanity of a MapDocument. Structural problems
  * are hard errors (a malformed map); unresolved refs are warnings for now (we do
- * not yet model every cross-block reference the editor checks).
+ * not yet model every cross-block reference the editor checks). MidStack OWNER/SUBRACE
+ * is the exception: CMidStack::isValid rejects a nil/unresolved owner, and when SUBRACE
+ * is present it must resolve to a subrace owned by that same player.
  */
 export function validateMap(doc: MapDocument): ValidateResult {
   const errors: string[] = [];
@@ -109,6 +113,7 @@ export function validateMap(doc: MapDocument): ValidateResult {
     if (playerIds.has(p.id)) errors.push(`duplicate player id ${p.id}`);
     playerIds.add(p.id);
   }
+  const subRaceById = new Map((doc.subraces ?? []).map((s) => [s.id, s]));
 
   const objectIds = new Set<string>();
   for (const o of doc.objects) {
@@ -119,7 +124,25 @@ export function validateMap(doc: MapDocument): ValidateResult {
     if (objectIds.has(o.id)) errors.push(`duplicate object id ${o.id}`);
     objectIds.add(o.id);
     const owner = ownerOf(o);
-    if (owner && !playerIds.has(owner)) {
+    if (o.type === "stack") {
+      if (!owner || owner === NIL_REF) {
+        errors.push(`stack ${o.id} has no OWNER — native CMidStack::isValid rejects nil`);
+      } else if (!playerIds.has(owner)) {
+        errors.push(`stack ${o.id} OWNER ${owner} does not resolve to a player`);
+      }
+
+      const subRace = o.subRace;
+      if (subRace && subRace !== NIL_REF) {
+        const rec = subRaceById.get(subRace);
+        if (!rec) {
+          errors.push(`stack ${o.id} SUBRACE ${subRace} does not resolve`);
+        } else if (owner && owner !== NIL_REF && playerIds.has(owner) && rec.playerId !== owner) {
+          errors.push(
+            `stack ${o.id} SUBRACE ${subRace} belongs to ${rec.playerId}, not OWNER ${owner}`,
+          );
+        }
+      }
+    } else if (owner && owner !== NIL_REF && !playerIds.has(owner)) {
       warnings.push(`object ${o.id} owner ${owner} does not resolve to a player`);
     }
   }

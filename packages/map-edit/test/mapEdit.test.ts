@@ -1974,7 +1974,7 @@ describe("@d2/map-edit addObject writers (chest / village / stack) + MidgardPlan
     expect(planCellsOf(out, id)).toEqual([{ x: 22, y: 23 }]);
   });
 
-  it("SAME-SESSION formation edit (the stack editor's op) on an ADDED stack folds in", () => {
+  it("SAME-SESSION formation edit on an ADDED stack defaults OWNER to the neutral player", () => {
     const { doc, raw } = parseScenarioRaw(bytes);
     const src = doc.objects.find(
       (o) => o.type === "stack" && (o as { leaderCell?: number }).leaderCell !== undefined,
@@ -1998,10 +1998,13 @@ describe("@d2/map-edit addObject writers (chest / village / stack) + MidgardPlan
     const out = applyEditsToBytes(raw, ops); // must NOT throw
     const re = parseScenario(out);
     const st = re.objects.find((o) => o.id === id) as {
-      leaderCell?: number; garrison: ({ unit: string } | null)[];
+      owner?: string; leaderCell?: number; garrison: ({ unit: string } | null)[];
     };
+    const neutral = doc.players.find((p) => p.race === 4) ?? doc.players[0]!;
+    expect(st.owner).toBe(neutral.id);
     expect(st.garrison[1]?.unit).toBe("G000UU0001");
     expect(st.leaderCell).toBe(0);
+    expect(validateMap(re).ok).toBe(true);
     const res = roundTripSemantic(doc, out, ops);
     expect(res.reason).toBeUndefined();
     expect(res.ok).toBe(true);
