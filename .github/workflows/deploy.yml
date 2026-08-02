@@ -67,6 +67,9 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          # A clean Vite build on the 2 GB VPS takes 8-15 minutes. The action default is
+          # 10m and can kill a healthy build while Rollup is still rendering chunks.
+          command_timeout: 30m
           script: |
             cd ~/d2editor
             # The data disk is fstab-nofail: after a reboot without it, /mnt/data is an EMPTY dir on
