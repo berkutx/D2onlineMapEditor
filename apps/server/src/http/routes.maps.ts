@@ -62,7 +62,7 @@ const sanitize = (s: string): string => s.replace(/[^\w.-]+/g, "_").slice(0, 40)
  * Apply an EditorProject's active ops to a base map and run all validator tiers.
  * Returns the produced bytes (when the build succeeded) alongside the report.
  */
-function buildAndValidate(
+export function buildAndValidate(
   baseBytes: Uint8Array,
   project: EditorProject,
   talismanTemplates?: ReadonlySet<string>,
@@ -163,7 +163,7 @@ function buildAndValidate(
  *  instance (the reference's addItem cascade). A missing catalog degrades to an empty set
  *  (entries simply not added) with one warning — asset volumes without the catalog stay usable. */
 let talismanSetCache: ReadonlySet<string> | null = null;
-async function loadTalismanTemplates(): Promise<ReadonlySet<string>> {
+export async function loadTalismanTemplates(): Promise<ReadonlySet<string>> {
   if (!talismanSetCache) {
     try {
       const path = join(config.ASSETS_DIR, "itemCatalog.json");
@@ -208,7 +208,7 @@ async function loadCatalogSets(): Promise<{
  *  overlap check. Degrades to `undefined` (⇒ 1×1) when the catalog is missing, so asset
  *  volumes without decorCatalog.json validate exactly as before. */
 let landmarkSizeFnCache: ((baseType: string) => readonly [number, number] | undefined) | null = null;
-async function loadLandmarkSizeFn(): Promise<(baseType: string) => readonly [number, number] | undefined> {
+export async function loadLandmarkSizeFn(): Promise<(baseType: string) => readonly [number, number] | undefined> {
   if (!landmarkSizeFnCache) {
     try {
       const { landmarkSizes } = await loadCatalogSets();

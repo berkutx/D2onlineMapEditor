@@ -1,6 +1,6 @@
 # d2-web-editor production image. Single Fastify process serves the built Vue SPA + REST API
-# + atlases + socket.io. Behind the existing Cloudflare Tunnel it is reached at
-# d2mapeditor.online/map (dashboard path-ingress -> http://d2editor:3000); the app strips the
+# + atlases + socket.io. Behind the shared lastwar_nginx container it is reached at
+# 151.115.56.12/map (path proxy -> http://d2editor:3000); the app strips the
 # /map base itself (BASE_PATH). The 253 MB atlas set is NOT baked — it is mounted from a
 # volume at /app/public/assets (see docker-compose.yml). Scenarios are baked (deploy/scenarios).
 #

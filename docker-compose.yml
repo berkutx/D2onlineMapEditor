@@ -1,7 +1,5 @@
-# d2-web-editor — its OWN isolated stack on the shared server (separate compose project,
-# does NOT touch the existing d2mapeditor stack). Joins the EXISTING d2map_net so the running
-# Cloudflare Tunnel can reach this container by name; the Zero-Trust dashboard routes
-# d2mapeditor.online path /map -> http://d2editor:3000. No host ports are published.
+# d2-web-editor — its own isolated stack on lastwar. No host ports are published: the
+# shared lastwar_nginx container reaches it through d2map_net and exposes /map/ on the IP.
 name: d2editor
 
 services:
@@ -29,6 +27,11 @@ services:
       # rebuild = fresh container FS) wipes the room history and clients have to re-seed
       ROOMS_DIR: /app/var/rooms
       LLM_DIR: /app/var/llm
+      VOICE_INTERNAL_URL: http://d2map_app:3456
+      VOICE_PUBLIC_BASE_PATH: /dialogeditor
+      D2_INTEGRATION_SECRET: ${D2_INTEGRATION_SECRET:?set the same strong secret in both stacks}
+      VOICE_INTEGRATION_ENABLED: ${VOICE_INTEGRATION_ENABLED:-off}
+      VOICE_INTEGRATION_CLIENTS: ${VOICE_INTEGRATION_CLIENTS:-}
     volumes:
       # atlases (253 MB) are NOT in git — populate this volume once from the dev box (see README)
       - d2editor_assets:/app/public/assets:ro

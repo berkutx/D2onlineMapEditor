@@ -15,6 +15,7 @@ import {
   serializeProject,
   deserializeProject,
   pushCommit,
+  allOpUids,
   ensureOpUids,
   undo,
   redo,
@@ -382,6 +383,27 @@ export const useEditStore = defineStore("edit", () => {
   function commit(ops: readonly EditOp[]): void {
     applyPreview(ops);
     commitStroke(ops);
+  }
+
+  /** Apply an idempotent external commit (voice-return/import). The caller supplies stable
+   *  op uids derived from the return token, so a reload/retry and the room log cannot apply it
+   *  twice. Kept separate from normal random-uid user edits. */
+  function commitExternal(ops: readonly EditOp[], uids: readonly string[]): void {
+    if (!project.value || ops.length === 0 || uids.length !== ops.length) return;
+    const known = allOpUids(project.value);
+    const fresh = ops.map((op, i) => ({ op, uid: uids[i]! })).filter((x) => !known.has(x.uid));
+    if (!fresh.length) return;
+    const freshOps = fresh.map((x) => x.op), freshUids = fresh.map((x) => x.uid);
+    const inverse = applyToLive(freshOps);
+    project.value = pushCommit(project.value, freshOps, freshUids);
+    report.value = null;
+    persist();
+    scheduleAutoValidate();
+    if (roomConnected.value && outgoing) {
+      outgoing(freshOps, inverse.slice().reverse().map((o) => [o]), freshUids);
+      myUndo.value = [...myUndo.value, { forward: freshOps, inverse }];
+      myRedo.value = [];
+    }
   }
 
   /** Backfill per-op uids for commits made before uid tracking, so the collab join can
@@ -815,6 +837,7 @@ export const useEditStore = defineStore("edit", () => {
     applyPreview,
     commitStroke,
     commit,
+    commitExternal,
     ensureJournalUids,
     applyIncoming,
     takeTerrainDirty,

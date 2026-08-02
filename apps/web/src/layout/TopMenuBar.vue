@@ -7,10 +7,21 @@
  */
 import { ref, computed, onMounted, watch } from "vue";
 import { storeToRefs } from "pinia";
-import { ElMessage, ElNotification } from "element-plus";
+import { ElMessage, ElNotification, ElMessageBox } from "element-plus";
 import { Check, Moon, Sunny, Share, CircleCheck, WarningFilled } from "@element-plus/icons-vue";
 import type { ScenarioEntry, ValidationReport } from "@d2/socket-contract";
-import { createNewMap, uploadMap } from "../services/api";
+import {
+  acknowledgeVoiceReturn,
+  applyVoiceReturn,
+  createNewMap,
+  createVoiceHandoff,
+  exportProjectPackage,
+  getRuntimeFeatures,
+  previewVoiceReturn,
+  uploadMap,
+  VoiceLoginRequiredError,
+  VoiceReturnRefreshError,
+} from "../services/api";
 import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
@@ -89,6 +100,9 @@ const {
 const dialogVisible = ref(false);
 const listLoading = ref(false);
 const shortcutsVisible = ref(false);
+const voiceBusy = ref(false);
+const voiceEnabled = ref(false);
+let integrationAutoStarted = false;
 
 async function openDialog(): Promise<void> {
   dialogVisible.value = true;
@@ -191,6 +205,112 @@ async function doExport(): Promise<void> {
   }
 }
 
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/** Default game-ready export. The editor backend builds the current .sg and the private voice
+ * service appends only audio referenced by that exact revision. */
+async function doPackageExport(allowMissing = false): Promise<void> {
+  const id = currentScenarioId.value, project = editStore.project;
+  if (!id || !project) return ElMessage.warning("Сначала откройте карту");
+  try {
+    const returnUrl = new URL(window.location.href);
+    returnUrl.searchParams.delete("resumeVoiceExport");
+    const r = await exportProjectPackage(id, project, allowMissing, returnUrl.pathname + returnUrl.search);
+    if (!r.ok) {
+      const names = r.missing.slice(0, 20).map((x) => `${x.kind === "music" ? "MusicP" : "SoundsP"}/${x.name}`).join("\n");
+      await ElMessageBox.confirm(
+        `В голосовом проекте не найдены файлы:\n\n${names}${r.missing.length > 20 ? `\n…ещё ${r.missing.length - 20}` : ""}\n\nСкачать пакет без них?`,
+        "Не хватает пользовательского аудио",
+        { type: "warning", confirmButtonText: "Скачать без них", cancelButtonText: "Отмена" },
+      );
+      return void doPackageExport(true);
+    }
+    saveBlob(r.blob, r.filename); ElMessage.success(`Готов пакет «${r.filename}»`);
+  } catch (e) {
+    if (e instanceof VoiceLoginRequiredError) {
+      sessionStorage.setItem("d2.voice.export", allowMissing ? "allow-missing" : "1");
+      window.location.href = e.loginUrl;
+      return;
+    }
+    if (String(e).includes("голосовой проект не найден")) return void doExport();
+    if (e === "cancel" || e === "close") return;
+    ElMessage.error(`Экспорт пакета не удался: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+function cleanIntegrationUrl(): void {
+  const u = new URL(window.location.href);
+  u.searchParams.delete("voiceReturn"); u.searchParams.delete("resumeVoice");
+  u.searchParams.delete("resumeVoiceExport");
+  history.replaceState(null, "", u.pathname + u.search + u.hash);
+}
+
+async function startVoiceHandoff(): Promise<void> {
+  const id = currentScenarioId.value, project = editStore.project;
+  if (!id || !project || voiceBusy.value) return;
+  voiceBusy.value = true;
+  try {
+    const returnUrl = new URL(window.location.href);
+    returnUrl.searchParams.delete("voiceReturn"); returnUrl.searchParams.delete("resumeVoice");
+    const result = await createVoiceHandoff(id, project, returnUrl.pathname + returnUrl.search);
+    if ("loginRequired" in result) {
+      sessionStorage.setItem("d2.voice.resume", "1"); window.location.href = result.loginUrl; return;
+    }
+    window.location.href = result.launchUrl;
+  } catch (e) {
+    ElNotification({ title: "Переход в озвучку не выполнен", message: e instanceof Error ? e.message : String(e), type: "error", duration: 0 });
+  } finally { voiceBusy.value = false; }
+}
+
+async function resolveVoiceReturn(token: string): Promise<void> {
+  const id = currentScenarioId.value, project = editStore.project;
+  if (!id || !project || voiceBusy.value) return;
+  voiceBusy.value = true;
+  try {
+    let preview = await previewVoiceReturn(id, token, project);
+    let applied;
+    for (;;) {
+      const resolutions: Record<string, "editor" | "voice"> = {};
+      for (const c of preview.conflicts) {
+        try {
+          await ElMessageBox.confirm(
+            `Редактор:\n${c.editorSummary}\n\nВойсер:\n${c.voiceSummary}`,
+            `Конфликт события «${c.eventName || c.eventId}»`,
+            {
+              type: "warning", confirmButtonText: "Взять из войсера", cancelButtonText: "Оставить редактор",
+              distinguishCancelAndClose: true, closeOnClickModal: false,
+            },
+          );
+          resolutions[c.eventId] = "voice";
+        } catch (action) {
+          if (action === "cancel") resolutions[c.eventId] = "editor";
+          else throw new Error("Возврат отложен — результат сохранён в войсере");
+        }
+      }
+      try {
+        applied = await applyVoiceReturn(id, token, editStore.project!, resolutions, preview.currentEventHashes);
+        break;
+      } catch (e) {
+        if (!(e instanceof VoiceReturnRefreshError)) throw e;
+        preview = e.preview;
+        ElMessage.warning("События успели измениться — окно конфликтов обновлено");
+      }
+    }
+    if (applied.ops.length) editStore.commitExternal(applied.ops, applied.uids);
+    if (!editStore.project) throw new Error("Проект редактора исчез во время возврата");
+    await acknowledgeVoiceReturn(id, token, editStore.project);
+    cleanIntegrationUrl();
+    ElMessage.success(applied.ops.length ? `Возвращено событий: ${applied.ops.length}` : "Изменения уже были применены");
+  } catch (e) {
+    ElNotification({ title: "Возврат из озвучки не завершён", message: e instanceof Error ? e.message : String(e), type: "warning", duration: 0 });
+  } finally { voiceBusy.value = false; }
+}
+
 // --- New Map -----------------------------------------------------------------
 const newMapVisible = ref(false);
 const newMapBusy = ref(false);
@@ -278,7 +398,8 @@ function onSelect(index: string): void {
     case "file:open": return void openDialog();
     case "file:new": newMapVisible.value = true; return;
     case "file:upload": return triggerUpload();
-    case "file:export": return void doExport();
+    case "file:export": return void (voiceEnabled.value ? doPackageExport() : doExport());
+    case "file:exportSg": return void doExport();
     case "edit:undo": return editStore.undoEdit();
     case "edit:redo": return editStore.redoEdit();
     case "edit:validate": return void doValidate();
@@ -303,7 +424,31 @@ function onSelect(index: string): void {
   if (index.startsWith("map:")) return void onMapCommand(index.slice(4));
 }
 
-onMounted(() => void mapStore.loadScenarios().catch(() => {}));
+onMounted(() => {
+  void mapStore.loadScenarios().catch(() => {});
+  void getRuntimeFeatures().then((f) => { voiceEnabled.value = f.voiceIntegration; }).catch(() => {});
+});
+
+watch(
+  () => [currentScenarioId.value, editStore.project?.baseScenarioId] as const,
+  ([id, projectId]) => {
+    if (!id || projectId !== id || integrationAutoStarted) return;
+    const q = new URLSearchParams(window.location.search);
+    const returnToken = q.get("voiceReturn");
+    const resume = q.get("resumeVoice") === "1" || sessionStorage.getItem("d2.voice.resume") === "1";
+    const resumeExport = q.get("resumeVoiceExport") === "1" || sessionStorage.getItem("d2.voice.export") != null;
+    if (returnToken) { integrationAutoStarted = true; void resolveVoiceReturn(returnToken); }
+    else if (resume) {
+      integrationAutoStarted = true; sessionStorage.removeItem("d2.voice.resume"); cleanIntegrationUrl(); void startVoiceHandoff();
+    }
+    else if (resumeExport) {
+      integrationAutoStarted = true;
+      const allowMissing = sessionStorage.getItem("d2.voice.export") === "allow-missing";
+      sessionStorage.removeItem("d2.voice.export"); cleanIntegrationUrl(); void doPackageExport(allowMissing);
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -316,7 +461,8 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
         <el-menu-item index="file:open">Открыть карту…<span class="mkbd">Ctrl+O</span></el-menu-item>
         <el-menu-item index="file:new">Новая карта…</el-menu-item>
         <el-menu-item index="file:upload">Загрузить .sg…</el-menu-item>
-        <el-menu-item index="file:export">Экспорт .sg…</el-menu-item>
+        <el-menu-item index="file:export">{{ voiceEnabled ? 'Скачать карту с аудио (.zip)…' : 'Экспорт .sg…' }}</el-menu-item>
+        <el-menu-item v-if="voiceEnabled" index="file:exportSg">Экспорт только .sg…</el-menu-item>
       </el-sub-menu>
 
       <!-- Правка / Вид / Карта / Справка consolidated under ONE menu — the freed bar space
@@ -383,6 +529,15 @@ onMounted(() => void mapStore.loadScenarios().catch(() => {}));
       :disabled="!currentScenarioId"
       @click="viewStore.toggleEventPanel()"
     >Сценарий</el-button>
+
+    <el-button
+      v-if="voiceEnabled"
+      class="quick-btn"
+      size="small"
+      :loading="voiceBusy"
+      :disabled="!currentScenarioId"
+      @click="startVoiceHandoff()"
+    >Диалоги и озвучка</el-button>
 
     <span class="bar-spacer" />
 

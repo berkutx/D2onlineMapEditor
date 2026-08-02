@@ -47,9 +47,9 @@ function envList(name: string, fallback: string[]): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** Normalize a base path: "" (dev) or "/map" (no trailing slash). */
-function envBasePath(): string {
-  const raw = (process.env.BASE_PATH ?? "").trim().replace(/\/+$/, "");
+/** Normalize a deployment path: "" (root) or "/map" (no trailing slash). */
+function envPath(name: string): string {
+  const raw = (process.env[name] ?? "").trim().replace(/\/+$/, "");
   if (!raw) return "";
   return raw.startsWith("/") ? raw : `/${raw}`;
 }
@@ -60,17 +60,25 @@ export const config = {
   HOST: process.env.HOST ?? "0.0.0.0",
 
   /**
-   * Deploy base path. Empty in dev; "/map" in production behind the Cloudflare Tunnel, which
-   * forwards d2mapeditor.online/map/* unchanged. The server strips it (Fastify rewriteUrl) and
-   * pins socket.io to `${BASE_PATH}/socket.io`. The web build sets a matching Vite base.
+   * Deploy base path. Empty in dev; "/map" in production behind lastwar_nginx. The server
+   * strips it (Fastify rewriteUrl) and pins socket.io to `${BASE_PATH}/socket.io`.
    */
-  BASE_PATH: envBasePath(),
+  BASE_PATH: envPath("BASE_PATH"),
 
   /** Built SPA dir to serve in production (apps/web/dist). Empty/absent -> dev (Vite serves it). */
   WEB_DIST: process.env.WEB_DIST ?? resolve(REPO_ROOT, "apps", "web", "dist"),
 
   /** Copilot LLM file-bridge enabled? Off in production (no agent) -> /copilot returns 503. */
   COPILOT_LLM: process.env.COPILOT_LLM !== "off",
+
+  /** Private voice service reachable only through the shared Docker network. Empty disables
+   *  the integration in local development; production uses http://d2map_app:3456. */
+  VOICE_INTERNAL_URL: (process.env.VOICE_INTERNAL_URL ?? "").replace(/\/+$/, ""),
+  /** Browser-visible reverse-proxy prefix for voicer login/project pages. */
+  VOICE_PUBLIC_BASE_PATH: envPath("VOICE_PUBLIC_BASE_PATH"),
+  VOICE_INTEGRATION_SECRET: process.env.D2_INTEGRATION_SECRET ?? "dev-d2-integration",
+  VOICE_INTEGRATION_ENABLED: process.env.VOICE_INTEGRATION_ENABLED !== "off",
+  VOICE_INTEGRATION_CLIENTS: String(process.env.VOICE_INTEGRATION_CLIENTS ?? "").split(/[;,]/).map((x) => x.trim()).filter(Boolean),
 
   /** Repo root, resolved absolute. */
   repoRoot: REPO_ROOT,

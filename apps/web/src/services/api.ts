@@ -13,6 +13,9 @@ import type {
   Region,
   GenerateResult,
   CopilotResult,
+  VoiceHandoffResult,
+  VoiceReturnPreview,
+  VoiceReturnApplyResult,
 } from "@d2/socket-contract";
 import type { MapDocument } from "@d2/map-schema";
 import type { EditorProject } from "@d2/map-edit";
@@ -118,6 +121,102 @@ export async function exportProject(id: string, project: EditorProject): Promise
   const m = /filename="?([^"]+)"?/.exec(disp);
   const filename = m ? decodeURIComponent(m[1]!) : `${id}-edited.sg`;
   return { ok: true, blob: await res.blob(), filename };
+}
+
+export type VoiceHandoffResponse = VoiceHandoffResult | { loginRequired: true; loginUrl: string };
+
+export async function getRuntimeFeatures(): Promise<{ voiceIntegration: boolean }> {
+  const res = await fetch(u(REST.health), { headers: idHeaders() });
+  if (!res.ok) return { voiceIntegration: false };
+  const data = await res.json() as { features?: { voiceIntegration?: boolean } };
+  return { voiceIntegration: data.features?.voiceIntegration === true };
+}
+
+/** Validate the current project server-side, extract only MapEvents, and create/reopen its
+ * private voice workspace. No .sg bytes pass through the browser. */
+export async function createVoiceHandoff(id: string, project: EditorProject, returnPath: string): Promise<VoiceHandoffResponse> {
+  const res = await fetch(u(REST.voiceHandoff(id)), {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json", ...idHeaders() },
+    body: JSON.stringify({ project, returnPath }),
+  });
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as Record<string, unknown>;
+  if (res.status === 401 && typeof data.loginUrl === "string") return { loginRequired: true, loginUrl: data.loginUrl };
+  if (!res.ok) throw new Error(String(data.error || `handoff failed: ${res.status}`));
+  return data as unknown as VoiceHandoffResult;
+}
+
+export async function previewVoiceReturn(id: string, token: string, project: EditorProject): Promise<VoiceReturnPreview> {
+  const res = await fetch(u(REST.voiceReturnPreview(id, token)), {
+    method: "POST", headers: { "content-type": "application/json", ...idHeaders() }, body: JSON.stringify({ project }),
+  });
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok) throw new Error(data.error || `return preview failed: ${res.status}`);
+  return data as VoiceReturnPreview;
+}
+
+export class VoiceReturnRefreshError extends Error {
+  constructor(message: string, readonly preview: VoiceReturnPreview) { super(message); this.name = "VoiceReturnRefreshError"; }
+}
+
+export async function applyVoiceReturn(
+  id: string,
+  token: string,
+  project: EditorProject,
+  resolutions: Record<string, "editor" | "voice">,
+  expectedEventHashes: Record<string, string>,
+): Promise<VoiceReturnApplyResult> {
+  const res = await fetch(u(REST.voiceReturnApply(id, token)), {
+    method: "POST", headers: { "content-type": "application/json", ...idHeaders() },
+    body: JSON.stringify({ project, resolutions, expectedEventHashes }),
+  });
+  const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (res.status === 409 && data.preview) throw new VoiceReturnRefreshError(data.error || "События изменились", data.preview as VoiceReturnPreview);
+  if (!res.ok) throw new Error(data.error || `return apply failed: ${res.status}`);
+  return data as VoiceReturnApplyResult;
+}
+
+export async function acknowledgeVoiceReturn(id: string, token: string, project: EditorProject): Promise<void> {
+  const res = await fetch(u(REST.voiceReturnAck(id, token)), {
+    method: "POST", headers: { "content-type": "application/json", ...idHeaders() }, body: JSON.stringify({ project }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(data.error || `return ack failed: ${res.status}`);
+  }
+}
+
+export type PackageExportResult =
+  | { ok: true; blob: Blob; filename: string }
+  | { ok: false; missing: { kind: "audio" | "music"; name: string }[] };
+
+export class VoiceLoginRequiredError extends Error {
+  constructor(readonly loginUrl: string) { super("Требуется вход в сервис озвучки"); this.name = "VoiceLoginRequiredError"; }
+}
+
+/** Build the current .sg in the editor backend, then let the private voice backend append only
+ * workspace audio referenced by that exact map. The browser receives only the final ZIP. */
+export async function exportProjectPackage(id: string, project: EditorProject, allowMissing = false, returnPath = window.location.pathname + window.location.search): Promise<PackageExportResult> {
+  const res = await fetch(u(REST.mapExportPackage(id)), {
+    method: "POST", headers: { "content-type": "application/json", ...idHeaders() },
+    body: JSON.stringify({ project, allowMissing, returnPath }),
+  });
+  if (res.status === 401) {
+    const data = await res.json().catch(() => ({})) as { loginUrl?: string };
+    if (data.loginUrl) throw new VoiceLoginRequiredError(data.loginUrl);
+  }
+  if (res.status === 409) {
+    const data = await res.json() as { missing?: { kind: "audio" | "music"; name: string }[]; error?: string };
+    if (data.missing) return { ok: false, missing: data.missing };
+    throw new Error(data.error || "Не удалось собрать пакет");
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(data.error || `package export failed: ${res.status}`);
+  }
+  const disp = res.headers.get("content-disposition") ?? "";
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
+  return { ok: true, blob: await res.blob(), filename: m ? decodeURIComponent(m[1]!) : `${id}-edited.zip` };
 }
 
 /**

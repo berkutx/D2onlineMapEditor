@@ -17,10 +17,11 @@ import { registerScenarioRoutes } from "./http/routes.scenarios.js";
 import { registerMapRoutes } from "./http/routes.maps.js";
 import { registerAssetRoutes } from "./http/routes.assets.js";
 import { registerUploadRoute } from "./http/routes.upload.js";
+import { registerVoiceRoutes } from "./http/routes.voice.js";
 
 /**
- * In production the app is served under config.BASE_PATH ("/map") behind the Cloudflare
- * Tunnel, which forwards d2mapeditor.online/map/* unchanged. Strip the prefix before routing
+ * In production the app is served under config.BASE_PATH ("/map") behind lastwar_nginx,
+ * which forwards /map/* unchanged. Strip the prefix before routing
  * so every route/static mount stays at its root path. No-op when BASE_PATH is empty (dev).
  * (socket.io is NOT affected — it intercepts upgrades before Fastify; its path is namespaced
  * in io.ts instead.)
@@ -73,6 +74,7 @@ export async function buildApp(): Promise<BuiltApp> {
   await registerMapRoutes(app, store, log);
   await registerAssetRoutes(app);
   await registerUploadRoute(app, store);
+  await registerVoiceRoutes(app, store);
   // SPA last: serves apps/web/dist + history fallback in production (no-op in dev).
   await registerSpa(app);
 

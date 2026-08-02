@@ -10,8 +10,8 @@ import vue from "@vitejs/plugin-vue";
 // ::1:3000 (nothing listening) and return 500 (ECONNREFUSED) intermittently.
 const SERVER_ORIGIN = "http://127.0.0.1:3000";
 
-// In production the app is served under a base path (behind the Cloudflare Tunnel at
-// https://d2mapeditor.online/map). Set VITE_BASE=/map/ at build time; dev stays at '/'.
+// In production the app is served below the nginx /map/ route on the server IP.
+// Set VITE_BASE=/map/ at build time; dev stays at '/'.
 // import.meta.env.BASE_URL then carries it, and api.ts / socket.ts derive every URL from it.
 const BASE = process.env.VITE_BASE || "/";
 

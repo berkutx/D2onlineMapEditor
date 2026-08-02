@@ -3,7 +3,7 @@
  * with directory listing disabled.
  *
  * Cache policy: a map load pulls HUNDREDS of small atlas files, each paying a round-trip
- * through the Cloudflare Tunnel — so `no-cache` (revalidate-every-file-every-load) was the
+ * through the public reverse proxy — so `no-cache` (revalidate-every-file-every-load) was the
  * dominant load cost. The atlas filenames are NOT content-hashed (a pipeline rebuild
  * overwrites them in place), so we can't go fully `immutable`; instead we cache a day and
  * `stale-while-revalidate` for a week: repeat loads (and same-session reloads) hit the disk

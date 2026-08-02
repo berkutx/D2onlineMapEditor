@@ -143,5 +143,10 @@ export const REST = {
   mapProject: (id: string) => `/api/maps/${id}/project`, // GET -> saved EditorProject (per x-client-id) | 404; PUT EditorProject -> {ok}
   assetsManifest: "/api/assets/manifest", // GET -> AssetManifest
   upload: "/api/maps/upload", // POST .sg -> { id }
+  voiceHandoff: (id: string) => `/api/maps/${id}/voice/handoff`,
+  voiceReturnPreview: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/preview`,
+  voiceReturnApply: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/apply`,
+  voiceReturnAck: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/ack`,
+  mapExportPackage: (id: string) => `/api/maps/${id}/export-package`,
   health: "/api/health",
 } as const;

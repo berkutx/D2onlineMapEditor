@@ -1,33 +1,46 @@
-# Deploying the editor to d2mapeditor.online/map
+# Deploying the editor to 151.115.56.12/map
 
-The editor publishes as its **own** isolated Docker stack on the existing server, reached
-through the **existing Cloudflare Tunnel** at `https://d2mapeditor.online/map`. It does not
-touch the live `d2mapeditor` site.
+The editor publishes as its **own** isolated Docker stack on the existing server and is
+temporarily reached through the shared nginx at `http://151.115.56.12/map/`. It does not
+publish a host port and does not modify the voicer container.
 
 ## Architecture
 - One container `d2editor` (Fastify) serves the built SPA + `/api` + atlases + socket.io.
-- It joins the existing external Docker network **`d2map_net`** so the running `cloudflared`
+- It joins the existing external Docker network **`d2map_net`** so `lastwar_nginx`
   can reach it as `http://d2editor:3000`.
-- The app runs under base path **`/map`** (`BASE_PATH=/map`): the tunnel forwards
-  `d2mapeditor.online/map/*` unchanged, and the app strips the prefix itself (Fastify
+- The app runs under base path **`/map`** (`BASE_PATH=/map`): nginx forwards `/map/*`
+  unchanged, and the app strips the prefix itself (Fastify
   `rewriteUrl`); socket.io is pinned to `/map/socket.io`; the web build uses Vite `base=/map/`.
 - Deploy: push to `main` → GitHub Actions tars the code over SSH to `~/d2editor` →
   `docker compose up -d --build` (separate compose project, isolated).
 
 ## One-time setup
 
+### 0. Voice integration secret and staged flag
+
+Create one 32-byte random secret and add it as the GitHub Actions secret
+`D2_INTEGRATION_SECRET` in **both** repositories. It is rendered into the two server-side
+`.env` files and never sent to the browser. The stacks communicate as
+`d2editor -> http://d2map_app:3456` over `d2map_net`.
+
+Keep the Actions variable `VOICE_INTEGRATION_ENABLED=off` while deploying/migrating the
+private voicer. For a pilot, set it to `on` and put the permitted browser `x-client-id` values
+in `VOICE_INTEGRATION_CLIENTS` (comma-separated); set the matching voicer usernames in that
+repository's `D2_INTEGRATION_USERS`. Empty allowlists enable every user. When the flag is off,
+the new button is hidden and the existing `.sg` export remains the default.
+
 ### 1. GitHub secrets (already added)
 `SERVER_HOST`, `SERVER_SSH_KEY`, `SERVER_USERNAME` — same as the existing repo.
 
-### 2. Cloudflare Zero-Trust: route /map to our container
-Networks → Tunnels → (your tunnel) → **Public Hostname** → add a rule **ABOVE** the catch-all:
-- **Hostname:** `d2mapeditor.online`
-- **Path:** `map` (i.e. matches `/map` and everything under it — try `map` first; if the
-  dashboard requires a regex, use `^/map(/.*)?$`)
-- **Service:** `http://d2editor:3000`
+### 2. Shared nginx IP route (active)
 
-Rule **order matters**: this `/map` rule must come before the existing `/` → `d2map_app:3456`
-rule, else `/` swallows it. Changes take effect in seconds and are trivially reversible.
+`lastwar_nginx` publishes host ports 80/443 and is attached to both its own network and
+`d2map_net`. Its server block routes `/map/` to `http://d2editor:3000`; `/map` redirects to
+`/map/`. The deploy workflow verifies the network attachment, reloads nginx, and checks
+`http://127.0.0.1/map/api/health` through that route after every restart.
+
+The former Cloudflare hostname/tunnel is not part of this deployment while the domain is
+unavailable. The browser entry point is currently `http://151.115.56.12/map/`.
 
 ### 2.5 Data disk (done 2026-07-02)
 Volumes are bind-backed onto a dedicated disk: `/dev/sda` (ext4, label `d2data`, in fstab
@@ -104,8 +117,8 @@ real request for any file is a 200 — real users never see the 404. Rebuild sou
 mod's `Game/Scripts/modifiers` (see `build_modifier_catalog.py`, which stores the `.lua` *path*, not code).
 
 ## Deploy
-`git push origin main` → the **Deploy** workflow builds + restarts `d2editor`. First deploy:
-push, wait for the build, confirm the Cloudflare rule, then open `https://d2mapeditor.online/map`.
+`git push origin main` → the **Deploy** workflow builds + restarts `d2editor`. Then open
+`http://151.115.56.12/map/` and verify `/map/api/health`.
 
 ## Prod toggles (baked via compose / Docker args)
 - `BASE_PATH=/map`, `VITE_BASE=/map/` — the base path.

@@ -13,3 +13,16 @@ export type {
 } from "./events.js";
 
 export const SOCKET_CONTRACT_VERSION = "0.1.0" as const;
+export {
+  VOICE_CONTRACT_VERSION,
+  VoiceAudioAsset,
+  DialogHandoffV1,
+  DialogEventChange,
+  DialogReturnV1,
+} from "./voice.js";
+export type {
+  VoiceHandoffResult,
+  VoiceConflict,
+  VoiceReturnPreview,
+  VoiceReturnApplyResult,
+} from "./voice.js";

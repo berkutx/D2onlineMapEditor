@@ -1,9 +1,9 @@
 name: Deploy
 
-# Push to main/master -> ship code to the server, rebuild & restart the d2editor container.
-# Isolated from the existing d2mapeditor stack (separate compose project + dir). Public access
-# is via the EXISTING Cloudflare Tunnel: add a Zero-Trust public-hostname rule routing
-# d2mapeditor.online path /map -> http://d2editor:3000 (placed ABOVE the catch-all).
+# Push to main/master -> ship code to lastwar, rebuild & restart d2editor. Public access is
+# provided by the existing lastwar_nginx container on the server IP:
+#   http://151.115.56.12/map/ -> http://d2editor:3000
+# Both containers communicate only through the shared d2map_net Docker network.
 #
 # The 253 MB atlas set is NOT shipped here (it is gitignored + not reproducible in CI without
 # the game install) — populate the d2editor_assets volume once from the dev box (see README).
@@ -27,6 +27,9 @@ jobs:
           SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USERNAME: ${{ secrets.SERVER_USERNAME }}
+          D2_INTEGRATION_SECRET: ${{ secrets.D2_INTEGRATION_SECRET }}
+          VOICE_INTEGRATION_ENABLED: ${{ vars.VOICE_INTEGRATION_ENABLED }}
+          VOICE_INTEGRATION_CLIENTS: ${{ vars.VOICE_INTEGRATION_CLIENTS }}
         run: |
           set -euo pipefail
           install -m 600 /dev/null key
@@ -39,9 +42,24 @@ jobs:
           # be tarred to the server.
           tar czf - \
             --exclude='./key' --exclude='.git' --exclude='.github' --exclude='node_modules' \
+            --exclude='.env' \
             --exclude='**/node_modules' --exclude='dist' --exclude='**/dist' \
             --exclude='public/assets' --exclude='var' --exclude='scratchpad' \
             . | ssh $SSHOPTS "$REMOTE" 'tar xzf - -C ~/d2editor'
+          EXIST=$(ssh $SSHOPTS "$REMOTE" 'cat ~/d2editor/.env 2>/dev/null' || true)
+          keep(){ printf '%s\n' "$EXIST" | grep -E "^$1=" | head -1 | cut -d= -f2- || true; }
+          D2_INTEGRATION_SECRET="${D2_INTEGRATION_SECRET:-$(keep D2_INTEGRATION_SECRET)}"
+          VOICE_INTEGRATION_ENABLED="${VOICE_INTEGRATION_ENABLED:-$(keep VOICE_INTEGRATION_ENABLED)}"
+          VOICE_INTEGRATION_ENABLED="${VOICE_INTEGRATION_ENABLED:-off}"
+          VOICE_INTEGRATION_CLIENTS="${VOICE_INTEGRATION_CLIENTS:-$(keep VOICE_INTEGRATION_CLIENTS)}"
+          test -n "$D2_INTEGRATION_SECRET" || { echo 'Missing GitHub secret D2_INTEGRATION_SECRET'; exit 1; }
+          umask 077
+          {
+            printf 'D2_INTEGRATION_SECRET=%s\n' "$D2_INTEGRATION_SECRET"
+            printf 'VOICE_INTEGRATION_ENABLED=%s\n' "$VOICE_INTEGRATION_ENABLED"
+            printf 'VOICE_INTEGRATION_CLIENTS=%s\n' "$VOICE_INTEGRATION_CLIENTS"
+          } > env.out
+          ssh $SSHOPTS "$REMOTE" 'cat > ~/d2editor/.env && chmod 600 ~/d2editor/.env' < env.out
 
       - name: Build & restart on server
         uses: appleboy/ssh-action@v1.0.3
@@ -68,6 +86,14 @@ jobs:
             # only AFTER a successful build (so a failed build never takes /map down). Project name
             # "d2editor" is separate from "d2mapeditor"; --remove-orphans is scoped to THIS project.
             docker compose up -d --build --force-recreate --remove-orphans
+            # nginx owns the public ports. Reconnect it idempotently in case the lastwar stack
+            # was recreated since the previous editor deployment.
+            docker inspect lastwar_nginx >/dev/null 2>&1 || { echo "FATAL: lastwar_nginx is missing"; exit 1; }
+            if ! docker inspect --format '{{json .NetworkSettings.Networks}}' lastwar_nginx | grep -q '"d2map_net"'; then
+              docker network connect d2map_net lastwar_nginx
+            fi
+            docker exec lastwar_nginx nginx -t
+            docker exec lastwar_nginx nginx -s reload
             docker image prune -f || true   # drop the now-dangling previous image
             df -h / | tail -1
             # surface the container's own logs + fail the deploy if it isn't actually serving
@@ -76,3 +102,5 @@ jobs:
             docker logs --tail 120 d2editor 2>&1 || true
             echo "=== health check (inside the container) ==="
             docker exec d2editor node -e "fetch('http://localhost:3000/map/api/health').then(r=>r.text()).then(t=>{console.log('HEALTH OK',t)}).catch(e=>{console.error('HEALTH FAIL',e.message);process.exit(1)})"
+            echo "=== health check (through IP nginx route) ==="
+            curl --fail --silent --show-error -H 'Host: 151.115.56.12' http://127.0.0.1/map/api/health >/dev/null
