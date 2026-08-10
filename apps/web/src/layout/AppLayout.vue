@@ -195,7 +195,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <el-aside v-if="!readOnly && toolStore.selectedZoneId" class="app-inspector" width="clamp(220px, 24vw, 260px)">
         <ZoneInspector />
       </el-aside>
-      <el-aside v-if="!readOnly && toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
+      <el-aside v-if="toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
         <ObjectInspector />
       </el-aside>
       <!-- scenario WINDOW (draggable non-modal dialog; teleports to <body>) -->

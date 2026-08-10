@@ -51,6 +51,7 @@ const collabStore = useCollabStore();
 void itemStore.load();
 const spriteStore = useSpriteStore();
 const { selectedId } = storeToRefs(toolStore);
+const readOnly = computed(() => editStore.readOnly);
 
 /** Retry the catalog loads when an object is selected but a catalog failed to load earlier
  *  (e.g. a transient error while the dev server was reloading). Unit/spell catalogs are
@@ -635,8 +636,9 @@ function close(): void {
       <el-button class="ins-close" text :icon="Close" @click="close()" />
     </div>
     <div class="ins-sub">Клетка {{ obj.pos.x }}, {{ obj.pos.y }}</div>
+    <div v-if="readOnly" class="ins-readonly">Только просмотр</div>
 
-    <div v-if="editable" class="ins-body">
+    <el-form v-if="editable" class="ins-body" :disabled="readOnly">
       <!-- 🧰 CHEST -->
       <template v-if="obj.type === 'treasure'">
         <div class="row">
@@ -715,6 +717,7 @@ function close(): void {
         <GarrisonEditor
           :garrison="defenseGarrison"
           :count="defenseCount"
+          :readonly="readOnly"
           roster="soldiers"
           @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
           @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
@@ -932,6 +935,7 @@ function close(): void {
           :garrison="stackGarrison"
           :count="stackCount"
           :leader-cell="stackLeaderCell"
+          :readonly="readOnly"
           @set-unit="(c, u) => stackSetUnit(obj, c, u)"
           @clear="(c) => stackClearCell(obj, c)"
           @set-stat="(c, k, v) => stackSetStat(obj, c, k, v)"
@@ -1054,6 +1058,7 @@ function close(): void {
             :key="v.id"
             type="button"
             class="dv-cell"
+            :disabled="readOnly"
             :class="{ sel: v.id === decorVariantId }"
             :title="v.desc_en || v.name_ru"
             @click="pickVariant(v.id)"
@@ -1101,6 +1106,7 @@ function close(): void {
         <GarrisonEditor
           :garrison="defenseGarrison"
           :count="defenseCount"
+          :readonly="readOnly"
           roster="soldiers"
           @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
           @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
@@ -1126,6 +1132,7 @@ function close(): void {
           :garrison="visitorGarrison"
           :count="visitorCount"
           :leader-cell="(visitorStack.leaderCell ?? -1)"
+          :readonly="readOnly"
           @set-unit="(c, u) => stackSetUnit(visitorStack, c, u)"
           @clear="(c) => stackClearCell(visitorStack, c)"
           @set-stat="(c, k, v) => stackSetStat(visitorStack, c, k, v)"
@@ -1139,7 +1146,7 @@ function close(): void {
         </template>
       </template>
 
-    </div>
+    </el-form>
 
     <div v-else class="ins-body">
       <p class="muted sm">Свойства для «{{ typeLabel }}» пока не редактируются. Сейчас поддержаны сундуки, руины и города.</p>
@@ -1187,7 +1194,7 @@ function close(): void {
           @click="rolesExpanded = !rolesExpanded"
         >{{ rolesExpanded ? "свернуть" : `+${objectRoles.length - ROLE_LIMIT} ещё` }}</el-button>
       </div>
-      <el-button v-if="canCreateEventFor" size="small" text type="primary" @click="newEventForObject()">
+      <el-button v-if="canCreateEventFor && !readOnly" size="small" text type="primary" @click="newEventForObject()">
         ＋ Событие с этим объектом
       </el-button>
     </div>
@@ -1197,7 +1204,7 @@ function close(): void {
     <div v-else-if="canCreateEventFor" class="ins-body">
       <div class="d2-sec">Сценарий</div>
       <p class="muted sm">событий с этим объектом нет</p>
-      <el-button size="small" text type="primary" @click="newEventForObject()">
+      <el-button v-if="!readOnly" size="small" text type="primary" @click="newEventForObject()">
         ＋ Событие с этим объектом
       </el-button>
     </div>
@@ -1245,6 +1252,16 @@ function close(): void {
   color: var(--el-text-color-secondary);
   margin: 0;
   padding: 0 12px var(--d2-sp-2);
+}
+.ins-readonly {
+  margin: 0 12px var(--d2-sp-2);
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--el-color-warning) 45%, transparent);
+  border-radius: var(--d2-radius);
+  background: color-mix(in srgb, var(--el-color-warning) 10%, transparent);
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  text-align: center;
 }
 .ins-body {
   display: flex;
@@ -1399,6 +1416,7 @@ function close(): void {
 }
 .dv-cell:hover { box-shadow: 0 0 0 1px var(--el-border-color-lighter); }
 .dv-cell.sel { box-shadow: 0 0 0 2px var(--d2-active-bar); }
+.dv-cell:disabled { cursor: default; opacity: 0.65; }
 /* «Сценарий»: compact clickable role rows (.d2-row owns hover wash + radius) */
 .roles-list {
   display: flex;
