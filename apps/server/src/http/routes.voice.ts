@@ -70,6 +70,12 @@ export function voiceLoginPath(next: string): string {
 
 interface CurrentBuild { project: EditorProject; doc: MapDocument; bytes: Uint8Array }
 async function currentBuild(store: MapStore, id: string, raw: unknown): Promise<CurrentBuild | { error: unknown; status: number }> {
+  const policy = await store.getAccessPolicy(id);
+  if (!policy) return { status: 404, error: { error: "map not found" } };
+  if (policy.readOnly) return {
+    status: 403,
+    error: { error: "preview_read_only", message: "Временная карта доступна только для просмотра", expiresAt: policy.expiresAt },
+  };
   const parsed = EditorProject.safeParse(raw);
   if (!parsed.success) return { status: 400, error: { error: "invalid EditorProject", detail: parsed.error.message } };
   if (parsed.data.baseScenarioId !== id) return { status: 400, error: { error: "project baseScenarioId mismatch" } };

@@ -39,7 +39,7 @@ const toolStore = useToolStore();
 const decorStore = useDecorStore();
 const editStore = useEditStore();
 const mapStore = useMapStore();
-const { currentScenarioId } = storeToRefs(mapStore);
+const { currentScenarioId, readOnly } = storeToRefs(mapStore);
 const roadActions = useRoadActions();
 const selActions = useSelectionActions();
 
@@ -66,6 +66,7 @@ function onKey(e: KeyboardEvent): void {
   // Global undo/redo: Ctrl+Z / Ctrl+Shift+Z (and Ctrl+Y), the single source of truth.
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")) {
     if (typing) return;
+    if (readOnly.value) { e.preventDefault(); return; }
     const redo = (e.key === "y" || e.key === "Y") || e.shiftKey;
     if (redo) editStore.redoEdit();
     else editStore.undoEdit();
@@ -74,6 +75,9 @@ function onKey(e: KeyboardEvent): void {
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (typing) return;
+  // Preview mode keeps navigation/view shortcuts but drops every edit/copilot shortcut before
+  // it reaches the tool-specific handlers below. Escape is retained for clearing selection.
+  if (readOnly.value && !["t", "o", "g", "l", "a", "p", "d", "f", "escape"].includes(e.key.toLowerCase())) return;
   // road-select tool: Delete erases the selected segment, Escape clears it
   // (same actions as the floating RoadActionBar — shared via useRoadActions).
   if (toolStore.tool === "roadsel" && toolStore.roadSel.length) {
@@ -170,32 +174,32 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <TopMenuBar />
     </el-header>
     <el-container class="app-body">
-      <ToolDock />
+      <ToolDock v-if="!readOnly" />
       <el-aside v-if="view.objectPanelVisible" class="app-aside" width="clamp(180px, 18vw, 220px)">
         <LeftObjectPanel />
       </el-aside>
       <el-main class="app-main">
         <MapCanvasHost />
-        <ToolOptionsBar v-if="currentScenarioId" />
-        <ObjectActionBar v-if="toolStore.tool === 'move'" />
-        <RoadActionBar v-if="toolStore.tool === 'roadsel'" />
-        <SelectionActionBar v-if="toolStore.tool === 'select'" />
-        <CopilotBar v-show="view.copilotVisible" />
-        <HistoryPanel />
+        <ToolOptionsBar v-if="currentScenarioId && !readOnly" />
+        <ObjectActionBar v-if="!readOnly && toolStore.tool === 'move'" />
+        <RoadActionBar v-if="!readOnly && toolStore.tool === 'roadsel'" />
+        <SelectionActionBar v-if="!readOnly && toolStore.tool === 'select'" />
+        <CopilotBar v-if="!readOnly" v-show="view.copilotVisible" />
+        <HistoryPanel v-if="!readOnly" />
         <MinimapDock v-if="currentScenarioId" />
       </el-main>
-      <el-aside v-if="toolStore.tool === 'decor'" class="app-decor" width="clamp(240px, 26vw, 300px)">
+      <el-aside v-if="!readOnly && toolStore.tool === 'decor'" class="app-decor" width="clamp(240px, 26vw, 300px)">
         <DecorPalette />
       </el-aside>
       <!-- zone inspector (mutually exclusive with the object selection by store invariant) -->
-      <el-aside v-if="toolStore.selectedZoneId" class="app-inspector" width="clamp(220px, 24vw, 260px)">
+      <el-aside v-if="!readOnly && toolStore.selectedZoneId" class="app-inspector" width="clamp(220px, 24vw, 260px)">
         <ZoneInspector />
       </el-aside>
-      <el-aside v-if="toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
+      <el-aside v-if="!readOnly && toolStore.selectedId" class="app-inspector" :width="inspectorWidth">
         <ObjectInspector />
       </el-aside>
       <!-- scenario WINDOW (draggable non-modal dialog; teleports to <body>) -->
-      <EventsPanel />
+      <EventsPanel v-if="!readOnly" />
     </el-container>
     <el-footer class="app-footer" height="28px">
       <StatusBar />

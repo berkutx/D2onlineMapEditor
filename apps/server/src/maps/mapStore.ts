@@ -8,9 +8,9 @@
  * runtime-registered uploads.
  */
 
-import { stat, readFile, writeFile, realpath, mkdir, rm } from "node:fs/promises";
+import { stat, readFile, writeFile, realpath, mkdir, rename, rm } from "node:fs/promises";
 import { join, basename } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { parseScenario, type MapDocument } from "@d2/sg-parser";
 import type { MapMeta } from "@d2/socket-contract";
 import { config } from "../config.js";
@@ -45,6 +45,9 @@ interface RegistryEntry {
   /** Temporary map (first-visit auto-clone) — swept after the TTL since lastAccess. */
   ephemeral?: boolean;
   lastAccess?: number;
+  /** Fixed hard deadline for a read-only external preview (epoch ms). */
+  previewExpiresAt?: number;
+  previewContentHash?: string;
 }
 
 /** Persist lastAccess at most this often (avoid a registry write on every map fetch). */
@@ -59,6 +62,8 @@ export class MapStore {
   private cache = new Map<string, CacheEntry>();
   /** One-shot load of the persisted uploads registry (see loadUploads). */
   private uploadsLoaded = false;
+  /** Registry snapshots must land in call order when several uploads finish together. */
+  private registryWrite: Promise<void> = Promise.resolve();
 
   constructor(private readonly cacheMax = config.MAP_CACHE_MAX) {}
 
@@ -96,6 +101,10 @@ export class MapStore {
           owner: typeof e.owner === "string" ? e.owner : undefined,
           ephemeral: e.ephemeral === true || undefined,
           lastAccessMs: typeof e.lastAccess === "number" ? e.lastAccess : e.createdAt,
+          previewExpiresAtMs:
+            typeof e.previewExpiresAt === "number" ? e.previewExpiresAt : undefined,
+          previewContentHash:
+            typeof e.previewContentHash === "string" ? e.previewContentHash : undefined,
         });
       } catch {
         continue; // file gone — drop from the effective registry
@@ -103,25 +112,37 @@ export class MapStore {
     }
   }
 
-  /** Persist the uploads registry (fileName + owner + TTL bookkeeping) next to the files. */
-  private async saveUploads(): Promise<void> {
+  /** Persist the uploads registry (fileName + owner + TTL bookkeeping) next to the files.
+   * Ordinary legacy callers remain best-effort; a newly-created preview requires durable
+   * registration so the API never returns a capability that vanishes after a restart. */
+  private async saveUploads(strict = false): Promise<void> {
     const entries: RegistryEntry[] = this.uploads.map((u) => ({
       fileName: basename(u.realPath),
       owner: u.owner,
       createdAt: Math.floor(u.mtimeMs),
       ephemeral: u.ephemeral || undefined,
       lastAccess: u.lastAccessMs,
+      previewExpiresAt: u.previewExpiresAtMs,
+      previewContentHash: u.previewContentHash,
     }));
-    try {
+    const payload = JSON.stringify(entries, null, 2);
+    const attempt = this.registryWrite.catch(() => {}).then(async () => {
       await mkdir(config.UPLOAD_DIR, { recursive: true });
-      await writeFile(
-        join(config.UPLOAD_DIR, "registry.json"),
-        JSON.stringify(entries, null, 2),
-        "utf-8",
-      );
-    } catch {
+      const registryPath = join(config.UPLOAD_DIR, "registry.json");
+      const tempPath = join(config.UPLOAD_DIR, `.registry-${process.pid}-${randomUUID()}.tmp`);
+      try {
+        await writeFile(tempPath, payload, { encoding: "utf-8", flag: "wx" });
+        await rename(tempPath, registryPath);
+      } finally {
+        await rm(tempPath, { force: true }).catch(() => {});
+      }
+    });
+    // Keep the queue usable after an I/O error. Callers that need durability await `attempt`.
+    this.registryWrite = attempt.catch(() => {});
+    if (strict) await attempt;
+    else await attempt.catch(() => {
       // persistence is best-effort; the in-memory registry still works this session
-    }
+    });
   }
 
   /** Rescan the configured roots and refresh the id->path registry. */
@@ -134,6 +155,9 @@ export class MapStore {
 
   /** Latest scenario listing (rescans on every call — cheap, header-only). */
   async listScenarios() {
+    // Preview records are deliberately ownerless (capability URLs), hence hidden from the
+    // listing. Still remove expired ones before the scan so stale files do not accumulate.
+    await this.sweepExpiredPreviews();
     const result = await this.refresh();
     return result.entries;
   }
@@ -144,7 +168,7 @@ export class MapStore {
   async registerUpload(
     absPath: string,
     owner?: string,
-    opts?: { ephemeral?: boolean },
+    opts?: { ephemeral?: boolean; previewExpiresAtMs?: number; previewContentHash?: string },
   ): Promise<ScenarioRecord> {
     await this.loadUploads();
     const real = await realpath(absPath);
@@ -158,10 +182,21 @@ export class MapStore {
       owner,
       ephemeral: opts?.ephemeral || undefined,
       lastAccessMs: Date.now(),
+      previewExpiresAtMs: opts?.previewExpiresAtMs,
+      previewContentHash: opts?.previewContentHash,
     };
     this.uploads = this.uploads.filter((u) => u.id !== id).concat(rec);
     this.registry.set(id, rec);
-    await this.saveUploads();
+    try {
+      await this.saveUploads(opts?.previewExpiresAtMs !== undefined);
+    } catch (error) {
+      // The preview route removes the just-written .sg. Drop the failed in-memory capability
+      // as well and enqueue a corrected snapshot after any already-queued concurrent write.
+      this.uploads = this.uploads.filter((u) => u.id !== id);
+      if (this.registry.get(id) === rec) this.registry.delete(id);
+      void this.saveUploads();
+      throw error;
+    }
     return rec;
   }
 
@@ -184,8 +219,23 @@ export class MapStore {
     const expired = this.uploads.filter(
       (u) => u.ephemeral && (u.lastAccessMs ?? 0) < cutoff,
     );
-    if (expired.length === 0) return 0;
-    for (const u of expired) {
+    return this.removeUploads(expired);
+  }
+
+  /** Delete previews whose fixed one-hour deadline has elapsed. Access never extends it. */
+  async sweepExpiredPreviews(now = Date.now()): Promise<number> {
+    await this.loadUploads();
+    return this.removeUploads(
+      this.uploads.filter(
+        (u) => u.previewExpiresAtMs !== undefined && u.previewExpiresAtMs <= now,
+      ),
+    );
+  }
+
+  /** Drop upload files and all editor-side state derived from them, then persist the registry. */
+  private async removeUploads(records: readonly ScenarioRecord[]): Promise<number> {
+    if (records.length === 0) return 0;
+    for (const u of records) {
       try {
         await rm(u.realPath, { force: true });
       } catch {
@@ -200,10 +250,10 @@ export class MapStore {
       this.registry.delete(u.id);
       this.cache.delete(u.id);
     }
-    const gone = new Set(expired.map((u) => u.id));
+    const gone = new Set(records.map((u) => u.id));
     this.uploads = this.uploads.filter((u) => !gone.has(u.id));
     await this.saveUploads();
-    return expired.length;
+    return records.length;
   }
 
   /** Resolve an opaque id to its server-private record, rescanning if unknown. */
@@ -213,7 +263,50 @@ export class MapStore {
       await this.refresh();
       rec = this.registry.get(id);
     }
+    // Enforce the fixed deadline on every request, not only on the periodic sweep. This also
+    // makes an expired capability return 404 immediately even if the process was asleep.
+    if (rec?.previewExpiresAtMs !== undefined && rec.previewExpiresAtMs <= Date.now()) {
+      await this.removeUploads([rec]);
+      return undefined;
+    }
     return rec;
+  }
+
+  /** Access policy used by REST/socket mutation guards. Undefined means the map is absent. */
+  async getAccessPolicy(
+    id: string,
+  ): Promise<{ readOnly: boolean; expiresAt?: number } | undefined> {
+    const rec = await this.resolve(id);
+    if (!rec) return undefined;
+    return rec.previewExpiresAtMs === undefined
+      ? { readOnly: false }
+      : { readOnly: true, expiresAt: rec.previewExpiresAtMs };
+  }
+
+  /** Hot-path socket guard. Production preloads the registry before socket.io starts, and every
+   * runtime preview registration updates it synchronously before returning its URL. */
+  isReadOnlyKnown(id: string): boolean {
+    return this.registry.get(id)?.previewExpiresAtMs !== undefined;
+  }
+
+  /** Find the one active content-addressed preview for a SHA-256. The deadline is fixed: a
+   * cache lookup never touches/extends it. */
+  async findPreviewByHash(
+    sha256: string,
+  ): Promise<{ id: string; expiresAt: number } | undefined> {
+    await this.sweepExpiredPreviews();
+    const rec = this.uploads.find(
+      (u) => u.previewContentHash === sha256 && u.previewExpiresAtMs !== undefined,
+    );
+    if (!rec?.previewExpiresAtMs) return undefined;
+    // Ensure a registry entry whose file disappeared is not advertised as a cache hit.
+    try {
+      await stat(rec.realPath);
+    } catch {
+      await this.removeUploads([rec]);
+      return undefined;
+    }
+    return { id: rec.id, expiresAt: rec.previewExpiresAtMs };
   }
 
   /**
@@ -259,6 +352,8 @@ export class MapStore {
 
   /** Cheap header-derived meta for an id (uses the full parse cache if warm). */
   async getMeta(id: string): Promise<MapMeta | undefined> {
+    const policy = await this.getAccessPolicy(id);
+    if (!policy) return undefined;
     const loaded = await this.getMap(id);
     if (!loaded) return undefined;
     const { doc } = loaded;
@@ -269,6 +364,8 @@ export class MapStore {
       players: doc.players.length,
       version: doc.header.version,
       description: doc.header.description ?? "",
+      readOnly: policy.readOnly || undefined,
+      expiresAt: policy.expiresAt,
     };
   }
 

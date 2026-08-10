@@ -50,8 +50,10 @@ async function boot(): Promise<void> {
         if (focusObj) toolStore.focusObjectId = focusObj;
         bootLoading.value = false;
         return;
-      } catch {
-        ElMessage.warning("Карта из ссылки недоступна — открываю карту по умолчанию.");
+      } catch (error) {
+        // A capability URL must never silently turn into some other editable map. This also
+        // gives expired previews an honest terminal screen without exposing a `preview` switch.
+        throw new Error(`Карта из ссылки уже удалена или недоступна${error instanceof Error ? `: ${error.message}` : ""}`);
       }
     }
     // Returning visitor: open their most recent OWN map (the list is owner-filtered, so any

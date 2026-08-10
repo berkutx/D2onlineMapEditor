@@ -12,7 +12,7 @@
 
 import { mkdir, writeFile, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { REST, Region, type ValidationReport } from "@d2/socket-contract";
 import {
   parseScenario,
@@ -335,6 +335,25 @@ export async function registerMapRoutes(
   store: MapStore,
   log: EditLog,
 ): Promise<void> {
+  /** Preview links may render the parsed document, but every route that can persist, derive
+   * editable ops, clone, or emit `.sg` bytes is denied server-side (the UI lock is not trust). */
+  const requireWritable = async (id: string, reply: FastifyReply): Promise<boolean> => {
+    const policy = await store.getAccessPolicy(id);
+    if (!policy) {
+      reply.code(404).send({ error: "map not found" });
+      return false;
+    }
+    if (policy.readOnly) {
+      reply.code(403).send({
+        error: "preview_read_only",
+        message: "Временная карта доступна только для просмотра",
+        expiresAt: policy.expiresAt,
+      });
+      return false;
+    }
+    return true;
+  };
+
   app.get<{ Params: { id: string } }>(REST.map(":id"), async (req, reply) => {
     const { id } = req.params;
 
@@ -373,6 +392,7 @@ export async function registerMapRoutes(
 
   app.get<{ Params: { id: string } }>(REST.mapRaw(":id"), async (req, reply) => {
     const { id } = req.params;
+    if (!(await requireWritable(id, reply))) return;
     const raw = await store.getRawBytes(id);
     if (!raw) {
       return reply.code(404).send({ error: "map not found" });
@@ -424,6 +444,7 @@ export async function registerMapRoutes(
   // after the visitor's last access — every open/edit refreshes the timer.
   app.post<{ Params: { id: string } }>(REST.mapClone(":id"), async (req, reply) => {
     const { id } = req.params;
+    if (!(await requireWritable(id, reply))) return;
     const src = await store.getRawBytes(id);
     if (!src) {
       return reply.code(404).send({ error: "map not found" });
@@ -442,6 +463,7 @@ export async function registerMapRoutes(
     join(config.PROJECTS_DIR, sanitize(mapId), `${sanitize(clientId)}.json`);
 
   app.get<{ Params: { id: string } }>(REST.mapProject(":id"), async (req, reply) => {
+    if (!(await requireWritable(req.params.id, reply))) return;
     const clientId = clientIdOf(req);
     if (!clientId) return reply.code(400).send({ error: "x-client-id required" });
     try {
@@ -455,6 +477,7 @@ export async function registerMapRoutes(
   });
 
   app.put<{ Params: { id: string } }>(REST.mapProject(":id"), async (req, reply) => {
+    if (!(await requireWritable(req.params.id, reply))) return;
     const clientId = clientIdOf(req);
     if (!clientId) return reply.code(400).send({ error: "x-client-id required" });
     const parsed = EditorProject.safeParse(req.body);
@@ -478,6 +501,7 @@ export async function registerMapRoutes(
     const url = action === "validate" ? REST.mapValidate(":id") : REST.mapExport(":id");
     app.post<{ Params: { id: string } }>(url, async (req, reply) => {
       const { id } = req.params;
+      if (action === "export" && !(await requireWritable(id, reply))) return;
 
       const parsed = EditorProject.safeParse(req.body);
       if (!parsed.success) {
@@ -523,6 +547,7 @@ export async function registerMapRoutes(
     REST.mapExportAt(":id"),
     async (req, reply) => {
       const { id } = req.params;
+      if (!(await requireWritable(id, reply))) return;
       try {
         const channel = typeof req.query.channel === "string" && req.query.channel ? req.query.channel : undefined;
         const key = roomKey(id, channel);
@@ -561,6 +586,7 @@ export async function registerMapRoutes(
   // commits the ops (one undo step). The LLM/keyword router (client) only picks recipe+region.
   app.post<{ Params: { id: string } }>(REST.mapGenerate(":id"), async (req, reply) => {
     const { id } = req.params;
+    if (!(await requireWritable(id, reply))) return;
     const body = (req.body ?? {}) as Record<string, unknown>;
 
     const projParsed = EditorProject.safeParse(body.project);
@@ -626,12 +652,13 @@ export async function registerMapRoutes(
   // the SAME generation executor + 3-tier validator as /generate; the client commits {ops}
   // as one undoable edit. (Stands in for a real LLM endpoint, none configured.)
   app.post<{ Params: { id: string } }>(REST.mapCopilot(":id"), async (req, reply) => {
+    const { id } = req.params;
+    if (!(await requireWritable(id, reply))) return;
     // The LLM bridge needs a local agent watching var/llm — absent in production. Disabled
     // there (COPILOT_LLM=off); the no-LLM recipe/keyword generation (/generate) still works.
     if (!config.COPILOT_LLM) {
       return reply.code(503).send({ error: "LLM Copilot disabled on this deployment" });
     }
-    const { id } = req.params;
     const body = (req.body ?? {}) as Record<string, unknown>;
 
     const projParsed = EditorProject.safeParse(body.project);

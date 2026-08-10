@@ -36,7 +36,7 @@ function fakeSocket(id: string): { socket: never; invoke: (ev: string, ...args: 
 }
 
 const fakeIo = { to: () => ({ emit: () => undefined }) } as never;
-const fakeStore = {} as never;
+const fakeStore = { isReadOnlyKnown: () => false } as never;
 
 describe("RoomManager id slots", () => {
   it("assigns the smallest free slot per member and keeps them distinct", () => {

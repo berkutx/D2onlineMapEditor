@@ -44,6 +44,9 @@ jobs:
           VOICE_INTEGRATION_ENABLED: ${{ vars.VOICE_INTEGRATION_ENABLED }}
           VOICE_INTEGRATION_CLIENTS: ${{ vars.VOICE_INTEGRATION_CLIENTS }}
           VOICE_PUBLIC_ORIGIN: ${{ vars.VOICE_PUBLIC_ORIGIN }}
+          PREVIEW_TTL_MS: ${{ vars.PREVIEW_TTL_MS }}
+          PREVIEW_UPLOAD_LIMIT: ${{ vars.PREVIEW_UPLOAD_LIMIT }}
+          PREVIEW_RATE_WINDOW_MS: ${{ vars.PREVIEW_RATE_WINDOW_MS }}
         run: |
           set -euo pipefail
           install -m 600 /dev/null key
@@ -74,6 +77,12 @@ jobs:
           VOICE_INTEGRATION_CLIENTS="${VOICE_INTEGRATION_CLIENTS:-$(keep VOICE_INTEGRATION_CLIENTS)}"
           VOICE_PUBLIC_ORIGIN="${VOICE_PUBLIC_ORIGIN:-$(keep VOICE_PUBLIC_ORIGIN)}"
           VOICE_PUBLIC_ORIGIN="${VOICE_PUBLIC_ORIGIN:-http://151.115.56.12}"
+          PREVIEW_TTL_MS="${PREVIEW_TTL_MS:-$(keep PREVIEW_TTL_MS)}"
+          PREVIEW_TTL_MS="${PREVIEW_TTL_MS:-3600000}"
+          PREVIEW_UPLOAD_LIMIT="${PREVIEW_UPLOAD_LIMIT:-$(keep PREVIEW_UPLOAD_LIMIT)}"
+          PREVIEW_UPLOAD_LIMIT="${PREVIEW_UPLOAD_LIMIT:-5}"
+          PREVIEW_RATE_WINDOW_MS="${PREVIEW_RATE_WINDOW_MS:-$(keep PREVIEW_RATE_WINDOW_MS)}"
+          PREVIEW_RATE_WINDOW_MS="${PREVIEW_RATE_WINDOW_MS:-3600000}"
           test -n "$D2_INTEGRATION_SECRET" || { echo 'Missing GitHub secret D2_INTEGRATION_SECRET'; exit 1; }
           umask 077
           {
@@ -81,6 +90,9 @@ jobs:
             printf 'VOICE_INTEGRATION_ENABLED=%s\n' "$VOICE_INTEGRATION_ENABLED"
             printf 'VOICE_INTEGRATION_CLIENTS=%s\n' "$VOICE_INTEGRATION_CLIENTS"
             printf 'VOICE_PUBLIC_ORIGIN=%s\n' "$VOICE_PUBLIC_ORIGIN"
+            printf 'PREVIEW_TTL_MS=%s\n' "$PREVIEW_TTL_MS"
+            printf 'PREVIEW_UPLOAD_LIMIT=%s\n' "$PREVIEW_UPLOAD_LIMIT"
+            printf 'PREVIEW_RATE_WINDOW_MS=%s\n' "$PREVIEW_RATE_WINDOW_MS"
           } > env.out
           ssh $SSHOPTS "$REMOTE" 'cat > ~/d2editor/.env && chmod 600 ~/d2editor/.env' < env.out
 

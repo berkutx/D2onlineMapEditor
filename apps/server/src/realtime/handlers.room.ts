@@ -203,6 +203,10 @@ export function registerRoomHandlers(
       ack({ ok: false, reason: "invalid op: " + parsed.error.issues[0]?.message });
       return;
     }
+    if (store.isReadOnlyKnown(p.mapId)) {
+      ack({ ok: false, reason: "временная карта доступна только для просмотра" });
+      return;
+    }
     withRoom(key, () => {
       // durability freeze: the room's log file stopped accepting writes (disk full/IO) —
       // acking an edit we cannot persist would silently diverge memory from disk.
@@ -254,6 +258,10 @@ export function registerRoomHandlers(
         return;
       }
       validated.push({ clientOpId: String(item?.clientOpId ?? ""), op: parsed.data });
+    }
+    if (store.isReadOnlyKnown(p.mapId)) {
+      ack({ ok: false, reason: "временная карта доступна только для просмотра" });
+      return;
     }
     withRoom(key, () => {
       if (log.isDegraded(key)) {
@@ -341,6 +349,10 @@ export function registerRoomHandlers(
     const key = keyFor(p.mapId);
     if (!key) {
       ack({ ok: false, reason: "not joined to this map's room" });
+      return;
+    }
+    if (store.isReadOnlyKnown(p.mapId)) {
+      ack({ ok: false, reason: "временная карта доступна только для просмотра" });
       return;
     }
     const me = socket.data.clientId ?? socket.id;
@@ -453,6 +465,10 @@ export function registerRoomHandlers(
     const key = keyFor(p.mapId);
     if (!key) {
       ack({ ok: false, reason: "not joined to this map's room" });
+      return;
+    }
+    if (store.isReadOnlyKnown(p.mapId)) {
+      ack({ ok: false, reason: "временная карта доступна только для просмотра" });
       return;
     }
     const me = socket.data.clientId ?? socket.id;

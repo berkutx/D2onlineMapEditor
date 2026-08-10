@@ -5,7 +5,7 @@
  * dirty tags, appearance toggle). No loose action buttons; view/grid/undo are
  * each defined in exactly one menu (their rapid surfaces live in the dock).
  */
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { ElMessage, ElNotification, ElMessageBox } from "element-plus";
 import { Check, Moon, Sunny, Share, CircleCheck, WarningFilled } from "@element-plus/icons-vue";
@@ -33,7 +33,7 @@ const viewStore = useViewStore();
 const editStore = useEditStore();
 const collabStore = useCollabStore();
 
-const { scenarios, currentScenarioId, status } = storeToRefs(mapStore);
+const { scenarios, currentScenarioId, status, readOnly, previewExpiresAt } = storeToRefs(mapStore);
 const { peerList, syncState } = storeToRefs(collabStore);
 
 /** Copy a share link (?map=<id>&room=<channel>): the guest opens the same map AND joins
@@ -55,6 +55,19 @@ async function shareLink(): Promise<void> {
 const initials = (name: string): string =>
   name.replace(/[^\p{L}\p{N}]/gu, " ").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "?";
 const { dirty, edited, undoable, redoable, report, busy } = storeToRefs(editStore);
+
+const previewClock = ref(Date.now());
+let previewClockTimer: ReturnType<typeof setInterval> | undefined;
+const previewCountdown = computed(() => {
+  const deadline = previewExpiresAt.value;
+  if (!deadline) return "";
+  const seconds = Math.max(0, Math.ceil((deadline - previewClock.value) / 1000));
+  if (seconds === 0) return "удалена с сервера";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return `удаление через ${h ? `${h}:` : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+});
 
 /** Honest sync badge (replaces the old always-on «есть правки»): only when the map actually
  *  differs from base, and it reflects REAL sync — synced ✓ / saving ⟳ / not-synced ⚠. */
@@ -146,9 +159,9 @@ async function onMapCommand(id: string): Promise<void> {
 
 // Keep an EditorProject alive for whichever map is open (restores persisted edits).
 watch(
-  currentScenarioId,
-  (id) => {
-    if (id) editStore.ensureProject(id);
+  [currentScenarioId, readOnly],
+  ([id, isReadOnly]) => {
+    if (id) editStore.ensureProject(id, { readOnly: isReadOnly });
   },
   { immediate: true },
 );
@@ -394,6 +407,10 @@ async function onUploadFile(e: Event): Promise<void> {
 
 /** el-menu dispatcher — one place routes every menu-item index to its action. */
 function onSelect(index: string): void {
+  if (readOnly.value && !index.startsWith("view:") && !index.startsWith("help:")) {
+    ElMessage.info("Временная карта открыта только для просмотра");
+    return;
+  }
   switch (index) {
     case "file:open": return void openDialog();
     case "file:new": newMapVisible.value = true; return;
@@ -425,14 +442,16 @@ function onSelect(index: string): void {
 }
 
 onMounted(() => {
+  previewClockTimer = setInterval(() => { previewClock.value = Date.now(); }, 1000);
   void mapStore.loadScenarios().catch(() => {});
   void getRuntimeFeatures().then((f) => { voiceEnabled.value = f.voiceIntegration; }).catch(() => {});
 });
+onBeforeUnmount(() => clearInterval(previewClockTimer));
 
 watch(
   () => [currentScenarioId.value, editStore.project?.baseScenarioId] as const,
   ([id, projectId]) => {
-    if (!id || projectId !== id || integrationAutoStarted) return;
+    if (!id || projectId !== id || readOnly.value || integrationAutoStarted) return;
     const q = new URLSearchParams(window.location.search);
     const returnToken = q.get("voiceReturn");
     const resume = q.get("resumeVoice") === "1" || sessionStorage.getItem("d2.voice.resume") === "1";
@@ -456,7 +475,7 @@ watch(
     <span class="app-title"><span class="app-mark" />Disciples II</span>
 
     <el-menu class="topmenu" mode="horizontal" :ellipsis="false" :default-active="''" @select="onSelect">
-      <el-sub-menu index="file">
+      <el-sub-menu v-if="!readOnly" index="file">
         <template #title>Файл</template>
         <el-menu-item index="file:open">Открыть карту…<span class="mkbd">Ctrl+O</span></el-menu-item>
         <el-menu-item index="file:new">Новая карта…</el-menu-item>
@@ -469,7 +488,7 @@ watch(
            hosts direct-access buttons (Сценарий, Проверка). Canonical homes stay here. -->
       <el-sub-menu index="more">
         <template #title>Меню</template>
-      <el-sub-menu index="edit">
+      <el-sub-menu v-if="!readOnly" index="edit">
         <template #title>Правка</template>
         <el-menu-item index="edit:undo" :disabled="!undoable">Отменить<span class="mkbd">Ctrl+Z</span></el-menu-item>
         <el-menu-item index="edit:redo" :disabled="!redoable">Вернуть<span class="mkbd">Ctrl+⇧Z</span></el-menu-item>
@@ -485,8 +504,8 @@ watch(
         <el-menu-item index="view:locations"><el-icon class="mck" :style="{ visibility: locationsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Локации<span class="mkbd">L</span></el-menu-item>
         <el-menu-item index="view:animate"><el-icon class="mck" :style="{ visibility: animate ? 'visible' : 'hidden' }"><Check /></el-icon>Анимация<span class="mkbd">A</span></el-menu-item>
         <el-menu-item index="view:objectPanel"><el-icon class="mck" :style="{ visibility: objectPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Панель объектов<span class="mkbd">P</span></el-menu-item>
-        <el-menu-item index="view:eventPanel"><el-icon class="mck" :style="{ visibility: eventPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Сценарий (события)<span class="mkbd">E</span></el-menu-item>
-        <el-menu-item index="view:anchors"><el-icon class="mck" :style="{ visibility: anchorsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Связи (якоря ⚓)</el-menu-item>
+        <el-menu-item v-if="!readOnly" index="view:eventPanel"><el-icon class="mck" :style="{ visibility: eventPanelVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Сценарий (события)<span class="mkbd">E</span></el-menu-item>
+        <el-menu-item v-if="!readOnly" index="view:anchors"><el-icon class="mck" :style="{ visibility: anchorsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Связи (якоря ⚓)</el-menu-item>
         <el-menu-item index="view:roles"><el-icon class="mck" :style="{ visibility: rolesVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Роли локаций</el-menu-item>
         <el-menu-item index="view:minimap"><el-icon class="mck" :style="{ visibility: minimapVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Миникарта</el-menu-item>
         <el-menu-item index="view:debug"><el-icon class="mck" :style="{ visibility: debugOverlay ? 'visible' : 'hidden' }"><Check /></el-icon>Отладка<span class="mkbd">D</span></el-menu-item>
@@ -499,11 +518,11 @@ watch(
           <el-menu-item index="view:tint:roads"><el-icon class="mck" :style="{ visibility: overlayTints.roads ? 'visible' : 'hidden' }"><Check /></el-icon>Дороги</el-menu-item>
         </el-sub-menu>
         <el-menu-item index="view:fit">К размеру окна<span class="mkbd">F</span></el-menu-item>
-        <el-menu-item index="view:copilot"><el-icon class="mck" :style="{ visibility: copilotVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Copilot<span class="mkbd">/</span></el-menu-item>
+        <el-menu-item v-if="!readOnly" index="view:copilot"><el-icon class="mck" :style="{ visibility: copilotVisible ? 'visible' : 'hidden' }"><Check /></el-icon>Copilot<span class="mkbd">/</span></el-menu-item>
         <el-menu-item index="view:appearance"><el-icon class="mck" :style="{ visibility: dark ? 'visible' : 'hidden' }"><Check /></el-icon>Тёмная тема</el-menu-item>
       </el-sub-menu>
 
-      <el-sub-menu index="map">
+      <el-sub-menu v-if="!readOnly" index="map">
         <template #title>Карта</template>
         <el-sub-menu v-for="g in scenariosByCampaign" :key="g.campaign" :index="'map:camp:' + g.campaign">
           <template #title>{{ g.campaign }}</template>
@@ -523,6 +542,7 @@ watch(
 
     <!-- direct-access buttons (rapid surface; canonical homes stay in the menu) -->
     <el-button
+      v-if="!readOnly"
       class="quick-btn"
       size="small"
       :class="{ 'is-open': eventPanelVisible }"
@@ -531,7 +551,7 @@ watch(
     >Сценарий</el-button>
 
     <el-button
-      v-if="voiceEnabled"
+      v-if="voiceEnabled && !readOnly"
       class="quick-btn"
       size="small"
       :loading="voiceBusy"
@@ -542,13 +562,16 @@ watch(
     <span class="bar-spacer" />
 
     <span v-if="liveMapName" class="map-title">{{ liveMapName }}</span>
+    <el-tag v-if="readOnly" size="small" type="warning" effect="dark" round>
+      Только просмотр · {{ previewCountdown }}
+    </el-tag>
     <el-tag v-if="status === 'loading'" size="small" type="warning" effect="plain" round>Загрузка…</el-tag>
     <el-tag v-if="syncBadge" size="small" :type="syncBadge.type" effect="plain" round>{{ syncBadge.text }}</el-tag>
 
     <!-- Check button IS the status (no separate chip): the map auto-re-checks ~2.5s after
          the last edit; the button turns green (ok) / RED PULSING (won't save; click for the
          detailed reasons). Neutral while unchecked/pending. -->
-    <el-tooltip :content="validateHint" placement="bottom" :show-after="200">
+    <el-tooltip v-if="!readOnly" :content="validateHint" placement="bottom" :show-after="200">
       <el-button
         class="validate-btn"
         :class="{ pulse: validity === 'fail' }"
@@ -577,7 +600,7 @@ watch(
         <span class="peer-avatar" :style="{ background: p.color }">{{ initials(p.name) }}</span>
       </el-tooltip>
     </span>
-    <el-tooltip content="Скопировать ссылку для совместного редактирования" placement="bottom" :show-after="300">
+    <el-tooltip v-if="!readOnly" content="Скопировать ссылку для совместного редактирования" placement="bottom" :show-after="300">
       <el-button class="appearance" text :icon="Share" :disabled="!currentScenarioId" @click="shareLink()" />
     </el-tooltip>
 

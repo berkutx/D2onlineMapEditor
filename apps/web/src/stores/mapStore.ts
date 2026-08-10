@@ -12,8 +12,8 @@
 import { defineStore } from "pinia";
 import { ref, shallowRef, computed } from "vue";
 import type { MapDocument } from "@d2/map-schema";
-import type { ScenarioEntry } from "@d2/socket-contract";
-import { fetchScenarios, fetchMapDocument } from "../services/api";
+import type { MapMeta, ScenarioEntry } from "@d2/socket-contract";
+import { fetchScenarios, fetchMapDocument, fetchMapMeta } from "../services/api";
 import { useAssetStore } from "./assetStore";
 
 export type MapLoadStatus = "idle" | "loading" | "ready" | "error";
@@ -22,6 +22,7 @@ export const useMapStore = defineStore("map", () => {
   const scenarios = ref<ScenarioEntry[]>([]);
   const currentScenarioId = ref<string | null>(null);
   const currentMap = shallowRef<MapDocument | null>(null);
+  const currentMeta = ref<MapMeta | null>(null);
 
   const status = ref<MapLoadStatus>("idle");
   const error = ref<string | null>(null);
@@ -30,6 +31,8 @@ export const useMapStore = defineStore("map", () => {
     () => currentMap.value?.header.name || currentMap.value?.header.description || "",
   );
   const mapSize = computed(() => currentMap.value?.size ?? 0);
+  const readOnly = computed(() => currentMeta.value?.readOnly === true);
+  const previewExpiresAt = computed(() => currentMeta.value?.expiresAt ?? null);
 
   /** Object counts grouped by the discriminated-union `type` (for the left panel). */
   const objectCounts = computed<Record<string, number>>(() => {
@@ -62,9 +65,12 @@ export const useMapStore = defineStore("map", () => {
     error.value = null;
     try {
       await assets.ensureLoaded();
-      const doc = await fetchMapDocument(id);
+      // Meta carries the server-authoritative preview policy. Fetch it with the document so a
+      // query-string flag can never turn an ordinary map read-only (or a preview editable).
+      const [doc, meta] = await Promise.all([fetchMapDocument(id), fetchMapMeta(id)]);
       currentScenarioId.value = id;
       currentMap.value = doc;
+      currentMeta.value = meta;
       status.value = "ready";
       return doc;
     } catch (e) {
@@ -86,10 +92,13 @@ export const useMapStore = defineStore("map", () => {
     scenarios,
     currentScenarioId,
     currentMap,
+    currentMeta,
     status,
     error,
     mapName,
     mapSize,
+    readOnly,
+    previewExpiresAt,
     objectCounts,
     totalObjects,
     loadScenarios,

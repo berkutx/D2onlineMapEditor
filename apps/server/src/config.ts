@@ -138,6 +138,12 @@ export const config = {
    *  access. Override with EPHEMERAL_TTL_MS. Default 2 days. */
   EPHEMERAL_TTL_MS: envInt("EPHEMERAL_TTL_MS", 2 * 24 * 60 * 60 * 1000),
 
+  /** Hard lifetime for a map sent by a trusted external service for read-only preview.
+   * Unlike an ephemeral editing clone, opening the preview never extends this deadline. */
+  PREVIEW_TTL_MS: envInt("PREVIEW_TTL_MS", 60 * 60 * 1000),
+  PREVIEW_UPLOAD_LIMIT: envInt("PREVIEW_UPLOAD_LIMIT", 5),
+  PREVIEW_RATE_WINDOW_MS: envInt("PREVIEW_RATE_WINDOW_MS", 60 * 60 * 1000),
+
   /** Upload guard: 32 MiB cap and required magic. */
   UPLOAD_MAX_BYTES: 32 * 1024 * 1024,
   SG_MAGIC: "D2EESFISIG",

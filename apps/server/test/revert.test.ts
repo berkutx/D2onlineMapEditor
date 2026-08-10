@@ -53,7 +53,7 @@ function baseDoc(): MapDocument {
     for (let x = 0; x < n; x++) cells.push({ x, y, value: 0, terrain: 0, ground: 0, forest: 0, roadType: -1, roadVar: -1 });
   return { name: "t", size: n, players: 0, terrain: { size: n, cells }, objects: [], version: "S143" } as unknown as MapDocument;
 }
-const fakeStore = { getMap: async () => ({ doc: baseDoc() }) } as never;
+const fakeStore = { getMap: async () => ({ doc: baseDoc() }), isReadOnlyKnown: () => false } as never;
 
 const setCell = (x: number, y: number, value: number): EditOp => ({ kind: "setCell", x, y, value });
 const MAP = "m1";

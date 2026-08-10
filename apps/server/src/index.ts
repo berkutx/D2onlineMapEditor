@@ -13,24 +13,31 @@ async function main(): Promise<void> {
 
   // Ensure the HTTP server exists before socket.io attaches to it.
   await app.ready();
+  // Preload upload policies before accepting socket edits. This makes the per-op preview
+  // read-only guard synchronous (no filesystem await on every brush cell) even after restart.
+  await store.refresh();
   const { io, snapshots, evictor } = createIo(app.server, store, log);
 
   await app.listen({ port: config.PORT, host: config.HOST });
 
-  // The temporary-copy watcher: ephemeral first-visit clones are deleted EPHEMERAL_TTL_MS
-  // (default 2 days) after their last access. Hourly + once at boot.
+  // Temporary storage watcher: editing clones use a sliding TTL; external previews use a
+  // fixed one-hour deadline. Resolve() also enforces preview expiry synchronously, while this
+  // minute sweep removes files even when nobody tries the old link again.
   const sweep = async (): Promise<void> => {
     try {
       const n = await store.sweepEphemeral(config.EPHEMERAL_TTL_MS);
+      const previews = await store.sweepExpiredPreviews();
       // eslint-disable-next-line no-console
       if (n > 0) console.log(`[@d2/server] swept ${n} expired ephemeral map(s)`);
+      // eslint-disable-next-line no-console
+      if (previews > 0) console.log(`[@d2/server] swept ${previews} expired preview map(s)`);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn("[@d2/server] ephemeral sweep failed:", e);
     }
   };
   void sweep();
-  const sweeper = setInterval(() => void sweep(), 60 * 60 * 1000);
+  const sweeper = setInterval(() => void sweep(), 60 * 1000);
 
   // eslint-disable-next-line no-console
   console.log(

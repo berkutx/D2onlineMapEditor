@@ -17,6 +17,7 @@ import { registerScenarioRoutes } from "./http/routes.scenarios.js";
 import { registerMapRoutes } from "./http/routes.maps.js";
 import { registerAssetRoutes } from "./http/routes.assets.js";
 import { registerUploadRoute } from "./http/routes.upload.js";
+import { registerPreviewRoute } from "./http/routes.preview.js";
 import { registerVoiceRoutes } from "./http/routes.voice.js";
 
 /**
@@ -74,6 +75,7 @@ export async function buildApp(): Promise<BuiltApp> {
   await registerMapRoutes(app, store, log);
   await registerAssetRoutes(app);
   await registerUploadRoute(app, store);
+  await registerPreviewRoute(app, store);
   await registerVoiceRoutes(app, store);
   // SPA last: serves apps/web/dist + history fallback in production (no-op in dev).
   await registerSpa(app);

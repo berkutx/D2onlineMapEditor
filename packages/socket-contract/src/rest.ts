@@ -26,6 +26,10 @@ export const MapMeta = z.object({
   players: z.number().int(),
   version: z.string(),
   description: z.string().default(""),
+  /** Temporary previews are capability-linked, read-only maps. These additive fields are
+   * absent on ordinary editable maps so older clients keep working unchanged. */
+  readOnly: z.boolean().optional(),
+  expiresAt: z.number().int().optional(),
 });
 export type MapMeta = z.infer<typeof MapMeta>;
 
@@ -143,6 +147,7 @@ export const REST = {
   mapProject: (id: string) => `/api/maps/${id}/project`, // GET -> saved EditorProject (per x-client-id) | 404; PUT EditorProject -> {ok}
   assetsManifest: "/api/assets/manifest", // GET -> AssetManifest
   upload: "/api/maps/upload", // POST .sg -> { id }
+  previewUpload: "/api/maps/preview", // public POST .sg -> one-hour read-only preview
   voiceHandoff: (id: string) => `/api/maps/${id}/voice/handoff`,
   voiceReturnPreview: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/preview`,
   voiceReturnApply: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/apply`,

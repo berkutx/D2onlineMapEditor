@@ -149,10 +149,16 @@ async function rebuild(): Promise<void> {
     await scene.buildScene(doc, man, getAssetStore(), VISIBLE_OBJECT_TYPES, objectData);
     // editor: this map's project + base doc (liveDoc = base + persisted edits, which
     // the rev watcher re-tiles onto the freshly-built terrain).
-    editStore.ensureProject(id);
+    editStore.ensureProject(id, { readOnly: mapStore.readOnly });
     editStore.setBaseDoc(doc);
     // join this map's collaboration room (room = map id = share link). Done AFTER setBaseDoc
     // so a snapshot catch-up replaces a consistent base; join() leaves any previous room.
+    if (mapStore.readOnly) {
+      // Every viewer of this capability joins the same presence channel. The backend rejects
+      // all edit/revert events for the map, but cursor/selection presence remains collaborative.
+      collabStore.setPendingShare(id, "preview");
+      toolStore.setTool("select");
+    }
     void collabStore.join(id);
     scene.setPanEnabled(toolStore.tool === "select");
     // apply the current view state to the freshly-built scene
@@ -1062,6 +1068,8 @@ let roadDrag: { kind: "move" | "extend"; start: { x: number; y: number }; last: 
 /** Open context menu: screen position + the object it targets (obj=null → the EMPTY-cell
  *  placement menu at `cell`). */
 const ctxMenu = ref<{ x: number; y: number; obj: MapObject | null; cell: { x: number; y: number } } | null>(null);
+const ctxObjectTitle = (obj: MapObject): string =>
+  "name" in obj && typeof obj.name === "string" && obj.name ? obj.name : obj.type;
 /** While set, the NEXT left click picks the anchor PARENT for this child id. */
 const anchorPickFor = ref<string | null>(null);
 
@@ -2189,12 +2197,12 @@ watch(
 
     <!-- right-click object menu (плавающее, закрывается любым кликом/Esc) -->
     <div
-      v-if="ctxMenu"
+      v-if="ctxMenu && !mapStore.readOnly"
       class="ctx-menu d2-float"
       :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
     >
       <template v-if="ctxMenu.obj">
-        <div class="ctx-title">{{ (ctxMenu.obj as { name?: string }).name || ctxMenu.obj.type }} <code>{{ ctxMenu.obj.id }}</code></div>
+        <div class="ctx-title">{{ ctxObjectTitle(ctxMenu.obj) }} <code>{{ ctxMenu.obj.id }}</code></div>
         <button class="ctx-item" @click="ctxAction('props')">Свойства</button>
         <div class="ctx-sep" />
         <button class="ctx-item" @click="ctxAction('events')">📋 События объекта</button>

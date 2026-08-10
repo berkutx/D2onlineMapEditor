@@ -39,11 +39,29 @@ function fakeSocket(id: string): {
 }
 
 const fakeIo = { to: () => ({ emit: () => undefined }) } as never;
-const fakeStore = {} as never;
+const fakeStore = { isReadOnlyKnown: () => false } as never;
 
 const setCell = (x: number, v: number): EditOp => ({ kind: "setCell", x, y: 0, value: v });
 
 describe("ops:since — reconnect catch-up", () => {
+  it("rejects socket edits for a server-marked preview map", () => {
+    const rooms = new RoomManager();
+    const log = new EditLog();
+    const { socket, invoke } = fakeSocket("preview-viewer");
+    const previewStore = { isReadOnlyKnown: (id: string) => id === "preview-map" } as never;
+    registerRoomHandlers(fakeIo, socket, rooms, log, previewStore);
+    invoke("room:join", { mapId: "preview-map", channel: "spectators", user: { name: "Viewer" } }, () => undefined);
+    let ack: { ok: boolean; reason?: string } | null = null;
+    invoke(
+      "edit:op",
+      { mapId: "preview-map", clientOpId: "blocked", baseSeq: 0, op: setCell(0, 9) },
+      (result: typeof ack) => { ack = result; },
+    );
+    expect(ack).toMatchObject({ ok: false });
+    expect(ack!.reason).toContain("только для просмотра");
+    expect(log.head("preview-map#spectators")).toBe(0);
+  });
+
   it("returns exactly the entries after afterSeq, with clientOpIds for self-filtering", () => {
     const rooms = new RoomManager();
     const log = new EditLog();

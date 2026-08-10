@@ -79,6 +79,9 @@ export const useEditStore = defineStore("edit", () => {
   const project = ref<EditorProject | null>(null);
   const report = ref<ValidationReport | null>(null);
   const busy = ref(false);
+  /** Server-authoritative policy for external one-hour previews. Every central mutation path
+   * checks this in addition to the UI being reduced; the backend independently enforces it. */
+  const readOnly = ref(false);
   /** Debug/timing for the last Copilot generation (shown in the chat). */
   const genDebug = ref<GenDebug | null>(null);
 
@@ -168,7 +171,18 @@ export const useEditStore = defineStore("edit", () => {
   /** Load (or create) the project for `mapId`, restoring any persisted edits. localStorage
    *  first (this device's live state); if it yields an EMPTY project, the server-saved copy
    *  (per clientId) is adopted asynchronously — so a new/cleared browser restores its edits. */
-  function ensureProject(mapId: string): void {
+  function ensureProject(mapId: string, options: { readOnly?: boolean } = {}): void {
+    const nextReadOnly = options.readOnly === true;
+    if (nextReadOnly) {
+      readOnly.value = true;
+      clearTimeout(autoValidateTimer);
+      clearTimeout(remoteSaveTimer);
+      // Never restore/persist a local or server journal for a preview capability.
+      project.value = emptyProject(mapId);
+      report.value = null;
+      return;
+    }
+    readOnly.value = false;
     if (project.value?.baseScenarioId === mapId) return;
     clearTimeout(autoValidateTimer); // don't let a stale timer validate across a map switch
     try {
@@ -217,7 +231,7 @@ export const useEditStore = defineStore("edit", () => {
   let remoteSaveTimer: ReturnType<typeof setTimeout> | undefined;
   function scheduleRemoteSave(): void {
     const p = project.value;
-    if (!p) return;
+    if (!p || readOnly.value) return;
     clearTimeout(remoteSaveTimer);
     remoteSaveTimer = setTimeout(() => {
       const cur = project.value;
@@ -230,7 +244,7 @@ export const useEditStore = defineStore("edit", () => {
 
   function persist(): void {
     const p = project.value;
-    if (!p) return;
+    if (!p || readOnly.value) return;
     try {
       localStorage.setItem(keyFor(p.baseScenarioId), serializeProject(p));
     } catch {
@@ -246,7 +260,7 @@ export const useEditStore = defineStore("edit", () => {
       Pick<EditorProject, "zones" | "captions" | "eventDescs" | "anchors" | "roadAnchors" | "autoVars">
     >,
   ): void {
-    if (!project.value) return;
+    if (!project.value || readOnly.value) return;
     project.value = { ...project.value, ...fields, metaRev: (project.value.metaRev ?? 0) + 1 };
     persist();
   }
@@ -327,6 +341,7 @@ export const useEditStore = defineStore("edit", () => {
   /** Apply ops to the live doc for immediate feedback (no journal entry yet). Accumulates the
    *  stroke's inverse so the eventual commitStroke can record it for collab undo. */
   function applyPreview(ops: readonly EditOp[]): void {
+    if (readOnly.value) return;
     const inv = applyToLive(ops);
     if (inv.length) {
       pendingInverses = [...inv, ...pendingInverses];
@@ -345,7 +360,7 @@ export const useEditStore = defineStore("edit", () => {
   /** Record a finished stroke as one commit (liveDoc already reflects it via preview). When
    *  joined to a room, also broadcast the ops and push {forward,inverse} onto my undo stack. */
   function commitStroke(ops: readonly EditOp[]): void {
-    if (!project.value || ops.length === 0) return;
+    if (!project.value || readOnly.value || ops.length === 0) return;
     const inverse = pendingInverses;
     const perOp = pendingPerOp;
     pendingInverses = [];
@@ -368,7 +383,7 @@ export const useEditStore = defineStore("edit", () => {
    * Returns the exact inverse (apply in array order) so the shared history can revert it.
    */
   function applyIncoming(ops: readonly EditOp[], uids?: readonly string[]): EditOp[] {
-    if (!project.value || ops.length === 0) return [];
+    if (!project.value || readOnly.value || ops.length === 0) return [];
     const inv = applyToLive(ops); // incremental liveDoc update (+ rev/objectsRev); not my stroke
     // record for export / recompute; the peer op's uid too, so a future room-log replay
     // (reload / second tab) recognizes this op as already-held and skips it
@@ -389,7 +404,7 @@ export const useEditStore = defineStore("edit", () => {
    *  op uids derived from the return token, so a reload/retry and the room log cannot apply it
    *  twice. Kept separate from normal random-uid user edits. */
   function commitExternal(ops: readonly EditOp[], uids: readonly string[]): void {
-    if (!project.value || ops.length === 0 || uids.length !== ops.length) return;
+    if (!project.value || readOnly.value || ops.length === 0 || uids.length !== ops.length) return;
     const known = allOpUids(project.value);
     const fresh = ops.map((op, i) => ({ op, uid: uids[i]! })).filter((x) => !known.has(x.uid));
     if (!fresh.length) return;
@@ -409,7 +424,7 @@ export const useEditStore = defineStore("edit", () => {
   /** Backfill per-op uids for commits made before uid tracking, so the collab join can
    *  dedup room-log replays against the WHOLE journal. Called by collabStore on join. */
   function ensureJournalUids(): void {
-    if (!project.value) return;
+    if (!project.value || readOnly.value) return;
     const ensured = ensureOpUids(project.value, newOpUid);
     if (ensured !== project.value) {
       project.value = ensured;
@@ -418,7 +433,7 @@ export const useEditStore = defineStore("edit", () => {
   }
 
   function undoEdit(): void {
-    if (!project.value) return;
+    if (!project.value || readOnly.value) return;
     // Collab: apply the captured inverse of MY last op as a NEW forward edit (append-inverse,
     // no history rewind) and broadcast it. Local-only: the classic cursor step-back.
     if (roomConnected.value) {
@@ -445,7 +460,7 @@ export const useEditStore = defineStore("edit", () => {
     scheduleAutoValidate();
   }
   function redoEdit(): void {
-    if (!project.value) return;
+    if (!project.value || readOnly.value) return;
     // Collab: re-apply the original forward op (mirror of undoEdit) and broadcast it.
     if (roomConnected.value) {
       const entry = myRedo.value[myRedo.value.length - 1];
@@ -481,7 +496,7 @@ export const useEditStore = defineStore("edit", () => {
 
   /** Discard all edits for the current map, keeping the same base. */
   function reset(): void {
-    if (!project.value) return;
+    if (!project.value || readOnly.value) return;
     clearTimeout(autoValidateTimer); // a pending auto-check would race the fresh project
     project.value = emptyProject(project.value.baseScenarioId, project.value.meta);
     recompute();
@@ -743,7 +758,7 @@ export const useEditStore = defineStore("edit", () => {
   function scheduleAutoValidate(): void {
     clearTimeout(autoValidateTimer);
     const p = project.value;
-    if (!p || p.journal.length === 0) return; // nothing to check on a pristine map
+    if (!p || readOnly.value || p.journal.length === 0) return; // nothing to check on a pristine map
     autoValidateTimer = setTimeout(() => {
       if (busy.value) {
         scheduleAutoValidate(); // a manual validate/export/generate is running — retry later
@@ -766,7 +781,7 @@ export const useEditStore = defineStore("edit", () => {
     cells?: [number, number][] | null,
     protect?: boolean,
   ): Promise<ValidationReport | null> {
-    if (!project.value) return null;
+    if (!project.value || readOnly.value) return null;
     busy.value = true;
     try {
       const res = await generateRegion(project.value.baseScenarioId, project.value, recipeId, region, seed, cells, protect, collabSlot);
@@ -790,7 +805,7 @@ export const useEditStore = defineStore("edit", () => {
     cells?: [number, number][] | null,
     protect?: boolean,
   ): Promise<{ report: ValidationReport; reasoning?: string; debug?: GenDebug } | null> {
-    if (!project.value) return null;
+    if (!project.value || readOnly.value) return null;
     busy.value = true;
     try {
       const res = await copilotLlm(project.value.baseScenarioId, project.value, text, selection ?? null, cells, protect, undefined, collabSlot);
@@ -804,7 +819,7 @@ export const useEditStore = defineStore("edit", () => {
   }
 
   async function exportSg(): Promise<ExportResult | null> {
-    if (!project.value) return null;
+    if (!project.value || readOnly.value) return null;
     busy.value = true;
     try {
       const r = await exportProject(project.value.baseScenarioId, project.value);
@@ -820,6 +835,7 @@ export const useEditStore = defineStore("edit", () => {
     project,
     report,
     busy,
+    readOnly,
     genDebug,
     baseDoc,
     liveDoc,

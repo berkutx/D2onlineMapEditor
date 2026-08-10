@@ -30,6 +30,11 @@ export interface ScenarioRecord {
   ephemeral?: boolean;
   /** Last time this record was accessed (ms epoch) — refreshes the ephemeral TTL. */
   lastAccessMs?: number;
+  /** Fixed deletion deadline for a trusted external read-only preview. It is intentionally
+   * independent from lastAccessMs: repeatedly opening a link must not prolong storage. */
+  previewExpiresAtMs?: number;
+  /** SHA-256 of the original `.sg`; active previews are deduplicated by this value. */
+  previewContentHash?: string;
 }
 
 function lowerExt(name: string): string {

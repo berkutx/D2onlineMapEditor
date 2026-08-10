@@ -29,6 +29,43 @@ in `VOICE_INTEGRATION_CLIENTS` (comma-separated); set the matching voicer userna
 repository's `D2_INTEGRATION_USERS`. Empty allowlists enable every user. When the flag is off,
 the new button is hidden and the existing `.sg` export remains the default.
 
+### 0.5 Temporary map preview
+
+The editor also accepts a played `.sg` from an external web service without creating an editable
+user project. Authentication is deliberately disabled for the initial integration:
+
+```http
+POST /map/api/maps/preview
+Content-Type: multipart/form-data
+X-Preview-Client-IP: <optional original visitor IP>
+
+file=<one .sg, up to 32 MiB>
+```
+
+Without `X-Preview-Client-IP`, the editor uses the request's network address. Until service
+authentication is added, a caller can spoof the optional header, so its per-IP limit is
+best-effort; never expose `D2_INTEGRATION_SECRET` to make up for that.
+
+Success is `201` with `{ id, path, expiresAt, sha256, cacheHit: false }`; `expiresAt` is a Unix
+timestamp in milliseconds and `path` is relative to the editor origin. The external service
+should cache `path` and send every spectator to that existing capability URL. A repeated POST of
+the same bytes during the active lifetime is a `200` cache hit with the same id/deadline and no
+second file. GET views are unlimited; only creation of a new unique snapshot consumes the limit
+of 5 per originating IP per hour (`429` carries `Retry-After`).
+
+Storage and registry writes use temporary files plus atomic renames. If the volume is full the
+request returns `507 preview_storage_full`, removes the incomplete snapshot, and refunds the IP
+quota entry.
+
+The deadline is fixed at creation (default one hour): views and cache hits never extend it. The
+server removes the `.sg` and registry entry, and the returned capability link then shows an
+expiry error instead of opening an editable default map. There is no client-side `preview` URL
+flag: server metadata is authoritative and cannot be disabled by editing the URL. Project save,
+raw download, clone, generation, voice handoff, `.sg`/ZIP export, and socket edits all return
+`403`; the SPA hides the corresponding editor controls and displays the countdown. Viewers of
+the same capability automatically share a presence-only room, so they can see each other's
+cursors and selections without receiving edit permissions.
+
 ### 1. GitHub secrets (already added)
 `SERVER_HOST`, `SERVER_SSH_KEY`, `SERVER_USERNAME` — same as the existing repo.
 
