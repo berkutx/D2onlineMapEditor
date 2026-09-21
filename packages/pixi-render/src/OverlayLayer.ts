@@ -63,6 +63,10 @@ export class OverlayLayer {
   private doc: MapDocument | null = null;
   private landmarks?: LandmarkFootprints;
   private size = 0;
+  private cursorCell: CellRef | null = null;
+  private landmarkMountain: ReadonlyArray<string> = [];
+  private guardRange = 0;
+  private mapsDirty = false;
 
   private readonly passable = new Set<string>();
   private readonly danger = new Set<string>();
@@ -96,8 +100,11 @@ export class OverlayLayer {
     this.doc = doc;
     this.landmarks = landmarks;
     this.size = doc.size;
+    this.landmarkMountain = landmarkMountain ?? [];
+    this.guardRange = guardRange ?? 0;
+    this.cursorCell = null;
     if (!this.guardTex) this.guardTex = makeGuardPattern();
-    this.computeMaps(doc, landmarkMountain ?? [], guardRange ?? 0);
+    this.mapsDirty = true;
 
     if (this.cursor) {
       this.cursor.destroy();
@@ -121,6 +128,17 @@ export class OverlayLayer {
 
     this.redrawTints();
     this.hoverGfx.clear();
+  }
+
+  /** Edits replace the document, so hover and tint caches must follow the same snapshot as
+   *  the object/terrain layers. Keep the cursor texture and refresh even a stationary cursor.
+   *  Disabled tints are computed lazily to keep brush strokes cheap. */
+  update(doc: MapDocument): void {
+    this.doc = doc;
+    this.size = doc.size;
+    this.mapsDirty = true;
+    this.redrawTints();
+    this.setCursorCell(this.cursorCell);
   }
 
   private key(x: number, y: number): string {
@@ -197,6 +215,10 @@ export class OverlayLayer {
     g.clear();
     const e = this.enabled;
     if (!(e.passable || e.danger || e.terraform || e.forest || e.roads)) return;
+    if (this.mapsDirty && this.doc) {
+      this.computeMaps(this.doc, this.landmarkMountain, this.guardRange);
+      this.mapsDirty = false;
+    }
     for (let x = 0; x < this.size; x++) {
       for (let y = 0; y < this.size; y++) {
         const key = this.key(x, y);
@@ -233,6 +255,7 @@ export class OverlayLayer {
     let bestZ = -Infinity;
     for (const o of this.doc.objects) {
       if (o.type === "unit" || o.type === "location" || o.type === "generic") continue;
+      if (o.type === "stack" && o.garrisoned) continue;
       const { w, h } = objectFootprint(o, this.landmarks);
       if (cx >= o.pos.x && cx < o.pos.x + w && cy >= o.pos.y && cy < o.pos.y + h) {
         const z = objectZBase(o) + o.pos.x + o.pos.y + h;
@@ -247,6 +270,7 @@ export class OverlayLayer {
 
   /** Move the cursor-tile highlight and (re)draw the hovered object's outline. */
   setCursorCell(cell: CellRef | null): void {
+    this.cursorCell = cell;
     if (this.cursor) {
       if (cell) {
         const c = cellToWorld(cell.x + 0.5, cell.y + 0.5);

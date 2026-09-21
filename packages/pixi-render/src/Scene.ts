@@ -372,6 +372,7 @@ export class Scene {
     if (!this.terrain || !this.assets) return;
     if (dirtyCells?.length && this.terrain.canUpdate(map)) this.terrain.updateCells(map, dirtyCells);
     else this.terrain.build(map, this.assets, this.terrainCodes);
+    this.overlay?.update(map);
     // TerrainTilemapLayer.build/updateCells flag the tilemaps' view dirty, so this single
     // render rebuilds their geometry (Pixi caches unchanged renderables — the reason terrain
     // edits used to stay invisible until the mouse moved). No rAF/timer hacks needed.
@@ -387,6 +388,7 @@ export class Scene {
   updateObjects(map: MapDocument): void {
     if (!this.objects || !this.assets || !this.anim) return;
     this.objects.build(map, this.assets, this.anim, this.objectTypes, this.objectTables);
+    this.overlay?.update(map);
     this.updateRenderMode();
     this.renderNow(); // ObjectLayer.build add/removes children → Pixi rebuilds the instruction set
     // Self-heal: a freshly ADDED object can reference a LAZY sheet not pulled yet (a new
