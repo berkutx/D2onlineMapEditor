@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ru" class="dark">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Formation browser fixture</title></head>
+  <body><div id="app"></div><script type="module">
+    import { createApp } from 'vue';
+    import { createPinia } from 'pinia';
+    import ElementPlus from 'element-plus';
+    import 'element-plus/dist/index.css';
+    import 'element-plus/theme-chalk/dark/css-vars.css';
+    import '../src/style.css';
+    import Fixture from './formation.fixture.vue';
+    createApp(Fixture).use(createPinia()).use(ElementPlus).mount('#app');
+  </script></body>
+</html>

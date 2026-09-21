@@ -186,7 +186,7 @@ const markTip = (m: ModifierEntry | undefined): string =>
       :title="modelValue.length ? `Модификаторы: ${modelValue.length}` : 'Модификаторы юнита'"
       @click="open = true"
     >
-      ⚙<template v-if="modelValue.length">&nbsp;{{ modelValue.length }}</template><template v-if="!compact && !modelValue.length">&nbsp;моды</template>
+      ⚙<template v-if="!compact">&nbsp;Модификаторы</template><template v-if="modelValue.length">&nbsp;{{ modelValue.length }}</template>
     </el-button>
 
     <el-dialog v-model="open" :title="title" width="760px" align-center append-to-body class="ml-dialog">

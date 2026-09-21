@@ -9,6 +9,7 @@
  * Trackpad-friendly: a modal dialog with big rows, no hover-only affordances.
  */
 import { ref, computed, watch } from "vue";
+import { useFormDisabled } from "element-plus";
 import { Search, CircleClose } from "@element-plus/icons-vue";
 import { useUnitStore, roleLabel, type UnitEntry, type UnitGroup } from "../stores/unitStore";
 import UnitIcon from "./UnitIcon.vue";
@@ -54,6 +55,7 @@ const emit = defineEmits<{
 }>();
 
 const unitStore = useUnitStore();
+const formDisabled = useFormDisabled();
 const NULL_ID = "G000000000";
 
 const open = ref(false);
@@ -143,19 +145,27 @@ const triggerText = computed(() => {
 const rowReason = (u: UnitEntry): string => (props.disabledReason ? props.disabledReason(u.id) || "" : "");
 
 function choose(id: string): void {
+  if (formDisabled.value || props.disabledReason?.(id)) return;
   if (props.triggerLabel) emit("pick", id);
   else emit("update:modelValue", id);
   open.value = false;
 }
 function clear(): void {
+  if (formDisabled.value) return;
   emit("update:modelValue", props.nullable ? null : NULL_ID);
   open.value = false;
 }
+function show(): void {
+  if (!formDisabled.value) open.value = true;
+}
+watch(formDisabled, (disabled) => { if (disabled) open.value = false; });
+defineExpose({ show });
 </script>
 
 <template>
   <span class="up-wrap">
-    <el-button class="up-trigger" size="small" @click="open = true">
+    <slot name="trigger" :show="show">
+    <el-button class="up-trigger" size="small" @click="show()">
       <UnitIcon
         v-if="!triggerLabel && unitStore.nameOf(modelValue)"
         :id="modelValue"
@@ -177,6 +187,7 @@ function clear(): void {
       title="Убрать"
       @click="clear()"
     />
+    </slot>
 
     <el-dialog v-model="open" :title="title" width="560px" align-center append-to-body class="up-dialog">
       <div class="up-controls">

@@ -638,7 +638,7 @@ function close(): void {
     <div class="ins-sub">Клетка {{ obj.pos.x }}, {{ obj.pos.y }}</div>
     <div v-if="readOnly" class="ins-readonly">Только просмотр</div>
 
-    <el-form v-if="editable" class="ins-body" :disabled="readOnly">
+    <el-form v-if="editable" class="ins-body" :disabled="readOnly" @submit.prevent>
       <!-- 🧰 CHEST -->
       <template v-if="obj.type === 'treasure'">
         <div class="row">
@@ -715,6 +715,7 @@ function close(): void {
         <!-- Стражи руины — embedded GROUP_ID + UNIT_/POS_ (like a fort's defense); soldiers only. -->
         <div class="d2-sec">Стражи <span class="muted">({{ defenseCount }}/6)</span></div>
         <GarrisonEditor
+          :key="obj.id"
           :garrison="defenseGarrison"
           :count="defenseCount"
           :readonly="readOnly"
@@ -932,6 +933,7 @@ function close(): void {
 
         <div class="d2-sec">Состав отряда <span class="muted">({{ stackCount }}/6)</span></div>
         <GarrisonEditor
+          :key="obj.id"
           :garrison="stackGarrison"
           :count="stackCount"
           :leader-cell="stackLeaderCell"
@@ -1104,6 +1106,7 @@ function close(): void {
         <div class="d2-sec">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
         <!-- roster=soldiers: гарнизон города — без героев; герой в городе живёт ГОСТЕМ ниже -->
         <GarrisonEditor
+          :key="obj.id"
           :garrison="defenseGarrison"
           :count="defenseCount"
           :readonly="readOnly"
@@ -1123,12 +1126,15 @@ function close(): void {
         <!-- Capital: гость только для просмотра (readonly); Village: полностью редактируемый -->
         <GarrisonEditor
           v-if="visitorStack && obj.type === 'capital'"
+          :key="visitorStack.id"
           :garrison="visitorGarrison"
           :count="visitorCount"
+          :leader-cell="visitorStack.leaderCell ?? -1"
           readonly
         />
         <GarrisonEditor
           v-else-if="visitorStack"
+          :key="visitorStack.id"
           :garrison="visitorGarrison"
           :count="visitorCount"
           :leader-cell="(visitorStack.leaderCell ?? -1)"

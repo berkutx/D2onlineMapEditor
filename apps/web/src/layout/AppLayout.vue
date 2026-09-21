@@ -49,13 +49,13 @@ watch(
   () => ElMessage.warning("Перенакат отменён: эти клетки/объекты изменил другой участник."),
 );
 
-/** Cities/capitals show a double garrison (2 vertical formations) — give them a wider rail.
+/** Formation inspectors need room for two readable portrait cards and the selected unit.
  *  Widths are clamp()'d so rails SHRINK on narrow windows instead of pushing off-screen. */
 const inspectorWidth = computed(() => {
   const id = toolStore.selectedId;
   const o = id ? editStore.liveDoc?.objects.find((x) => x.id === id) : null;
-  return o && (o.type === "capital" || o.type === "village" || o.type === "stack")
-    ? "clamp(250px, 28vw, 320px)"
+  return o && ["capital", "village", "stack", "ruin"].includes(o.type)
+    ? "clamp(300px, 30vw, 380px)"
     : "clamp(220px, 24vw, 260px)";
 });
 

@@ -234,13 +234,14 @@ function setCellMods(i: number, mods: string[]): void {
         </label>
       </div>
       <div class="tpl-units">
-        <div class="tpl-units-lbl d2-sec">Состав (6 ячеек, лидер ★ — одна из них):</div>
+        <div class="tpl-units-lbl d2-sec">Состав <span class="tpl-count">({{ entityFill(sel.units) }}/6 клеток)</span></div>
         <p v-if="!hasLeader" class="tpl-need-leader">
           {{ orphanLeader
             ? "Лидер выбран, но не размещён в отряде — кликните ячейку, чтобы поставить его ★"
             : "Отряд начинается с лидера: кликните любую ячейку — сперва выбирается герой или вор ★" }}
         </p>
         <GarrisonEditor
+          :key="sel.id"
           :garrison="garrisonView"
           :count="sel ? entityFill(sel.units) : 0"
           :leader-cell="leaderCellIdx"
@@ -253,7 +254,7 @@ function setCellMods(i: number, mods: string[]): void {
           @set-mods="(c, m) => setCellMods(c, m)"
         />
       </div>
-      <p class="tpl-hint">Шаблон — «рецепт» отряда: событие «Создать отряд» ставит его в выбранную локацию. Лидер (★) — часть отряда и занимает одну из 6 ячеек; модификаторы юнита — под ⚙ у ячейки. Снаряжения у шаблона не бывает — формат .sg его не хранит.</p>
+      <p class="tpl-hint">Событие «Создать отряд» размещает этот состав в выбранной локации. ★ — лидер; большой юнит занимает обе клетки ряда. Выберите юнита, чтобы настроить уровень и модификаторы. Здоровье и снаряжение в шаблоне не задаются.</p>
     </el-scrollbar>
   </div>
 </template>
