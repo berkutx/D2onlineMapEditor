@@ -154,6 +154,12 @@ export function findFreeCapitalSpot(doc: MapDocument): { x: number; y: number } 
 /** A captured player cluster — enough to re-insert verbatim (undo of a remove, redo of an add). */
 export interface PlayerCluster {
   player: Record<string, unknown>;
+  /** Original MidPlayer block position: PLAYER_n slots use this order, not playerNo/id order.
+   * Absent only in older journals; those are restored only when their slots prove one position. */
+  playerIndex?: number;
+  /** Remaining MidPlayer order at capture time. Prevents a stale restore from overwriting a
+   * changed roster's global slot table; ordinary edits to remaining players are independent. */
+  remainingPlayerIds?: string[];
   subraces: Record<string, unknown>[];
   objects: MapObject[];
   fogs: unknown[];
@@ -169,6 +175,60 @@ function normSlots(slots: readonly number[] | undefined): number[] {
   const out = (slots ?? []).slice(0, SLOT_COUNT);
   while (out.length < SLOT_COUNT) out.push(99);
   return out;
+}
+
+/** A valid historical restore cannot be applied to this roster anymore. The editor can report
+ * this expected collaboration conflict without swallowing malformed operations or other errors. */
+export class PlayerRosterConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PlayerRosterConflictError";
+  }
+}
+
+/** New snapshots carry the exact position. For old snapshots, do not guess from ids or simply
+ * append: that would restore PLAYER_n for a different block order. A unique full race-slot
+ * alignment is sufficient evidence, including the neutral player's race type (4). */
+function insertionIndex(doc: MapDocument, c: PlayerCluster): number {
+  if (c.playerIndex !== undefined) {
+    // A valid captured last position can be beyond the CURRENT end after a peer removal.
+    // Validate against the captured bound first; the comparison below classifies that as
+    // a collaboration conflict, not a malformed operation.
+    const capturedBound = c.remainingPlayerIds?.length ?? doc.players.length;
+    if (!Number.isInteger(c.playerIndex) || c.playerIndex < 0 || c.playerIndex > capturedBound) {
+      throw new Error("insertCluster: invalid player index in snapshot");
+    }
+    const remainingSlots = normSlots(c.slots);
+    remainingSlots.splice(c.playerIndex, 1);
+    remainingSlots.push(99);
+    const currentSlots = normSlots(doc.header.playerSlots);
+    if (remainingSlots.some((slot, i) => slot !== currentSlots[i])
+      || (c.remainingPlayerIds !== undefined && (c.remainingPlayerIds.length !== doc.players.length
+        || c.remainingPlayerIds.some((id, i) => id !== doc.players[i]?.id)))) {
+      throw new PlayerRosterConflictError("insertCluster: player roster changed since snapshot; cannot restore stale player slots");
+    }
+    return c.playerIndex;
+  }
+
+  const legacyError = (): PlayerRosterConflictError => new PlayerRosterConflictError(
+    "insertCluster: legacy player snapshot has no provable unique player position; restore from a consistent map before retrying",
+  );
+  const race = typeof c.player.raceId === "string" ? raceTypeOf(c.player.raceId) : undefined;
+  const current = doc.players.map((p) => raceTypeOf(p.raceId));
+  const currentSlots = doc.header.playerSlots;
+  if (race === undefined || current.some((r) => r === undefined)
+    || !currentSlots || currentSlots.length !== SLOT_COUNT || c.slots.length !== SLOT_COUNT
+    || current.length >= SLOT_COUNT
+    || currentSlots.some((slot, i) => slot !== (current[i] ?? 99))) throw legacyError();
+
+  const candidates: number[] = [];
+  for (let i = 0; i <= current.length; i++) {
+    const restored = [...current.slice(0, i), race, ...current.slice(i)];
+    if (c.slots.every((slot, j) => slot === (restored[j] ?? 99))) candidates.push(i);
+  }
+  const index = candidates[0];
+  if (candidates.length !== 1 || index === undefined) throw legacyError();
+  return index;
 }
 
 type Sats = NonNullable<MapDocument["satellites"]>;
@@ -238,12 +298,15 @@ export function synthesizeCluster(doc: MapDocument, spec: AddPlayerSpec): Player
   const slots = normSlots(doc.header.playerSlots);
   slots[playerIndex] = raceType;
 
-  return { player, subraces: [subrace], objects: [capital, stack], fogs: [fog], spells: [spells], buildings: [buildings], planEntries, diplomacy, slots };
+  return { player, playerIndex, remainingPlayerIds: doc.players.map((p) => p.id), subraces: [subrace], objects: [capital, stack], fogs: [fog], spells: [spells], buildings: [buildings], planEntries, diplomacy, slots };
 }
 
 /** Insert a cluster into a doc → new doc (pure). Used by addPlayer (synthesized) and the undo of a
  *  removePlayer (verbatim snapshot restore). */
 export function insertCluster(doc: MapDocument, c: PlayerCluster): MapDocument {
+  const playerIndex = insertionIndex(doc, c);
+  const players = doc.players.slice();
+  players.splice(playerIndex, 0, c.player as unknown as (typeof players)[number]);
   const sat: Sats = doc.satellites ?? emptySats();
   const satOut: Sats = {
     ...sat,
@@ -256,7 +319,7 @@ export function insertCluster(doc: MapDocument, c: PlayerCluster): MapDocument {
     : doc.plan;
   return {
     ...doc,
-    players: [...doc.players, c.player as unknown as (typeof doc.players)[number]],
+    players,
     subraces: [...(doc.subraces ?? []), ...(c.subraces as unknown as NonNullable<typeof doc.subraces>)],
     objects: [...doc.objects, ...c.objects],
     satellites: satOut,
@@ -269,7 +332,8 @@ export function insertCluster(doc: MapDocument, c: PlayerCluster): MapDocument {
 /** Capture the full cluster owned by `playerId` (player + its subraces + every owned object + its
  *  satellites + plan entries + diplomacy rows), plus the CURRENT slot array (so undo restores it). */
 export function extractCluster(doc: MapDocument, playerId: string): PlayerCluster {
-  const player = doc.players.find((p) => p.id === playerId);
+  const playerIndex = doc.players.findIndex((p) => p.id === playerId);
+  const player = doc.players[playerIndex];
   if (!player) throw new Error(`extractCluster: unknown player ${playerId}`);
   const raceType = raceTypeOf(player.raceId);
   const subraces = (doc.subraces ?? []).filter((s) => s.playerId === playerId);
@@ -284,6 +348,8 @@ export function extractCluster(doc: MapDocument, playerId: string): PlayerCluste
   const diplomacy = raceType === undefined ? [] : (doc.diplomacy ?? []).filter((d) => d.race1 === raceType || d.race2 === raceType);
   return {
     player: player as Record<string, unknown>,
+    playerIndex,
+    remainingPlayerIds: doc.players.filter((p) => p.id !== playerId).map((p) => p.id),
     subraces: subraces as unknown as Record<string, unknown>[],
     objects, fogs, spells, buildings, planEntries, diplomacy,
     slots: normSlots(doc.header.playerSlots),

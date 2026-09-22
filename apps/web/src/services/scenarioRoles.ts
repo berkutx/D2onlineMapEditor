@@ -94,6 +94,20 @@ export function computeObjectRoles(doc: MapDocument): Map<string, ObjectRole[]> 
 /** Compact per-class counts for one object (what the pixi overlay renders). */
 export interface RoleCounts { trigger: number; target: number; spawn: number; destination: number; env: number }
 
+/** Sum the scenario roles represented by a zone's constituent locations. */
+export function sumRoleCounts(counts: Iterable<RoleCounts | undefined>): RoleCounts {
+  const total: RoleCounts = { trigger: 0, target: 0, spawn: 0, destination: 0, env: 0 };
+  for (const count of counts) {
+    if (!count) continue;
+    total.trigger += count.trigger;
+    total.target += count.target;
+    total.spawn += count.spawn;
+    total.destination += count.destination;
+    total.env += count.env;
+  }
+  return total;
+}
+
 export function countsOf(list: ObjectRole[] | undefined): RoleCounts | null {
   if (!list?.length) return null;
   const c: RoleCounts = { trigger: 0, target: 0, spawn: 0, destination: 0, env: 0 };

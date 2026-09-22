@@ -5,14 +5,16 @@
  * ghost duplicate entry (the pending.sg two-step is gone). Non-.sg payloads are rejected.
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { REST, type ScenarioEntry } from "@d2/socket-contract";
 import { buildApp } from "../src/app";
 import { MapStore } from "../src/maps/mapStore";
+import { installScenarioFixture } from "./scenarioFixture";
 
 let app: FastifyInstance;
-let sgBytes: Buffer; // a real .sg pulled from the scanned install, reused as the upload payload
+let sgBytes: Buffer; // a generated, parseable .sg shared by this suite's uploads
+let restoreScenarioRoots: (() => void) | undefined;
 
 const OWNER = "up-owner-cccc";
 const STRANGER = "up-stranger-dddd";
@@ -49,13 +51,21 @@ async function listFor(clientId?: string): Promise<ScenarioEntry[]> {
 }
 
 beforeAll(async () => {
+  const fixture = await installScenarioFixture();
+  sgBytes = fixture.bytes;
+  restoreScenarioRoots = fixture.restore;
   ({ app } = await buildApp());
   await app.ready();
-  // reuse a REAL install scenario's bytes as the upload payload (valid magic + parseable header)
+  // Exercise real filesystem discovery and raw download against a bounded fixture.
   const install = (await listFor()).filter((e) => e.source === "install");
-  expect(install.length).toBeGreaterThan(0);
+  expect(install).toHaveLength(1);
   const raw = await app.inject({ method: "GET", url: REST.mapRaw(install[0]!.id) });
-  sgBytes = raw.rawPayload;
+  expect(raw.rawPayload.equals(sgBytes)).toBe(true);
+});
+
+afterAll(async () => {
+  try { if (app) await app.close(); }
+  finally { restoreScenarioRoots?.(); }
 });
 
 describe("POST /api/maps/upload — private user maps", () => {
@@ -79,8 +89,9 @@ describe("POST /api/maps/upload — private user maps", () => {
     expect(b.id).toBe(a.id); // idempotent — no duplicate
 
     // exactly ONE owner entry for that id, and no "pending.sg" ghost leaked into the listing
-    expect((await listFor(OWNER)).filter((e) => e.id === a.id).length).toBe(1);
-    expect((await listFor(OWNER)).some((e) => e.fileName === "pending.sg")).toBe(false);
+    const ownerList = await listFor(OWNER);
+    expect(ownerList.filter((e) => e.id === a.id).length).toBe(1);
+    expect(ownerList.some((e) => e.fileName === "pending.sg")).toBe(false);
 
     // a different visitor uploading identical content gets their OWN copy (no ownership collision)
     const c = (await upload(sgBytes, STRANGER)).json() as { id: string };

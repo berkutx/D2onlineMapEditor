@@ -30,14 +30,16 @@ ENV HOST=0.0.0.0 \
 
 # whole workspace (the .dockerignore keeps node_modules / dist / public/assets / var out)
 COPY . .
-# Build packages (tsc -b), then the server (tsc -p -> apps/server/dist), then the web (vite ->
-# apps/web/dist). No `pnpm -r run gen` (JSON schemas for the Python pipeline; not needed at
+# Build packages (tsc -b), then the server, run fixture-free regression tests, and
+# build the web (vue-tsc -b AND vite). Type errors/tests must block shipping the image.
+# No `pnpm -r run gen` (JSON schemas for the Python pipeline; not needed at
 # runtime, and it must run after build:tsc). The `test -f` lines fail the image LOUDLY if either
 # build artifact is missing, instead of shipping a container that crash-loops on a missing dist.
 RUN pnpm install --frozen-lockfile \
  && pnpm run build:tsc \
  && pnpm --filter @d2/mapgen run build \
  && pnpm --filter @d2/server run build \
+ && pnpm run test:ci \
  && VITE_BASE="$VITE_BASE" VITE_COPILOT_LLM="$VITE_COPILOT_LLM" pnpm --filter @d2/web run build \
  && test -f packages/mapgen/dist/index.js \
  && test -f apps/server/dist/index.js \

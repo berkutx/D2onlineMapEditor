@@ -21,8 +21,8 @@ import {
   redo,
   applyOp,
   applyOps,
+  PlayerRosterConflictError,
   activeOps,
-  opKeys,
   canUndo as canUndoFn,
   canRedo as canRedoFn,
   tileZone,
@@ -32,25 +32,7 @@ import {
 } from "@d2/map-edit";
 import type { MapDocument } from "@d2/map-schema";
 
-/** A structural signature of the CURRENT state at an op-key ("x,y" cell / "O:id" object / …),
- *  read from the live doc — for the redo guard (compare state at undo-time vs redo-time). */
-function keySig(doc: MapDocument, key: string): string {
-  if (key.startsWith("O:")) return JSON.stringify(doc.objects.find((o) => o.id === key.slice(2)) ?? null);
-  if (key.startsWith("E:")) return JSON.stringify((doc.events ?? []).find((e) => e.id === key.slice(2)) ?? null);
-  if (key.startsWith("T:")) return JSON.stringify((doc.templates ?? []).find((t) => t.id === key.slice(2)) ?? null);
-  if (key === "VARS") return JSON.stringify(doc.variables ?? []);
-  if (key === "DIPLOMACY") return JSON.stringify(doc.diplomacy ?? []);
-  if (key === "SCENARIO") return JSON.stringify(doc.header ?? {});
-  const [x, y] = key.split(",").map(Number);
-  const c = doc.terrain.cells[y * doc.size + x];
-  return c ? JSON.stringify([c.value, c.roadType, c.roadVar]) : "";
-}
-/** Signature of every key a set of ops touches (their combined footprint) in `doc`. */
-function sigOfKeys(doc: MapDocument, ops: readonly EditOp[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const op of ops) for (const k of opKeys(op)) out[k] = keySig(doc, k);
-  return out;
-}
+import { captureRedoState } from "../services/redoGuard";
 import type { ValidationReport, Region, GenDebug } from "@d2/socket-contract";
 import {
   validateProject,
@@ -130,6 +112,8 @@ export const useEditStore = defineStore("edit", () => {
   /** Bumped when a redo is REFUSED because the state it targets changed (a peer edited those
    *  cells/objects since the undo) — the UI watches this to toast «перенакат отменён». */
   const redoBlockedTick = ref(0);
+  /** A stale faction restore is a normal collaboration conflict, not an uncaught UI error. */
+  const undoBlockedTick = ref(0);
   /** Inverse ops accumulated for the in-progress (un-committed) preview, in undo order. */
   let pendingInverses: EditOp[] = [];
   /** Same inverses in APPLY order (pendingPerOp[i] undoes the i-th previewed op) — aligns
@@ -321,16 +305,18 @@ export const useEditStore = defineStore("edit", () => {
   function applyToLive(ops: readonly EditOp[]): EditOp[] {
     if (!liveDoc.value || ops.length === 0) return [];
     let d = liveDoc.value;
+    let nextTerrainDirty = terrainDirty === null ? null : terrainDirty.slice();
     const inv: EditOp[] = [];
     for (const op of ops) {
       const r = applyOp(d, op);
       d = r.doc;
       inv.unshift(r.inverse); // prepend → final array undoes in reverse application order
-      if (op.kind === "setCell" && terrainDirty) {
-        if (terrainDirty.length >= TERRAIN_DIRTY_CAP) terrainDirty = null;
-        else terrainDirty.push({ x: op.x, y: op.y });
+      if (op.kind === "setCell" && nextTerrainDirty) {
+        if (nextTerrainDirty.length >= TERRAIN_DIRTY_CAP) nextTerrainDirty = null;
+        else nextTerrainDirty.push({ x: op.x, y: op.y });
       }
     }
+    terrainDirty = nextTerrainDirty; // publish render invalidation only after the whole batch succeeds
     liveDoc.value = d;
     rev.value++;
     if (touchesObjects(ops)) objectsRev.value++;
@@ -439,7 +425,14 @@ export const useEditStore = defineStore("edit", () => {
     if (roomConnected.value) {
       const entry = myUndo.value[myUndo.value.length - 1];
       if (!entry) return;
-      const inv = applyToLive(entry.inverse);
+      let inv: EditOp[];
+      try {
+        inv = applyToLive(entry.inverse);
+      } catch (error) {
+        if (!(error instanceof PlayerRosterConflictError)) throw error;
+        undoBlockedTick.value++;
+        return; // keep the journal and undo entry; no partial commit or broadcast
+      }
       const uids = entry.inverse.map(() => newOpUid());
       project.value = pushCommit(project.value, entry.inverse, uids);
       persist();
@@ -447,7 +440,7 @@ export const useEditStore = defineStore("edit", () => {
       myUndo.value = myUndo.value.slice(0, -1);
       // capture the post-undo state of the forward op's keys, so redo can detect a peer having
       // since changed them (the redo guard). liveDoc now reflects the inverse just applied.
-      const expect = liveDoc.value ? sigOfKeys(liveDoc.value, entry.forward) : {};
+      const expect = liveDoc.value ? captureRedoState(liveDoc.value, entry.forward) : {};
       myRedo.value = [...myRedo.value, { ...entry, expect }];
       report.value = null;
       scheduleAutoValidate();
@@ -469,8 +462,8 @@ export const useEditStore = defineStore("edit", () => {
       // (a peer edited those cells/objects) — «перенакатить нельзя, если состояние изменилось».
       // The whole redo chain is then void (a peer edit breaks the linear redo).
       if (entry.expect && liveDoc.value) {
-        const now = sigOfKeys(liveDoc.value, entry.forward);
-        if (Object.keys(entry.expect).some((k) => now[k] !== entry.expect![k])) {
+        const now = captureRedoState(liveDoc.value, entry.forward);
+        if (Object.entries(entry.expect).some(([k, expected]) => now[k] !== expected)) {
           myRedo.value = [];
           redoBlockedTick.value++;
           return;
@@ -587,22 +580,32 @@ export const useEditStore = defineStore("edit", () => {
     return zid;
   }
   /** Move the WHOLE zone by (dx,dy): every primitive location moves in ONE commit and the
-   *  drawn mask shifts with it (project metadata). Bounds clamping is the caller's job. */
+   *  drawn mask shifts with it (project metadata). Reject invalid input before committing. */
   function moveZone(zid: string, dx: number, dy: number): boolean {
     const doc = liveDoc.value;
     const z = project.value?.zones?.[zid];
-    if (!doc || !project.value || !z || (dx === 0 && dy === 0)) return false;
+    if (readOnly.value || !doc || !project.value || !z || (dx === 0 && dy === 0)) return false;
+    if (!Number.isSafeInteger(dx) || !Number.isSafeInteger(dy)) return false;
+    const cells: string[] = [];
+    for (const key of z.cells) {
+      if (!/^\d+,\d+$/.test(key)) return false;
+      const parts = key.split(",");
+      const x = Number(parts[0]), y = Number(parts[1]);
+      if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x >= doc.size || y >= doc.size) return false;
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= doc.size || ny >= doc.size) return false;
+      cells.push(`${nx},${ny}`);
+    }
     const ops: EditOp[] = [];
     for (const id of z.locIds) {
       const o = doc.objects.find((x) => x.id === id);
-      if (o) ops.push({ kind: "moveObject", id, x: o.pos.x + dx, y: o.pos.y + dy });
+      if (!o || o.type !== "location") return false;
+      const x = o.pos.x + dx, y = o.pos.y + dy;
+      if (x < 0 || y < 0 || x >= doc.size || y >= doc.size) return false;
+      ops.push({ kind: "moveObject", id, x, y });
     }
     if (!ops.length) return false;
     commit(ops);
-    const cells = z.cells.map((k) => {
-      const [x, y] = k.split(",").map(Number);
-      return `${x + dx},${y + dy}`;
-    });
     patchMeta({ zones: { ...project.value.zones, [zid]: { ...z, cells } } });
     return true;
   }
@@ -848,6 +851,7 @@ export const useEditStore = defineStore("edit", () => {
     dirty,
     edited,
     redoBlockedTick,
+    undoBlockedTick,
     ensureProject,
     setBaseDoc,
     applyPreview,

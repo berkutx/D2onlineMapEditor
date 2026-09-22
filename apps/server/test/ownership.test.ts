@@ -4,13 +4,15 @@
  * restart (registry.json); direct by-id access stays open (capability share links).
  */
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { REST, type ScenarioEntry } from "@d2/socket-contract";
 import { buildApp } from "../src/app";
 import { MapStore } from "../src/maps/mapStore";
+import { installScenarioFixture } from "./scenarioFixture";
 
 let app: FastifyInstance;
+let restoreScenarioRoots: (() => void) | undefined;
 
 const OWNER = "test-owner-aaaa";
 const STRANGER = "test-stranger-bbbb";
@@ -37,8 +39,15 @@ async function listFor(clientId?: string): Promise<ScenarioEntry[]> {
 }
 
 beforeAll(async () => {
+  const fixture = await installScenarioFixture();
+  restoreScenarioRoots = fixture.restore;
   ({ app } = await buildApp());
   await app.ready();
+});
+
+afterAll(async () => {
+  try { if (app) await app.close(); }
+  finally { restoreScenarioRoots?.(); }
 });
 
 describe("POST /api/maps/new — race gate", () => {

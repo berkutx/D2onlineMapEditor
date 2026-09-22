@@ -53,6 +53,7 @@ import {
   countsOf,
   rolesMatchFilter,
   formatRoleBadges,
+  sumRoleCounts,
   ROLE_META,
   type ObjectRole,
   type RoleCounts,
@@ -403,16 +404,7 @@ function zoneVisuals(): ZoneVisual[] {
     let badges: string | undefined;
     let summary: string[] | undefined;
     if (counts) {
-      const agg: RoleCounts = { trigger: 0, spawn: 0, destination: 0, env: 0 };
-      for (const id of z.locIds) {
-        const c = counts[id];
-        if (c) {
-          agg.trigger += c.trigger;
-          agg.spawn += c.spawn;
-          agg.destination += c.destination;
-          agg.env += c.env;
-        }
-      }
+      const agg = sumRoleCounts(z.locIds.map((id) => counts[id]));
       badges = formatRoleBadges(agg) || undefined;
     }
     if (sums) {
@@ -1470,7 +1462,7 @@ function onPointerDown(e: PointerEvent): void {
     const selLoc = editStore.liveDoc?.objects.find(
       (o) => o.id === toolStore.selectedId && o.type === "location",
     );
-    if (selLoc) {
+    if (selLoc?.type === "location") {
       const w = worldFromEvent(e);
       if (w) {
         const r = selLoc.radius ?? 0;

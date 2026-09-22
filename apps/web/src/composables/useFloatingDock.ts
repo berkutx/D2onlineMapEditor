@@ -11,7 +11,7 @@
  * only treat a pointer gesture as a drag once it moves past a small threshold; a genuine drag
  * then swallows the trailing click so the header's own @click doesn't also fire.
  */
-import { computed, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, type CSSProperties, type Ref } from "vue";
 
 export interface DockPos {
   x: number;
@@ -138,7 +138,7 @@ export function useFloatingDock(id: string, cardRef: Ref<HTMLElement | null>) {
   onBeforeUnmount(() => window.removeEventListener("resize", reclamp));
 
   /** Inline style: empty (use CSS default corner) until dragged, then absolute top-left. */
-  const style = computed<Record<string, string>>(() =>
+  const style = computed<CSSProperties>(() =>
     pos.value
       ? { left: `${pos.value.x}px`, top: `${pos.value.y}px`, right: "auto", bottom: "auto" }
       : {},

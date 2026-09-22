@@ -10,6 +10,7 @@ import { storeToRefs } from "pinia";
 import { ElMessage } from "element-plus";
 import { Close, Delete } from "@element-plus/icons-vue";
 import { placeVisitorOps } from "@d2/map-edit";
+import type { GarrisonUnit, MapObject } from "@d2/map-schema";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useItemStore } from "../stores/itemStore";
@@ -20,6 +21,10 @@ import { useEventStore } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
 import { useCollabStore } from "../stores/collabStore";
 import { computeObjectRoles, ROLE_META, type ObjectRole } from "../services/scenarioRoles";
+import {
+  bindSelectionAction, isSiteObject, selectDefenseObject, selectEditableVisitorStack,
+  selectLocationObject, selectStackObject,
+} from "../services/inspectorSelection";
 import DecorThumb from "./DecorThumb.vue";
 import ThumbPreview from "./ThumbPreview.vue";
 import type { DecorThumb as DecorThumbRect } from "../stores/decorStore";
@@ -76,10 +81,9 @@ const TYPE_LABEL: Record<string, string> = {
   rod: "Жезл", tomb: "Могила", unit: "Юнит", location: "Локация",
 };
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
-const SITE_TYPES = ["merchant", "mage", "trainer", "mercenary"];
 const editable = computed(
-  () => !!obj.value && ["treasure", "ruin", "village", "capital", "crystal", "stack", "location",
-    "rod", "landmark", "mountains", ...SITE_TYPES].includes(obj.value.type),
+  () => !!obj.value && (["treasure", "ruin", "village", "capital", "crystal", "stack", "location",
+    "rod", "landmark", "mountains"].includes(obj.value.type) || isSiteObject(obj.value)),
 );
 
 /** MidLocation radius is a size step r → a (2r+1)×(2r+1) cell square. */
@@ -230,7 +234,7 @@ const headerSpriteKey = computed<string | null>(() => {
   if (o.type === "treasure") return chestImageKey.value(o.image ?? 0);
   if (o.type === "village") return `G000FT0000NE${o.tier ?? 1}`;
   if (o.type === "crystal") return crystalKey(o.resource ?? 0);
-  if (SITE_TYPES.includes(o.type)) return siteImageKey.value(o.image ?? 0);
+  if (isSiteObject(o)) return siteImageKey.value(o.image ?? 0);
   return null;
 });
 watch(headerSpriteKey, (k) => { if (k) void spriteStore.ensureKeys([k]); }, { immediate: true });
@@ -277,7 +281,7 @@ function cityRemoveItem(idx: number): void {
 // FULL entity copy: a member carries xp/name/creation/modifiers/key/slot beyond
 // unit/level/hp — stripping them here used to WIPE veteran data on any garrison edit
 // (patchObject replaces the whole array; nothing merges it back).
-type GarrUnit = { unit: string; level: number; hp: number; modifiers?: string[] };
+type GarrUnit = GarrisonUnit;
 function garr6(o: { garrison?: (GarrUnit | null)[] } | null | undefined): (GarrUnit | null)[] {
   const out: (GarrUnit | null)[] = [null, null, null, null, null, null];
   (o?.garrison ?? []).forEach((c, i) => { if (c && i < 6) out[i] = { ...c }; });
@@ -290,10 +294,29 @@ const visitorStack = computed(() => {
   const s = ref ? editStore.liveDoc?.objects.find((x) => x.id === ref) : undefined;
   return s && s.type === "stack" ? s : null;
 });
-const defenseGarrison = computed(() => garr6(obj.value as { garrison?: (GarrUnit | null)[] } | null));
-const visitorGarrison = computed(() => garr6(visitorStack.value as { garrison?: (GarrUnit | null)[] } | null));
+const defenseObject = computed(() => selectDefenseObject(obj.value));
+const defenseGarrison = computed(() => garr6(defenseObject.value));
+const visitorGarrison = computed(() => garr6(visitorStack.value));
 const defenseCount = computed(() => defenseGarrison.value.filter(Boolean).length);
 const visitorCount = computed(() => visitorGarrison.value.filter(Boolean).length);
+
+// A picker can finish after selection changes. Bind to the rendered object identity, but
+// read its latest garrison at invocation so another participant's edits are not overwritten.
+const defenseActions = computed(() => ({
+  setUnit: bindSelectionAction(() => defenseObject.value, () => readOnly.value,
+    (o, cell: number, unitId: string) => setGarrisonUnitOn(o.id, garr6(o), cell, unitId)),
+  clear: bindSelectionAction(() => defenseObject.value, () => readOnly.value,
+    (o, cell: number) => clearGarrisonCellOn(o.id, garr6(o), cell)),
+  setStat: bindSelectionAction(() => defenseObject.value, () => readOnly.value,
+    (o, cell: number, key: "level" | "hp", value: number) => setGarrisonStatOn(o.id, garr6(o), cell, key, value)),
+  setMods: bindSelectionAction(() => defenseObject.value, () => readOnly.value,
+    (o, cell: number, mods: string[]) => setGarrisonModsOn(o.id, garr6(o), cell, mods)),
+}));
+const setLocationCaption = computed(() => bindSelectionAction(
+  () => selectLocationObject(obj.value),
+  () => readOnly.value,
+  (o, caption: string) => editStore.setCaption(o.id, caption),
+));
 
 /** commit a garrison change to a specific object id (the city, for its defense). */
 function commitGarrison(targetId: string, g: (GarrUnit | null)[]): void {
@@ -313,8 +336,8 @@ function placeUnitInCells(g: (GarrUnit | null)[], cell: number, unitId: string):
   if (unitStore.isLarge(unitId)) {
     const a = cell & ~1, b = a + 1, hp = unitStore.get(unitId)?.hp ?? 0, key = freshBigKey();
     for (const i of [a, b]) if (i !== cell) g[i] = null; // evict whatever sat in the sibling cell
-    g[a] = { unit: unitId, level: lvl, hp, key } as GarrUnit;
-    g[b] = { unit: unitId, level: lvl, hp, key } as GarrUnit;
+    g[a] = { unit: unitId, level: lvl, hp, key };
+    g[b] = { unit: unitId, level: lvl, hp, key };
   } else {
     g[cell] = { unit: unitId, level: lvl, hp: unitStore.get(unitId)?.hp ?? 0 };
   }
@@ -330,10 +353,10 @@ function setGarrisonUnitOn(targetId: string, cur: (GarrUnit | null)[], cell: num
  *  — silently dropping the edit, which the export's semantic round-trip then rejects. Falls back to
  *  just `cell` for a keyless (freshly-placed, not-yet-serialized) unit. */
 function entityCells(g: (GarrUnit | null)[], cell: number): number[] {
-  const key = (g[cell] as { key?: string } | null)?.key;
+  const key = g[cell]?.key;
   if (!key) return [cell];
   const out: number[] = [];
-  g.forEach((x, i) => { if (x && (x as { key?: string }).key === key) out.push(i); });
+  g.forEach((x, i) => { if (x?.key === key) out.push(i); });
   return out.length ? out : [cell];
 }
 function clearGarrisonCellOn(targetId: string, cur: (GarrUnit | null)[], cell: number): void {
@@ -345,7 +368,10 @@ function setGarrisonStatOn(targetId: string, cur: (GarrUnit | null)[], cell: num
   const g = cur.map((c) => (c ? { ...c } : null));
   if (!g[cell]) return;
   const nv = Math.max(0, Math.round(v || 0));
-  for (const i of entityCells(g, cell)) g[i] = { ...(g[i] as GarrUnit), [key]: nv }; // keep both cells of a big unit in sync
+  for (const i of entityCells(g, cell)) {
+    const unit = g[i];
+    if (unit) g[i] = { ...unit, [key]: nv }; // keep both cells of a big unit in sync
+  }
   commitGarrison(targetId, g);
 }
 /** unit-with-updated-modifiers; the key is DELETED when the list empties (an explicit
@@ -359,7 +385,10 @@ function withMods(c: GarrUnit, mods: string[]): GarrUnit {
 function setGarrisonModsOn(targetId: string, cur: (GarrUnit | null)[], cell: number, mods: string[]): void {
   const g = cur.map((c) => (c ? { ...c } : null));
   if (!g[cell]) return;
-  for (const i of entityCells(g, cell)) g[i] = withMods(g[i] as GarrUnit, mods); // both cells of a big unit
+  for (const i of entityCells(g, cell)) {
+    const unit = g[i];
+    if (unit) g[i] = withMods(unit, mods); // both cells of a big unit
+  }
   commitGarrison(targetId, g);
 }
 
@@ -446,10 +475,25 @@ function setStackBanner(id: string | null): void {
   if (obj.value?.type !== "stack") return;
   editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { banner: id && id !== NEUTRAL ? id : "000000" } }]);
 }
-type StackLike = { id: string; garrison?: (GarrUnit | null)[]; leaderCell?: number } | null | undefined;
-const stackGarrison = computed(() => garr6(obj.value?.type === "stack" ? (obj.value as { garrison?: (GarrUnit | null)[] }) : null));
+type StackObject = Extract<MapObject, { type: "stack" }>;
+type StackLike = StackObject | null | undefined;
+const stackGarrison = computed(() => garr6(obj.value?.type === "stack" ? obj.value : null));
 const stackCount = computed(() => stackGarrison.value.filter(Boolean).length);
 const stackLeaderCell = computed(() => (obj.value?.type === "stack" ? obj.value.leaderCell ?? -1 : -1));
+
+function bindStackActions(selected: () => StackObject | null) {
+  return {
+    setUnit: bindSelectionAction(selected, () => readOnly.value, stackSetUnit),
+    clear: bindSelectionAction(selected, () => readOnly.value, stackClearCell),
+    setStat: bindSelectionAction(selected, () => readOnly.value, stackSetStat),
+    setLeader: bindSelectionAction(selected, () => readOnly.value, stackSetLeader),
+    setMods: bindSelectionAction(selected, () => readOnly.value, stackSetMods),
+  };
+}
+const stackActions = computed(() => bindStackActions(() => selectStackObject(obj.value)));
+const visitorActions = computed(() => bindStackActions(
+  () => selectEditableVisitorStack(obj.value, editStore.liveDoc?.objects ?? []),
+));
 
 // Formation editors, parameterized by the target stack — reused by the Отряд section AND the city
 // VISITOR (which is itself a linked stack). Editing the formation rewrites UNIT_/POS_ (new MidUnit
@@ -690,7 +734,7 @@ function close(): void {
           <div class="d2-sec">Награда (золото и мана)</div>
           <div class="reward-edit">
             <div v-for="r in reward" :key="r.k" class="rw-edit">
-              <SpriteThumb :sprite-key="REWARD_CRYSTAL[r.k]" :size="20" :title="r.label" />
+              <SpriteThumb :sprite-key="REWARD_CRYSTAL[r.k] ?? null" :size="20" :title="r.label" />
               <span class="rw-lbl">{{ r.label }}</span>
               <el-input-number :model-value="r.v" :min="0" :max="9999" size="small" controls-position="right" @change="(v: number) => setReward(r.k, v)" />
             </div>
@@ -720,10 +764,10 @@ function close(): void {
           :count="defenseCount"
           :readonly="readOnly"
           roster="soldiers"
-          @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
-          @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
-          @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"
-          @set-mods="(c, m) => setGarrisonModsOn(obj.id, defenseGarrison, c, m)"
+          @set-unit="defenseActions.setUnit"
+          @clear="defenseActions.clear"
+          @set-stat="defenseActions.setStat"
+          @set-mods="defenseActions.setMods"
         />
       </template>
 
@@ -790,7 +834,7 @@ function close(): void {
       </template>
 
       <!-- 🏪 SITE (торговец / маг / тренер / наёмники) -->
-      <template v-else-if="SITE_TYPES.includes(obj.type)">
+      <template v-else-if="isSiteObject(obj)">
         <div class="col">
           <label>Название</label>
           <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
@@ -938,11 +982,11 @@ function close(): void {
           :count="stackCount"
           :leader-cell="stackLeaderCell"
           :readonly="readOnly"
-          @set-unit="(c, u) => stackSetUnit(obj, c, u)"
-          @clear="(c) => stackClearCell(obj, c)"
-          @set-stat="(c, k, v) => stackSetStat(obj, c, k, v)"
-          @set-leader="(c) => stackSetLeader(obj, c)"
-          @set-mods="(c, m) => stackSetMods(obj, c, m)"
+          @set-unit="stackActions.setUnit"
+          @clear="stackActions.clear"
+          @set-stat="stackActions.setStat"
+          @set-leader="stackActions.setLeader"
+          @set-mods="stackActions.setMods"
         />
 
         <div class="d2-sec">Экипировка лидера</div>
@@ -1021,7 +1065,7 @@ function close(): void {
             :model-value="editStore.captions[obj.id] ?? ''"
             size="small"
             placeholder="опционально"
-            @input="(v: string) => editStore.setCaption(obj.id, v)"
+            @input="setLocationCaption"
           />
         </div>
       </template>
@@ -1111,10 +1155,10 @@ function close(): void {
           :count="defenseCount"
           :readonly="readOnly"
           roster="soldiers"
-          @set-unit="(c, u) => setGarrisonUnitOn(obj.id, defenseGarrison, c, u)"
-          @clear="(c) => clearGarrisonCellOn(obj.id, defenseGarrison, c)"
-          @set-stat="(c, k, v) => setGarrisonStatOn(obj.id, defenseGarrison, c, k, v)"
-          @set-mods="(c, m) => setGarrisonModsOn(obj.id, defenseGarrison, c, m)"
+          @set-unit="defenseActions.setUnit"
+          @clear="defenseActions.clear"
+          @set-stat="defenseActions.setStat"
+          @set-mods="defenseActions.setMods"
         />
         <div class="section-divider" />
         <div class="d2-sec">
@@ -1139,11 +1183,11 @@ function close(): void {
           :count="visitorCount"
           :leader-cell="(visitorStack.leaderCell ?? -1)"
           :readonly="readOnly"
-          @set-unit="(c, u) => stackSetUnit(visitorStack, c, u)"
-          @clear="(c) => stackClearCell(visitorStack, c)"
-          @set-stat="(c, k, v) => stackSetStat(visitorStack, c, k, v)"
-          @set-leader="(c) => stackSetLeader(visitorStack, c)"
-          @set-mods="(c, m) => stackSetMods(visitorStack, c, m)"
+          @set-unit="visitorActions.setUnit"
+          @clear="visitorActions.clear"
+          @set-stat="visitorActions.setStat"
+          @set-leader="visitorActions.setLeader"
+          @set-mods="visitorActions.setMods"
         />
         <p v-if="obj.type === 'capital'" class="muted sm">Гостя-лорда выбирает игрок в игре — редактируется только оборона.</p>
         <template v-else-if="!visitorStack">

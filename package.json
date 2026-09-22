@@ -11,6 +11,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
+    "test:ci": "vitest run apps/web/test packages/map-edit/test/playerRosterOrder.test.ts packages/map-edit/test/projectUids.test.ts packages/map-edit/test/zones.test.ts packages/pixi-render/test",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "gen": "turbo run gen",

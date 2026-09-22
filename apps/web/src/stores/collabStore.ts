@@ -19,6 +19,8 @@ import { getSocket } from "../realtime/socket";
 import { getChannelId, getClientId } from "../services/clientId";
 import { useEditStore } from "./editStore";
 import { useDecorStore } from "./decorStore";
+import { summarize, summarizeBatch, detailOf, detailBatch, type OpContext } from "../services/historyPresentation";
+import { pendingJournalEntries } from "../services/journalSync";
 
 const NAME_KEY = "d2.collab.name";
 
@@ -70,136 +72,6 @@ function randomName(): string {
   return `Гость-${n}`;
 }
 
-/** Russian labels for the object types + the patchObject field keys, so history rows read
- *  like the editor, not like the raw model. */
-const TYPE_RU: Record<string, string> = {
-  stack: "отряд", village: "город", capital: "столица", fort: "форт", ruin: "руины",
-  merchant: "лавка", mage: "маг. башня", trainer: "тренер", mercenary: "наёмники",
-  mountains: "горы", crystal: "кристалл", landmark: "декор", location: "локация",
-  unit: "юнит", treasure: "клад", rod: "жезл", tomb: "гробница", generic: "объект",
-};
-const FIELD_RU: Record<string, string> = {
-  name: "имя", owner: "владелец", garrison: "гарнизон", leaderCell: "лидер", order: "приказ",
-  equip: "снаряжение", inventory: "инвентарь", banner: "знамя", baseType: "вид", image: "вид",
-  radius: "радиус", items: "предметы", stock: "товары", school: "школа магии", gold: "золото",
-  facing: "поворот", morale: "мораль", move: "ход", subRace: "фракция", desc: "описание",
-  visitorStack: "гость", tier: "уровень", value: "значение",
-};
-const typeRu = (t: string): string => TYPE_RU[t] ?? t;
-const fieldsRu = (fields: Record<string, unknown>): string =>
-  Object.keys(fields).map((k) => FIELD_RU[k] ?? k).join(", ");
-
-/** Optional humanizers wired in by the store (avoid hard coupling at module level):
- *  the target object of an op by id, and a decoration name for a G000MG… id. */
-interface OpContext {
-  objectOf?: (id: string) => { type: string; name?: string } | undefined;
-  decorName?: (id: string) => string | undefined;
-}
-
-/** «столица „Хеленверд“» / «декор „Стена“» — the op target, best effort. */
-function targetRu(id: string, ctx?: OpContext): string {
-  const o = ctx?.objectOf?.(id);
-  if (!o) return "объект";
-  const decor = o.type === "landmark" ? ctx?.decorName?.((o as { baseType?: string }).baseType ?? "") : undefined;
-  const label = o.name || decor;
-  return label ? `${typeRu(o.type)} «${label}»` : typeRu(o.type);
-}
-
-/** Humanize one patched value: decoration ids get their catalog name, the rest print as-is. */
-function valueRu(key: string, v: unknown, ctx?: OpContext): string {
-  if (typeof v === "object") return "…";
-  const s = String(v);
-  if (key === "baseType") {
-    const name = ctx?.decorName?.(s);
-    return name ? `${name} (${s})` : s;
-  }
-  if (key === "image") return `вариант ${s}`;
-  return s;
-}
-
-/** A short, human-readable Russian summary of an op for the history panel. */
-function summarize(op: EditOp, ctx?: OpContext): string {
-  switch (op.kind) {
-    case "setCell":
-      // roadType rides along on every INVERSE setCell (exact restore; -1 = «нет дороги») —
-      // call it a road op only when it lays road (≥0), so terrain reverts don't read «дорога»
-      return op.roadType !== undefined && op.roadType >= 0
-        ? `🛣 дорога (${op.x}, ${op.y})` : `⛰ рельеф (${op.x}, ${op.y})`;
-    case "addObject":
-      return `➕ ${typeRu(op.object.type)}`;
-    case "moveObject":
-      return `⇄ ${targetRu(op.id, ctx)} → (${op.x}, ${op.y})`;
-    case "patchObject":
-      return `✎ ${fieldsRu(op.fields) || "свойства"} — ${targetRu(op.id, ctx)}`;
-    case "deleteObject":
-      return `🗑 ${targetRu(op.id, ctx)}`;
-    case "upsertEvent":
-      return `⚡ событие «${op.event.name || op.event.id}»`;
-    case "deleteEvent":
-      return "🗑 удалено событие";
-    case "setVariables":
-      return `𝑥 переменные (${op.variables.length})`;
-    case "upsertTemplate":
-      return `⛨ шаблон «${op.template.name || op.template.id}»`;
-    case "deleteTemplate":
-      return "🗑 удалён шаблон";
-  }
-}
-
-/** One-line summary for a whole COMMIT collapsed into ONE row — «⛰ рельеф — 412 кл.» instead
- *  of 412 «⛰ рельеф (x, y)» rows (the whole point of batching). */
-function summarizeBatch(ops: readonly EditOp[], ctx?: OpContext): string {
-  const n = ops.length;
-  if (n === 1) return summarize(ops[0]!, ctx);
-  const allCells = ops.every((o) => o.kind === "setCell");
-  if (allCells) {
-    const roads = ops.filter((o) => o.kind === "setCell" && o.roadType !== undefined && o.roadType >= 0).length;
-    if (roads === n) return `🛣 дороги — ${n} кл.`;
-    if (roads === 0) return `⛰ рельеф — ${n} кл.`;
-    return `⛰ рельеф + 🛣 дороги — ${n} кл.`;
-  }
-  const allSameAdd = ops.every((o) => o.kind === "addObject");
-  if (allSameAdd) return `➕ объектов: ${n}`;
-  return `✎ правок за операцию: ${n}`;
-}
-function detailBatch(ops: readonly EditOp[]): string {
-  const by = new Map<string, number>();
-  for (const o of ops) by.set(o.kind, (by.get(o.kind) ?? 0) + 1);
-  const tally = [...by].map(([k, c]) => `${k} × ${c}`).join(", ");
-  return `${ops.length} правок за одну операцию\n${tally}`;
-}
-
-/** A slightly longer description revealed when a history row is clicked (not exhaustive). */
-function detailOf(op: EditOp, ctx?: OpContext): string {
-  switch (op.kind) {
-    case "setCell":
-      return `клетка (${op.x}, ${op.y}), значение ${op.value}${op.roadType !== undefined ? `, дорога ${op.roadType}` : ""}`;
-    case "addObject":
-      return `${typeRu(op.object.type)} «${(op.object as { name?: string }).name || op.object.id}» в (${op.object.pos.x}, ${op.object.pos.y})`;
-    case "moveObject":
-      return `${targetRu(op.id, ctx)} (${op.id}) → клетка (${op.x}, ${op.y})`;
-    case "patchObject": {
-      const parts = Object.entries(op.fields).map(([k, v]) => {
-        const label = FIELD_RU[k] ?? k;
-        const val = valueRu(k, v, ctx);
-        return val.length && typeof v !== "object" ? `${label}: ${val}` : label;
-      });
-      return `${targetRu(op.id, ctx)} (${op.id})\n${parts.join("\n")}`;
-    }
-    case "deleteObject":
-      return `${targetRu(op.id, ctx)} (${op.id})`;
-    case "upsertEvent":
-      return `${op.event.id}\nусловий: ${op.event.conditions.length}, эффектов: ${op.event.effects.length}, шанс ${op.event.chance}%`;
-    case "deleteEvent":
-      return `событие ${op.id}`;
-    case "setVariables":
-      return op.variables.map((v) => `${v.name} = ${v.value}`).join("\n") || "нет переменных";
-    case "upsertTemplate":
-      return `${op.template.id}\nюнитов: ${op.template.units.filter(Boolean).length}, лидер: ${op.template.leader || "—"}`;
-    case "deleteTemplate":
-      return `шаблон ${op.id}`;
-  }
-}
 
 export const useCollabStore = defineStore("collab", () => {
   const edit = useEditStore();
@@ -261,8 +133,7 @@ export const useCollabStore = defineStore("collab", () => {
   function opCtx(): OpContext {
     const decor = useDecorStore();
     return {
-      objectOf: (id) =>
-        edit.liveDoc?.objects.find((o) => o.id === id) as { type: string; name?: string } | undefined,
+      objectOf: (id) => edit.liveDoc?.objects.find((o) => o.id === id),
       decorName: (id) => (id ? decor.get(id.toUpperCase())?.name_ru || decor.get(id.toUpperCase())?.desc_en : undefined),
     };
   }
@@ -991,22 +862,18 @@ export const useCollabStore = defineStore("collab", () => {
    *  NOT on reconnects — doJoin from the reconnect handler bypasses this. */
   function offerPreJoinDraft(id: string): void {
     if (!connected.value || mapId.value !== id) return;
+    edit.ensureJournalUids();
     const p = edit.project;
     if (!p || p.baseScenarioId !== id) return;
     // capture NOW: peer ops folding into the journal while the (possible) dialog is open must not
     // ride along. The uids ride along too — the room log must carry the SAME uids the journal
     // holds, or the next reload would re-apply the sent draft (the double-apply crash). Take ONLY
     // ops the room's log doesn't already carry (roomOpUids) — else a draft pushed in a PRIOR
-    // session (still in my journal) is re-sent on every fresh join. Uid-less legacy ops (none
-    // after ensureJournalUids) count as un-synced.
-    const allDraft = activeOps(p);
-    const allUids = activeOpUids(p);
-    const draft: typeof allDraft = [];
-    const draftUids: typeof allUids = [];
-    for (let i = 0; i < allDraft.length; i++) {
-      const u = allUids[i];
-      if (!u || !roomOpUids.has(u)) { draft.push(allDraft[i]!); draftUids.push(u); }
-    }
+    // session (still in my journal) is re-sent on every fresh join. Legacy identities have
+    // already been backfilled and persisted above, so a retry keeps the SAME identities.
+    const pendingDraft = pendingJournalEntries(p, roomOpUids);
+    const draft = pendingDraft.map((entry) => entry.op);
+    const draftUids = pendingDraft.map((entry) => entry.uid);
     if (!draft.length) return; // everything's already in the room — nothing to reconcile
 
     // My own room → silently reconcile via the chunked reseed pusher, no modal. getChannelId() is

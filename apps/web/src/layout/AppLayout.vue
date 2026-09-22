@@ -46,7 +46,11 @@ const selActions = useSelectionActions();
 // Redo guard (collab): the store refuses a redo whose target a peer changed since the undo.
 watch(
   () => editStore.redoBlockedTick,
-  () => ElMessage.warning("Перенакат отменён: эти клетки/объекты изменил другой участник."),
+  () => ElMessage.warning("Повтор правки отменён: затронутые данные изменил другой участник."),
+);
+watch(
+  () => editStore.undoBlockedTick,
+  () => ElMessage.warning("Нельзя отменить удаление фракции: состав игроков изменился или прежнее положение игрока нельзя безопасно восстановить. Карта не изменена."),
 );
 
 /** Formation inspectors need room for two readable portrait cards and the selected unit.

@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:typed": "vue-tsc -b && vite build",
+    "build": "vue-tsc -b && vite build",
+    "build:typed": "pnpm run build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "vue-tsc -b",
     "test": "vitest run"
   },
   "dependencies": {

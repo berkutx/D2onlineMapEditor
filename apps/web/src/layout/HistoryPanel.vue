@@ -153,8 +153,8 @@ async function download(e: HistoryEntry): Promise<void> {
   if (!id) return;
   try {
     const r = await exportAt(id, collab.channel, e.seq);
-    if (!r.ok || !r.blob) {
-      ElMessage.warning(`Не удалось выкачать точку #${e.seq}${r.report && !r.report.ok ? " — карта на этой точке невалидна" : ""}`);
+    if (!r.ok) {
+      ElMessage.warning(`Не удалось выкачать точку #${e.seq}${!r.report.ok ? " — карта на этой точке невалидна" : ""}`);
       return;
     }
     const url = URL.createObjectURL(r.blob);

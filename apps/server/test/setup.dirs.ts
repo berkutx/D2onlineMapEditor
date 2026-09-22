@@ -10,7 +10,9 @@
  *
  * This setupFile runs BEFORE the test file imports config.ts (which reads these envs at module-eval
  * time), and vitest isolates modules per file (isolate: true, the default), so config picks up a
- * UNIQUE dir per file. mkdtemp gives one base per file; it's removed after the file's tests.
+ * UNIQUE dir per file. LLM_DIR must be isolated too: Copilot tests clear requests before
+ * running and must never delete the developer's pending requests from var/llm.
+ * mkdtemp gives one base per file; it's removed after the file's tests.
  */
 import { afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -21,6 +23,7 @@ const base = mkdtempSync(join(tmpdir(), "d2-server-test-"));
 process.env.UPLOAD_DIR = join(base, "uploads");
 process.env.PROJECTS_DIR = join(base, "projects");
 process.env.ROOMS_DIR = join(base, "rooms");
+process.env.LLM_DIR = join(base, "llm");
 
 afterAll(() => {
   try {

@@ -194,7 +194,10 @@ function showReport(r: ValidationReport): void {
 }
 
 async function doValidate(): Promise<void> {
-  if (!currentScenarioId.value) return ElMessage.warning("Сначала откройте карту");
+  if (!currentScenarioId.value) {
+    ElMessage.warning("Сначала откройте карту");
+    return;
+  }
   try {
     const r = await editStore.validate();
     if (r) showReport(r);
@@ -204,7 +207,10 @@ async function doValidate(): Promise<void> {
 }
 
 async function doExport(): Promise<void> {
-  if (!currentScenarioId.value) return ElMessage.warning("Сначала откройте карту");
+  if (!currentScenarioId.value) {
+    ElMessage.warning("Сначала откройте карту");
+    return;
+  }
   try {
     const r = await editStore.exportSg();
     if (!r) return;
@@ -229,7 +235,10 @@ function saveBlob(blob: Blob, filename: string): void {
  * service appends only audio referenced by that exact revision. */
 async function doPackageExport(allowMissing = false): Promise<void> {
   const id = currentScenarioId.value, project = editStore.project;
-  if (!id || !project) return ElMessage.warning("Сначала откройте карту");
+  if (!id || !project) {
+    ElMessage.warning("Сначала откройте карту");
+    return;
+  }
   try {
     const returnUrl = new URL(window.location.href);
     returnUrl.searchParams.delete("resumeVoiceExport");
