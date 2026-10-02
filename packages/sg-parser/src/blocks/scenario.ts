@@ -134,8 +134,8 @@ export function readScenarioInfo(buf: ByteBuffer, obj: FramedObject): ScenarioIn
 
 /**
  * MidDiplomacy (code 0x14, short DP, singleton): count (tag == the block's own compound id)
- * then N × (RACE_1:int, RACE_2:int, RELATION:int). Race values are Grace indices; RELATION
- * is kept as the raw int32 (0..100 meter; any high-bit flags preserved).
+ * then N × (RACE_1:int, RACE_2:int, RELATION:int). Race values are category IDs, not Grace indices. RELATION
+ * is kept as raw signed int32: current meter in bits1..7; alliance in bit0; all other flags preserved.
  * Byte-verified on Riders: 3 entries (4-0, 4-1, 0-1), relation 0.
  */
 export function readDiplomacy(buf: ByteBuffer, obj: FramedObject): DiplomacyEntry[] {

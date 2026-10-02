@@ -47,9 +47,10 @@ export const MapHeader = z.object({
 });
 export type MapHeader = z.infer<typeof MapHeader>;
 
-/** One MidDiplomacy entry: relation between two RACES (Grace indices, as stored on disk).
- *  `relation` is the raw int32 — the 0..100 meter in the low bits (presets: 100=мир,
- *  49=нейтралитет, 0=война); possible alliance/war flags in high bits are preserved as-is. */
+/** One MidDiplomacy entry between race CATEGORY IDs (not Grace record indices).
+ * RELATION is raw signed int32: bit0 alliance; bits1..7 current meter; bits8..14
+ * previous meter; bits15..29 alliance turn; bit30 always-war; bit31 unbreakable.
+ * Preserve the whole word and stored pair order when serializing. */
 export const DiplomacyEntry = z.object({
   race1: z.number().int(),
   race2: z.number().int(),
@@ -60,7 +61,7 @@ export type DiplomacyEntry = z.infer<typeof DiplomacyEntry>;
 export const PlayerInfo = z.object({
   id: z.string(), // player uid e.g. "PL0001"
   playerNo: z.number().int(), // 1..13
-  race: z.number().int(),
+  race: z.number().int(), // Derived Grace record index, NOT a diplomacy race category.
   name: z.string().default(""),
   isHuman: z.boolean().default(false),
   color: z.string().optional(), // derived team color hex (#rrggbb)
