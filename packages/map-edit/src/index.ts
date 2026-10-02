@@ -29,3 +29,5 @@ export * from "./materialize.js";
 export * from "./relations.js";
 export * from "./cascade.js";
 export * from "./project.js";
+
+export * from "./diplomacy.js";

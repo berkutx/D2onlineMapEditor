@@ -86,8 +86,8 @@ export function scenVariablesFrame(version: string, blockId: string, vars: reado
 }
 
 /** Serialize the singleton MidDiplomacy block (code 0x14, short DP): count (tag == the block's
- *  own id) then N × (RACE_1:int, RACE_2:int, RELATION:int). Races are Grace indices; RELATION
- *  is the raw int32 (0..100 meter + any preserved high-bit flags). */
+ *  own id) then N × (RACE_1:int, RACE_2:int, RELATION:int). Races are category IDs, not Grace indices.
+ *  RELATION is the raw packed int32; the current meter occupies only bits1..7. */
 export function diplomacyFrame(version: string, blockId: string, entries: readonly DiplomacyEntry[]): Uint8Array {
   const second = parseInt(blockId.slice(6), 16) || 0;
   return emitBlock(version, "MidDiplomacy", 0x14, "DP", second, (w, full) => {
