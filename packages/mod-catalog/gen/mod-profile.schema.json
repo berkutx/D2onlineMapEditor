@@ -1,0 +1,83 @@
+{
+  "modSchemaVersion": 1,
+  "$ref": "#/definitions/ModProfile",
+  "definitions": {
+    "ModProfile": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "races": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "raceId": {
+                "type": "string",
+                "pattern": "^G\\d{3}[A-Z]{2}[0-9A-Z]{4}$"
+              },
+              "raceType": {
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "playable": {
+                "type": "boolean"
+              },
+              "guardian": {
+                "type": "string",
+                "pattern": "^G\\d{3}[A-Z]{2}[0-9A-Z]{4}$"
+              },
+              "guardianHp": {
+                "type": "integer"
+              },
+              "leader": {
+                "type": "string",
+                "pattern": "^G\\d{3}[A-Z]{2}[0-9A-Z]{4}$"
+              },
+              "leaderHp": {
+                "type": "integer"
+              },
+              "lord": {
+                "type": "string",
+                "pattern": "^G\\d{3}[A-Z]{2}[0-9A-Z]{4}$"
+              },
+              "terrain": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "key",
+              "raceId",
+              "raceType",
+              "name",
+              "playable"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "capitalItem": {
+          "type": "string",
+          "pattern": "^G\\d{3}[A-Z]{2}[0-9A-Z]{4}$"
+        },
+        "unitCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "schemaVersion"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

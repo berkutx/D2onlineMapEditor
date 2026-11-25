@@ -46,4 +46,5 @@ export function parseHeaderOnly(buf: Uint8Array): {
 export { MapDocument };
 export { ByteBuffer } from "./bytebuffer.js";
 export * from "./framing.js";
+export * from "./globalIds.js";
 export * from "./writer/index.js";

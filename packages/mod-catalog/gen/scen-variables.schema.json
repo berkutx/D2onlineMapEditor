@@ -1,0 +1,108 @@
+{
+  "modSchemaVersion": 1,
+  "$ref": "#/definitions/ScenVariableCatalog",
+  "definitions": {
+    "ScenVariableCatalog": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "racePrefixes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "variables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "prefix": {
+                "type": "boolean",
+                "default": false
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "global",
+                  "perRace"
+                ],
+                "default": "global"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "flag",
+                  "number"
+                ],
+                "default": "number"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "mss32",
+                  "lua"
+                ]
+              },
+              "origin": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "presets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "label"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "name",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "schemaVersion"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

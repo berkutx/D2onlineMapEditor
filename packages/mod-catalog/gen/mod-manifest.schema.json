@@ -1,0 +1,148 @@
+{
+  "modSchemaVersion": 1,
+  "$ref": "#/definitions/ModManifest",
+  "definitions": {
+    "ModManifest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "family": {
+          "type": "string",
+          "minLength": 1
+        },
+        "familyOrder": {
+          "type": "integer",
+          "default": 0
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "data-only"
+          ],
+          "default": "ready"
+        },
+        "contentFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "pipelineVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engineContentFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "exe": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "mss32": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "globals": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "scripts": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified",
+                  "experimental",
+                  "missing"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "parent": {
+          "type": "object",
+          "properties": {
+            "modId": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+            },
+            "contentFingerprint": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "modId",
+            "contentFingerprint"
+          ],
+          "additionalProperties": false
+        },
+        "files": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^blobs\\/[0-9a-f]{2}\\/[0-9a-f]{64}\\.[a-z0-9]+$"
+          },
+          "propertyNames": {
+            "pattern": "^(?!\\/)(?!.*(^|\\/)\\.\\.(\\/|$))[^\\\\]+$"
+          },
+          "default": {}
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "family",
+        "contentFingerprint",
+        "schemaVersion",
+        "pipelineVersion"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

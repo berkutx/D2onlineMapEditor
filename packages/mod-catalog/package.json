@@ -1,0 +1,34 @@
+{
+  "name": "@d2/mod-catalog",
+  "version": "0.1.0",
+  "description": "Contract D: mod data sets (manifest, id sets, profile, scenario variables) + map/mod compatibility",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./mod-manifest.schema.json": "./gen/mod-manifest.schema.json",
+    "./mod-index.schema.json": "./gen/mod-index.schema.json",
+    "./id-sets.schema.json": "./gen/id-sets.schema.json",
+    "./mod-profile.schema.json": "./gen/mod-profile.schema.json",
+    "./scen-variables.schema.json": "./gen/scen-variables.schema.json"
+  },
+  "files": ["dist", "gen"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "gen": "tsx scripts/gen.ts",
+    "clean": "rimraf dist gen"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "zod-to-json-schema": "^3.23.5",
+    "tsx": "^4.19.2"
+  }
+}

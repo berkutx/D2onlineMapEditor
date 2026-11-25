@@ -1,0 +1,34 @@
+{
+  "modSchemaVersion": 1,
+  "$ref": "#/definitions/IdSets",
+  "definitions": {
+    "IdSets": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "tables": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^G\\d{3}[A-Z]{2}[0-9A-Z]{4}$"
+            }
+          },
+          "propertyNames": {
+            "pattern": "^[A-Z]{2}$"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "tables"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

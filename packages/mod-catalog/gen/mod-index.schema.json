@@ -1,0 +1,68 @@
+{
+  "modSchemaVersion": 1,
+  "$ref": "#/definitions/ModIndex",
+  "definitions": {
+    "ModIndex": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "defaultModId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+        },
+        "mods": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "familyOrder": {
+                "type": "integer",
+                "default": 0
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "data-only"
+                ],
+                "default": "ready"
+              },
+              "contentFingerprint": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "family",
+              "contentFingerprint"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "schemaVersion"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
