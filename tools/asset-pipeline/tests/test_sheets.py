@@ -201,6 +201,57 @@ class TestFrameTable(unittest.TestCase):
         self.assertEqual(t.frames["K"][0], 0)
 
 
+class TestThumbSheet(unittest.TestCase):
+    """build_decor_catalog.write_thumb_sheets: one contact sheet for the decoration palette."""
+
+    def test_every_entry_gets_a_cell_and_keeps_its_full_sprite(self):
+        import shutil
+        import tempfile
+        import build_decor_catalog
+
+        rng = np.random.RandomState(3)
+        page = np.zeros((300, 500, 4), np.uint8)
+        page[..., :3] = (255, 0, 255)          # the key colour under every transparent pixel
+        page[10:210, 20:420] = np.concatenate(  # a big sprite: 400x200 of noise, opaque
+            [rng.randint(0, 255, size=(200, 400, 3)), np.full((200, 400, 1), 255)], axis=2)
+        page[220:250, 30:50] = (10, 200, 30, 255)  # a small one: 20x30, one colour
+        cat = {
+            "BIG": {"thumb": {"page": "p.png", "x": 0, "y": 0, "w": 440, "h": 220}},
+            "SMALL": {"thumb": {"page": "p.png", "x": 30, "y": 220, "w": 20, "h": 30}},
+        }
+        full = dict((k, dict(v["thumb"])) for k, v in cat.items())
+        tmp = tempfile.mkdtemp(prefix="d2-thumbs-")
+        try:
+            pages = build_decor_catalog.write_thumb_sheets(cat, lambda _page: page, tmp)
+            self.assertEqual(pages, 1)
+            sheet = Image.open(os.path.join(tmp, "decorThumbs.png"))
+            self.assertEqual(sheet.mode, "P")  # 256 colours, alpha kept
+            rgba = np.array(sheet.convert("RGBA"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        for key in ("BIG", "SMALL"):
+            self.assertEqual(cat[key]["sprite"], full[key])  # the exact picture stays reachable
+            t = cat[key]["thumb"]
+            self.assertEqual(t["page"], "decorThumbs.png")
+            self.assertLessEqual(max(t["w"], t["h"]), build_decor_catalog.THUMB_SIZE)
+            self.assertLessEqual(t["x"] + t["w"], rgba.shape[1])
+            self.assertLessEqual(t["y"] + t["h"], rgba.shape[0])
+        big, small = cat["BIG"]["thumb"], cat["SMALL"]["thumb"]
+        self.assertEqual((big["w"], big["h"]), (64, 32))      # scaled down, proportions kept
+        self.assertEqual((small["w"], small["h"]), (20, 30))  # never scaled up
+        cell = rgba[small["y"]:small["y"] + small["h"], small["x"]:small["x"] + small["w"]]
+        self.assertTrue((cell[..., 3] == 255).all())
+        self.assertLess(np.abs(cell[..., :3].astype(int) - (10, 200, 30)).max(), 24)  # 256 colours: close
+        # the transparent margin of the big sprite stays transparent, and no key colour
+        # leaked into its scaled edge
+        cell = rgba[big["y"]:big["y"] + big["h"], big["x"]:big["x"] + big["w"]]
+        self.assertEqual(int(cell[0, 0, 3]), 0)
+        visible = cell[cell[..., 3] > 200][:, :3].astype(int)
+        magenta = (visible[:, 0] > 230) & (visible[:, 2] > 230) & (visible[:, 1] < 40)
+        self.assertEqual(int(magenta.sum()), 0)
+
+
 def _game_dir():
     for cand in (os.environ.get("D2_GAME_DIR"),):
         if cand and os.path.isdir(cand):
