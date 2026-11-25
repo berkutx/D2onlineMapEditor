@@ -5,10 +5,11 @@
  * to be written with RACE 0.
  */
 import { describe, it, expect } from "vitest";
-import { createBlankMap, parseScenario, serializeMapFromModelBytes, validateMap } from "@d2/sg-parser";
+import { createBlankMap, parseScenario, parseScenarioRaw, serializeMapFromModelBytes, validateMap } from "@d2/sg-parser";
+// the sources, not the built package: this must not pass or fail on a stale build
 import {
-  MOUNTAIN_RACE, applyOps, materializeForExport, placeMountainOps, type EditOp,
-} from "@d2/map-edit";
+  MOUNTAIN_RACE, applyEditsToBytes, applyOps, materializeForExport, placeMountainOps, type EditOp,
+} from "../src/index";
 
 const base = createBlankMap({ size: 48, name: "Mountain race" });
 const doc = parseScenario(base);
@@ -35,6 +36,8 @@ describe("a mountain's RACE", () => {
     expect(live.objects.filter((o) => o.type === "mountains").map((o) => (o as { race?: number }).race)).toEqual([4, 4]);
     // …and the document agrees with what the export writes (the semantic check compares them)
     expect(mountainsOf(exported(old)).map((o) => (o as { race?: number }).race)).toEqual([4, 4]);
+    // the byte-patch writer (the tests' parity oracle) reads the old op the same way
+    expect(mountainsOf(applyEditsToBytes(parseScenarioRaw(base).raw, old)).map((o) => (o as { race?: number }).race)).toEqual([4, 4]);
   });
 
   it("leaves a mountain of the base map alone, and an explicit other race too", () => {

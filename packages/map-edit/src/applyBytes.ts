@@ -615,7 +615,8 @@ export function applyEditsToBytes(
       // no plan entries for mountains (byte-verified: none in Riders)
       addedMountains.push({
         x: o.pos.x, y: o.pos.y, w: o.w ?? 1, h: o.h ?? 1,
-        image: o.image ?? 0, race: o.race ?? MOUNTAIN_RACE,
+        // 0 = written by this editor before MOUNTAIN_RACE existed: neutral, as applyOp reads it
+        image: o.image ?? 0, race: o.race || MOUNTAIN_RACE,
       });
     } else if (o.type === "stack") {
       // A hero stack: either a city VISITOR (empty formation; INSIDE → the city, whose
