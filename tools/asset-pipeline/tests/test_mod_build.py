@@ -312,6 +312,46 @@ class TestBuildModGenerators(TempDirCase):
         self.assertFalse(read & unread)
         self.assertIn("START_LEADER_CHANGE_MODE", unread)
 
+    def test_engine_pack_fingerprint_is_taken_only_from_a_pack_of_this_install(self):
+        game = os.path.join(self.tmp, "game")
+        os.makedirs(os.path.join(game, "Globals"))
+        os.makedirs(os.path.join(game, "Scripts", "modifiers"))
+        files = {"Globals/GUnits.dbf": b"units-table", "Scripts/modifiers/a.lua": b"return 1"}
+        for rel, data in files.items():
+            with open(os.path.join(game, *rel.split("/")), "wb") as fp:
+                fp.write(data)
+        pack = os.path.join(self.tmp, "pack")
+        os.makedirs(pack)
+
+        def write_pack(entries):
+            with open(os.path.join(pack, "manifest.json"), "w", encoding="utf-8") as fp:
+                json.dump({"packId": "some-mod", "contentFingerprint": "ab" * 32, "files": entries}, fp)
+
+        def entry(rel, data):
+            return {"path": rel, "size": len(data), "sha256": sha256_bytes(data)}
+
+        # the pack spells paths its own way, and lists files the editor never reads
+        write_pack([entry("globals/gunits.DBF", files["Globals/GUnits.dbf"]),
+                    entry("Scripts/modifiers/a.lua", files["Scripts/modifiers/a.lua"]),
+                    entry("Music/theme.mp3", b"not compared")])
+        self.assertEqual(build_mod.engine_pack_fingerprint(pack, game), ("ab" * 32, "some-mod", 2))
+
+        # one table differs: the pack is of another install (or another version of it)
+        write_pack([entry("Globals/GUnits.dbf", b"other-table"),
+                    entry("Scripts/modifiers/a.lua", files["Scripts/modifiers/a.lua"])])
+        with self.assertRaises(build_mod.BuildError) as ctx:
+            build_mod.engine_pack_fingerprint(pack, game)
+        self.assertIn("1 of 2", str(ctx.exception))
+
+        # a script the pack has and this install lacks
+        write_pack([entry("Scripts/modifiers/gone.lua", b"x")])
+        with self.assertRaises(build_mod.BuildError):
+            build_mod.engine_pack_fingerprint(pack, game)
+        # nothing to compare is not a match
+        write_pack([entry("Music/theme.mp3", b"x")])
+        with self.assertRaises(build_mod.BuildError):
+            build_mod.engine_pack_fingerprint(pack, game)
+
     def test_profile_names_the_maze_tower_only_when_the_mod_has_it(self):
         g = os.path.join(self.tmp, "Globals")
         write_globals(g)  # its GLmark has no G000MG0149

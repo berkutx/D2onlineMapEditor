@@ -56,7 +56,7 @@ python tools/asset-pipeline/build_mod.py \
     --game "C:/Games/SomeMod" --mod-id some-mod --name "Some Mod" \
     --family some --family-order 1 --store public/assets \
     [--graphics | --ingest-atlases <dir of an existing pipeline.py output>] [--default] [--dry-run]
-    [--engine-fingerprint <sha256>] [--source-url <url>]
+    [--engine-pack <dir of the engine's content pack>] [--source-url <url>]
 ```
 
 - `--game` is the directory holding `Globals` / `Imgs` / `Scripts` (for an original install
@@ -71,10 +71,16 @@ python tools/asset-pipeline/build_mod.py \
 - `--graphics` builds the sprites from the game's own archives (see below) — the normal way.
 - `--dry-run` builds everything, prints sizes and how much is already in the store, and
   leaves the store untouched.
-- `--engine-fingerprint` records, as `engineContentFingerprint`, the `contentFingerprint`
-  the online engine's content pipeline reports for the same install (it covers the whole
-  installation and is computed by that pipeline, not here). It is what an engine profile
-  of this installation is found by when a map is handed over for a play test.
+- `--engine-pack <dir>` ties the mod to the online engine's content pack of the same install
+  (the folder with the pack's `manifest.json`). The engine has already catalogued the whole
+  installation — sound and video included — and its manifest lists every file with size
+  and sha256, so **nothing is recomputed**: the pack's `contentFingerprint` is recorded as
+  `engineContentFingerprint`, after every table and script the pack lists is compared with
+  this install. One difference and the build stops: the pack is of another install or
+  another version of it. It is what an engine profile of this installation is found by
+  when a map is handed over for a play test. Rebuild with it again whenever the install —
+  and so the engine's pack — changes; a stale pack is refused, not recorded.
+- `--engine-fingerprint <sha256>` gives the same value by hand, unchecked (no pack at hand).
 - `--source-url` records where the data set can be downloaded from (`sourceUrl`, also in
   `mods/index.json`) — the slot a catalog of ready builds fills in.
 

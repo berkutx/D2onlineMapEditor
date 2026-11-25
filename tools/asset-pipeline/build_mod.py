@@ -499,6 +499,63 @@ def run_builder(name, game, out_dir):
         raise BuildError("%s failed: %s" % (name, rc))
 
 
+def _resolve(root, rel):
+    """A file under ``root`` by a forward-slashed relative path, matched case-insensitively
+    segment by segment (an install's "Globals/GUnits.dbf" may be "globals/Gunits.DBF")."""
+    path = root
+    parts = rel.split("/")
+    for i, part in enumerate(parts):
+        try:
+            names = os.listdir(path)
+        except OSError:
+            return None
+        hit = [n for n in names if n.lower() == part.lower()]
+        if not hit:
+            return None
+        path = os.path.join(path, sorted(hit)[0])
+        if i < len(parts) - 1 and not os.path.isdir(path):
+            return None
+    return path if os.path.isfile(path) else None
+
+
+def engine_pack_fingerprint(pack_dir, game):
+    """The ``contentFingerprint`` of an online-engine content pack — after checking that the
+    pack was catalogued from THIS install.
+
+    The engine's fingerprint covers the whole installation (sound and video included) and
+    its pack manifest lists every file with size and sha256. Nothing is recomputed here: the
+    value is taken from the pack. What the editor's mod is built from — the tables and the
+    scripts — is compared file by file with the pack's list; one difference means the pack
+    describes another install or another version of it, and the link is refused rather
+    than recorded wrong. Returns ``(fingerprint, pack id, files compared)``."""
+    path = os.path.join(pack_dir, "manifest.json")
+    if not os.path.isfile(path):
+        raise BuildError("no manifest.json in engine pack %s" % pack_dir)
+    with open(path, encoding="utf-8") as fp:
+        pack = json.load(fp)
+    fingerprint = pack.get("contentFingerprint")
+    if not isinstance(fingerprint, str) or not re.match(r"^[0-9a-f]{64}$", fingerprint):
+        raise BuildError("engine pack %s has no contentFingerprint" % pack_dir)
+    compared = 0
+    wrong = []
+    for entry in pack.get("files", []):
+        rel = entry.get("path", "")
+        if not rel.lower().startswith(("globals/", "scripts/")):
+            continue
+        compared += 1
+        local = _resolve(game, rel)
+        if local is None:
+            wrong.append(rel + " (not in this install)")
+        elif os.path.getsize(local) != entry.get("size") or sha256_file(local) != entry.get("sha256"):
+            wrong.append(rel)
+    if compared == 0:
+        raise BuildError("engine pack %s lists no Globals/Scripts files to check against" % pack_dir)
+    if wrong:
+        raise BuildError("engine pack %s was not catalogued from this install: %d of %d tables/scripts differ (%s%s)" % (
+            pack_dir, len(wrong), compared, ", ".join(wrong[:4]), ", ..." if len(wrong) > 4 else ""))
+    return fingerprint, pack.get("packId"), compared
+
+
 def pillow_version():
     import PIL
     return getattr(PIL, "__version__", None) or getattr(PIL, "PILLOW_VERSION", "?")
@@ -573,9 +630,13 @@ def main(argv=None):
     ap.add_argument("--ingest-atlases", default=None, metavar="DIR",
                     help="instead of --graphics: take in an existing pipeline.py output (manifest.json + pages)")
     ap.add_argument("--default", action="store_true", help="make this the store's default mod")
+    ap.add_argument("--engine-pack", default=None, metavar="DIR",
+                    help="an online-engine content pack of this install (the folder with its "
+                         "manifest.json): its contentFingerprint is recorded as "
+                         "engineContentFingerprint, after the pack's tables and scripts are "
+                         "checked against this install")
     ap.add_argument("--engine-fingerprint", default=None, metavar="SHA256",
-                    help="contentFingerprint the online engine's content pipeline reports for this "
-                         "install (recorded as engineContentFingerprint; it is not computed here)")
+                    help="the same value given by hand, unchecked (when no pack is at hand)")
     ap.add_argument("--source-url", default=None, metavar="URL",
                     help="where this data set can be downloaded from (for a catalog of ready builds)")
     ap.add_argument("--dry-run", action="store_true",
@@ -586,6 +647,8 @@ def main(argv=None):
         ap.error("--mod-id must be a lowercase slug ([a-z0-9-], up to 40 chars)")
     if args.engine_fingerprint and not re.match(r"^[0-9a-f]{64}$", args.engine_fingerprint):
         ap.error("--engine-fingerprint must be 64 lowercase hex characters")
+    if args.engine_pack and args.engine_fingerprint:
+        ap.error("--engine-pack already gives the fingerprint; drop --engine-fingerprint")
     if args.graphics and args.ingest_atlases:
         ap.error("--graphics and --ingest-atlases are two ways to the same thing; give one")
     game = os.path.abspath(args.game)
@@ -719,7 +782,11 @@ def main(argv=None):
         "capabilities": [],
         "files": {k: files[k] for k in sorted(files)},
     }
-    if args.engine_fingerprint:
+    engine_pack = None
+    if args.engine_pack:
+        engine_pack = engine_pack_fingerprint(os.path.abspath(args.engine_pack), game)
+        mod["engineContentFingerprint"] = engine_pack[0]
+    elif args.engine_fingerprint:
         mod["engineContentFingerprint"] = args.engine_fingerprint
     if args.source_url:
         mod["sourceUrl"] = args.source_url
@@ -729,6 +796,9 @@ def main(argv=None):
     ids = new_files["ids.json"]["tables"]
     print("mod %s (%s, family %s #%d): %s" % (mod["id"], mod["name"], mod["family"], mod["familyOrder"], status))
     print("  fingerprint  %s" % content_fp)
+    if engine_pack:
+        print("  engine pack  %s, fingerprint %s (%d tables and scripts checked against this install)" % (
+            engine_pack[1] or "?", engine_pack[0], engine_pack[2]))
     print("  ids          %s" % ", ".join("%s %d" % (c, len(ids[c])) for c in sorted(ids)))
     print("  races        %s" % ", ".join("%s%s" % (r["key"], "" if r["playable"] else "(np)") for r in new_files["profile.json"]["races"]))
     print("  variables    %s" % (", ".join(v["name"] + ("*" if v.get("prefix") else "") for v in new_files["scenVariables.json"]["variables"]) or "-"))
