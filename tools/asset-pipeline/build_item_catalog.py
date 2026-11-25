@@ -23,53 +23,14 @@ import argparse
 import json
 import os
 import re
-import struct
+import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def read_dbf(path):
-    d = open(path, "rb").read()
-    nrec = struct.unpack_from("<I", d, 4)[0]
-    hlen = struct.unpack_from("<H", d, 8)[0]
-    rlen = struct.unpack_from("<H", d, 10)[0]
-    fields = []
-    i = 32
-    while d[i] != 0x0D:
-        fields.append((d[i:i + 11].split(b"\x00")[0].decode("latin1"), d[i + 16]))
-        i += 32
-    rows = []
-    for r in range(nrec):
-        off = hlen + r * rlen
-        if off + rlen > len(d):
-            break
-        # DBF record marker: 0x20 (space) = active, 0x2A ('*') = deleted. GItem.DBF carries
-        # 22 deleted records — stale ghost duplicates of live items (same ITEM_ID, usually with
-        # an empty DESC_TXT) plus a few removed-from-game rows. Skipping them keeps the catalog
-        # to live game items only and drops the desc-less ghosts (e.g. the summon scrolls).
-        if d[off] == 0x2A:
-            continue
-        pos = off + 1
-        row = {}
-        for (name, flen) in fields:
-            row[name] = d[pos:pos + flen]
-            pos += flen
-        rows.append(row)
-    return rows
-
-
-def _find(globals_dir, name):
-    for nm in (name, name.upper(), name.lower()):
-        p = os.path.join(globals_dir, nm)
-        if os.path.exists(p):
-            return p
-    raise FileNotFoundError(name + " in " + globals_dir)
-
-
-def ascii_(b):
-    return b.decode("latin1").split("\x00")[0].strip()
-
-
-def cp866_(b):
-    return b.decode("cp866").rstrip("\x00").strip()
+# The shared table reader (deleted rows skipped — GItem.DBF carries 22 stale ghost duplicates
+# of live items — and columns a mod lacks read as empty). Re-exported under the names the
+# other catalog builders import from this module.
+from fflib.dbf import read_dbf, find_table as _find, ascii_, cp866_  # noqa: E402,F401
 
 
 def parse_gold(value_bytes):

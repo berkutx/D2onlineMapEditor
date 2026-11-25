@@ -12,45 +12,14 @@ landmarks correctly. Keyed UPPERCASE to match objectSpriteKey (lmarkId.toUpper()
 import argparse
 import json
 import os
-import struct
+import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def read_dbf(path):
-    d = open(path, "rb").read()
-    nrec = struct.unpack_from("<I", d, 4)[0]
-    hlen = struct.unpack_from("<H", d, 8)[0]
-    rlen = struct.unpack_from("<H", d, 10)[0]
-    fields = []
-    i = 32
-    while d[i] != 0x0D:
-        fields.append((d[i:i + 11].split(b"\x00")[0].decode("latin1"), d[i + 16]))
-        i += 32
-    rows = []
-    for r in range(nrec):
-        off = hlen + r * rlen
-        if off + rlen > len(d):
-            break
-        # DBF record marker: 0x20 (space) = active, 0x2A ('*') = deleted. Several game DBFs carry
-        # deleted records (GMabi 558, Lrace 8, GLmark 6, Lterrain 1, Gunits 4); reading them leaks
-        # stale data into the extract — e.g. a deleted Lterrain GO=0 row into terrainCodes. Skip
-        # them so the extracted maps reflect only live game data, matching the engine.
-        if d[off] == 0x2A:
-            continue
-        pos = off + 1
-        row = {}
-        for (name, flen) in fields:
-            row[name] = d[pos:pos + flen].decode("latin1").strip()
-            pos += flen
-        rows.append(row)
-    return rows
-
-
-def _find(globals_dir, name):
-    for nm in (name, name.upper(), name.lower()):
-        p = os.path.join(globals_dir, nm)
-        if os.path.exists(p):
-            return p
-    raise FileNotFoundError(name + " in " + globals_dir)
+# The shared table reader, decoded flavour. It skips deleted rows: several game DBFs carry
+# them (GMabi 558, Lrace 8, GLmark 6, Lterrain 1, Gunits 4) and reading them leaks stale data
+# into the extract — e.g. a deleted Lterrain GO=0 row into terrainCodes.
+from fflib.dbf import read_dbf_text as read_dbf, find_table as _find  # noqa: E402
 
 
 def _id_num(s):
@@ -63,14 +32,8 @@ def _int_or_none(s):
     return int(s) if s.lstrip("-").isdigit() else None
 
 
-def _unit_boat(globals_dir, server):
-    """leader impl (UPPER) -> boat race (Lrace key), for boat-eligible leaders only.
-
-    The editor draws a boat for a stack on water UNLESS the leader is water_only or
-    flying (mobilAbil has plains(0) AND forest(1) AND water(3)). Boat race =
-    Gunit.race_id -> Grace.race_type.key (ObjectAccessors.cpp StackObjectAccessor).
-    Scoped to the leader impls the map actually uses (fetched from the map server).
-    """
+def _map_leader_impls(server):
+    """Leader impls of one map (the legacy --server scoping), or None when unreachable."""
     import json as _json
     import urllib.request
     try:
@@ -78,10 +41,23 @@ def _unit_boat(globals_dir, server):
         riders = next((s for s in scen if "Rider" in s.get("name", "")), scen[0])
         doc = _json.load(urllib.request.urlopen(server + "/api/maps/" + riders["id"]))
     except Exception as e:  # noqa: BLE001
-        import sys
-        sys.stderr.write("  unitBoat: map fetch failed (%s); skipping boats\n" % e)
-        return {}
+        sys.stderr.write("  unitBoat: map fetch failed (%s); using every unit\n" % e)
+        return None
+    return {o["leaderImage"] for o in doc.get("objects", [])
+            if o.get("type") == "stack" and o.get("leaderImage")}
 
+
+def _unit_boat(globals_dir, server=None):
+    """leader impl (UPPER) -> boat race (Lrace key), for boat-eligible leaders only.
+
+    The editor draws a boat for a stack on water UNLESS the leader is water_only or
+    flying (mobilAbil has plains(0) AND forest(1) AND water(3)). Boat race =
+    Gunit.race_id -> Grace.race_type.key (ObjectAccessors.cpp StackObjectAccessor).
+
+    Covers EVERY unit of the mod, so the table does not depend on which map happened to
+    be open when it was built (any unit can lead a stack on some map). ``server`` keeps
+    the old behaviour of scoping it to the leaders one map uses.
+    """
     units = {r["UNIT_ID"].lower(): r for r in read_dbf(_find(globals_dir, "Gunits.dbf"))}
     grace_rt = {r["RACE_ID"].lower(): _int_or_none(r.get("RACE_TYPE"))
                 for r in read_dbf(_find(globals_dir, "Grace.dbf"))}
@@ -91,10 +67,11 @@ def _unit_boat(globals_dir, server):
         if a is not None:
             mabi.setdefault(r["UNIT_ID"].lower(), set()).add(a)
 
-    impls = {o["leaderImage"] for o in doc.get("objects", [])
-             if o.get("type") == "stack" and o.get("leaderImage")}
+    impls = _map_leader_impls(server) if server else None
+    if impls is None:
+        impls = set(units)
     boat = {}
-    for impl in impls:
+    for impl in sorted(impls):  # sorted: the output must not depend on set iteration order
         u = units.get(impl.lower())
         if not u:
             continue
@@ -114,8 +91,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--server", default="http://localhost:3000",
-                    help="map server, for the leader boat-eligibility table")
+    ap.add_argument("--server", default="",
+                    help="legacy: scope the leader boat table to one map served by this map "
+                         "server; default = every unit of the mod (map-independent)")
     args = ap.parse_args(argv)
     globals_dir = os.path.join(args.game, "Globals")
 

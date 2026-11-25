@@ -1,0 +1,90 @@
+{
+  "comment": "Curated meaning of scenario variables. build_mod.py merges this with what it finds in a mod: an mss32 entry is kept only when the mod's mss32.dll contains the name; a lua entry only when the mod's scripts read it. Names found in scripts but not listed here are added without a description.",
+  "racePrefixes": {
+    "empire": "EMPIRE_",
+    "legions": "LEGIONS_",
+    "clans": "CLANS_",
+    "undead": "HORDES_",
+    "elves": "ELVES_"
+  },
+  "variables": [
+    {
+      "name": "MULTIPLE_BUILD_CAPITAL",
+      "scope": "perRace",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/hooks.cpp",
+      "title": "Строительство в столице",
+      "description": "Положительное значение снимает ограничение «одна постройка в день». Отрицательное запрещает строительство: любая постройка считается уже возведённой сегодня. Ноль или отсутствие переменной — обычные правила. Вариант с префиксом расы действует только на неё и важнее общего.",
+      "presets": [
+        { "value": null, "label": "Одна постройка в день (обычные правила)" },
+        { "value": 1, "label": "Несколько построек в день" },
+        { "value": -1, "label": "Строительство запрещено" }
+      ]
+    },
+    {
+      "name": "HIRE_UNIT_ANY_RACE",
+      "scope": "perRace",
+      "kind": "flag",
+      "source": "mss32",
+      "origin": "mss32/src/unitsforhirehooks.cpp",
+      "title": "Найм юнитов любой расы",
+      "description": "Ненулевое значение добавляет в список найма столицы юнитов всех рас, а не только своей. Вариант с префиксом расы действует только на неё и важнее общего.",
+      "presets": [
+        { "value": null, "label": "Только своя раса" },
+        { "value": 1, "label": "Юниты всех рас" }
+      ]
+    },
+    {
+      "name": "HIRE_UNIT_TIER_MAX",
+      "scope": "perRace",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/unitsforhirehooks.cpp",
+      "title": "Найм улучшенных юнитов",
+      "description": "Значение больше 1 разрешает нанимать в столице юнитов до указанного уровня развития, если построены нужные здания. Вариант с префиксом расы действует только на неё и важнее общего.",
+      "presets": [
+        { "value": null, "label": "Только базовые юниты" },
+        { "value": 2, "label": "До 2-го уровня" },
+        { "value": 3, "label": "До 3-го уровня" },
+        { "value": 4, "label": "До 4-го уровня" },
+        { "value": 5, "label": "До 5-го уровня" }
+      ]
+    },
+    {
+      "name": "UNIT_HIRE_TIER_MAX",
+      "scope": "global",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/unitsforhirehooks.cpp",
+      "title": "Найм улучшенных юнитов (старое имя)",
+      "description": "Прежнее имя переменной HIRE_UNIT_TIER_MAX; действует на все расы. В новых картах используйте HIRE_UNIT_TIER_MAX."
+    },
+    {
+      "name": "ENABLE_GLOBAL_CUSTOM_MAPMOD",
+      "source": "lua",
+      "kind": "flag",
+      "title": "Общие модификаторы карты"
+    },
+    {
+      "name": "ENABLE_CUSTOM_PVP_MOD_UCHENIK",
+      "source": "lua",
+      "kind": "flag",
+      "title": "PvP-модификатор «Ученик»"
+    },
+    {
+      "name": "PERK_LVL_",
+      "prefix": true,
+      "source": "lua",
+      "kind": "number",
+      "title": "Уровень перка",
+      "description": "Полное имя: PERK_LVL_<раса>_<id модификатора>."
+    },
+    {
+      "name": "SMNS_INFO_TURN",
+      "source": "lua",
+      "kind": "number",
+      "title": "Ход показа правил SMNS"
+    }
+  ]
+}

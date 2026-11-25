@@ -40,6 +40,56 @@ This processes the Stage-1 archives and writes:
 
 `public/assets/` is gitignored; the committed artifact is the **code** here.
 
+## Mod data sets (`build_mod.py`)
+
+The editor can serve several mods side by side. `build_mod.py` builds the data of ONE mod
+(one game installation) into a content-addressed store that all mods share:
+
+```
+<store>/mods/index.json            the installed mods (+ the default one)
+<store>/mods/<mod-id>/mod.json     one mod: identity + logical file name -> blob
+<store>/blobs/<xx>/<sha256>.<ext>  immutable files; identical bytes are stored once
+```
+
+```
+python tools/asset-pipeline/build_mod.py \
+    --game "C:/Games/SomeMod" --mod-id some-mod --name "Some Mod" \
+    --family some --family-order 1 --store public/assets \
+    [--ingest-atlases <dir of an existing pipeline.py output>] [--default] [--dry-run]
+```
+
+- `--game` is the directory holding `Globals` / `Imgs` / `Scripts` (for an original install
+  that is `<root>/Game`; many mods keep them in the install root).
+- `--family` / `--family-order`: mods of one family are versions of the same line; a map
+  that fits several versions opens on the highest order.
+- `--ingest-atlases` takes in the atlases of an earlier `pipeline.py` run (the files its
+  `manifest.json` names) and builds the decoration catalog, which needs them. Atlases that
+  already live in the store's own folder come in as hard links (no extra disk); atlases from
+  another folder are copied, because a hard link would share bytes with a file somebody
+  else may rewrite. Without graphics the mod is registered as `data-only`.
+- `--dry-run` builds everything, prints sizes and how much is already in the store, and
+  leaves the store untouched.
+
+Per mod it writes the catalogs and icon sets the editor already used (same builders, same
+output) plus:
+
+| file | from | used for |
+|------|------|----------|
+| `ids.json` | id columns of GUnits, GItem, GSpells, GLmark, Gmodif, GLord, Grace, Gbuild | detecting the mod of a map; "this map references ids the mod lacks" |
+| `profile.json` | Grace, GLord, GUnits, Lrace, Lterrain | blank maps and new players (guardian, leader, lord, hit points) |
+| `dictionaries.json` | every `L*.dbf` | pickers and groups of the mod editor |
+| `scenVariables.json` | names found in `mss32.dll` and read by the mod's Lua, described in `data/scen_variables.json` | the map-restrictions panel |
+| `settings.json` | numbers and flags of `Scripts/settings.lua` | value limits |
+| `dbfSchema.json` | header of every Globals table | which columns this mod has |
+| `modscripts/**` | `Scripts/modifiers/**.lua` | the modifier inspector |
+
+The JSON shapes are **Contract D** (`packages/mod-catalog`); `build_mod.py` checks its
+output against the JSON Schemas in `packages/mod-catalog/gen/`.
+
+All table reads go through `fflib/dbf.py`. The mods do not have the same columns (a field
+is wider, added or missing), so a row answers a missing column with an empty value and the
+miss is listed in the build summary and in `dbfSchema.json` instead of failing the build.
+
 ## Test
 
 ```
@@ -61,6 +111,10 @@ fflib/
   naming.py      name classify/normalize; strips the .PNG.PNG double-extension
   shaders.py     numpy magenta color-key (P + RGB) + shader variants
   packer.py      shelf/row bin-packer, 2048² cap, multi-page split
+  dbf.py         the one Globals table reader (deleted rows skipped, missing columns tolerated + reported)
+  blobstore.py   content-addressed store: blobs/<xx>/<sha256>.<ext>, hard link / copy / move
+build_mod.py     one mod -> the store (catalogs, icons, ids, profile, dictionaries, variables)
+data/            curated descriptions (scenario variables)
 extract_ff.py    .ff -> named FFImage list
 decode_images.py color-key + trim -> Frame (keeps spriteSourceSize/sourceSize)
 build_atlases.py Frames -> spritesheet PNG + Pixi JSON (frames/animations/meta)

@@ -21,48 +21,17 @@ import argparse
 import glob
 import json
 import os
-import struct
+import sys
 
 import numpy as np
 from PIL import Image
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def read_dbf(path):
-    d = open(path, "rb").read()
-    nrec = struct.unpack_from("<I", d, 4)[0]
-    hlen = struct.unpack_from("<H", d, 8)[0]
-    rlen = struct.unpack_from("<H", d, 10)[0]
-    fields = []
-    i = 32
-    while d[i] != 0x0D:
-        fields.append((d[i:i + 11].split(b"\x00")[0].decode("latin1"), d[i + 16]))
-        i += 32
-    rows = []
-    for r in range(nrec):
-        off = hlen + r * rlen
-        if off + rlen > len(d):
-            break
-        # DBF record marker: 0x20 (space) = active, 0x2A ('*') = deleted. GLmark.dbf carries
-        # 6 deleted ghost records (e.g. G000MG8014, whose stale empty-NAME_TXT copy comes after
-        # its live twin and would otherwise win the last-wins `cat` dict -> a nameless landmark).
-        # Skipping deleted rows keeps the catalog to live game landmarks.
-        if d[off] == 0x2A:
-            continue
-        pos = off + 1
-        row = {}
-        for (name, flen) in fields:
-            row[name] = d[pos:pos + flen]
-            pos += flen
-        rows.append(row)
-    return rows
-
-
-def _find(globals_dir, name):
-    for nm in (name, name.upper(), name.lower()):
-        p = os.path.join(globals_dir, nm)
-        if os.path.exists(p):
-            return p
-    raise FileNotFoundError(name + " in " + globals_dir)
+# The shared table reader. It skips deleted rows: GLmark.dbf carries 6 deleted ghost records
+# (e.g. G000MG8014, whose stale empty-NAME_TXT copy comes after its live twin and would
+# otherwise win the last-wins `cat` dict -> a nameless landmark).
+from fflib.dbf import read_dbf, find_table as _find  # noqa: E402
 
 
 # RU landmark name -> (shape, style, tone_or_None, english). tone None => from colour.
