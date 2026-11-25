@@ -48,6 +48,8 @@ SW_RESTORE = 9
 
 # button positions as (fx, fy) fractions of the client rectangle, read off the editor's
 # layout. Tweak with --dump / repeated runs if a click misses (the debugger shows feedback).
+# These are the STOCK layout; use_layout() replaces them with the positions of the editor
+# actually being driven (a mod may redraw its dialogs -- see LAYOUT below).
 POINTS = {
     "menu_load":  (0.497, 0.617),   # main menu: "Загрузить сценарий"
     "list_item0": (0.371, 0.158),   # load list: first scenario row
@@ -57,6 +59,93 @@ POINTS = {
     "opt_exit":   (0.494, 0.492),   # options popup: "Выход" (leave scenario -> main menu)
     "dialog_ok":  (0.500, 0.620),   # СООБЩ. message box: "Ok"
 }
+
+# The editor does not scale its dialogs: each is laid out in its own pixel box (given in
+# Interf\ScenEdit.dlg) and placed on the 1024x768 screen -- centred, except the palette column,
+# which hugs the top-right corner. So a click point can be COMPUTED from the editor's own
+# dialog file instead of being read off a screenshot:
+#   point -> (dialog, control, how the dialog is placed, where inside the control)
+# Needed because mods redraw dialogs: Nazar's Legacy made the scenario list twice as wide
+# (DLG_EDIT_MAP 680x600 instead of 340x600), which put the stock "Ok" point on its "Back".
+SCREEN = (1024, 768)
+LAYOUT = {
+    "menu_load":  ("DLG_MAIN_MENU", "BTN_LOAD", "centre", "middle"),
+    "list_item0": ("DLG_EDIT_MAP", "TLBOX_CHOOSE", "centre", "first_row"),
+    "list_ok":    ("DLG_EDIT_MAP", "BTN_OK", "centre", "middle"),
+    "opt":        ("DLG_ISO_PAL", "BTN_OPTIONS", "top_right", "middle"),
+    "opt_save":   ("DLG_OPTIONS", "BTN_SAVE", "centre", "middle"),
+    "opt_exit":   ("DLG_OPTIONS", "BTN_QUIT", "centre", "middle"),
+}
+
+
+def read_dialogs(path):
+    """Interf\\ScenEdit.dlg -> {dialog: ((w, h), {control: (x0, y0, x1, y1)})}.
+    The file is plain text: `DIALOG <name>,x0,y0,x1,y1,...`, then one control per line as
+    `<KIND> <name>,x0,y0,x1,y1,...` until `END`."""
+    import io
+    import re
+    head = re.compile(r"^\s*DIALOG\s+(\w+),(-?\d+),(-?\d+),(-?\d+),(-?\d+)")
+    ctl = re.compile(r"^\s*\w+\s+(\w+),(-?\d+),(-?\d+),(-?\d+),(-?\d+)")
+    out, cur = {}, None
+    with io.open(path, "r", encoding="latin-1") as f:
+        for line in f:
+            m = head.match(line)
+            if m:
+                x0, y0, x1, y1 = (int(v) for v in m.groups()[1:])
+                cur = ((x1 - x0, y1 - y0), {})
+                out[m.group(1)] = cur
+            elif line.strip().upper() == "END":
+                cur = None
+            elif cur is not None:
+                m = ctl.match(line)
+                if m:
+                    cur[1][m.group(1)] = tuple(int(v) for v in m.groups()[1:])
+    return out
+
+
+def points_from_layout(dlg_path, screen=SCREEN):
+    """Click points (fractions of the screen) computed from one editor's dialog file.
+    Returns only the points whose dialog and control were found."""
+    dialogs = read_dialogs(dlg_path)
+    sw, sh = screen
+    points = {}
+    for name, (dlg, control, anchor, spot) in LAYOUT.items():
+        if dlg not in dialogs or control not in dialogs[dlg][1]:
+            continue
+        (w, h), controls = dialogs[dlg]
+        x0, y0, x1, y1 = controls[control]
+        ox, oy = (sw - w, 0) if anchor == "top_right" else ((sw - w) / 2.0, (sh - h) / 2.0)
+        if spot == "first_row":
+            x, y = x0 + 30, y0 + 8        # inside the first row of the list
+        else:
+            x, y = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        points[name] = (round((ox + x) / sw, 3), round((oy + y) / sh, 3))
+    return points
+
+
+def use_layout(workdir, log=print):
+    """Aim the clicks at the dialogs of the editor in `workdir` (read from its
+    Interf\\ScenEdit.dlg). Points that cannot be computed keep their stock value.
+    Returns the names of the points that moved by more than a few pixels."""
+    import os
+    path = os.path.join(workdir, "Interf", "ScenEdit.dlg")
+    try:
+        found = points_from_layout(path)
+    except (IOError, OSError) as e:
+        log("[drive] layout: cannot read %s (%s) -- using the stock click points" % (path, e))
+        return []
+    moved = []
+    for name, (fx, fy) in sorted(found.items()):
+        sx, sy = POINTS[name]
+        if abs(fx - sx) * SCREEN[0] > 12 or abs(fy - sy) * SCREEN[1] > 12:
+            moved.append(name)
+        POINTS[name] = (fx, fy)
+    log("[drive] layout: %d click point(s) from %s%s" % (
+        len(found), path,
+        "; differs from stock: " + ", ".join(
+            "%s=(%d,%d)" % (n, POINTS[n][0] * SCREEN[0], POINTS[n][1] * SCREEN[1]) for n in moved)
+        if moved else " (stock layout)"))
+    return moved
 
 
 def find_hwnd(title, timeout=40):
@@ -216,8 +305,10 @@ def to_main_menu(hwnd, log):
     so a new scenario can be loaded. Blind (no BP feedback here) — do_load's list-open retry
     is what actually confirms we reached the menu."""
     log("[drive] leaving scenario -> main menu (OPTIONS/Exit)")
-    click(hwnd, *POINTS["opt"]); time.sleep(1.5)
-    click(hwnd, *POINTS["opt_exit"]); time.sleep(2.0)
+    # generous pauses: on a 144x144 map the options popup needs more than 1.5 s to appear, and
+    # an "Exit" clicked before it is there lands on the map -- the editor then never leaves it
+    click(hwnd, *POINTS["opt"]); time.sleep(3.0)
+    click(hwnd, *POINTS["opt_exit"]); time.sleep(3.5)
 
 
 def run_sequence(title="Scenario Editor", log=print, wait_window=60,

@@ -92,12 +92,43 @@ set GC_PAR=4 && python batch_runner.py "C:\maps\folder"   # resumable summary.js
 powershell -File make_clones.ps1 -Count 0                 # remove the clones afterwards
 ```
 
+### E) A map of ANY mod — against the editor of ITS mod
+A map must be checked with the editor of the mod it was made for (another mod's database rejects it
+for its own reasons — see the false signal noted in `docs/full-rebuild-model-gaps.md`). `ScenEdit.exe`
+is the same binary in the mods we have (SMNS, Semga, Nazar's Legacy), so the tester drives all of
+them; what differs is the mod's data and, sometimes, its dialogs.
+```
+powershell -File clone_install.ps1 -Master "C:\Games\SomeMod" -Clone "C:\Temp\gc\somemod" -Wrapper "C:\Games\InstallWithCncDdraw"
+python scen_tester.py --batch "C:\maps\made-for-somemod" --editor "C:\Temp\gc\somemod\ScenEdit.exe" --kill-exit
+powershell -File clone_install.ps1 -Clone "C:\Temp\gc\somemod" -Remove
+```
+`clone_install.ps1` makes a throw-away clone of the install (hard links + junctions, about a megabyte,
+its own empty `Exports`), so the install itself — its `Exports`, its ini — is never touched. `-Wrapper`
+is any folder that has cnc-ddraw as `C4dll-R.dll` with its `ddraw.ini`; the clone runs it windowed with
+`renderer=gdi`, whatever wrapper the mod ships. It also sets `ScenEditDatabase=0` and `DisplaySize=0`.
+
+**Click points come from the editor's own dialog file.** The editor does not scale its dialogs: each
+has a pixel box in `Interf\ScenEdit.dlg` and is centred on the 1024×768 screen (the palette column
+hugs the top-right corner). `drive.use_layout()` computes the points from that file at start, so a mod
+that redraws a dialog is driven correctly: Nazar's Legacy made the scenario list twice as wide, which
+put the stock "Ok" point on its "Back" — every map, originals included, came out `LOAD_FAIL`. The log
+line `[drive] layout: … differs from stock: …` shows what moved. `DisplaySize` must be 0 for this
+arithmetic (the clone script sets it).
+
+**What a verdict covers.** `PASS` = the editor loaded the map and its on-load validation was clean.
+It does not tell you whether the editor considers the map *changed*: it may silently normalise a field
+on load and then ask «Сценарий не сохранён! Хотите сохранить его?» on exit. That is worth looking at —
+let it save, and diff the saved file against yours block by block. Two writer bugs were found that way
+(mountains written with RACE 0 instead of 4; a doubled closing underscore in a new map's default texts).
+
 **Target-editor prerequisites** (found the hard way): the load list must be in folder-browse mode
 — `ScenEditDatabase=0` in `Disciple.ini` (`=1` lists the DATABASE scenarios, so the staged copy
 never appears and the first-row click loads the wrong map). Headless = the null-render wrapper:
 cnc-ddraw built as `C4dll-R.dll` + `ddraw.ini` with `renderer=null` (see the slasher dir). The
 driver binds its window lookup to the debuggee PID, so parallel editors don't steal each other's
-clicks.
+clicks. A null renderer is a convenience, not a requirement: any cnc-ddraw `C4dll-R.dll` run
+windowed with `renderer=gdi` works just as well (a visible window that needs no focus) — that is
+what `clone_install.ps1` sets up, and what the four-mod check of 2026-11 ran on.
 
 **Headless?** Unattended — yes: no mouse/keyboard emulation, no focus needed (posted messages
 go to the window's queue), the window may be minimized/background. It does need a live

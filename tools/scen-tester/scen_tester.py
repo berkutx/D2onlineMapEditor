@@ -1302,6 +1302,9 @@ def main():
     editor = os.path.abspath(args.editor)
     workdir = os.path.dirname(editor)
     exports = args.exports or os.path.join(workdir, "Exports")
+    # click where THIS editor's dialogs are (a mod may redraw them)
+    import drive
+    drive.use_layout(workdir, log)
 
     if args.batch:
         folder = os.path.abspath(args.batch)
