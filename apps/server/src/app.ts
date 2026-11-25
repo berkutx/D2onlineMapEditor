@@ -10,6 +10,7 @@ import multipart from "@fastify/multipart";
 import { config } from "./config.js";
 import { MapStore } from "./maps/mapStore.js";
 import { EditLog } from "./realtime/EditLog.js";
+import { ModRegistry } from "./mods/modRegistry.js";
 import { registerStatic } from "./http/static.js";
 import { registerSpa } from "./http/spa.js";
 import { registerHealthRoutes } from "./http/routes.health.js";
@@ -42,6 +43,8 @@ export interface BuiltApp {
   store: MapStore;
   /** The durable per-room op-log — shared between the REST routes (export-at) and socket.io. */
   log: EditLog;
+  /** The mod datasets this server serves (one implicit `default` mod until multi-mod lands). */
+  mods: ModRegistry;
 }
 
 export async function buildApp(): Promise<BuiltApp> {
@@ -68,17 +71,19 @@ export async function buildApp(): Promise<BuiltApp> {
   // durable per-room op-log (var/rooms): the server is the source of truth. Created here so it
   // is shared by the REST export-at route AND socket.io (createIo receives this same instance).
   const log = new EditLog(config.ROOMS_DIR);
+  // game data sets (catalogs + atlas manifest) the routes validate and generate against
+  const mods = new ModRegistry();
 
   await registerStatic(app);
   await registerHealthRoutes(app, log);
   await registerScenarioRoutes(app, store);
-  await registerMapRoutes(app, store, log);
-  await registerAssetRoutes(app);
+  await registerMapRoutes(app, store, log, mods);
+  await registerAssetRoutes(app, mods);
   await registerUploadRoute(app, store);
   await registerPreviewRoute(app, store);
-  await registerVoiceRoutes(app, store);
+  await registerVoiceRoutes(app, store, mods);
   // SPA last: serves apps/web/dist + history fallback in production (no-op in dev).
   await registerSpa(app);
 
-  return { app, store, log };
+  return { app, store, log, mods };
 }

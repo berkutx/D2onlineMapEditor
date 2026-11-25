@@ -10,7 +10,7 @@
  * imperatively to drive the renderer.
  */
 import { Scene, AssetStore } from "@d2/pixi-render";
-import { ASSET_BASE_URL } from "../services/api";
+import { assetBaseUrl } from "../services/api";
 
 interface Holder {
   scene: Scene | null;
@@ -19,10 +19,12 @@ interface Holder {
 
 const holder: Holder = { scene: null, assets: null };
 
-/** Get (lazily creating) the singleton AssetStore. Loaded once per session. */
+/** Get (lazily creating) the singleton AssetStore. Loaded once per session. The base URL is
+ *  the ACTIVE mod's, captured at creation — so the first call must come after the session's
+ *  mod is known (assetStore.ensureLoaded awaits it). */
 export function getAssetStore(): AssetStore {
   if (!holder.assets) {
-    holder.assets = new AssetStore({ baseUrl: ASSET_BASE_URL });
+    holder.assets = new AssetStore({ baseUrl: assetBaseUrl() });
   }
   return holder.assets;
 }

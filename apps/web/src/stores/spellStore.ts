@@ -5,7 +5,7 @@
  * summon?, desc? }. RU labels for the spell-category enum live here.
  */
 import { defineStore } from "pinia";
-import { assetUrl } from "../services/api";
+import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
 
 export interface SpellEntry {
@@ -55,7 +55,7 @@ export const useSpellStore = defineStore("spell", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("spellCatalog.json"));
+      const res = await fetch(await modAssetUrl("spellCatalog.json"));
       if (!res.ok) throw new Error(`spellCatalog.json ${res.status}`);
       const arr = (await res.json()) as SpellEntry[];
       const map: Record<string, SpellEntry> = {};

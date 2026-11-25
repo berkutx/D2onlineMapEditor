@@ -37,14 +37,10 @@ import {
   pushCommit,
   materializeForExport,
   roundTripSemantic,
-  buildWallSet,
-  buildDecorSet,
   validateMechanics,
   occupancyErrors,
   planCoverageErrors,
   DECODE_TABLES,
-  type WallSet,
-  type DecorSet,
 } from "@d2/map-edit";
 import { getRecipe } from "@d2/mapgen";
 import { clientIdOf } from "./routes.scenarios.js";
@@ -54,6 +50,7 @@ import { roomKey } from "../realtime/RoomManager.js";
 import type { EditLog } from "../realtime/EditLog.js";
 import type { MapDocument } from "@d2/map-schema";
 import type { MapStore } from "../maps/mapStore.js";
+import type { ModContext, ModRegistry } from "../mods/modRegistry.js";
 
 const FILLS: readonly TerrainFill[] = TERRAIN_FILLS;
 const sanitize = (s: string): string => s.replace(/[^\w.-]+/g, "_").slice(0, 40) || "blank";
@@ -158,66 +155,17 @@ export function buildAndValidate(
   return { report, bytes };
 }
 
-/** Lazily load + cache the TALISMAN template-id set from public/assets/itemCatalog.json
- *  (catKey L_TALISMAN) — the byte writer adds a MidTalismanCharges entry per minted talisman
- *  instance (the reference's addItem cascade). A missing catalog degrades to an empty set
- *  (entries simply not added) with one warning — asset volumes without the catalog stay usable. */
-let talismanSetCache: ReadonlySet<string> | null = null;
-export async function loadTalismanTemplates(): Promise<ReadonlySet<string>> {
-  if (!talismanSetCache) {
-    try {
-      const path = join(config.ASSETS_DIR, "itemCatalog.json");
-      const items = JSON.parse(await readFile(path, "utf-8")) as { id: string; catKey?: string }[];
-      talismanSetCache = new Set(items.filter((i) => i.catKey === "L_TALISMAN").map((i) => i.id));
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn(`[maps] itemCatalog.json unavailable — talisman charges entries disabled (${String(e)})`);
-      talismanSetCache = new Set();
-    }
-  }
-  return talismanSetCache;
-}
-
-/** Lazily load + cache the decoration catalog as a wall set (by iso orient) + a decor set
- *  (1×1 by shape) + landmark footprints (UPPERCASE id → [cx,cy], for the generation
- *  occupancy guard), all from public/assets/decorCatalog.json (read once). */
-let wallSetCache: WallSet | null = null;
-let decorSetCache: DecorSet | null = null;
-let landmarkSizesCache: Record<string, readonly [number, number]> | null = null;
-async function loadCatalogSets(): Promise<{
-  walls: WallSet;
-  decor: DecorSet;
-  landmarkSizes: Record<string, readonly [number, number]>;
-}> {
-  if (!wallSetCache || !decorSetCache || !landmarkSizesCache) {
-    const path = join(config.ASSETS_DIR, "decorCatalog.json");
-    const json = JSON.parse(await readFile(path, "utf-8")) as never;
-    wallSetCache = buildWallSet(json);
-    decorSetCache = buildDecorSet(json);
-    const sizes: Record<string, readonly [number, number]> = {};
-    const entries = Array.isArray(json)
-      ? (json as { id: string; cx?: number; cy?: number }[])
-      : Object.values(json as Record<string, { id: string; cx?: number; cy?: number }>);
-    for (const e of entries) sizes[e.id.toUpperCase()] = [e.cx ?? 1, e.cy ?? 1];
-    landmarkSizesCache = sizes;
-  }
-  return { walls: wallSetCache, decor: decorSetCache, landmarkSizes: landmarkSizesCache };
-}
-
-/** A baseType → GLmark `[w,h]` resolver for the byte writer's plan footprints + the mechanics
- *  overlap check. Degrades to `undefined` (⇒ 1×1) when the catalog is missing, so asset
- *  volumes without decorCatalog.json validate exactly as before. */
-let landmarkSizeFnCache: ((baseType: string) => readonly [number, number] | undefined) | null = null;
-export async function loadLandmarkSizeFn(): Promise<(baseType: string) => readonly [number, number] | undefined> {
-  if (!landmarkSizeFnCache) {
-    try {
-      const { landmarkSizes } = await loadCatalogSets();
-      landmarkSizeFnCache = (baseType: string) => landmarkSizes[(baseType ?? "").toUpperCase()];
-    } catch {
-      landmarkSizeFnCache = () => undefined;
-    }
-  }
-  return landmarkSizeFnCache;
+/**
+ * {@link buildAndValidate} against a mod's data: the talisman template set and the landmark
+ * footprints both come from the catalogs of the mod the map belongs to (see ModContext).
+ */
+export async function buildAndValidateForMod(
+  mod: ModContext,
+  baseBytes: Uint8Array,
+  project: EditorProject,
+): Promise<{ report: ValidationReport; bytes?: Uint8Array }> {
+  const { talismanTemplates, landmarkSize } = await mod.validationInputs();
+  return buildAndValidate(baseBytes, project, talismanTemplates, landmarkSize);
 }
 
 /** Parse a hand-drawn cell mask (body.cells = [[x,y],…]) into an "x,y" Set; undefined if empty. */
@@ -334,6 +282,7 @@ export async function registerMapRoutes(
   app: FastifyInstance,
   store: MapStore,
   log: EditLog,
+  mods: ModRegistry,
 ): Promise<void> {
   /** Preview links may render the parsed document, but every route that can persist, derive
    * editable ops, clone, or emit `.sg` bytes is denied server-side (the UI lock is not trust). */
@@ -519,7 +468,7 @@ export async function registerMapRoutes(
         return reply.code(404).send({ error: "map not found" });
       }
 
-      const { report, bytes } = buildAndValidate(base.bytes, project, await loadTalismanTemplates(), await loadLandmarkSizeFn());
+      const { report, bytes } = await buildAndValidateForMod(mods.forMap(id), base.bytes, project);
 
       if (action === "validate") {
         return reply.send(report);
@@ -565,7 +514,7 @@ export async function registerMapRoutes(
         // ops with seq <= target (the log is seq-ordered; a preserved gap just means fewer ops)
         const ops = log.all(key).filter((e) => e.seq <= seq).map((e) => e.op);
         const proj: EditorProject = { ...emptyProject(id), journal: ops.length ? [ops] : [], cursor: ops.length ? 1 : 0 };
-        const { report, bytes } = buildAndValidate(base.bytes, proj, await loadTalismanTemplates(), await loadLandmarkSizeFn());
+        const { report, bytes } = await buildAndValidateForMod(mods.forMap(id), base.bytes, proj);
         if (!report.ok || !bytes) {
           return reply.code(422).send(report);
         }
@@ -624,9 +573,10 @@ export async function registerMapRoutes(
     // concurrent generation). nextTypedId clamps an out-of-range/absent slot to 0.
     const genSlot = Number.isInteger(body.slot) ? Number(body.slot) : 0;
     const t0 = Date.now();
+    const mod = mods.forMap(id);
     let ops;
     try {
-      const { walls, decor, landmarkSizes } = await loadCatalogSets();
+      const { walls, decor, landmarkSizes } = await mod.catalogSets();
       ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect, decor, landmarkSizes, genSlot);
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
@@ -634,7 +584,7 @@ export async function registerMapRoutes(
 
     // validate the generated ops as one more commit on top of the project
     const augmented = ops.length ? pushCommit(project, ops) : project;
-    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates(), await loadLandmarkSizeFn());
+    const { report } = await buildAndValidateForMod(mod, base.bytes, augmented);
     const debug = {
       serverMs: Date.now() - t0,
       opCount: ops.length,
@@ -735,7 +685,8 @@ export async function registerMapRoutes(
       }
       steps.push({ ...(s as object), region: reg.data } as PlanStep);
     }
-    const { walls, decor, landmarkSizes } = await loadCatalogSets();
+    const mod = mods.forMap(id);
+    const { walls, decor, landmarkSizes } = await mod.catalogSets();
     const seed = Date.now() & 0x7fffffff;
     const mask = parseMask(body.cells);
     const protect = body.protect === true;
@@ -749,7 +700,7 @@ export async function registerMapRoutes(
     }
 
     const augmented = ops.length ? pushCommit(project, ops) : project;
-    const { report } = buildAndValidate(base.bytes, augmented, await loadTalismanTemplates(), await loadLandmarkSizeFn());
+    const { report } = await buildAndValidateForMod(mod, base.bytes, augmented);
     const debug = {
       serverMs: Date.now() - t0,
       opCount: ops.length,

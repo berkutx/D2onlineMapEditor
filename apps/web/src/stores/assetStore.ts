@@ -11,6 +11,7 @@ import { ref, shallowRef } from "vue";
 import type { AssetManifest } from "@d2/asset-manifest";
 import { fetchAssetManifest } from "../services/api";
 import { getAssetStore } from "../canvas/sceneHolder";
+import { useModStore } from "./modStore";
 
 export type AssetLoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -31,6 +32,8 @@ export const useAssetStore = defineStore("assets", () => {
     status.value = "loading";
     error.value = null;
     try {
+      // the manifest and the AssetStore's base URL both belong to the session's mod
+      await useModStore().whenReady();
       const m = await fetchAssetManifest();
       await getAssetStore().load(m);
       manifest.value = m;

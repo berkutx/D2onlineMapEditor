@@ -6,7 +6,7 @@
  * leader-subtype enums live here so the catalog stays pure game-sourced data.
  */
 import { defineStore } from "pinia";
-import { assetUrl } from "../services/api";
+import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
 
 export interface UnitEntry {
@@ -82,7 +82,7 @@ export const useUnitStore = defineStore("unit", () => {
       // ?v cache-bust: the catalog lives on the d2editor_assets volume (gitignored, built offline)
       // and Cloudflare caches it max-age=24h. BUMP this when the volume catalog is re-uploaded, or
       // clients keep the stale edge copy. v2 = adds the `large` (2-cell unit) flag. See deploy/README.
-      const res = await fetch(assetUrl("unitCatalog.json") + "?v=2");
+      const res = await fetch((await modAssetUrl("unitCatalog.json")) + "?v=2");
       if (!res.ok) throw new Error(`unitCatalog.json ${res.status}`);
       const arr = (await res.json()) as UnitEntry[];
       // HARD REQUIREMENT: the catalog MUST carry unit SIZE (`large` = 2-cell big unit). A catalog

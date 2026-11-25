@@ -30,6 +30,8 @@ app.mount("#app");
 // Preload the item / unit / spell catalogs as first-class resources at startup, so the
 // object inspector + pickers are instant (no "Загрузка каталога…" flash on first open).
 // load() is idempotent, so the existing lazy call sites become instant cache hits.
+// The catalogs belong to a mod: each load() waits (modStore.whenReady) until the first
+// opened map has named its mod, then fetches — queued here, not fetched blindly.
 void useItemStore().load();
 void useUnitStore().load();
 void useSpellStore().load();

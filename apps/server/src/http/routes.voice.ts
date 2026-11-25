@@ -14,7 +14,8 @@ import { parseScenario } from "@d2/sg-parser";
 import { config } from "../config.js";
 import type { MapStore } from "../maps/mapStore.js";
 import { clientIdOf } from "./routes.scenarios.js";
-import { buildAndValidate, loadLandmarkSizeFn, loadTalismanTemplates } from "./routes.maps.js";
+import { buildAndValidateForMod } from "./routes.maps.js";
+import type { ModRegistry } from "../mods/modRegistry.js";
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -69,7 +70,7 @@ export function voiceLoginPath(next: string): string {
 }
 
 interface CurrentBuild { project: EditorProject; doc: MapDocument; bytes: Uint8Array }
-async function currentBuild(store: MapStore, id: string, raw: unknown): Promise<CurrentBuild | { error: unknown; status: number }> {
+async function currentBuild(store: MapStore, mods: ModRegistry, id: string, raw: unknown): Promise<CurrentBuild | { error: unknown; status: number }> {
   const policy = await store.getAccessPolicy(id);
   if (!policy) return { status: 404, error: { error: "map not found" } };
   if (policy.readOnly) return {
@@ -81,7 +82,7 @@ async function currentBuild(store: MapStore, id: string, raw: unknown): Promise<
   if (parsed.data.baseScenarioId !== id) return { status: 400, error: { error: "project baseScenarioId mismatch" } };
   const base = await store.getRawBytes(id);
   if (!base) return { status: 404, error: { error: "map not found" } };
-  const built = buildAndValidate(base.bytes, parsed.data, await loadTalismanTemplates(), await loadLandmarkSizeFn());
+  const built = await buildAndValidateForMod(mods.forMap(id), base.bytes, parsed.data);
   if (!built.report.ok || !built.bytes) return { status: 422, error: built.report };
   return { project: parsed.data, bytes: built.bytes, doc: parseScenario(built.bytes) };
 }
@@ -175,11 +176,11 @@ async function getReturn(req: FastifyRequest, clientId: string, token: string): 
   return { response, data: parsed.data };
 }
 
-export async function registerVoiceRoutes(app: FastifyInstance, store: MapStore): Promise<void> {
+export async function registerVoiceRoutes(app: FastifyInstance, store: MapStore, mods: ModRegistry): Promise<void> {
   app.post<{ Params: { id: string }; Body: { project?: unknown; returnPath?: string } | unknown }>(REST.voiceHandoff(":id"), async (req, reply) => {
     const clientId = clientIdOf(req); if (!clientId) return reply.code(400).send({ error: "x-client-id required" });
     const body = (req.body || {}) as { project?: unknown; returnPath?: string };
-    const built = await currentBuild(store, req.params.id, body.project ?? req.body);
+    const built = await currentBuild(store, mods, req.params.id, body.project ?? req.body);
     if ("status" in built) return reply.code(built.status).send(built.error);
     const events = built.doc.events.map((e) => MapEvent.parse(e));
     const payload = DialogHandoffV1.parse({
@@ -207,7 +208,7 @@ export async function registerVoiceRoutes(app: FastifyInstance, store: MapStore)
 
   const prepare = async (req: FastifyRequest<{ Params: { id: string; token: string }; Body: { project?: unknown; resolutions?: Record<string, "editor" | "voice">; expectedEventHashes?: Record<string, string> } }>) => {
     const clientId = clientIdOf(req); if (!clientId) return { error: { status: 400, body: { error: "x-client-id required" } } };
-    const built = await currentBuild(store, req.params.id, req.body?.project);
+    const built = await currentBuild(store, mods, req.params.id, req.body?.project);
     if ("status" in built) return { error: { status: built.status, body: built.error } };
     const got = await getReturn(req, clientId, req.params.token);
     if (!got.data) return { errorResponse: got.response };
@@ -248,7 +249,7 @@ export async function registerVoiceRoutes(app: FastifyInstance, store: MapStore)
 
   app.post<{ Params: { id: string; token: string }; Body: { project?: unknown } }>(REST.voiceReturnAck(":id", ":token"), async (req, reply) => {
     const clientId = clientIdOf(req); if (!clientId) return reply.code(400).send({ error: "x-client-id required" });
-    const built = await currentBuild(store, req.params.id, req.body?.project);
+    const built = await currentBuild(store, mods, req.params.id, req.body?.project);
     if ("status" in built) return reply.code(built.status).send(built.error);
     const acceptedEvents = built.doc.events.map((e) => MapEvent.parse(e));
     const response = await voiceFetch(req, clientId, `/internal/editor/returns/${encodeURIComponent(req.params.token)}/ack`, {
@@ -260,7 +261,7 @@ export async function registerVoiceRoutes(app: FastifyInstance, store: MapStore)
 
   app.post<{ Params: { id: string }; Body: { project?: unknown; allowMissing?: boolean; returnPath?: string } }>(REST.mapExportPackage(":id"), async (req, reply) => {
     const clientId = clientIdOf(req); if (!clientId) return reply.code(400).send({ error: "x-client-id required" });
-    const built = await currentBuild(store, req.params.id, req.body?.project);
+    const built = await currentBuild(store, mods, req.params.id, req.body?.project);
     if ("status" in built) return reply.code(built.status).send(built.error);
     const mapName = `${built.doc.header.name || req.params.id}-edited.sg`;
     const response = await voiceFetch(req, clientId, "/internal/editor/package", {

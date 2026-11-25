@@ -7,7 +7,7 @@
  *   scripted? }. RU class labels live here so the catalog stays pure game-sourced data.
  */
 import { defineStore } from "pinia";
-import { assetUrl } from "../services/api";
+import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
 
 export interface ModifierEntry {
@@ -64,7 +64,7 @@ export const useModifierStore = defineStore("modifier", () => {
       // ?v cache-bust: the catalog is a fresh asset, and Cloudflare cached a 404 for the
       // bare URL before it was uploaded — a versioned key dodges that stale negative cache
       // and lets future catalog rebuilds invalidate cleanly (bump on content change).
-      const res = await fetch(assetUrl("modifierCatalog.json") + "?v=2");
+      const res = await fetch((await modAssetUrl("modifierCatalog.json")) + "?v=2");
       if (!res.ok) throw new Error(`modifierCatalog.json ${res.status}`);
       const arr = (await res.json()) as ModifierEntry[];
       const map: Record<string, ModifierEntry> = {};

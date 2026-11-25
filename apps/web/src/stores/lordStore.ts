@@ -5,7 +5,7 @@
  * off the referenced row, so a player's lord is a pick over its race's three lords.
  */
 import { defineStore } from "pinia";
-import { assetUrl } from "../services/api";
+import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
 
 export interface LordEntry {
@@ -31,7 +31,7 @@ export const useLordStore = defineStore("lord", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("lordCatalog.json"));
+      const res = await fetch(await modAssetUrl("lordCatalog.json"));
       if (!res.ok) throw new Error(`lordCatalog.json ${res.status}`);
       const arr = (await res.json()) as LordEntry[];
       const map: Record<string, LordEntry> = {};

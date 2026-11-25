@@ -9,6 +9,7 @@
  */
 import { defineStore } from "pinia";
 import { assetUrl } from "../services/api";
+import { modAssetUrl } from "./modStore";
 import { ref } from "vue";
 
 export interface SpriteRect {
@@ -29,10 +30,14 @@ export const useSpriteStore = defineStore("sprite", () => {
 
   function manifest(): Promise<ManifestLite> {
     if (!manifestP) {
-      manifestP = fetch(assetUrl("manifest.json"), { cache: "force-cache" }).then((r) => {
-        if (!r.ok) throw new Error(`manifest.json ${r.status}`);
-        return r.json() as Promise<ManifestLite>;
-      });
+      // page metas below use the synchronous assetUrl: they are only fetched after this
+      // manifest promise has resolved, i.e. once the session's mod is known
+      manifestP = modAssetUrl("manifest.json")
+        .then((url) => fetch(url, { cache: "force-cache" }))
+        .then((r) => {
+          if (!r.ok) throw new Error(`manifest.json ${r.status}`);
+          return r.json() as Promise<ManifestLite>;
+        });
     }
     return manifestP;
   }

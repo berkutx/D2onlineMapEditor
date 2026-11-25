@@ -1,31 +1,21 @@
 /**
- * GET /api/assets/manifest -> the contents of public/assets/manifest.json.
+ * GET /api/assets/manifest -> the atlas manifest (manifest.json) of the default mod.
  *
- * The file is read fresh (and lightly cached by mtime) so a pipeline rebuild is
- * picked up without restarting the server. Raw bytes are passed through as JSON.
+ * The file is read fresh (and lightly cached by mtime, see ModContext.manifest) so a
+ * pipeline rebuild is picked up without restarting the server.
  */
 
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { REST } from "@d2/socket-contract";
-import { config } from "../config.js";
+import type { ModRegistry } from "../mods/modRegistry.js";
 
-const MANIFEST_PATH = join(config.ASSETS_DIR, "manifest.json");
-
-let cache: { mtimeMs: number; json: unknown } | null = null;
-
-export async function registerAssetRoutes(app: FastifyInstance): Promise<void> {
+export async function registerAssetRoutes(app: FastifyInstance, mods: ModRegistry): Promise<void> {
   app.get(REST.assetsManifest, async (_req, reply) => {
     try {
-      const st = await stat(MANIFEST_PATH);
-      if (!cache || cache.mtimeMs !== st.mtimeMs) {
-        const raw = await readFile(MANIFEST_PATH, "utf8");
-        cache = { mtimeMs: st.mtimeMs, json: JSON.parse(raw) };
-      }
+      const json = await mods.default().manifest();
       return reply
         .header("cache-control", "no-cache")
-        .send(cache.json);
+        .send(json);
     } catch {
       return reply
         .code(503)

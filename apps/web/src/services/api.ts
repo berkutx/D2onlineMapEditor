@@ -5,6 +5,7 @@
  * In dev these are same-origin relative URLs proxied to :3000 by Vite (see
  * vite.config.ts). In prod they are served by the same Fastify instance.
  */
+import { ref } from "vue";
 import { REST } from "@d2/socket-contract";
 import type {
   ScenarioEntry,
@@ -409,8 +410,28 @@ export async function saveProjectRemote(id: string, project: EditorProject): Pro
   });
 }
 
-/** Base URL the AssetStore prepends to every manifest-relative path. */
-export const ASSET_BASE_URL = `${BASE}/assets`;
+// --- mod asset URLs -----------------------------------------------------------------
+// Every file of a mod's data set (catalogs, icons, sprite sheets, the atlas manifest) is
+// addressed through this one resolver, so where a mod's files live is decided in one place.
 
-/** Build a URL for a file under the atlas/asset mount (catalogs, icons, sprite sheets). */
-export const assetUrl = (rel: string): string => `${ASSET_BASE_URL}/${rel.replace(/^\//, "")}`;
+/** Id of the implicit mod backed by the flat (pre-multi-mod) `/assets` layout. */
+export const DEFAULT_MOD_ID = "default";
+
+/** Root URL of a mod's asset files. The implicit default mod is the flat `/assets` mount. */
+export function modAssetBase(_modId: string): string {
+  return `${BASE}/assets`;
+}
+
+// A Vue ref, so templates/computeds that build asset URLs re-evaluate once a mod is active.
+const activeAssetBase = ref(modAssetBase(DEFAULT_MOD_ID));
+
+/** Point the resolver at a mod. Called by modStore.activate — not by components. */
+export function setActiveAssetMod(modId: string): void {
+  activeAssetBase.value = modAssetBase(modId);
+}
+
+/** Base URL of the ACTIVE mod's assets (what the AssetStore prepends to manifest paths). */
+export const assetBaseUrl = (): string => activeAssetBase.value;
+
+/** Build a URL for a file of the active mod (catalogs, icons, sprite sheets). */
+export const assetUrl = (rel: string): string => `${activeAssetBase.value}/${rel.replace(/^\//, "")}`;

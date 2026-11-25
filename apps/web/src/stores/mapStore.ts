@@ -5,7 +5,8 @@
  * and pointless (the renderer, not Vue, consumes its interior).
  *
  * Orchestrates the "Open map" flow:
- *   ensure assets loaded -> fetch MapDocument -> hand both to the canvas host.
+ *   fetch MapMeta -> activate the map's mod -> ensure assets loaded -> fetch MapDocument
+ *   -> hand both to the canvas host.
  * The actual `scene.buildScene` call lives in the canvas host, which watches
  * `currentMap` and reacts imperatively (keeping Pixi out of reactivity).
  */
@@ -15,6 +16,7 @@ import type { MapDocument } from "@d2/map-schema";
 import type { MapMeta, ScenarioEntry } from "@d2/socket-contract";
 import { fetchScenarios, fetchMapDocument, fetchMapMeta } from "../services/api";
 import { useAssetStore } from "./assetStore";
+import { useModStore, DEFAULT_MOD_ID } from "./modStore";
 
 export type MapLoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -61,13 +63,19 @@ export const useMapStore = defineStore("map", () => {
    */
   async function openMap(id: string): Promise<MapDocument> {
     const assets = useAssetStore();
+    const mods = useModStore();
     status.value = "loading";
     error.value = null;
     try {
+      // Meta FIRST: it names the mod the map belongs to, and nothing mod-specific (atlases,
+      // catalogs) may load before that is known. It also carries the server-authoritative
+      // preview policy, so a query-string flag can never turn an ordinary map read-only (or
+      // a preview editable).
+      const meta = await fetchMapMeta(id);
+      // every map belongs to the implicit default mod until maps carry their own
+      mods.activate(DEFAULT_MOD_ID);
       await assets.ensureLoaded();
-      // Meta carries the server-authoritative preview policy. Fetch it with the document so a
-      // query-string flag can never turn an ordinary map read-only (or a preview editable).
-      const [doc, meta] = await Promise.all([fetchMapDocument(id), fetchMapMeta(id)]);
+      const doc = await fetchMapDocument(id);
       currentScenarioId.value = id;
       currentMap.value = doc;
       currentMeta.value = meta;

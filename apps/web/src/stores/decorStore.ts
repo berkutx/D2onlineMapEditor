@@ -5,7 +5,7 @@
  * and a `thumb` rect so the palette can crop a thumbnail straight from the atlas pages.
  */
 import { defineStore } from "pinia";
-import { assetUrl } from "../services/api";
+import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
 
 export interface DecorThumb {
@@ -127,7 +127,7 @@ export const useDecorStore = defineStore("decor", () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await fetch(assetUrl("decorCatalog.json"));
+      const res = await fetch(await modAssetUrl("decorCatalog.json"));
       if (!res.ok) throw new Error(`decorCatalog.json ${res.status}`);
       catalog.value = (await res.json()) as Record<string, DecorEntry>;
       loaded.value = true;
