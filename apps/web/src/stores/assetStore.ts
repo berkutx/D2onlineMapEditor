@@ -33,8 +33,8 @@ export const useAssetStore = defineStore("assets", () => {
     error.value = null;
     try {
       // the manifest and the AssetStore's base URL both belong to the session's mod
-      await useModStore().whenReady();
-      const m = await fetchAssetManifest();
+      const modId = await useModStore().whenReady();
+      const m = await fetchAssetManifest(modId);
       await getAssetStore().load(m);
       manifest.value = m;
       status.value = "ready";

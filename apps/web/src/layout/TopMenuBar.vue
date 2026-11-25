@@ -26,9 +26,12 @@ import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
 import { useCollabStore } from "../stores/collabStore";
+import { useModStore } from "../stores/modStore";
 import { getScene } from "../canvas/sceneHolder";
+import MapModBadge from "./MapModBadge.vue";
 
 const mapStore = useMapStore();
+const modStore = useModStore();
 const viewStore = useViewStore();
 const editStore = useEditStore();
 const collabStore = useCollabStore();
@@ -336,9 +339,18 @@ async function resolveVoiceReturn(token: string): Promise<void> {
 // --- New Map -----------------------------------------------------------------
 const newMapVisible = ref(false);
 const newMapBusy = ref(false);
-const newMap = ref<{ size: number; fill: string; name: string; races: string[] }>(
+const newMap = ref<{ size: number; fill: string; name: string; races: string[]; modId?: string }>(
   { size: 72, fill: "default", name: "Новая карта", races: ["empire", "undead"] },
 );
+// a new map is made for the mod being worked on (else the server's default) — offered once
+// the dialog opens, when the mod list is certainly loaded
+watch(newMapVisible, (open) => {
+  if (!open) return;
+  const ids = modStore.openableMods.map((m) => m.id);
+  if (newMap.value.modId && ids.includes(newMap.value.modId)) return;
+  const preferred = [modStore.activeModId, modStore.defaultModId].find((id) => id && ids.includes(id));
+  newMap.value.modId = preferred ?? ids[0];
+});
 /** Playable races (the addRace port): each = player + capital + guardian + hero. */
 const raceOptions = [
   { value: "empire", label: "Империя" },
@@ -571,6 +583,7 @@ watch(
     <span class="bar-spacer" />
 
     <span v-if="liveMapName" class="map-title">{{ liveMapName }}</span>
+    <MapModBadge />
     <el-tag v-if="readOnly" size="small" type="warning" effect="dark" round>
       Только просмотр · {{ previewCountdown }}
     </el-tag>
@@ -627,6 +640,9 @@ watch(
       >
         <el-table-column prop="name" label="Название" min-width="200" />
         <el-table-column prop="campaign" label="Кампания" min-width="160" />
+        <el-table-column v-if="modStore.mods.length > 1" label="Мод" min-width="120">
+          <template #default="{ row }">{{ modStore.nameOf(row.mod) }}</template>
+        </el-table-column>
         <el-table-column label="Размер" width="90">
           <template #default="{ row }">{{ row.mapSize }}×{{ row.mapSize }}</template>
         </el-table-column>
@@ -653,6 +669,12 @@ watch(
       <el-form label-width="90px" label-position="left">
         <el-form-item label="Название">
           <el-input v-model="newMap.name" placeholder="Новая карта" />
+        </el-form-item>
+        <el-form-item v-if="modStore.openableMods.length > 1" label="Мод">
+          <el-select v-model="newMap.modId">
+            <el-option v-for="m in modStore.openableMods" :key="m.id" :label="m.name" :value="m.id" />
+          </el-select>
+          <div class="nm-hint">Юниты, предметы и графика карты берутся из этого мода.</div>
         </el-form-item>
         <el-form-item label="Размер">
           <el-select v-model="newMap.size">

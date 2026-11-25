@@ -10,6 +10,8 @@ import { REST } from "@d2/socket-contract";
 import type {
   ScenarioEntry,
   MapMeta,
+  ModInfo,
+  ModList,
   ValidationReport,
   Region,
   GenerateResult,
@@ -82,9 +84,55 @@ export function fetchMapMeta(id: string): Promise<MapMeta> {
   return getJson<MapMeta>(u(REST.mapMeta(id)));
 }
 
-/** GET /api/assets/manifest -> AssetManifest (fetched once, cached in the store) */
-export function fetchAssetManifest(): Promise<AssetManifest> {
-  return getJson<AssetManifest>(u(REST.assetsManifest));
+/** GET /api/assets/manifest[?mod=] -> the AssetManifest of a mod (fetched once, cached in the
+ *  store). Without a mod id the server answers with its default mod's manifest. */
+export function fetchAssetManifest(modId?: string): Promise<AssetManifest> {
+  const q = modId && modId !== DEFAULT_MOD_ID ? `?mod=${encodeURIComponent(modId)}` : "";
+  return getJson<AssetManifest>(u(REST.assetsManifest) + q);
+}
+
+/**
+ * GET /api/mods -> the mod data sets the server serves. A server that predates mods has no
+ * such route; it is then treated as serving the one implicit `default` mod over `/assets`.
+ */
+export async function fetchMods(retries = 4): Promise<ModList> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(u(REST.mods), { headers: { accept: "application/json", ...idHeaders() } });
+      if (res.status === 404) return LEGACY_MODS;
+      if (!res.ok) throw new Error(`GET ${REST.mods} failed: ${res.status}`);
+      const text = await res.text();
+      if (!text) throw new Error(`GET ${REST.mods}: empty response (backend restarting?)`);
+      return JSON.parse(text) as ModList;
+    } catch (e) {
+      // the same transient dev-proxy / restart blips getJson rides out
+      lastErr = e;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+/** PUT /api/maps/:id/mod -> MapMeta. Re-assign the mod of an uploaded map (its owner only);
+ *  `null` clears the choice so the mod is decided from the map's content again. */
+export async function setMapMod(id: string, modId: string | null): Promise<MapMeta> {
+  const res = await fetch(u(REST.mapMod(id)), {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...idHeaders() },
+    body: JSON.stringify({ modId }),
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j?.error) msg = j.error;
+    } catch {
+      /* keep the status */
+    }
+    throw new Error(msg);
+  }
+  return (await res.json()) as MapMeta;
 }
 
 /** POST /api/maps/:id/validate -> ValidationReport (apply the project's ops, validate, no bytes).
@@ -352,6 +400,8 @@ export async function createNewMap(opts: {
   name: string;
   /** playable races to add (addRace: player + capital + hero each); server-validated */
   races?: string[];
+  /** the mod the map is made for (default: the server's default mod) */
+  modId?: string;
 }): Promise<string> {
   return (await postJsonRetry<{ id: string }>(u(REST.mapNew), opts)).id;
 }
@@ -417,18 +467,33 @@ export async function saveProjectRemote(id: string, project: EditorProject): Pro
 /** Id of the implicit mod backed by the flat (pre-multi-mod) `/assets` layout. */
 export const DEFAULT_MOD_ID = "default";
 
-/** Root URL of a mod's asset files. The implicit default mod is the flat `/assets` mount. */
-export function modAssetBase(_modId: string): string {
-  return `${BASE}/assets`;
+/** The implicit mod of a server that has no mod store: everything lives flat under /assets. */
+const LEGACY_MOD: ModInfo = {
+  id: DEFAULT_MOD_ID,
+  name: DEFAULT_MOD_ID,
+  family: DEFAULT_MOD_ID,
+  familyOrder: 0,
+  status: "ready",
+  rev: "flat",
+  assetBase: "/assets",
+};
+const LEGACY_MODS: ModList = { defaultModId: DEFAULT_MOD_ID, mods: [LEGACY_MOD] };
+
+/** Absolute (deploy-base-prefixed) root URL of a mod's files; the server names the path. */
+export function modAssetBase(mod: Pick<ModInfo, "assetBase">): string {
+  return BASE + mod.assetBase;
 }
 
 // A Vue ref, so templates/computeds that build asset URLs re-evaluate once a mod is active.
-const activeAssetBase = ref(modAssetBase(DEFAULT_MOD_ID));
+const activeAssetBase = ref(modAssetBase(LEGACY_MOD));
 
 /** Point the resolver at a mod. Called by modStore.activate — not by components. */
-export function setActiveAssetMod(modId: string): void {
-  activeAssetBase.value = modAssetBase(modId);
+export function setActiveAssetMod(mod: Pick<ModInfo, "assetBase">): void {
+  activeAssetBase.value = modAssetBase(mod);
 }
+
+/** True while the active mod is the flat pre-multi-mod layout (plain, un-versioned names). */
+export const activeAssetsAreFlat = (): boolean => activeAssetBase.value === modAssetBase(LEGACY_MOD);
 
 /** Base URL of the ACTIVE mod's assets (what the AssetStore prepends to manifest paths). */
 export const assetBaseUrl = (): string => activeAssetBase.value;

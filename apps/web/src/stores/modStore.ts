@@ -1,6 +1,6 @@
 /**
- * The session's active MOD — the game data set (catalogs, sprites, scripts) every asset
- * URL and catalog load resolves against.
+ * The mods the server serves, and the session's ACTIVE mod — the game data set (catalogs,
+ * sprites, scripts) every asset URL and catalog load resolves against.
  *
  * The mod is a property of the map being opened, so it is only known once the map's meta
  * has arrived. Everything that fetches mod data therefore awaits {@link whenReady} first
@@ -9,11 +9,19 @@
  *
  * One mod per page session: the catalog stores and the Pixi AssetStore load once and never
  * unload, so a different mod is never swapped in underneath them. {@link activate} reports
- * a mismatch instead; the caller then has to start a fresh session for that map.
+ * a mismatch instead; the caller then starts a fresh session for that map (a page reload —
+ * see mapStore.openMap).
  */
 import { defineStore } from "pinia";
-import { ref } from "vue";
-import { DEFAULT_MOD_ID, assetUrl, setActiveAssetMod } from "../services/api";
+import { computed, ref } from "vue";
+import type { ModInfo, ModList } from "@d2/socket-contract";
+import {
+  DEFAULT_MOD_ID,
+  activeAssetsAreFlat,
+  assetUrl,
+  fetchMods,
+  setActiveAssetMod,
+} from "../services/api";
 
 export { DEFAULT_MOD_ID };
 
@@ -21,29 +29,67 @@ export { DEFAULT_MOD_ID };
  * URL of a file of the session's mod, resolved only once that mod is known. The loaders of
  * mod data (catalogs, the atlas manifest) use this instead of the synchronous `assetUrl`,
  * so a load kicked off at startup or in a component's setup waits for the map's mod.
+ *
+ * `flatBust` is a cache-busting version for the flat pre-multi-mod layout only, whose file
+ * names never change; a store mod's URLs already carry the mod's revision.
  */
-export async function modAssetUrl(rel: string): Promise<string> {
+export async function modAssetUrl(rel: string, flatBust?: string): Promise<string> {
   await useModStore().whenReady();
-  return assetUrl(rel);
+  const url = assetUrl(rel);
+  return flatBust && activeAssetsAreFlat() ? `${url}?v=${flatBust}` : url;
 }
 
 export const useModStore = defineStore("mod", () => {
+  /** Every mod the server serves (empty until loadMods resolves). */
+  const mods = ref<ModInfo[]>([]);
+  /** The mod the server uses when a map's own mod cannot be determined. */
+  const defaultModId = ref<string>(DEFAULT_MOD_ID);
   /** The active mod id, or null until the first map's mod is known. */
   const activeModId = ref<string | null>(null);
 
+  let listP: Promise<ModList> | null = null;
   let resolveReady!: (modId: string) => void;
   const ready = new Promise<string>((resolve) => {
     resolveReady = resolve;
   });
 
+  /** Fetch the server's mod list (once per session; concurrent callers share the request). */
+  function loadMods(): Promise<ModList> {
+    if (!listP) {
+      listP = fetchMods().then((list) => {
+        mods.value = list.mods;
+        defaultModId.value = list.defaultModId;
+        return list;
+      });
+      // a failed fetch must not be remembered: the next map open tries again
+      listP.catch(() => {
+        listP = null;
+      });
+    }
+    return listP;
+  }
+
+  const byId = (id: string | null | undefined): ModInfo | undefined =>
+    id ? mods.value.find((m) => m.id === id) : undefined;
+
+  /** Display name of a mod (its id when the mod is unknown to this server). */
+  const nameOf = (id: string | null | undefined): string => byId(id)?.name ?? id ?? "";
+
+  const activeMod = computed<ModInfo | undefined>(() => byId(activeModId.value));
+  /** Mods a map can be opened on (their graphics are built). */
+  const openableMods = computed<ModInfo[]>(() => mods.value.filter((m) => m.status === "ready"));
+
   /**
-   * Make `modId` the session's mod. Idempotent for the same id. Returns false when a
-   * DIFFERENT mod is already active — nothing is changed in that case.
+   * Make `modId` the session's mod (the list must be loaded). Idempotent for the same id.
+   * Returns false when a DIFFERENT mod is already active, or the mod is unknown — nothing is
+   * changed in that case.
    */
   function activate(modId: string): boolean {
     if (activeModId.value === modId) return true;
     if (activeModId.value !== null) return false;
-    setActiveAssetMod(modId);
+    const mod = byId(modId);
+    if (!mod) return false;
+    setActiveAssetMod(mod);
     activeModId.value = modId;
     resolveReady(modId);
     return true;
@@ -54,5 +100,5 @@ export const useModStore = defineStore("mod", () => {
     return ready;
   }
 
-  return { activeModId, activate, whenReady };
+  return { mods, defaultModId, activeModId, activeMod, openableMods, loadMods, nameOf, activate, whenReady };
 });

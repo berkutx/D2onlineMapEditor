@@ -19,12 +19,12 @@ interface Holder {
 
 const holder: Holder = { scene: null, assets: null };
 
-/** Get (lazily creating) the singleton AssetStore. Loaded once per session. The base URL is
- *  the ACTIVE mod's, captured at creation — so the first call must come after the session's
- *  mod is known (assetStore.ensureLoaded awaits it). */
+/** Get (lazily creating) the singleton AssetStore. Loaded once per session. Its base URL is
+ *  the ACTIVE mod's, asked for at every fetch — the instance itself may be created before
+ *  the session's mod is known (the canvas host exposes it as a debug handle at mount). */
 export function getAssetStore(): AssetStore {
   if (!holder.assets) {
-    holder.assets = new AssetStore({ baseUrl: assetBaseUrl() });
+    holder.assets = new AssetStore({ baseUrl: assetBaseUrl });
   }
   return holder.assets;
 }

@@ -23,8 +23,12 @@ import type {
 
 /** Optional override hooks so a host can control URL resolution / fetching. */
 export interface AssetStoreOptions {
-  /** Prefix prepended to every manifest-relative path (e.g. "/assets/"). */
-  baseUrl?: string;
+  /**
+   * Prefix prepended to every manifest-relative path (e.g. "/assets/"). A function is asked
+   * at every URL build, so a store created before its data set is known (the host may hand
+   * the instance out early) still fetches from the right place once loading starts.
+   */
+  baseUrl?: string | (() => string);
   /** Custom JSON fetcher (defaults to global `fetch`). Useful for tests/SSR. */
   fetchJson?: (url: string) => Promise<unknown>;
 }
@@ -85,7 +89,8 @@ export class AssetStore {
   }
 
   private url(path: string): string {
-    const base = this.opts.baseUrl ?? "";
+    const opt = this.opts.baseUrl;
+    const base = (typeof opt === "function" ? opt() : opt) ?? "";
     if (!base) return path;
     const sep = base.endsWith("/") || path.startsWith("/") ? "" : "/";
     return `${base}${sep}${path}`;

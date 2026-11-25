@@ -61,10 +61,10 @@ export const useModifierStore = defineStore("modifier", () => {
     loading.value = true;
     error.value = null;
     try {
-      // ?v cache-bust: the catalog is a fresh asset, and Cloudflare cached a 404 for the
-      // bare URL before it was uploaded — a versioned key dodges that stale negative cache
-      // and lets future catalog rebuilds invalidate cleanly (bump on content change).
-      const res = await fetch((await modAssetUrl("modifierCatalog.json")) + "?v=2");
+      // ?v cache-bust for the flat pre-multi-mod layout only (a mod's URL carries its revision):
+      // Cloudflare cached a 404 for the bare URL before the catalog was uploaded — a versioned
+      // key dodges that stale negative cache (bump on content change).
+      const res = await fetch(await modAssetUrl("modifierCatalog.json", "2"));
       if (!res.ok) throw new Error(`modifierCatalog.json ${res.status}`);
       const arr = (await res.json()) as ModifierEntry[];
       const map: Record<string, ModifierEntry> = {};
