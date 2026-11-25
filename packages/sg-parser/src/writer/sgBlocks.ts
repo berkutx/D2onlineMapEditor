@@ -35,8 +35,14 @@ export interface ScenarioBlock {
 export interface ScenarioBlocks {
   /** Everything before the first block frame (magic + version + preamble). */
   header: Uint8Array;
+  /** The scenario's OBJECTS — exactly what the header's OB0000 count counts. */
   blocks: ScenarioBlock[];
-  /** Any bytes after the last block's ENDOBJECT terminator (usually empty). */
+  /**
+   * Any bytes after the last object's ENDOBJECT terminator (usually empty). ATTACHMENTS live
+   * here: frames at the end of the file that carry no OBJ_ID (see FramedObject.id) — the map
+   * picture a mod's random-scenario generator appends. The game stops reading at the object
+   * count, so they are kept byte for byte and never counted.
+   */
   trailer: Uint8Array;
 }
 
@@ -45,6 +51,31 @@ function terminatorEnd(bytes: Uint8Array, fieldsEnd: number): number {
   let e = fieldsEnd + END.length;
   if (bytes[e] === 0) e += 1; // the NUL after ENDOBJECT
   return e;
+}
+
+/**
+ * How many of the leading frames are scenario OBJECTS: all of them, minus the frames at the
+ * end that have no OBJ_ID (attachments). A frame without an id BETWEEN objects is not an
+ * attachment (the game would choke on it) and stays counted, as does everything in a file
+ * where no frame has an id at all.
+ */
+function objectFrameCount(framed: readonly { id: string }[]): number {
+  let n = framed.length;
+  while (n > 0 && framed[n - 1]!.id === "") n--;
+  return n === 0 ? framed.length : n;
+}
+
+/**
+ * Offset where the object stream ends: just after the last scenario object's terminator.
+ * New blocks are inserted HERE — for an ordinary map that is the end of the file, for a map
+ * with attachments it is before them (appended after, the game would never reach the new
+ * blocks: it would read an attachment as an object first and refuse the map).
+ */
+export function objectStreamEnd(input: Uint8Array): number {
+  const framed = [...iterateObjects(new ByteBuffer(input))];
+  const objects = objectFrameCount(framed);
+  if (objects === framed.length) return input.length;
+  return terminatorEnd(input, framed[objects - 1]!.fieldsEnd);
 }
 
 /**
@@ -66,7 +97,8 @@ export function splitScenario(input: Uint8Array): ScenarioBlocks {
 
   const blocks: ScenarioBlock[] = [];
   let start = headerEnd;
-  for (const f of framed) {
+  // attachments (trailing frames without an OBJ_ID) are not objects: they stay in the trailer
+  for (const f of framed.slice(0, objectFrameCount(framed))) {
     const end = terminatorEnd(input, f.fieldsEnd);
     blocks.push({ typeName: f.typeName, id: f.id, bytes: input.slice(start, end) });
     start = end;
@@ -74,7 +106,7 @@ export function splitScenario(input: Uint8Array): ScenarioBlocks {
   return {
     header: input.slice(0, headerEnd),
     blocks,
-    trailer: input.slice(start), // bytes after the last terminator (normally none)
+    trailer: input.slice(start), // bytes after the last object's terminator (normally none)
   };
 }
 
@@ -94,7 +126,7 @@ const OB = "OB0000";
 /**
  * STEP 2 — patch the header's `OB0000` block-count int32 to `count` (returns a fresh header). The
  * count lives in the header before the first block frame (`<version>OB0000<int32 LE>`); the game
- * trusts it and refuses to load a map whose count ≠ the number of frames present. Mirrors the
+ * reads exactly that many objects and refuses a map where they are not all there. Mirrors the
  * reference's `header.data(m_blocks.count())`. A header with no OB0000 is returned unchanged.
  */
 export function patchBlockCount(header: Uint8Array, count: number): Uint8Array {

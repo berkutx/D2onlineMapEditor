@@ -154,8 +154,11 @@ export function validateMap(doc: MapDocument): ValidateResult {
  * Tier 3b — BYTE-level block integrity. Catches the exact defect classes that our
  * self-consistent parser/writer CANNOT see but that make the GAME editor refuse a map
  * (discovered via the ScenEdit gold check):
- *   1. the OB0000 header count must equal the number of block frames actually present
- *      (the game trusts it to know how many blocks to read);
+ *   1. the OB0000 header count must equal the number of OBJECT frames actually present
+ *      (the game trusts it to know how many blocks to read). An object frame has an OBJ_ID;
+ *      frames without one at the END of the file are attachments (a random scenario's map
+ *      picture) the game never reads, and are not counted. One of those BETWEEN objects is
+ *      an error: the game reads the objects in order and cannot get past it;
  *   2. every internal reference (the `0B 00 00 00`-prefixed 10-char ids inside block
  *      bodies: FOG_ID, SUBRACE, STACK, OWNER, INSIDE, ELEMENT, event ID_LOC/ID_STACK…)
  *      should point to an EXISTING block of this map. Dangling refs are WARNINGS, not
@@ -179,20 +182,35 @@ export function verifyBlockIntegrity(bytes: Uint8Array): ValidateResult {
   };
   const ascii = (s: string): number[] => [...s].map((c) => c.charCodeAt(0));
 
-  // 1) collect every block id (OBJ_ID right before BEGOBJECT) + count frames
+  // 1) collect every block id (OBJ_ID right before BEGOBJECT) + count the object frames
   const WHAT = ascii("WHAT");
   const BEG = ascii("BEGOBJECT\0");
+  const OBJ_ID = ascii("OBJ_ID");
   const ids = new Set<string>();
   let blockCount = 0;
+  let attachments = 0; // frames without an OBJ_ID seen so far
+  let buried = 0; // …of which an object frame came after
   let version = "";
   for (let i = indexOfSeq(WHAT, 0); i >= 0; i = indexOfSeq(WHAT, i + 4)) {
     const beg = indexOfSeq(BEG, i);
     if (beg < 0) break;
     // OBJ_ID + [0B 00 00 00] + id(10) + NUL sits immediately before BEGOBJECT
+    const oid = beg - 21;
+    const hasId = oid >= i && OBJ_ID.every((c, k) => buf[oid + k] === c);
+    if (!hasId) {
+      attachments++;
+      continue;
+    }
+    buried = attachments;
     const id = td.decode(buf.subarray(beg - 11, beg - 1));
     ids.add(id);
     if (!version) version = id.slice(0, 4);
     blockCount++;
+  }
+  if (buried > 0) {
+    errors.push(
+      `integrity: ${buried} block(s) without an OBJ_ID sit between the scenario's objects — the game reads the objects in order and will refuse to load this map`,
+    );
   }
 
   // OB0000 declared count

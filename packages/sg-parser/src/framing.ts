@@ -24,7 +24,13 @@ const AVC_SUFFIX = "@@";
 export interface FramedObject {
   /** Decl TypeName, e.g. "MidStack", "Capital", "ScenarioInfo". */
   typeName: string;
-  /** Compound uid as stored, e.g. "S143KC0001" (NUL-trimmed), or "" if absent. */
+  /**
+   * Compound uid as stored, e.g. "S143KC0001" (NUL-trimmed), or "" when the frame has no
+   * `OBJ_ID` of its own. Every scenario object has one; a frame without it is an ATTACHMENT
+   * some tool appended after the objects — the mod's random-scenario generator writes the
+   * map picture as `.?AVCMapImage` + `BASE64`. The game never reads it: it stops at the
+   * header's object count, which does not include it.
+   */
   id: string;
   /** Byte offset just AFTER `BEGOBJECT\0` (first field). */
   fieldsFrom: number;
@@ -41,8 +47,10 @@ export function* iterateObjects(buf: ByteBuffer): Generator<FramedObject> {
     const end = buf.indexOf(END, beg + BEG.length);
     if (end < 0) break;
 
-    const typeName = typeNameBefore(buf, beg);
-    const id = compoundIdBefore(buf, beg);
+    // the decl and the id are looked for in THIS frame's own head only (after the previous
+    // frame's ENDOBJECT): a frame without an OBJ_ID must not inherit its neighbour's id
+    const typeName = typeNameBefore(buf, beg, cursor);
+    const id = compoundIdBefore(buf, beg, cursor);
     // fields start after "BEGOBJECT\0"
     let fieldsFrom = beg + BEG.length;
     if (buf.bytes[fieldsFrom] === 0) fieldsFrom += 1;
@@ -52,20 +60,24 @@ export function* iterateObjects(buf: ByteBuffer): Generator<FramedObject> {
   }
 }
 
-/** Recover the `.?AVC<TypeName>@@` TypeName immediately preceding `beg`. */
-function typeNameBefore(buf: ByteBuffer, beg: number): string {
+/** Recover the `.?AVC<TypeName>@@` TypeName of the frame head `[from, beg)`. */
+function typeNameBefore(buf: ByteBuffer, beg: number, from: number): string {
   const avc = buf.lastIndexOf(AVC_PREFIX, beg);
-  if (avc < 0) return "";
+  if (avc < 0 || avc < from) return "";
   const nameStart = avc + AVC_PREFIX.length;
   const suffix = buf.indexOf(AVC_SUFFIX, nameStart);
-  if (suffix < 0 || suffix >= beg) return "";
-  return buf.asciiSlice(nameStart, suffix);
+  if (suffix >= 0 && suffix < beg) return buf.asciiSlice(nameStart, suffix);
+  // a decl written without the `@@` suffix (an attachment such as `.?AVCMapImage`): the name
+  // runs to its NUL
+  let nameEnd = nameStart;
+  while (nameEnd < beg && buf.bytes[nameEnd] !== 0) nameEnd++;
+  return buf.asciiSlice(nameStart, nameEnd);
 }
 
-/** Recover the compound id from the `OBJ_ID` field preceding `beg`. */
-function compoundIdBefore(buf: ByteBuffer, beg: number): string {
+/** Recover the compound id from the `OBJ_ID` field of the frame head `[from, beg)`. */
+function compoundIdBefore(buf: ByteBuffer, beg: number, from: number): string {
   const oid = buf.lastIndexOf("OBJ_ID", beg);
-  if (oid < 0) return "";
+  if (oid < 0 || oid < from) return "";
   let at = oid + "OBJ_ID".length;
   if (at + 4 > buf.length) return "";
   const len = buf.readInt32LE(at);

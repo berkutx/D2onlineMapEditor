@@ -224,6 +224,9 @@ function consume(buf: ByteBuffer, obj: FramedObject, acc: Accumulated): void {
       return;
     }
     default: {
+      // a frame without an OBJ_ID is an attachment (see FramedObject.id), not a map object:
+      // the writer keeps its bytes in the trailer, the model has nothing to say about it
+      if (!obj.id) return;
       const reader = SINGLE_READERS[obj.typeName];
       acc.objects.push(reader ? reader(buf, obj) : readGeneric(buf, obj));
       return;

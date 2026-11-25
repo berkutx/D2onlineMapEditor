@@ -12,6 +12,7 @@
 import { ByteBuffer, tagValueOffset } from "../bytebuffer.js";
 import { ByteWriter } from "./byteWriter.js";
 import { encodeCp1251 } from "./cp1251.js";
+import { objectStreamEnd } from "./sgBlocks.js";
 
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
 
@@ -1497,18 +1498,24 @@ export function appendBlocks(bytes: Uint8Array, frames: Uint8Array[]): Uint8Arra
   const objCountAt = obAt + "OB0000".length;
   const objCount = buf.readInt32LE(objCountAt);
 
+  // New blocks go at the end of the OBJECT stream. That is the end of the file — unless the
+  // map carries attachments after its objects (a random scenario's map picture): the game
+  // reads `count` objects in order, so a block appended after an attachment would never be
+  // reached, and the attachment would be read as an object.
+  const insertAt = objectStreamEnd(bytes);
   const extra = frames.reduce((a, f) => a + f.length, 0);
   const out = new Uint8Array(bytes.length + extra);
-  out.set(bytes, 0);
+  out.set(bytes.subarray(0, insertAt), 0);
+  let off = insertAt;
+  for (const f of frames) {
+    out.set(f, off);
+    off += f.length;
+  }
+  out.set(bytes.subarray(insertAt), off);
   new DataView(out.buffer, out.byteOffset, out.byteLength).setInt32(
     objCountAt,
     objCount + frames.length,
     true,
   );
-  let off = bytes.length;
-  for (const f of frames) {
-    out.set(f, off);
-    off += f.length;
-  }
   return out;
 }

@@ -11,6 +11,7 @@ export {
   joinScenario,
   rebuildScenario,
   patchBlockCount,
+  objectStreamEnd,
   type ScenarioBlock,
   type ScenarioBlocks,
 } from "./sgBlocks.js";
