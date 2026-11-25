@@ -288,8 +288,34 @@ class TestBuildModGenerators(TempDirCase):
         os.makedirs(os.path.join(self.tmp, "game", "Scripts"))
         cat = build_mod.build_scen_variables(os.path.join(self.tmp, "game"), os.path.join(self.tmp, "game", "Scripts"))
         self.assertEqual(cat["variables"], [])
-        self.assertEqual(cat["racePrefixes"], {})
         self.assertEqual(cat["groups"], [])
+        # ... and every curated rule is one this mod does NOT read: a map that sets one is
+        # warned about. Only what is needed to recognise a name is kept, and the race
+        # prefixes stay, because a rule may be spelled per race.
+        names = [u["name"] for u in cat["unsupported"]]
+        self.assertIn("MULTIPLE_BUILD_CAPITAL", names)
+        self.assertIn("TIER_0_CITY_GOLD_INCOME", names)
+        self.assertIn("PERK_LVL_", names)
+        for u in cat["unsupported"]:
+            self.assertLessEqual(set(u), {"name", "prefix", "scope", "source", "title"})
+        self.assertEqual(cat["racePrefixes"]["undead"], "HORDES_")
+
+    def test_a_rule_is_either_read_by_the_mod_or_listed_as_unsupported(self):
+        os.makedirs(os.path.join(self.tmp, "game", "Scripts"))
+        with open(self.path("game", "mss32.dll"), "wb") as fp:
+            fp.write(b"\x00MULTIPLE_BUILD_CAPITAL\x00")
+        game = os.path.join(self.tmp, "game")
+        cat = build_mod.build_scen_variables(game, os.path.join(game, "Scripts"))
+        read = set(v["name"] for v in cat["variables"])
+        unread = set(u["name"] for u in cat["unsupported"])
+        self.assertEqual(read, {"MULTIPLE_BUILD_CAPITAL"})
+        self.assertFalse(read & unread)
+        self.assertIn("START_LEADER_CHANGE_MODE", unread)
+
+    def test_profile_names_the_maze_tower_only_when_the_mod_has_it(self):
+        g = os.path.join(self.tmp, "Globals")
+        write_globals(g)  # its GLmark has no G000MG0149
+        self.assertNotIn("mazeTower", build_mod.build_profile(g))
 
     def test_series_are_written_out_and_matched_by_their_format_string(self):
         os.makedirs(os.path.join(self.tmp, "game", "Scripts"))

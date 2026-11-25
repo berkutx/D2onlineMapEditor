@@ -69,11 +69,24 @@ export function raceFacts(profile: ModProfile): Record<string, RaceFacts> {
   return out;
 }
 
+/**
+ * Grace id -> race category (LRace id) for EVERY race of a profile, neutrals included — what
+ * tells which diplomacy row a player belongs to. Ids are upper-case.
+ */
+export function raceCategories(profile: ModProfile): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of profile.races) out[r.raceId.toUpperCase()] = r.raceType;
+  return out;
+}
+
 export const ModProfile = z.object({
   schemaVersion: z.literal(MOD_SCHEMA_VERSION),
   races: z.array(ModRace).default([]),
   /** The item a new capital starts with (addRace's constant). */
   capitalItem: GlobalId.optional(),
+  /** The 1x1 stone tower the game's own maze maps put at wall junctions, when the mod's
+   *  GLmark has it — what a generated maze uses for its corners. */
+  mazeTower: GlobalId.optional(),
   /** Number of GUnits rows — the unit level cap is 65536 / unitCount (reference editor rule). */
   unitCount: z.number().int().nonnegative().optional(),
 });

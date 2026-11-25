@@ -36,7 +36,7 @@ import {
   type ModDetection,
   type RaceFacts,
 } from "@d2/mod-catalog";
-import type { ModInfo } from "@d2/socket-contract";
+import type { ModInfo, ModPassport } from "@d2/socket-contract";
 import { config } from "../config.js";
 
 /** Id of the implicit mod backed by the flat (pre-multi-mod) assets layout. */
@@ -133,6 +133,25 @@ export class ModContext {
     };
   }
 
+  /** The list row plus where the mod's data came from (GET /api/mods/:id). */
+  get passport(): ModPassport {
+    if (this.source.kind === "flat") return this.info;
+    const m = this.source.manifest;
+    const source = Object.fromEntries(
+      Object.entries(m.source).filter((e): e is [string, string] => typeof e[1] === "string"),
+    );
+    return {
+      ...this.info,
+      pipelineVersion: m.pipelineVersion,
+      engineContentFingerprint: m.engineContentFingerprint,
+      source: Object.keys(source).length > 0 ? source : undefined,
+      capabilities: m.capabilities,
+      parent: m.parent,
+      sourceUrl: m.sourceUrl,
+      fileCount: Object.keys(m.files).length,
+    };
+  }
+
   /**
    * Absolute path of one of the mod's files by its LOGICAL name ("unitCatalog.json",
    * "itemicons/g000ig0001.png"), or undefined when the mod has no such file. For the flat
@@ -178,6 +197,16 @@ export class ModContext {
    * landmark footprints (for the generation occupancy guard), all from decorCatalog.json
    * (read once). Throws when the catalog is missing — generation cannot run without it.
    */
+  /** The mod's maze tower landmark (profile.json), or undefined: the stock id is then used. */
+  private async mazeTower(): Promise<string | undefined> {
+    if (this.source.kind === "flat" || !this.source.manifest.files["profile.json"]) return undefined;
+    try {
+      return ModProfile.parse(await this.readJson("profile.json")).mazeTower;
+    } catch {
+      return undefined; // an unreadable profile is reported where the faction data is loaded
+    }
+  }
+
   async catalogSets(): Promise<CatalogSets> {
     if (!this.catalogs) {
       const json = (await this.readJson("decorCatalog.json")) as never;
@@ -186,7 +215,11 @@ export class ModContext {
         ? (json as { id: string; cx?: number; cy?: number }[])
         : Object.values(json as Record<string, { id: string; cx?: number; cy?: number }>);
       for (const e of entries) landmarkSizes[e.id.toUpperCase()] = [e.cx ?? 1, e.cy ?? 1];
-      this.catalogs = { walls: buildWallSet(json), decor: buildDecorSet(json), landmarkSizes };
+      this.catalogs = {
+        walls: buildWallSet(json, { preferredTower: await this.mazeTower() }),
+        decor: buildDecorSet(json),
+        landmarkSizes,
+      };
     }
     return this.catalogs;
   }

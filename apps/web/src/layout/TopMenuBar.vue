@@ -32,6 +32,12 @@ import MapModBadge from "./MapModBadge.vue";
 
 const mapStore = useMapStore();
 const modStore = useModStore();
+
+/** Why a map of the list is flagged: its report (attached only to maps that do not fit). */
+function misfitHint(compat: { issues: { severity: string; message: string }[] }): string {
+  const errors = compat.issues.filter((i) => i.severity === "error");
+  return `Карта ссылается на то, чего в этом моде нет (${errors.length} таблиц). Игра этого мода её не загрузит.`;
+}
 const viewStore = useViewStore();
 const editStore = useEditStore();
 const collabStore = useCollabStore();
@@ -641,7 +647,18 @@ watch(
         <el-table-column prop="name" label="Название" min-width="200" />
         <el-table-column prop="campaign" label="Кампания" min-width="160" />
         <el-table-column v-if="modStore.mods.length > 1" label="Мод" min-width="120">
-          <template #default="{ row }">{{ modStore.nameOf(row.mod) }}</template>
+          <template #default="{ row }">
+            {{ modStore.nameOf(row.mod) }}
+            <!-- the server attaches a report only to maps that do not fit their mod -->
+            <el-tooltip
+              v-if="row.compat && !row.compat.playable"
+              placement="top"
+              :show-after="200"
+              :content="misfitHint(row.compat)"
+            >
+              <span class="mod-misfit" aria-label="не подходит моду">⚠</span>
+            </el-tooltip>
+          </template>
         </el-table-column>
         <el-table-column label="Размер" width="90">
           <template #default="{ row }">{{ row.mapSize }}×{{ row.mapSize }}</template>
@@ -840,6 +857,11 @@ watch(
 .nm-races :deep(.el-checkbox) {
   height: 24px;
   margin-right: 0;
+}
+.mod-misfit {
+  margin-left: 4px;
+  color: var(--el-color-warning);
+  cursor: help;
 }
 .nm-hint {
   font-size: 11px;

@@ -121,7 +121,12 @@ interface WallCatalogEntry {
  */
 export function buildWallSet(
   catalog: Record<string, WallCatalogEntry> | WallCatalogEntry[],
+  opts: { preferredTower?: string } = {},
 ): WallSet {
+  // The round stone "Башня" the game's OWN maze maps place at junctions (verified on a
+  // shipped maze scenario). Its id is a fact of the mod's tables: the mod's profile names it
+  // (`mazeTower`); the stock id is the fallback for a catalog that comes without a profile.
+  const preferredTower = (opts.preferredTower ?? "G000MG0149").toUpperCase();
   const arr = Array.isArray(catalog) ? catalog : Object.values(catalog);
   const byKey = new Map<string, WallStyle>();
   for (const e of arr) {
@@ -142,10 +147,10 @@ export function buildWallSet(
   for (const e of arr) {
     if (e.shape !== "tower" || (e.cx ?? 1) !== 1 || (e.cy ?? 1) !== 1) continue;
     const fac = e.id.slice(0, 4);
-    // Prefer G000MG0149 — the round stone "Башня" the game's OWN maze maps place at junctions
-    // (verified on a shipped maze scenario); fall back to any neutral turret of the faction.
+    // Prefer the mod's maze tower; fall back to any neutral turret of the faction.
     const score =
-      (e.id === "G000MG0149" ? 2 : 0) + (e.tone === "neutral" || (e.tags ?? []).includes("neutral") ? 1 : 0);
+      (e.id.toUpperCase() === preferredTower ? 2 : 0) +
+      (e.tone === "neutral" || (e.tags ?? []).includes("neutral") ? 1 : 0);
     const cur = towerByFaction.get(fac);
     if (!cur || score > cur.score) towerByFaction.set(fac, { id: e.id, score });
   }

@@ -34,6 +34,61 @@ export const ModList = z.object({
 });
 export type ModList = z.infer<typeof ModList>;
 
+/** A capability of a mod or a map, as the online engine's capability matrix states one. */
+export const CapabilityInfo = z.object({
+  id: z.string(),
+  status: z.enum(["verified", "experimental", "missing"]),
+  reason: z.string().optional(),
+  evidence: z.array(z.string()).optional(),
+});
+export type CapabilityInfo = z.infer<typeof CapabilityInfo>;
+
+/**
+ * Everything the server knows about ONE mod (GET REST.mod): the list row plus where its data
+ * came from. For the implicit `default` mod only the list row's fields are present.
+ */
+export const ModPassport = ModInfo.extend({
+  /** Version of the asset pipeline (and its image encoder) that produced the files. */
+  pipelineVersion: z.string().optional(),
+  /**
+   * Fingerprint of the whole install as the online engine's content pack computes it — what
+   * an engine profile of the same installation is found by. Absent until it is recorded.
+   */
+  engineContentFingerprint: z.string().optional(),
+  /** Hashes of the source the mod was built from (`exe`, `mss32`, `globals`, `scripts`). */
+  source: z.record(z.string(), z.string()).optional(),
+  /** What a map may rely on in this mod beyond the classic format. */
+  capabilities: z.array(CapabilityInfo).optional(),
+  /** A derived mod's base: unchanged files are the parent's. */
+  parent: z.object({ modId: z.string(), contentFingerprint: z.string() }).optional(),
+  /** Where this data set can be downloaded from, when it came from a catalog of builds. */
+  sourceUrl: z.string().optional(),
+  /** How many files (logical names) the mod consists of. */
+  fileCount: z.number().int().optional(),
+});
+export type ModPassport = z.infer<typeof ModPassport>;
+
+/**
+ * How a map fits its mod, in the shape of the online engine SDK's compatibility report (the
+ * same as `CompatibilityReport` of @d2/mod-catalog), so editor and engine reports are
+ * interchangeable. Codes: `UNRESOLVED_GLOBAL_ID` (error: an id field points at a row the mod
+ * lacks), `UNRESOLVED_SCRIPT_ID` (warning: script text quotes such an id).
+ */
+export const CompatReport = z.object({
+  /** No error-level issue: the game of this mod will load the map. */
+  playable: z.boolean(),
+  issues: z.array(
+    z.object({
+      code: z.string(),
+      severity: z.enum(["error", "warning"]),
+      message: z.string(),
+      capability: z.string().optional(),
+    }),
+  ),
+  capabilities: z.array(CapabilityInfo),
+});
+export type CompatReport = z.infer<typeof CompatReport>;
+
 /**
  * How a map's mod was decided:
  *  - `install`  the map lives in a mod's own scenario folder;
@@ -81,6 +136,9 @@ export const ScenarioEntry = z.object({
   owner: z.string().optional(),
   /** Id of the map's mod (v0.3, additive) — see MapMeta.mod for how it was decided. */
   mod: z.string().optional(),
+  /** Present only when the map does NOT fit its mod cleanly (some issue was found); a
+   *  listing can flag such maps without opening them. Absent = nothing to report. */
+  compat: CompatReport.optional(),
 });
 export type ScenarioEntry = z.infer<typeof ScenarioEntry>;
 
@@ -99,6 +157,9 @@ export const MapMeta = z.object({
   /** The mod the map is opened against (v0.3, additive). Absent from servers that predate
    *  mods; a client then uses the `default` mod. */
   mod: MapMod.optional(),
+  /** How the map fits that mod, as a report (present when the mod has id tables to check
+   *  against — always, except for the implicit `default` mod). */
+  compat: CompatReport.optional(),
   /** The caller may change the map's mod (PUT REST.mapMod): it is their own uploaded map. */
   modEditable: z.boolean().optional(),
 });
@@ -214,13 +275,14 @@ export const REST = {
   mapGenerate: (id: string) => `/api/maps/${id}/generate`, // POST { project, recipeId, region, seed? } -> { ops, report }
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
   mods: "/api/mods", // GET -> ModList (the mod data sets this server serves)
+  mod: (id: string) => `/api/mods/${id}`, // GET -> ModPassport (ETag = the mod's rev) | 404
   mapMod: (id: string) => `/api/maps/${id}/mod`, // PUT { modId } -> MapMeta (owner of an uploaded map only)
   mapNew: "/api/maps/new", // POST { size, fill?, name?, modId? } -> { id } (from-scratch blank terrain)
   mapClone: (id: string) => `/api/maps/${id}/clone`, // POST -> { id } (byte-exact personal copy, owned by x-client-id)
   mapProject: (id: string) => `/api/maps/${id}/project`, // GET -> saved EditorProject (per x-client-id) | 404; PUT EditorProject -> {ok}
   assetsManifest: "/api/assets/manifest", // GET [?mod=<id>] -> AssetManifest (default mod when omitted)
   upload: "/api/maps/upload", // POST .sg -> { id }
-  previewUpload: "/api/maps/preview", // public POST .sg -> one-hour read-only preview
+  previewUpload: "/api/maps/preview", // public POST .sg [?mod=<id>] -> one-hour read-only preview (mod: what the map was made for)
   voiceHandoff: (id: string) => `/api/maps/${id}/voice/handoff`,
   voiceReturnPreview: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/preview`,
   voiceReturnApply: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/apply`,

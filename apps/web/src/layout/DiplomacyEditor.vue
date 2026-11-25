@@ -1,13 +1,17 @@
 <script setup lang="ts">
 /** MidDiplomacy pairs use race categories; edits replace only packed meter bits. */
-import { computed } from "vue";
+import { computed, onMounted } from "vue";
 import { ElSelect, ElOption, ElInputNumber, ElEmpty } from "element-plus";
 import { diplomacyRaceCategory, readDiplomacyRelation } from "@d2/map-edit";
 import { useEventStore } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
+import { useModStore } from "../stores/modStore";
 
 const store = useEventStore();
 const edit = useEditStore();
+// which diplomacy row a player belongs to is a fact of the map's mod (its Grace table)
+const mods = useModStore();
+onMounted(() => void mods.loadProfile());
 const players = computed(() => edit.liveDoc?.players ?? []);
 interface Pair {
   key: string; aName: string; bName: string; aColor?: string; bColor?: string;
@@ -17,7 +21,8 @@ const pairs = computed<Pair[]>(() => {
   const ps = players.value, out: Pair[] = [];
   for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
     const a = ps[i]!, b = ps[j]!;
-    const race1 = diplomacyRaceCategory(a), race2 = diplomacyRaceCategory(b);
+    const cats = mods.raceCategoryById;
+    const race1 = diplomacyRaceCategory(a, cats), race2 = diplomacyRaceCategory(b, cats);
     const state = race1 === null || race2 === null ? null : readDiplomacyRelation(store.diplomacy, race1, race2);
     out.push({ key: a.id + ':' + b.id, aName: a.name || `Игрок ${a.playerNo}`, bName: b.name || `Игрок ${b.playerNo}`,
       aColor: a.color, bColor: b.color, race1, race2, relation: state?.current ?? 0, alwaysWar: state?.alwaysWar ?? false });

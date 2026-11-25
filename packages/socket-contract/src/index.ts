@@ -1,5 +1,5 @@
 export { ScenarioEntry, MapMeta, ValidationReport, REST, Region, GenerateRequest, CopilotRequest } from "./rest.js";
-export { ModInfo, ModList, MapMod, MapModSource } from "./rest.js";
+export { ModInfo, ModList, ModPassport, CompatReport, MapMod, MapModSource } from "./rest.js";
 export type { GenerateResult, CopilotResult, GenDebug } from "./rest.js";
 export { EditOp, OpAck, ScenarioInfoPatch } from "./ops.js";
 export { UserPresence } from "./presence.js";

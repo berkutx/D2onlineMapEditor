@@ -15,7 +15,7 @@
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import type { ModInfo, ModList } from "@d2/socket-contract";
-import { ModProfile, ScenVariableCatalog, raceFacts, type RaceFacts } from "@d2/mod-catalog";
+import { ModProfile, ScenVariableCatalog, raceCategories, raceFacts, type RaceFacts } from "@d2/mod-catalog";
 import {
   DEFAULT_MOD_ID,
   activeAssetsAreFlat,
@@ -107,6 +107,11 @@ export const useModStore = defineStore("mod", () => {
    * an operation then leaves the faction data out and the reference table applies.
    */
   const raceFactsByKey = shallowRef<Record<string, RaceFacts>>({});
+  /**
+   * Grace id -> race category for every race of the active mod (neutrals included); empty
+   * without a profile. Diplomacy rows are keyed by category, players carry a Grace id.
+   */
+  const raceCategoryById = shallowRef<Record<string, number>>({});
   let profileP: Promise<Record<string, RaceFacts>> | null = null;
 
   /** Load the active mod's profile (once per session; waits for the mod to be known). */
@@ -114,7 +119,12 @@ export const useModStore = defineStore("mod", () => {
     if (!profileP) {
       profileP = modAssetUrl("profile.json")
         .then((url) => fetch(url))
-        .then(async (res) => (res.ok ? raceFacts(ModProfile.parse(await res.json())) : {}))
+        .then(async (res) => {
+          if (!res.ok) return {};
+          const profile = ModProfile.parse(await res.json());
+          raceCategoryById.value = raceCategories(profile);
+          return raceFacts(profile);
+        })
         .catch(() => ({}))
         .then((facts) => {
           raceFactsByKey.value = facts;
@@ -147,7 +157,7 @@ export const useModStore = defineStore("mod", () => {
   }
 
   return {
-    mods, defaultModId, activeModId, activeMod, openableMods, raceFactsByKey, scenVariables,
+    mods, defaultModId, activeModId, activeMod, openableMods, raceFactsByKey, raceCategoryById, scenVariables,
     loadMods, loadProfile, loadScenVariables, nameOf, activate, whenReady,
   };
 });

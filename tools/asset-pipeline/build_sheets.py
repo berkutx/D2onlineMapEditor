@@ -118,12 +118,48 @@ def _encode_rgba(canvas):
     return buf.getvalue()
 
 
+def merge_palettes(raws):
+    """Palette frames with DIFFERENT palettes, re-indexed onto one common palette — or None
+    when together they show more than 255 colours.
+
+    A unit's eight facings come from eight source records, each with its own palette, but
+    they are the same creature in the same colours. Lossless: every visible pixel keeps its
+    exact colour; index 0 is the (transparent) colour key, the rest are the colours in use,
+    sorted, so the result does not depend on the order of the frames."""
+    packed = []
+    for r in raws:
+        rgb = r.palette[r.idx].astype(np.uint32)
+        packed.append(((rgb[..., 0] << 16) | (rgb[..., 1] << 8) | rgb[..., 2], ~r.transp[r.idx]))
+    colours = np.unique(np.concatenate([colour[opaque] for colour, opaque in packed]))
+    if len(colours) > 255:
+        return None
+    palette = np.zeros((256, 3), np.uint8)
+    palette[0] = (255, 0, 255)
+    palette[1:1 + len(colours), 0] = (colours >> 16) & 255
+    palette[1:1 + len(colours), 1] = (colours >> 8) & 255
+    palette[1:1 + len(colours), 2] = colours & 255
+    transp = np.zeros(256, bool)
+    transp[0] = True
+    out = []
+    for r, (colour, opaque) in zip(raws, packed):
+        idx = np.zeros(colour.shape, np.uint8)
+        idx[opaque] = (np.searchsorted(colours, colour[opaque]) + 1).astype(np.uint8)
+        out.append(RawFrame(r.key, idx=idx, palette=palette, transp=transp))
+    return out
+
+
 def make_sheets(sheet_id, raws):
     """Trim and pack frames into sheet(s): normally one; more only when they overflow
     MAX_SHEET. Deterministic: the same frames always give the same bytes."""
     if not raws:
         return []
     first = raws[0]
+    if all(r.idx is not None for r in raws) and not all(
+            np.array_equal(r.palette, first.palette) and np.array_equal(r.transp, first.transp) for r in raws):
+        merged = merge_palettes(raws)
+        if merged is not None:
+            raws = merged
+            first = raws[0]
     indexed = (
         all(r.idx is not None for r in raws)
         and all(np.array_equal(r.palette, first.palette) and np.array_equal(r.transp, first.transp) for r in raws)
@@ -266,10 +302,18 @@ def archive_sheets(path, bundle):
     return sheets, animations
 
 
-def unit_sheets(path):
-    """IsoUnit: each unit's idle frame per facing (frame 0 of STOP0..7) as a lazy sheet
-    "unit/<IMPL>", and the boats as one eager sheet "iso-unit". IsoUnit is 150+ MB of
-    animations, so only these exact keys are resolved — never the whole archive."""
+def unit_sheets(path, only=None):
+    """IsoUnit: each unit's idle frame per facing (frame 0 of STOP0..7) as a lazy sheet of
+    its own, "unit/<IMPL>STOP<n>", and the boats as one eager sheet "iso-unit". IsoUnit is
+    150+ MB of animations, so only these exact keys are resolved — never the whole archive.
+
+    One sheet per FACING, not per unit: the eight facings are eight source records with
+    eight palettes (256..1900 colours per unit together — measured), so only a facing on its
+    own stays a palette image; and a stack on a map faces one way, so a map fetches one
+    small sheet per stack instead of all eight facings.
+
+    ``only`` (a collection of impl ids, upper-case) limits the unit sheets to those units —
+    for a test that looks at a sample."""
     with open(path, "rb") as fp:
         raw = fp.read()
     stop_keys = sorted(set(m.group(0).decode("latin1")
@@ -303,8 +347,12 @@ def unit_sheets(path):
     for key in stop_keys:
         by_impl.setdefault(key.split("STOP")[0], []).append(key)
     for impl in sorted(by_impl):
-        frames = [f for f in (first_frame(k) for k in by_impl[impl]) if f is not None]
-        lazy.extend(make_sheets("unit/" + impl.upper(), frames))
+        if only is not None and impl.upper() not in only:
+            continue
+        for key in by_impl[impl]:
+            frame = first_frame(key)
+            if frame is not None:
+                lazy.extend(make_sheets("unit/" + key.upper(), [frame]))
     return eager, lazy
 
 

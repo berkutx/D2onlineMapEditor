@@ -150,6 +150,116 @@
             "additionalProperties": false
           },
           "default": []
+        },
+        "unsupported": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "prefix": {
+                "type": "boolean",
+                "default": false
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "global",
+                  "perRace"
+                ],
+                "default": "global"
+              },
+              "raceMode": {
+                "type": "string",
+                "enum": [
+                  "override",
+                  "add"
+                ],
+                "default": "override"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "flag",
+                  "number"
+                ],
+                "default": "number"
+              },
+              "absentValue": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": 0
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "mss32",
+                  "lua"
+                ]
+              },
+              "origin": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "presets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "label"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "group": {
+                "type": "string"
+              },
+              "companions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "name",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
         }
       },
       "required": [

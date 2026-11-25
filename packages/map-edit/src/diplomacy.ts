@@ -45,8 +45,16 @@ const RACE_CATEGORIES = new Map<string, number>([
   ["G000RR0004", 4], ...RACE_KEYS.map(key => [RACES[key].raceId, RACES[key].raceType] as [string, number]),
 ]);
 /** PlayerInfo.race is a Grace record index, not the diplomacy category.
- * Reuse the editor's explicit supported-faction table; unknown records stay unknown.
+ *
+ * `categories` is the map's own mod's table (Grace id -> race category, from the mod's
+ * profile). Without one — a deployment with no mod data — the editor's reference table of
+ * the stock factions is used. Unknown records stay unknown.
  */
-export function diplomacyRaceCategory(player: Pick<PlayerInfo, "raceId">): number | null {
-  return RACE_CATEGORIES.get(player.raceId?.toUpperCase() ?? "") ?? null;
+export function diplomacyRaceCategory(
+  player: Pick<PlayerInfo, "raceId">,
+  categories?: Readonly<Record<string, number>>,
+): number | null {
+  const id = player.raceId?.toUpperCase() ?? "";
+  if (categories && Object.keys(categories).length > 0) return categories[id] ?? null;
+  return RACE_CATEGORIES.get(id) ?? null;
 }

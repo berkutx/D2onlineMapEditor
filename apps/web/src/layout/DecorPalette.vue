@@ -159,7 +159,7 @@ const variantIndex = computed(() => {
             :class="{ sel: v.id === decorId }"
             :title="v.desc_en"
             @click="pickVariant(v.id)"
-            @mouseenter="showPreview($event, v.thumb, v.desc_en || selectedGroup.label)"
+            @mouseenter="showPreview($event, v.sprite ?? v.thumb, v.desc_en || selectedGroup.label)"
             @mouseleave="hidePreview()"
           >
             <DecorThumb :thumb="v.thumb" :size="40" />
@@ -181,7 +181,7 @@ const variantIndex = computed(() => {
           :class="{ sel: selectedGroup?.key === g.key }"
           :title="`${g.label} · ${g.cx}×${g.cy}`"
           @click="pickGroup(g)"
-          @mouseenter="showPreview($event, g.rep.thumb, g.label)"
+          @mouseenter="showPreview($event, g.rep.sprite ?? g.rep.thumb, g.label)"
           @mouseleave="hidePreview()"
         >
           <div class="dp-card-thumb">
@@ -203,7 +203,7 @@ const variantIndex = computed(() => {
             class="dp-card sm"
             :title="`${g.label} · ${g.cx}×${g.cy}`"
             @click="pickGroup(g)"
-            @mouseenter="showPreview($event, g.rep.thumb, g.label)"
+            @mouseenter="showPreview($event, g.rep.sprite ?? g.rep.thumb, g.label)"
             @mouseleave="hidePreview()"
           >
             <div class="dp-card-thumb">

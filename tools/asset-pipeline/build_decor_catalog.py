@@ -167,6 +167,57 @@ def tone_from_color(s):
     return "neutral"
 
 
+#: Longest side of a palette thumbnail. The palette draws cells of 22..64 px; a bigger sprite
+#: is scaled down to this once, here, instead of in every browser on every repaint.
+THUMB_SIZE = 64
+
+
+def write_thumb_sheets(cat, page_img, out_dir):
+    """One contact sheet with a thumbnail of every catalog entry (``decorThumbs.png``; a
+    numbered second page only if 2048x2048 overflows).
+
+    A palette shows hundreds of decorations at once. Cropping each from its own sprite
+    sheet would be one image request per decoration; this is one image for the whole
+    palette. Each entry keeps both places: ``thumb`` (its cell here, at most THUMB_SIZE on
+    the long side) and ``sprite`` (the full picture on its own sheet, for the zoomed preview).
+    """
+    from fflib import packer
+
+    cells = {}
+    for key in sorted(cat):
+        t = cat[key]["thumb"]
+        a = page_img(t["page"])[t["y"]:t["y"] + t["h"], t["x"]:t["x"] + t["w"]]
+        scale = min(1.0, float(THUMB_SIZE) / max(t["w"], t["h"]))
+        if scale < 1.0:
+            size = (max(1, int(round(t["w"] * scale))), max(1, int(round(t["h"] * scale))))
+            # premultiplied alpha: the colour of a transparent pixel (the key colour) must not
+            # leak into the edge of a scaled-down sprite
+            im = Image.fromarray(np.ascontiguousarray(a), "RGBA").convert("RGBa")
+            a = np.asarray(im.resize(size, Image.LANCZOS).convert("RGBA"))
+        a = np.array(a)  # a private, writable copy
+        a[a[..., 3] == 0] = 0
+        cells[key] = a
+
+    placements, _sizes = packer.pack(
+        [(key, cells[key].shape[1], cells[key].shape[0]) for key in sorted(cells)], max_size=2048)
+    pages = {}
+    for p in placements:
+        pages.setdefault(p.page, []).append(p)
+    for n, page in enumerate(sorted(pages)):
+        placed = pages[page]
+        name = "decorThumbs.png" if len(pages) == 1 else "decorThumbs-%d.png" % n
+        w = max(p.x + p.w for p in placed)
+        h = max(p.y + p.h for p in placed)
+        canvas = np.zeros((h, w, 4), np.uint8)
+        for p in placed:
+            canvas[p.y:p.y + p.h, p.x:p.x + p.w] = cells[p.key]
+            entry = cat[p.key]
+            entry["sprite"] = entry["thumb"]
+            entry["thumb"] = {"page": name, "x": p.x, "y": p.y, "w": p.w, "h": p.h}
+        Image.fromarray(canvas, "RGBA").save(os.path.join(out_dir, name), compress_level=9)
+    return len(pages)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Build public/assets/decorCatalog.json")
     ap.add_argument("--game", required=True, help="path to the Game directory")
@@ -308,6 +359,8 @@ def main(argv=None):
               "iso": {"orient": "none", "slope": slope}, "conf": "med",
               "desc_en": MNT_EN.get(tone, "Mountain"), "desc_ru": MNT_RU.get(tone, "Гора"),
               "tags": sorted(set(["mountain", tone])), "thumb": floc[k]})
+
+    write_thumb_sheets(cat, page_img, A)
 
     out_path = os.path.join(A, "decorCatalog.json")
     json.dump(cat, open(out_path, "w", encoding="utf-8"), ensure_ascii=False, indent=0)

@@ -72,6 +72,13 @@ export const ScenVariableCatalog = z.object({
   racePrefixes: z.record(z.string(), z.string()).default({}),
   groups: z.array(ScenVariableGroup).default([]),
   variables: z.array(ScenVariableDef).default([]),
+  /**
+   * Rules that exist elsewhere — another toolset build, another mod's script — but that THIS
+   * mod does not read. A map that sets one of them expects an effect it will not get here;
+   * that, and not every variable the mod has no opinion about (most are the map's own event
+   * counters), is what is worth a warning. Only name / prefix / scope / title are kept.
+   */
+  unsupported: z.array(ScenVariableDef).default([]),
 });
 export type ScenVariableCatalog = z.infer<typeof ScenVariableCatalog>;
 
@@ -190,6 +197,34 @@ export function setRule<T extends ScenVariableValue>(
     }
   }
   return { variables: out, blocked: false };
+}
+
+/** A map variable that names a rule its mod does not read ({@link unsupportedVariables}). */
+export interface UnsupportedVariable {
+  name: string;
+  value: number;
+  /** The rule as the catalog knows it from elsewhere (title, scope). */
+  def: ScenVariableDef;
+}
+
+/**
+ * The variables of a map that set a rule this mod does NOT read (the catalog's `unsupported`
+ * list, race-prefixed forms and name prefixes included). A name the mod does read is never
+ * reported, whatever else it resembles.
+ */
+export function unsupportedVariables(
+  catalog: ScenVariableCatalog,
+  variables: readonly ScenVariableValue[],
+): UnsupportedVariable[] {
+  if (catalog.unsupported.length === 0) return [];
+  const elsewhere: ScenVariableCatalog = { ...catalog, variables: catalog.unsupported };
+  const out: UnsupportedVariable[] = [];
+  for (const v of variables) {
+    if (findScenVariable(catalog, v.name)) continue;
+    const def = findScenVariable(elsewhere, v.name);
+    if (def) out.push({ name: v.name, value: v.value, def });
+  }
+  return out;
 }
 
 /**

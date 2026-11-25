@@ -13,12 +13,14 @@ import { z } from "zod";
 import { Capability, ModId } from "./manifest.js";
 import type { ModStatus } from "./manifest.js";
 import type { GlobalIdRefs, IdSets } from "./ids.js";
+import { unsupportedVariables } from "./scenVariables.js";
+import type { ScenVariableCatalog, ScenVariableValue } from "./scenVariables.js";
 
 /** An id field of the map points at a row the mod's tables do not have. Severity: error. */
 export const UNRESOLVED_GLOBAL_ID = "UNRESOLVED_GLOBAL_ID";
 /** Script text embedded in the map quotes an id the mod does not define. Severity: warning. */
 export const UNRESOLVED_SCRIPT_ID = "UNRESOLVED_SCRIPT_ID";
-/** A scenario variable the mod gives no meaning to. Severity: warning. */
+/** A scenario variable that sets a rule the mod does not read. Severity: warning. */
 export const UNKNOWN_SCEN_VARIABLE = "UNKNOWN_SCEN_VARIABLE";
 /** The map needs a capability the target does not provide. Severity: error. */
 export const UNSUPPORTED_CAPABILITY = "UNSUPPORTED_CAPABILITY";
@@ -130,6 +132,22 @@ function issuesOf(code: string, severity: "error" | "warning", where: string, by
       message: `${ids.length} ${table} id(s) ${where} are not defined by this mod: ${sample}${more}`,
     };
   });
+}
+
+/**
+ * One `UNKNOWN_SCEN_VARIABLE` warning per map variable that sets a rule the mod does not read
+ * (see {@link unsupportedVariables}) — the part of a compatibility report that comes from the
+ * map's scenario variables rather than from its ids.
+ */
+export function variableIssues(
+  catalog: ScenVariableCatalog,
+  variables: readonly ScenVariableValue[],
+): CompatibilityIssue[] {
+  return unsupportedVariables(catalog, variables).map((u) => ({
+    code: UNKNOWN_SCEN_VARIABLE,
+    severity: "warning" as const,
+    message: `variable ${u.name} = ${u.value} sets a rule this mod does not read${u.def.title ? ` (${u.def.title})` : ""}`,
+  }));
 }
 
 /** Index a mod's id sets for lookup. Build once per mod, reuse for every map. */

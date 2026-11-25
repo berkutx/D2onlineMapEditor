@@ -1,6 +1,7 @@
 /**
  * Mod routes.
  *  GET /api/mods                         -> ModList (the mod data sets this server serves)
+ *  GET /api/mods/:modId                  -> ModPassport (one mod and where its data came from)
  *  GET /assets/mods/:modId/:rev/<name>   -> one file of a mod, by its LOGICAL name
  *
  * A mod's files live in the content-addressed store (blobs/<xx>/<sha256>.<ext>); its
@@ -33,6 +34,19 @@ export async function registerModRoutes(app: FastifyInstance, mods: ModRegistry)
       mods: mods.list().map((m) => m.info),
     };
     return reply.header("cache-control", "no-cache").send(list);
+  });
+
+  // One mod's passport. It changes exactly when the mod is rebuilt, which is what `rev`
+  // says, so `rev` is the ETag: a client revalidates for free until then.
+  app.get<{ Params: { modId: string } }>(REST.mod(":modId"), async (req, reply) => {
+    mods.refresh();
+    const { modId } = req.params;
+    if (!mods.has(modId)) return reply.code(404).send({ error: `unknown mod '${modId}'` });
+    const mod = mods.get(modId);
+    const etag = `"${mod.rev}"`;
+    reply.header("cache-control", "no-cache").header("etag", etag);
+    if (req.headers["if-none-match"] === etag) return reply.code(304).send();
+    return reply.send(mod.passport);
   });
 
   app.get<{ Params: { modId: string; rev: string; "*": string } }>(

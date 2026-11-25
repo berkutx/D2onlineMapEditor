@@ -99,11 +99,32 @@ class TestMakeSheets(unittest.TestCase):
             self.assertTrue(same_picture(frame_rgba(sheet, pixels, entry), by_key[entry[0]].to_rgba()))
         self.assertEqual(len(sheet.frames), 40)
 
-    def test_frames_with_different_palettes_fall_back_to_rgba(self):
-        other = palette(MAGENTA, (1, 2, 3), (4, 5, 6))
-        a = indexed("A", [[1, 2]], self.pal)
-        b = indexed("B", [[1, 2]], other)
+    def test_frames_with_different_palettes_share_one_when_their_colours_fit(self):
+        # a unit's facings: separate source records, separate palettes, the same few colours
+        other = palette(MAGENTA, (1, 2, 3), (10, 20, 30), (4, 5, 6))
+        a = indexed("A", [[1, 2, 0]], self.pal)
+        b = indexed("B", [[1, 2, 3]], other)
         (sheet,) = build_sheets.make_sheets("t/mixed", [a, b])
+        self.assertEqual(sheet.mode, "P")
+        pixels = decode(sheet)
+        for entry in sheet.frames:
+            raw = a if entry[0] == "A" else b
+            self.assertTrue(same_picture(frame_rgba(sheet, pixels, entry), raw.to_rgba()))
+        # the order the frames come in does not change the bytes
+        (again,) = build_sheets.make_sheets("t/mixed", [b, a])
+        self.assertEqual(again.png, sheet.png)
+        # black is a colour like any other here, not the key
+        black = indexed("C", [[3, 1]], palette(MAGENTA, (0, 0, 0), (9, 9, 9), (0, 0, 0)))
+        (two,) = build_sheets.make_sheets("t/black", [a, black])
+        entry = [e for e in two.frames if e[0] == "C"][0]
+        self.assertEqual(frame_rgba(two, decode(two), entry)[0, 0].tolist(), [0, 0, 0, 255])
+
+    def test_too_many_colours_for_one_palette_fall_back_to_rgba(self):
+        def ramp(key, base):
+            pal = palette(MAGENTA, *[(base, i, 255 - i) for i in range(200)])
+            return indexed(key, [list(range(1, 201))], pal)
+        a, b = ramp("A", 10), ramp("B", 20)  # 200 + 200 distinct colours
+        (sheet,) = build_sheets.make_sheets("t/wide", [a, b])
         self.assertEqual(sheet.mode, "RGBA")
         pixels = decode(sheet)
         for entry in sheet.frames:
@@ -276,6 +297,51 @@ class TestAgainstTheEditorDecoder(unittest.TestCase):
 
     def test_iso_anim(self):
         self.check_archive("IsoAnim.ff", "iso-anim")
+
+
+@unittest.skipUnless(GAME, "needs a game install (D2_GAME_DIR or game-dir.local)")
+class TestUnitsAgainstTheEditorDecoder(unittest.TestCase):
+    """Unit sheets (the idle frame of each facing, a palette sheet each) against pipeline.py's
+    decoder.
+
+    The old decoder re-reads a unit's whole animation for one frame, so comparing all ~350
+    units takes many minutes: a spread-out sample runs by default, D2_FULL=1 runs them all."""
+
+    def test_idle_frames_and_boats(self):
+        import re
+        import decode_resource
+
+        path = extract_ff.find_archive(GAME, "IsoUnit.ff")
+        if not path:
+            self.skipTest("IsoUnit.ff not in this install")
+        with open(path, "rb") as fp:
+            raw = fp.read()
+        pattern = re.compile(b"G[0-9A-Za-z]{3}UU[0-9]{4}STOP[0-7]")
+        impls = sorted(set(m.group(0)[:10].decode("latin1").upper() for m in pattern.finditer(raw)))
+        del raw
+        sample = impls if os.environ.get("D2_FULL") else impls[::14]
+        eager, lazy = build_sheets.unit_sheets(path, only=set(sample))
+        # one sheet per facing, and it stays a palette image
+        self.assertGreaterEqual(len(lazy), len(sample))
+        self.assertEqual(set(len(s.frames) for s in lazy), {1})
+        self.assertEqual(set(s.mode for s in lazy), {"P"})
+        self.assertEqual(set(s.id.split("STOP")[0] for s in lazy), set("unit/" + i for i in sample))
+        where = {}
+        for s in eager + lazy:
+            pixels = decode(s)
+            for entry in s.frames:
+                where[entry[0]] = (pixels, entry)
+
+        keys = sorted(where)
+        compared = 0
+        for old in decode_resource.decode_keys(path, keys):
+            want = np.zeros((old.src_h, old.src_w, 4), np.uint8)
+            want[old.trim_y:old.trim_y + old.h, old.trim_x:old.trim_x + old.w] = old.rgba
+            pixels, entry = where[old.key]
+            self.assertTrue(same_picture(frame_rgba(None, pixels, entry), want), "%s differs" % old.key)
+            compared += 1
+        self.assertEqual(compared, len(keys))
+        self.assertGreater(compared, 100)
 
 
 if __name__ == "__main__":

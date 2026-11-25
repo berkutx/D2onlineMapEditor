@@ -200,3 +200,20 @@ describe("detectMod", () => {
     expect(a[0]).toBe("nazar-legacy");
   });
 });
+
+describe("raceCategories", () => {
+  it("maps every race of a profile — neutrals too — from its Grace id to its category", async () => {
+    const { ModProfile, raceCategories } = await import("../src/index");
+    const profile = ModProfile.parse({
+      schemaVersion: 1,
+      mazeTower: "G000MG0149",
+      races: [
+        { key: "empire", raceId: "G000RR0000", raceType: 0, name: "Империя", playable: true },
+        { key: "clans", raceId: "G000RR0001", raceType: 3, name: "Кланы", playable: true },
+        { key: "neutral", raceId: "G000RR0004", raceType: 4, name: "Нейтралы", playable: false },
+      ],
+    });
+    expect(raceCategories(profile)).toEqual({ G000RR0000: 0, G000RR0001: 3, G000RR0004: 4 });
+    expect(profile.mazeTower).toBe("G000MG0149");
+  });
+});

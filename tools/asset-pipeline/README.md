@@ -55,7 +55,8 @@ The editor can serve several mods side by side. `build_mod.py` builds the data o
 python tools/asset-pipeline/build_mod.py \
     --game "C:/Games/SomeMod" --mod-id some-mod --name "Some Mod" \
     --family some --family-order 1 --store public/assets \
-    [--ingest-atlases <dir of an existing pipeline.py output>] [--default] [--dry-run]
+    [--graphics | --ingest-atlases <dir of an existing pipeline.py output>] [--default] [--dry-run]
+    [--engine-fingerprint <sha256>] [--source-url <url>]
 ```
 
 - `--game` is the directory holding `Globals` / `Imgs` / `Scripts` (for an original install
@@ -67,8 +68,15 @@ python tools/asset-pipeline/build_mod.py \
   already live in the store's own folder come in as hard links (no extra disk); atlases from
   another folder are copied, because a hard link would share bytes with a file somebody
   else may rewrite. Without graphics the mod is registered as `data-only`.
+- `--graphics` builds the sprites from the game's own archives (see below) — the normal way.
 - `--dry-run` builds everything, prints sizes and how much is already in the store, and
   leaves the store untouched.
+- `--engine-fingerprint` records, as `engineContentFingerprint`, the `contentFingerprint`
+  the online engine's content pipeline reports for the same install (it covers the whole
+  installation and is computed by that pipeline, not here). It is what an engine profile
+  of this installation is found by when a map is handed over for a play test.
+- `--source-url` records where the data set can be downloaded from (`sourceUrl`, also in
+  `mods/index.json`) — the slot a catalog of ready builds fills in.
 
 Per mod it writes the catalogs and icon sets the editor already used (same builders, same
 output) plus:
@@ -78,7 +86,7 @@ output) plus:
 | `ids.json` | id columns of GUnits, GItem, GSpells, GLmark, Gmodif, GLord, Grace, Gbuild | detecting the mod of a map; "this map references ids the mod lacks" |
 | `profile.json` | Grace, GLord, GUnits, Lrace, Lterrain | blank maps and new players (guardian, leader, lord, hit points) |
 | `dictionaries.json` | every `L*.dbf` | pickers and groups of the mod editor |
-| `scenVariables.json` | names found in `mss32.dll` and read by the mod's Lua, described in `data/scen_variables.json` | the map-restrictions panel |
+| `scenVariables.json` | names found in `mss32.dll` and read by the mod's Lua, described in `data/scen_variables.json`; plus `unsupported` — the described rules this mod does NOT read | the map-restrictions panel, and its warning about variables that expect an effect this mod will not give |
 | `settings.json` | numbers and flags of `Scripts/settings.lua` | value limits |
 | `dbfSchema.json` | header of every Globals table | which columns this mod has |
 | `modscripts/**` | `Scripts/modifiers/**.lua` | the modifier inspector |
@@ -92,10 +100,14 @@ output against the JSON Schemas in `packages/mod-catalog/gen/`.
 
 - **One sheet per source image record** of `IsoTerrn / IsoStill / IsoCmon / City / IsoAnim`
   (a record already holds what belongs together: one landmark, one animation, one forest
-  set), one per unit for the idle frames of `IsoUnit`, and the shared terrain tile atlases.
+  set), one per FACING of a unit for the idle frames of `IsoUnit`, and the shared terrain
+  tile atlases.
 - Frames are assembled from the record's parts exactly as `GameResource` does, but **stay in
   palette indices**: a sheet is a palette PNG whose colour-key entries are transparent
-  (`tRNS`). Only frames that do not share one palette (a unit's eight facings) are RGBA.
+  (`tRNS`). Frames from several records share a sheet only when their colours fit one
+  palette (`merge_palettes`, lossless); otherwise the sheet is RGBA. A unit's eight facings
+  never fit (8 records, 256–1900 colours together), which is why each facing is a sheet of
+  its own — and a stack faces one way, so a map fetches one small sheet per stack.
 - A sheet depends on nothing but its record and the shader, so **the same record in two mods
   gives the same bytes** — one blob in the store, one cached copy in a browser.
 - Frame rectangles are in the manifest's own `frames` table (**AssetManifest 0.2**); a sheet
@@ -105,10 +117,18 @@ output against the JSON Schemas in `packages/mod-catalog/gen/`.
   the first archive that defines it; a later one is kept as `<archive>:<KEY>`, and each
   archive's animations are resolved through its own keys.
 
-For the reference install this is 1 406 sheets / 38 MB instead of 239 MB of atlas pages
-(animations: 9 MB instead of 82 MB); a map downloads about 10 MB instead of 39 MB.
+For the reference install this is 3 828 sheets / 33 MB instead of 239 MB of atlas pages
+(animations: 9 MB instead of 82 MB).
 `tests/test_sheets.py` rebuilds every frame from the sheets and compares it, pixel for pixel,
-with `GameResource.get_frames` (needs a game install; skipped without one).
+with `GameResource.get_frames` (needs a game install; skipped without one). The unit sheets
+are compared on a spread-out sample by default — the old decoder re-reads a whole animation
+per frame — and in full with `D2_FULL=1`.
+
+The decoration catalog built with the graphics also writes **`decorThumbs.png`**, one
+contact sheet with a thumbnail (at most 64 px) of every catalog entry: the palette shows
+hundreds of decorations at once, and this is one image instead of one request each. An
+entry keeps both places — `thumb` (its cell on the contact sheet) and `sprite` (the full
+picture on its own sheet, for the zoomed preview).
 
 `--ingest-atlases <dir>` is the older way: it takes in the atlas pages of an existing
 `pipeline.py` output (AssetManifest 0.1), which the editor still reads.

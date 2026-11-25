@@ -13,7 +13,7 @@ export {
 } from "./manifest.js";
 export { GlobalId, TableCode, ID_TABLES, IdSets, tableOf } from "./ids.js";
 export type { KnownTableCode, GlobalIdRefs } from "./ids.js";
-export { ModRace, ModProfile, raceFacts } from "./profile.js";
+export { ModRace, ModProfile, raceFacts, raceCategories } from "./profile.js";
 export type { RaceFacts } from "./profile.js";
 export {
   ScenVariablePreset,
@@ -25,8 +25,9 @@ export {
   readVariable,
   writeVariable,
   setRule,
+  unsupportedVariables,
 } from "./scenVariables.js";
-export type { ScenVariableValue, ScenVariableForm, RuleChange } from "./scenVariables.js";
+export type { ScenVariableValue, ScenVariableForm, RuleChange, UnsupportedVariable } from "./scenVariables.js";
 export {
   UNRESOLVED_GLOBAL_ID,
   UNRESOLVED_SCRIPT_ID,
@@ -39,5 +40,6 @@ export {
   indexIdSets,
   scoreCompatibility,
   detectMod,
+  variableIssues,
 } from "./compat.js";
 export type { ModCandidateInput, IdIndex } from "./compat.js";

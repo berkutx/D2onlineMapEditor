@@ -94,6 +94,8 @@ FINGERPRINT_ARCHIVES = [
 RACE_KEYS = {"HU": "empire", "DW": "clans", "HE": "legions", "UN": "undead", "EL": "elves", "NE": "neutral"}
 #: The item a new capital starts with (toolsqt D2MapEditor::addRace), when the mod has it.
 CAPITAL_ITEM = "G000IG0006"
+#: The round 1x1 stone tower ("Башня") the game's own maze maps place at wall junctions.
+MAZE_TOWER = "G000MG0149"
 #: What the editor's own code still assumes about races, whatever the mod (its reference
 #: RACES table, packages/sg-parser createBlankMap.ts): race key -> (RACE_ID, RACE_TYPE,
 #: guardian, first leader, category-0 lord, capital terrain). Hit points come from the
@@ -285,6 +287,11 @@ def build_profile(globals_dir):
     profile = {"schemaVersion": SCHEMA_VERSION, "races": races, "unitCount": unit_count}
     if CAPITAL_ITEM in items:
         profile["capitalItem"] = CAPITAL_ITEM
+    # the 1x1 stone tower the game's own maze maps put at wall junctions, if this mod has it
+    for r in dbf.read_dbf(dbf.find_table(globals_dir, "GLmark.dbf")):
+        if (dbf.ascii_(r["LMARK_ID"]).upper() == MAZE_TOWER
+                and dbf.int_(r["CX"], 1) == 1 and dbf.int_(r["CY"], 1) == 1):
+            profile["mazeTower"] = MAZE_TOWER
     return profile
 
 
@@ -370,6 +377,9 @@ def build_scen_variables(game, scripts_dir):
     lua = scan_lua_variables(scripts_dir)
 
     variables = []
+    # Rules the curated list knows but THIS mod does not read (another toolset build, another
+    # mod's script): a map that sets one expects an effect it will not get here.
+    unsupported = []
     described = set()
     for c in expand_curated(curated["variables"]):
         # 'probe' is for this function only: what to look for in the dll when the toolset
@@ -380,9 +390,11 @@ def build_scen_variables(game, scripts_dir):
             # the toolset build of THIS mod has to know the name; the format string of the
             # per-race form ("{:s}NAME") contains it too, so one search covers both
             if c.get("probe", c["name"]).encode("ascii") not in dll:
+                unsupported.append(entry)
                 continue
         else:
             if key not in lua:
+                unsupported.append(entry)
                 continue
             entry["origin"] = lua[key]
         described.add(key)
@@ -395,11 +407,17 @@ def build_scen_variables(game, scripts_dir):
             entry["prefix"] = True
         variables.append(entry)
     used_groups = set(v["group"] for v in variables if v.get("group"))
+    # an unsupported entry only has to be recognised, not edited: name, how it is spelled
+    # per race, and what to call it
+    unsupported = [dict((k, e[k]) for k in ("name", "prefix", "scope", "source", "title") if k in e)
+                   for e in unsupported]
+    per_race = any(v.get("scope") == "perRace" for v in variables + unsupported)
     return {
         "schemaVersion": SCHEMA_VERSION,
-        "racePrefixes": curated["racePrefixes"] if any(v["source"] == "mss32" for v in variables) else {},
+        "racePrefixes": curated["racePrefixes"] if per_race else {},
         "groups": [g for g in curated.get("groups", []) if g["id"] in used_groups],
         "variables": variables,
+        "unsupported": unsupported,
     }
 
 
@@ -555,12 +573,19 @@ def main(argv=None):
     ap.add_argument("--ingest-atlases", default=None, metavar="DIR",
                     help="instead of --graphics: take in an existing pipeline.py output (manifest.json + pages)")
     ap.add_argument("--default", action="store_true", help="make this the store's default mod")
+    ap.add_argument("--engine-fingerprint", default=None, metavar="SHA256",
+                    help="contentFingerprint the online engine's content pipeline reports for this "
+                         "install (recorded as engineContentFingerprint; it is not computed here)")
+    ap.add_argument("--source-url", default=None, metavar="URL",
+                    help="where this data set can be downloaded from (for a catalog of ready builds)")
     ap.add_argument("--dry-run", action="store_true",
                     help="build and report sizes, but leave the store untouched")
     args = ap.parse_args(argv)
 
     if not MOD_ID_RE.match(args.mod_id):
         ap.error("--mod-id must be a lowercase slug ([a-z0-9-], up to 40 chars)")
+    if args.engine_fingerprint and not re.match(r"^[0-9a-f]{64}$", args.engine_fingerprint):
+        ap.error("--engine-fingerprint must be 64 lowercase hex characters")
     if args.graphics and args.ingest_atlases:
         ap.error("--graphics and --ingest-atlases are two ways to the same thing; give one")
     game = os.path.abspath(args.game)
@@ -694,6 +719,10 @@ def main(argv=None):
         "capabilities": [],
         "files": {k: files[k] for k in sorted(files)},
     }
+    if args.engine_fingerprint:
+        mod["engineContentFingerprint"] = args.engine_fingerprint
+    if args.source_url:
+        mod["sourceUrl"] = args.source_url
     validate(mod, "mod-manifest.schema.json", "ModManifest")
 
     report = dbf.REPORT
@@ -725,7 +754,8 @@ def main(argv=None):
 
     write_atomic(os.path.join(store_root, "mods", args.mod_id, "mod.json"), dump_json(mod))
     index = load_index(store_root)
-    row = {k: mod[k] for k in ("id", "name", "family", "familyOrder", "status", "contentFingerprint")}
+    row = {k: mod[k] for k in ("id", "name", "family", "familyOrder", "status", "contentFingerprint", "sourceUrl")
+           if k in mod}
     index["mods"] = sorted([m for m in index.get("mods", []) if m.get("id") != mod["id"]] + [row],
                            key=lambda m: (m["family"], m["familyOrder"], m["id"]))
     if args.default or not index.get("defaultModId"):

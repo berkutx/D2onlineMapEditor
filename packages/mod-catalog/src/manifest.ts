@@ -68,6 +68,12 @@ export const ModSummary = z.object({
    * converts). Two builds of the same install share it; any data change alters it.
    */
   contentFingerprint: Sha256,
+  /**
+   * Where this data set can be downloaded from — set on a mod that came from (or is offered
+   * in) a catalog of ready builds, so a listing can fetch or update it. A locally built mod
+   * has none.
+   */
+  sourceUrl: z.string().url().optional(),
 });
 export type ModSummary = z.infer<typeof ModSummary>;
 
@@ -121,6 +127,6 @@ export type ModManifest = z.infer<typeof ModManifest>;
 
 /** The index row of a manifest (the fields the two share). */
 export function summaryOf(manifest: ModManifest): ModSummary {
-  const { id, name, family, familyOrder, status, contentFingerprint } = manifest;
-  return { id, name, family, familyOrder, status, contentFingerprint };
+  const { id, name, family, familyOrder, status, contentFingerprint, sourceUrl } = manifest;
+  return { id, name, family, familyOrder, status, contentFingerprint, ...(sourceUrl ? { sourceUrl } : {}) };
 }

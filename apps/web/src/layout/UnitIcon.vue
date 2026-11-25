@@ -5,7 +5,7 @@
  * coloured by subrace when the unit ships no face asset (~half the roster has none).
  */
 import { ref, computed, watch } from "vue";
-import { assetUrl } from "../services/api";
+import { activeAssetsAreFlat, assetUrl } from "../services/api";
 
 const props = withDefaults(
   defineProps<{ id?: string | null; level?: number; subraceId?: number; size?: number }>(),
@@ -15,10 +15,15 @@ const props = withDefaults(
 const failed = ref(false);
 watch(() => props.id, () => { failed.value = false; });
 
-// ?v bump busts the stale Cloudflare/browser cache after uniticons were regenerated (FACEB fix);
-// the filenames are stable (unit id), so a version query is the cache key. Bump on any regen.
-const ICON_VER = 2;
-const src = computed(() => (props.id ? assetUrl(`uniticons/${props.id.toLowerCase()}.png?v=${ICON_VER}`) : ""));
+// A mod of the store carries its revision in every URL, so a rebuilt icon is a new URL by
+// itself. Only the flat pre-store layout has stable file names: there a version query is the
+// cache key (bump on any regeneration of the icons — the FACEB fix was v2).
+const FLAT_ICON_VER = 2;
+const src = computed(() => {
+  if (!props.id) return "";
+  const url = assetUrl(`uniticons/${props.id.toLowerCase()}.png`);
+  return activeAssetsAreFlat() ? `${url}?v=${FLAT_ICON_VER}` : url;
+});
 const box = computed(() => ({ width: `${props.size}px`, height: `${props.size}px` }));
 </script>
 

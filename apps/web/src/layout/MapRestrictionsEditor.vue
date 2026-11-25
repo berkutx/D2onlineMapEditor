@@ -9,8 +9,8 @@
 import { computed, onMounted, reactive } from "vue";
 import { ElSelect, ElOption, ElInputNumber, ElSwitch, ElEmpty, ElScrollbar, ElTag, ElButton, ElMessage } from "element-plus";
 import {
-  readVariable, setRule, variableForms, writeVariable,
-  type ScenVariableDef, type ScenVariableForm, type ScenVariableGroup,
+  readVariable, setRule, unsupportedVariables, variableForms, writeVariable,
+  type ScenVariableDef, type ScenVariableForm, type ScenVariableGroup, type UnsupportedVariable,
 } from "@d2/mod-catalog";
 import type { ScenarioVariable } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
@@ -195,6 +195,17 @@ function setPlain(name: string, value: number): void {
   if (out !== variables.value) store.setVariables(out as ScenarioVariable[]);
 }
 
+/**
+ * Variables of the map that set a rule THIS mod does not read (another toolset build's, or
+ * another mod's script): the map expects an effect it will not get. Only those are worth a
+ * warning — a variable the mod merely has no opinion about is usually an event counter.
+ */
+const foreign = computed<UnsupportedVariable[]>(() =>
+  catalog.value ? unsupportedVariables(catalog.value, variables.value) : [],
+);
+const foreignReader = (u: UnsupportedVariable): string =>
+  u.def.source === "mss32" ? "другая сборка mss32" : "скрипт другого мода";
+
 /** "3 из 5" — how many of a rule's state variables the map has. */
 const companionsPresent = (def: ScenVariableDef): number =>
   (def.companions ?? []).filter((c) => valueOf(c) !== null).length;
@@ -207,7 +218,7 @@ const sourceLabel = (def: ScenVariableDef): string =>
   <div class="mr-editor">
     <el-scrollbar class="mr-list">
       <el-empty
-        v-if="!catalog || (!fixedDefs.length && !prefixDefs.length)"
+        v-if="!catalog || (!fixedDefs.length && !prefixDefs.length && !foreign.length)"
         description="Для мода этой карты не собран список ограничений"
         :image-size="60"
       />
@@ -219,6 +230,18 @@ const sourceLabel = (def: ScenVariableDef): string =>
           Потолки уровней юнитов, заклинаний, лидеров и городов — на вкладке
           <el-button link type="primary" size="small" @click="store.navigate({ tab: 'settings' })">Настройки</el-button>.
         </p>
+
+        <div v-if="foreign.length" class="mr-card d2-card mr-warn" role="alert">
+          <div class="mr-title">Мод «{{ mods.activeMod?.name ?? mods.activeModId }}» не читает эти переменные карты</div>
+          <div class="mr-desc">
+            Они задают правила, которые в этом моде не подействуют: карта, скорее всего, сделана для другого мода
+            или другой сборки. Значения остаются в карте как есть.
+          </div>
+          <div v-for="u in foreign" :key="u.name" class="mr-row">
+            <span class="mr-var mr-var-wide">{{ u.name }} = {{ u.value }}</span>
+            <span class="mr-foreign">{{ u.def.title || "правило" }} — читает {{ foreignReader(u) }}</span>
+          </div>
+        </div>
 
         <!-- one rule per card -->
         <div v-for="def in singleDefs" :key="def.name" class="mr-card d2-card">
@@ -369,6 +392,8 @@ const sourceLabel = (def: ScenVariableDef): string =>
 .mr-var { margin-left: auto; font-family: monospace; font-size: 11px; color: var(--el-text-color-secondary); }
 .mr-var-wide { margin-left: 0; flex: 1; }
 .mr-none { color: var(--el-text-color-secondary); font-style: italic; }
+.mr-warn { border-left: 3px solid var(--el-color-warning); }
+.mr-foreign { flex: 2; color: var(--el-text-color-secondary); }
 .mr-note { margin-top: 8px; color: var(--el-text-color-secondary); line-height: 1.45; }
 .mr-mono { font-family: monospace; font-size: 11px; }
 .mr-table { border-collapse: collapse; }

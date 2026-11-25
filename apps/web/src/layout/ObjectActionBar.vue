@@ -65,7 +65,7 @@ function hidePreview(): void {
           :class="{ sel: v.id === curId }"
           :title="v.desc_en"
           @click="reroll(v.id)"
-          @mouseenter="showPreview($event, v.thumb, v.desc_en || group!.label)"
+          @mouseenter="showPreview($event, v.sprite ?? v.thumb, v.desc_en || group!.label)"
           @mouseleave="hidePreview()"
         >
           <DecorThumb :thumb="v.thumb" :size="30" />

@@ -134,6 +134,24 @@ describe("GET /api/mods", () => {
   });
 });
 
+describe("GET /api/mods/:id", () => {
+  it("is the mod's passport, revalidated by its revision", async () => {
+    const res = await get(REST.mod("alpha"));
+    expect(res.statusCode).toBe(200);
+    const alpha = infoOf("alpha");
+    expect(res.json()).toMatchObject({
+      id: "alpha", name: "Alpha", family: "a", status: "ready", rev: alpha.rev,
+      assetBase: alpha.assetBase, pipelineVersion: "test", fileCount: 7, capabilities: [],
+    });
+    expect(res.headers.etag).toBe(`"${alpha.rev}"`);
+    expect(res.headers["cache-control"]).toBe("no-cache");
+
+    const again = await app.inject({ method: "GET", url: REST.mod("alpha"), headers: { "if-none-match": `"${alpha.rev}"` } });
+    expect(again.statusCode).toBe(304);
+    expect((await get(REST.mod("gamma"))).statusCode).toBe(404);
+  });
+});
+
 describe("a mod's files", () => {
   it("serves a file by logical name, immutable under the current revision", async () => {
     const res = await get(`${infoOf("alpha").assetBase}/unitCatalog.json`);
@@ -189,6 +207,51 @@ describe("the mod of a map", () => {
 
     const list = (await get(REST.scenarios)).json() as ScenarioEntry[];
     expect(list.find((e) => e.id === fixtureId)!.mod).toBe("alpha");
+    // it fits: the report says so, and the listing has nothing to flag
+    expect(meta.compat).toEqual({ playable: true, issues: [], capabilities: [] });
+    expect(list.find((e) => e.id === fixtureId)!.compat).toBeUndefined();
+  });
+
+  it("reports how a map fits the mod it is kept on, in the engine's report shape", async () => {
+    const id = ((await newMap({ modId: "beta" })).json() as { id: string }).id; // beta lacks the units
+    const meta = await metaOf(id, OWNER);
+    expect(meta.compat!.playable).toBe(false);
+    expect(meta.compat!.issues).toHaveLength(1);
+    expect(meta.compat!.issues[0]).toMatchObject({ code: "UNRESOLVED_GLOBAL_ID", severity: "error" });
+    expect(meta.compat!.issues[0]!.message).toContain("UU");
+    // a listing flags it without opening the map
+    const list = (await get(REST.scenarios, OWNER)).json() as ScenarioEntry[];
+    expect(list.find((e) => e.id === id)!.compat).toEqual(meta.compat);
+  });
+
+  it("a preview is opened on the mod its sender names; an unknown one is refused", async () => {
+    const bytes = Buffer.from(createBlankMap({ size: 48, name: "preview-mod", races: ["empire"] }));
+    const post = (query: string) => {
+      const boundary = "----mod-preview";
+      const CRLF = String.fromCharCode(13, 10);
+      const head = [
+        `--${boundary}`,
+        'Content-Disposition: form-data; name="file"; filename="m.sg"',
+        "Content-Type: application/octet-stream",
+        "",
+        "",
+      ].join(CRLF);
+      const body = Buffer.concat([Buffer.from(head), bytes, Buffer.from(`${CRLF}--${boundary}--${CRLF}`)]);
+      return app.inject({
+        method: "POST",
+        url: REST.previewUpload + query,
+        headers: { "content-type": `multipart/form-data; boundary=${boundary}`, "x-preview-client-ip": "203.0.113.9" },
+        payload: body,
+      });
+    };
+    const refused = await post("?mod=gamma");
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json()).toEqual({ error: "unknown_mod" });
+    const made = await post("?mod=beta");
+    expect(made.statusCode).toBe(201);
+    const id = (made.json() as { id: string }).id;
+    // the bytes alone say alpha (see the detection test above): the sender's word wins
+    expect((await metaOf(id)).mod).toMatchObject({ id: "beta", source: "choice" });
   });
 
   it("a map in a mod's own scenario folder is that mod's, whatever its ids say", async () => {

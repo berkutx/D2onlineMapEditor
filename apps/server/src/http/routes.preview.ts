@@ -135,6 +135,17 @@ export async function registerPreviewRoute(
     }
     const sha256 = createHash("sha256").update(buf).digest("hex");
 
+    // The caller may say which mod the map was made for (a generator knows; the bytes of a
+    // small or empty map do not). Without it the mod is matched from the ids, as for any map.
+    const askedMod = (req.query as { mod?: unknown } | undefined)?.mod;
+    let modId: string | undefined;
+    if (askedMod !== undefined) {
+      if (typeof askedMod !== "string" || !store.canOpenOn(askedMod)) {
+        return reply.code(400).send({ error: "unknown_mod" });
+      }
+      modId = askedMod;
+    }
+
     // Existing capability sharing already handles any number of spectators. Repeated POSTs
     // merely recover that same active id; they neither create a file nor spend the IP quota.
     const cached = await store.findPreviewByHash(sha256);
@@ -184,6 +195,7 @@ export async function registerPreviewRoute(
       const rec = await store.registerUpload(finalPath, undefined, {
         previewExpiresAtMs: expiresAt,
         previewContentHash: sha256,
+        modId,
       });
       return resultFor(rec.id, expiresAt, sha256);
     })();

@@ -12,7 +12,7 @@ import { stat, readFile, writeFile, realpath, mkdir, rename, rm } from "node:fs/
 import { join, basename } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { parseScenario, type MapDocument } from "@d2/sg-parser";
-import type { MapMeta, MapMod, ScenarioEntry } from "@d2/socket-contract";
+import type { CompatReport, MapMeta, MapMod, ScenarioEntry } from "@d2/socket-contract";
 import { config } from "../config.js";
 import { idForPath } from "../ingest/idCodec.js";
 import {
@@ -71,7 +71,7 @@ export class MapStore {
   /** Registry snapshots must land in call order when several uploads finish together. */
   private registryWrite: Promise<void> = Promise.resolve();
   /** id -> the map's mod, valid while `key` (file mtime, mods revision, explicit mod) holds. */
-  private modCache = new Map<string, { key: string; mod: MapMod }>();
+  private modCache = new Map<string, { key: string; mod: MapMod; compat?: CompatReport }>();
 
   constructor(
     private readonly cacheMax = config.MAP_CACHE_MAX,
@@ -182,6 +182,9 @@ export class MapStore {
     for (const entry of result.entries) {
       if (wanted && !wanted(entry)) continue;
       entry.mod = (await this.modOf(entry.id))?.id;
+      // only maps that do NOT fit cleanly carry a report: a listing flags those
+      const compat = this.modCache.get(entry.id)?.compat;
+      if (compat && compat.issues.length > 0) entry.compat = compat;
     }
     return result.entries;
   }
@@ -238,8 +241,11 @@ export class MapStore {
         scriptMissing: c.scriptMissing,
       }));
     }
+    // the report of the mod that was DECIDED (not of the best-fitting one): a map kept on
+    // a mod it does not fit is exactly what the report is for
+    const compat = analysis?.all.find((c) => c.modId === mod.id)?.report;
     this.modCache.delete(id);
-    this.modCache.set(id, { key, mod });
+    this.modCache.set(id, { key, mod, compat });
     while (this.modCache.size > MOD_CACHE_MAX) {
       const oldest = this.modCache.keys().next().value;
       if (oldest === undefined) break;
@@ -272,6 +278,12 @@ export class MapStore {
       }
     }
     return true;
+  }
+
+  /** True when a map may be opened on this mod: it is installed and its graphics are built. */
+  canOpenOn(modId: string): boolean {
+    this.mods.refresh();
+    return this.mods.has(modId) && this.mods.get(modId).info.status === "ready";
   }
 
   private modListeners = new Set<(id: string, modId: string) => void>();
@@ -509,6 +521,7 @@ export class MapStore {
       readOnly: policy.readOnly || undefined,
       expiresAt: policy.expiresAt,
       mod: await this.modOf(id),
+      compat: this.modCache.get(id)?.compat,
       modEditable: modEditable || undefined,
     };
   }

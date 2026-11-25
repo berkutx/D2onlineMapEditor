@@ -31,7 +31,11 @@ export interface DecorEntry {
   desc_en: string;
   desc_ru: string;
   tags: string[];
+  /** A small picture for lists: a cell of the mod's thumbnail contact sheet. */
   thumb: DecorThumb;
+  /** The full sprite on its own sheet (for a zoomed preview). Older catalogs have only
+   *  `thumb`, which then IS the full sprite. */
+  sprite?: DecorThumb;
 }
 
 /** One palette card: a named set of interchangeable variants (looks) of the same thing. */

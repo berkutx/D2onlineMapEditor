@@ -14,6 +14,8 @@ import {
   setRule,
   summaryOf,
   tableOf,
+  unsupportedVariables,
+  variableIssues,
   variableForms,
   writeVariable,
 } from "../src/index";
@@ -212,6 +214,42 @@ describe("reading and writing a map's scenario variables", () => {
     expect(writeVariable(vars, "MULTIPLE_BUILD_CAPITAL", null)).toEqual([vars[0]]);
     expect(writeVariable(vars, "NOPE", null)).toBe(vars);
     expect(writeVariable(vars, "COUNTER", 5)).toBe(vars);
+  });
+});
+
+describe("rules a mod does not read", () => {
+  const catalog = ScenVariableCatalog.parse({
+    schemaVersion: 1,
+    racePrefixes: { empire: "EMPIRE_", elves: "ELVES_" },
+    variables: [{ name: "MULTIPLE_BUILD_CAPITAL", scope: "perRace", source: "mss32" }],
+    unsupported: [
+      { name: "START_LEADER_CHANGE_MODE", source: "mss32", title: "Starting stack" },
+      { name: "HIRE_UNIT_TIER_MAX", scope: "perRace", source: "mss32" },
+      { name: "PERK_LVL_", prefix: true, source: "lua" },
+      { name: "MULTIPLE_BUILD_CAPITAL", source: "lua" }, // the mod reads it: never reported
+    ],
+  });
+  const vars = [
+    { id: 1, name: "COUNTER", value: 3 }, // the map's own: nobody's business
+    { id: 2, name: "START_LEADER_CHANGE_MODE", value: 1 },
+    { id: 3, name: "ELVES_HIRE_UNIT_TIER_MAX", value: 4 },
+    { id: 4, name: "PERK_LVL_EMPIRE_G201UM0001", value: 2 },
+    { id: 5, name: "EMPIRE_MULTIPLE_BUILD_CAPITAL", value: -1 },
+  ];
+
+  it("finds exactly the variables that expect an effect this mod will not give", () => {
+    expect(unsupportedVariables(catalog, vars).map((u) => u.name)).toEqual([
+      "START_LEADER_CHANGE_MODE", "ELVES_HIRE_UNIT_TIER_MAX", "PERK_LVL_EMPIRE_G201UM0001",
+    ]);
+    expect(unsupportedVariables(ScenVariableCatalog.parse({ schemaVersion: 1 }), vars)).toEqual([]);
+  });
+
+  it("reports them as warnings of a compatibility report", () => {
+    const issues = variableIssues(catalog, vars);
+    expect(issues.map((i) => [i.code, i.severity])).toEqual([
+      ["UNKNOWN_SCEN_VARIABLE", "warning"], ["UNKNOWN_SCEN_VARIABLE", "warning"], ["UNKNOWN_SCEN_VARIABLE", "warning"],
+    ]);
+    expect(issues[0]!.message).toBe("variable START_LEADER_CHANGE_MODE = 1 sets a rule this mod does not read (Starting stack)");
   });
 });
 
