@@ -20,8 +20,14 @@ export async function installScenarioFixture(): Promise<{ bytes: Buffer; restore
   // roots, leaving the production scanner/router and all storage configuration real.
   const originalRoots = config.SCENARIO_ROOTS.slice();
   config.SCENARIO_ROOTS.splice(0, config.SCENARIO_ROOTS.length, root);
+  // the developer's per-mod scenario folders (mods.local.json) are part of the library too
+  const originalModRoots = config.MOD_SCENARIO_ROOTS.slice();
+  config.MOD_SCENARIO_ROOTS.length = 0;
   return {
     bytes,
-    restore: () => { config.SCENARIO_ROOTS.splice(0, config.SCENARIO_ROOTS.length, ...originalRoots); },
+    restore: () => {
+      config.SCENARIO_ROOTS.splice(0, config.SCENARIO_ROOTS.length, ...originalRoots);
+      config.MOD_SCENARIO_ROOTS.splice(0, config.MOD_SCENARIO_ROOTS.length, ...originalModRoots);
+    },
   };
 }

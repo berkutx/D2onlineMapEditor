@@ -17,6 +17,7 @@ import { registerHealthRoutes } from "./http/routes.health.js";
 import { registerScenarioRoutes } from "./http/routes.scenarios.js";
 import { registerMapRoutes } from "./http/routes.maps.js";
 import { registerAssetRoutes } from "./http/routes.assets.js";
+import { registerModRoutes } from "./http/routes.mods.js";
 import { registerUploadRoute } from "./http/routes.upload.js";
 import { registerPreviewRoute } from "./http/routes.preview.js";
 import { registerVoiceRoutes } from "./http/routes.voice.js";
@@ -43,7 +44,7 @@ export interface BuiltApp {
   store: MapStore;
   /** The durable per-room op-log — shared between the REST routes (export-at) and socket.io. */
   log: EditLog;
-  /** The mod datasets this server serves (one implicit `default` mod until multi-mod lands). */
+  /** The mod datasets this server serves (the store's mods, or one implicit `default` mod). */
   mods: ModRegistry;
 }
 
@@ -67,14 +68,15 @@ export async function buildApp(): Promise<BuiltApp> {
     limits: { fileSize: config.UPLOAD_MAX_BYTES, files: 1 },
   });
 
-  const store = new MapStore();
+  // game data sets (catalogs, atlases, id tables) maps are matched and validated against
+  const mods = new ModRegistry();
+  const store = new MapStore(undefined, mods);
   // durable per-room op-log (var/rooms): the server is the source of truth. Created here so it
   // is shared by the REST export-at route AND socket.io (createIo receives this same instance).
   const log = new EditLog(config.ROOMS_DIR);
-  // game data sets (catalogs + atlas manifest) the routes validate and generate against
-  const mods = new ModRegistry();
 
   await registerStatic(app);
+  await registerModRoutes(app, mods);
   await registerHealthRoutes(app, log);
   await registerScenarioRoutes(app, store);
   await registerMapRoutes(app, store, log, mods);

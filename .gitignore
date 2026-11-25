@@ -10,6 +10,7 @@ coverage/
 CLAUDE.md
 .claude/settings.local.json
 game-dir.local
+mods.local.json
 
 # runtime data (server uploads / temp maps)
 var/

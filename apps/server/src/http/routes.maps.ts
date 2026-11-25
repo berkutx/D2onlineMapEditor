@@ -303,6 +303,13 @@ export async function registerMapRoutes(
     return true;
   };
 
+  /** The data set of the mod a map is opened against (catalogs for validation/generation). */
+  const modFor = async (id: string): Promise<ModContext> => mods.get((await store.modOf(id))?.id);
+
+  /** A mod a map may be assigned to: known, and its graphics are built. */
+  const isOpenableMod = (modId: unknown): modId is string =>
+    typeof modId === "string" && mods.has(modId) && mods.get(modId).info.status === "ready";
+
   app.get<{ Params: { id: string } }>(REST.map(":id"), async (req, reply) => {
     const { id } = req.params;
 
@@ -332,7 +339,7 @@ export async function registerMapRoutes(
 
   app.get<{ Params: { id: string } }>(REST.mapMeta(":id"), async (req, reply) => {
     const { id } = req.params;
-    const meta = await store.getMeta(id);
+    const meta = await store.getMeta(id, clientIdOf(req));
     if (!meta) {
       return reply.code(404).send({ error: "map not found" });
     }
@@ -354,10 +361,16 @@ export async function registerMapRoutes(
   });
 
   // POST /api/maps/new -> generate a from-scratch blank terrain map, register it, return its id.
-  app.post<{ Body: { size?: number; fill?: string; name?: string; races?: string[] } }>(
+  app.post<{ Body: { size?: number; fill?: string; name?: string; races?: string[]; modId?: string } }>(
     REST.mapNew,
     async (req, reply) => {
       const body = req.body ?? {};
+      // the mod the new map is made for: the caller's choice, else the server's default mod
+      mods.refresh();
+      if (body.modId !== undefined && !isOpenableMod(body.modId)) {
+        return reply.code(400).send({ error: `unknown or not yet usable mod '${String(body.modId)}'` });
+      }
+      const modId = mods.get(body.modId).id;
       const size = Number(body.size);
       const fill = (FILLS.includes(body.fill as TerrainFill) ? body.fill : "default") as TerrainFill;
       const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "New map";
@@ -382,8 +395,35 @@ export async function registerMapRoutes(
       await mkdir(config.UPLOAD_DIR, { recursive: true });
       const file = join(config.UPLOAD_DIR, `new-${sanitize(name)}-${size}-${Date.now()}.sg`);
       await writeFile(file, bytes);
-      const rec = await store.registerUpload(file, clientIdOf(req));
+      // a blank map references almost no ids, so its mod cannot be detected later: record it
+      const rec = await store.registerUpload(file, clientIdOf(req), { modId });
       return reply.code(201).send({ id: rec.id });
+    },
+  );
+
+  // PUT /api/maps/:id/mod { modId } -> MapMeta. Re-assign the mod of an UPLOADED map; only its
+  // owner may (the mod decides which data set every collaborator's editor loads). `modId: null`
+  // clears the choice, so the mod is decided by detection again. Install maps belong to the
+  // mod whose folder they live in.
+  app.put<{ Params: { id: string }; Body: { modId?: string | null } }>(
+    REST.mapMod(":id"),
+    async (req, reply) => {
+      const { id } = req.params;
+      if (!(await requireWritable(id, reply))) return;
+      const owner = await store.ownerOf(id);
+      const clientId = clientIdOf(req);
+      if (!owner || owner !== clientId) {
+        return reply.code(403).send({ error: "only the owner of an uploaded map can change its mod" });
+      }
+      const wanted = req.body?.modId;
+      mods.refresh();
+      if (wanted !== null && !isOpenableMod(wanted)) {
+        return reply.code(400).send({ error: `unknown or not yet usable mod '${String(wanted)}'` });
+      }
+      if (!(await store.setMod(id, wanted ?? undefined))) {
+        return reply.code(403).send({ error: "this map's mod cannot be changed" });
+      }
+      return store.getMeta(id, clientId);
     },
   );
 
@@ -401,7 +441,13 @@ export async function registerMapRoutes(
     await mkdir(config.UPLOAD_DIR, { recursive: true });
     const file = join(config.UPLOAD_DIR, `copy-${id.slice(0, 8)}-${Date.now()}.sg`);
     await writeFile(file, src.bytes);
-    const rec = await store.registerUpload(file, clientIdOf(req), { ephemeral: true });
+    // the copy stays on its source's mod even though it leaves the mod's folder — unless the
+    // source's own mod was undecided, in which case the copy is decided the same way later
+    const srcMod = await store.modOf(id);
+    const rec = await store.registerUpload(file, clientIdOf(req), {
+      ephemeral: true,
+      modId: srcMod && srcMod.source !== "default" ? srcMod.id : undefined,
+    });
     return reply.code(201).send({ id: rec.id });
   });
 
@@ -468,7 +514,7 @@ export async function registerMapRoutes(
         return reply.code(404).send({ error: "map not found" });
       }
 
-      const { report, bytes } = await buildAndValidateForMod(mods.forMap(id), base.bytes, project);
+      const { report, bytes } = await buildAndValidateForMod(await modFor(id), base.bytes, project);
 
       if (action === "validate") {
         return reply.send(report);
@@ -514,7 +560,7 @@ export async function registerMapRoutes(
         // ops with seq <= target (the log is seq-ordered; a preserved gap just means fewer ops)
         const ops = log.all(key).filter((e) => e.seq <= seq).map((e) => e.op);
         const proj: EditorProject = { ...emptyProject(id), journal: ops.length ? [ops] : [], cursor: ops.length ? 1 : 0 };
-        const { report, bytes } = await buildAndValidateForMod(mods.forMap(id), base.bytes, proj);
+        const { report, bytes } = await buildAndValidateForMod(await modFor(id), base.bytes, proj);
         if (!report.ok || !bytes) {
           return reply.code(422).send(report);
         }
@@ -573,7 +619,7 @@ export async function registerMapRoutes(
     // concurrent generation). nextTypedId clamps an out-of-range/absent slot to 0.
     const genSlot = Number.isInteger(body.slot) ? Number(body.slot) : 0;
     const t0 = Date.now();
-    const mod = mods.forMap(id);
+    const mod = await modFor(id);
     let ops;
     try {
       const { walls, decor, landmarkSizes } = await mod.catalogSets();
@@ -685,7 +731,7 @@ export async function registerMapRoutes(
       }
       steps.push({ ...(s as object), region: reg.data } as PlanStep);
     }
-    const mod = mods.forMap(id);
+    const mod = await modFor(id);
     const { walls, decor, landmarkSizes } = await mod.catalogSets();
     const seed = Date.now() & 0x7fffffff;
     const mask = parseMask(body.cells);

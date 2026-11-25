@@ -82,7 +82,8 @@ async function currentBuild(store: MapStore, mods: ModRegistry, id: string, raw:
   if (parsed.data.baseScenarioId !== id) return { status: 400, error: { error: "project baseScenarioId mismatch" } };
   const base = await store.getRawBytes(id);
   if (!base) return { status: 404, error: { error: "map not found" } };
-  const built = await buildAndValidateForMod(mods.forMap(id), base.bytes, parsed.data);
+  const mod = mods.get((await store.modOf(id))?.id);
+  const built = await buildAndValidateForMod(mod, base.bytes, parsed.data);
   if (!built.report.ok || !built.bytes) return { status: 422, error: built.report };
   return { project: parsed.data, bytes: built.bytes, doc: parseScenario(built.bytes) };
 }

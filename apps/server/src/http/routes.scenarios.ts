@@ -31,7 +31,7 @@ export async function registerScenarioRoutes(
 ): Promise<void> {
   app.get(REST.scenarios, async (req) => {
     const clientId = clientIdOf(req);
-    const entries = await store.listScenarios();
+    const entries = await store.listScenarios((e) => visibleTo(e, clientId));
     // never serialize the owner token back out — it is the caller's own secret
     return entries.filter((e) => visibleTo(e, clientId)).map(({ owner: _o, ...pub }) => pub);
   });
@@ -40,7 +40,7 @@ export async function registerScenarioRoutes(
     REST.scenario(":id"),
     async (req, reply) => {
       const { id } = req.params;
-      const entries = await store.listScenarios();
+      const entries = await store.listScenarios((e) => e.id === id);
       const entry = entries.find((e) => e.id === id);
       // by-id lookup honors the capability model: knowing the id grants access
       if (!entry) {

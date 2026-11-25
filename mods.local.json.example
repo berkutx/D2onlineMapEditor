@@ -1,0 +1,7 @@
+{
+  "//": "Copy to mods.local.json (gitignored). Lists, per mod id, the scenario folders of THAT mod's installation. A map found there is that mod's map, with no guessing; maps from the plain SCENARIO_ROOTS and uploaded maps are matched to a mod by the ids they reference. The mod ids are the ones build_mod.py registered in <ASSETS_DIR>/mods/index.json. The MOD_SCENARIO_ROOTS environment variable (modId=path;modId=path) wins over this file.",
+  "scenarioRoots": {
+    "some-mod": ["D:/Games/Some Mod/Exports", "D:/Games/Some Mod/Campaign"],
+    "another-mod": ["D:/Games/Another Mod/Exports"]
+  }
+}

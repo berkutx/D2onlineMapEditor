@@ -47,6 +47,48 @@ function envList(name: string, fallback: string[]): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** A scenario folder whose maps belong to one mod (no detection needed for them). */
+export interface ModScenarioRoot {
+  path: string;
+  modId: string;
+}
+
+/**
+ * Scenario folders per mod. A map found there IS that mod's map — its own Exports/Campaign
+ * folder says so — which is more reliable than detecting the mod from the ids it references
+ * (a vanilla map fits every mod). Sources, first one wins:
+ *   1. MOD_SCENARIO_ROOTS env: `modId=path;modId=path;…`
+ *   2. `mods.local.json` at the repo root (gitignored, see mods.local.json.example):
+ *      { "scenarioRoots": { "<modId>": ["<dir>", …] } }
+ */
+function modScenarioRoots(): ModScenarioRoot[] {
+  const out: ModScenarioRoot[] = [];
+  const env = process.env.MOD_SCENARIO_ROOTS?.trim();
+  if (env) {
+    for (const part of env.split(";")) {
+      const eq = part.indexOf("=");
+      if (eq <= 0) continue;
+      const modId = part.slice(0, eq).trim();
+      const path = part.slice(eq + 1).trim();
+      if (modId && path) out.push({ modId, path });
+    }
+    return out;
+  }
+  try {
+    const json = JSON.parse(readFileSync(join(REPO_ROOT, "mods.local.json"), "utf8")) as {
+      scenarioRoots?: Record<string, unknown>;
+    };
+    for (const [modId, dirs] of Object.entries(json.scenarioRoots ?? {})) {
+      for (const dir of Array.isArray(dirs) ? dirs : [dirs]) {
+        if (typeof dir === "string" && dir.trim()) out.push({ modId, path: dir.trim() });
+      }
+    }
+  } catch {
+    /* no local file */
+  }
+  return out;
+}
+
 /** Normalize a deployment path: "" (root) or "/map" (no trailing slash). */
 function envPath(name: string): string {
   const raw = (process.env[name] ?? "").trim().replace(/\/+$/, "");
@@ -107,7 +149,12 @@ export const config = {
     return [game ? join(game, "Game", "Campaign") : resolve(REPO_ROOT, "var", "scenarios")];
   })()),
 
-  /** Absolute path to the generated atlases + manifest. */
+  /** Scenario folders that belong to a specific mod (scanned before SCENARIO_ROOTS; a folder
+   *  listed in both is that mod's). */
+  MOD_SCENARIO_ROOTS: modScenarioRoots(),
+
+  /** Absolute path to the generated assets: the mod store (mods/ + blobs/), or the flat
+   *  pre-multi-mod layout (atlases + manifest + catalogs side by side). */
   ASSETS_DIR:
     process.env.ASSETS_DIR ?? resolve(REPO_ROOT, "public", "assets"),
 

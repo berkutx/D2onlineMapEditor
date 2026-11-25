@@ -12,7 +12,7 @@ import { stat, readFile, writeFile, realpath, mkdir, rename, rm } from "node:fs/
 import { join, basename } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { parseScenario, type MapDocument } from "@d2/sg-parser";
-import type { MapMeta } from "@d2/socket-contract";
+import type { MapMeta, MapMod, ScenarioEntry } from "@d2/socket-contract";
 import { config } from "../config.js";
 import { idForPath } from "../ingest/idCodec.js";
 import {
@@ -20,6 +20,7 @@ import {
   type ScenarioRecord,
   type ScanResult,
 } from "../ingest/scenarioScanner.js";
+import { ModRegistry } from "../mods/modRegistry.js";
 
 interface CacheEntry {
   mtimeMs: number;
@@ -48,10 +49,15 @@ interface RegistryEntry {
   /** Fixed hard deadline for a read-only external preview (epoch ms). */
   previewExpiresAt?: number;
   previewContentHash?: string;
+  /** The mod set explicitly for this map (chosen by its owner, or inherited by a clone). */
+  modId?: string;
 }
 
 /** Persist lastAccess at most this often (avoid a registry write on every map fetch). */
 const TOUCH_THROTTLE_MS = 60 * 60 * 1000;
+
+/** How many maps' mod decisions are remembered (each is a few hundred bytes). */
+const MOD_CACHE_MAX = 4000;
 
 export class MapStore {
   /** id -> server-private record (real path, source, mtime). */
@@ -64,8 +70,14 @@ export class MapStore {
   private uploadsLoaded = false;
   /** Registry snapshots must land in call order when several uploads finish together. */
   private registryWrite: Promise<void> = Promise.resolve();
+  /** id -> the map's mod, valid while `key` (file mtime, mods revision, explicit mod) holds. */
+  private modCache = new Map<string, { key: string; mod: MapMod }>();
 
-  constructor(private readonly cacheMax = config.MAP_CACHE_MAX) {}
+  constructor(
+    private readonly cacheMax = config.MAP_CACHE_MAX,
+    /** The mod data sets maps are matched against. */
+    private readonly mods: ModRegistry = new ModRegistry(),
+  ) {}
 
   /**
    * Restore runtime-registered uploads from UPLOAD_DIR/registry.json (written by
@@ -105,6 +117,7 @@ export class MapStore {
             typeof e.previewExpiresAt === "number" ? e.previewExpiresAt : undefined,
           previewContentHash:
             typeof e.previewContentHash === "string" ? e.previewContentHash : undefined,
+          modId: typeof e.modId === "string" ? e.modId : undefined,
         });
       } catch {
         continue; // file gone — drop from the effective registry
@@ -124,6 +137,7 @@ export class MapStore {
       lastAccess: u.lastAccessMs,
       previewExpiresAt: u.previewExpiresAtMs,
       previewContentHash: u.previewContentHash,
+      modId: u.modId,
     }));
     const payload = JSON.stringify(entries, null, 2);
     const attempt = this.registryWrite.catch(() => {}).then(async () => {
@@ -148,18 +162,108 @@ export class MapStore {
   /** Rescan the configured roots and refresh the id->path registry. */
   async refresh(): Promise<ScanResult> {
     await this.loadUploads();
-    const result = await scanScenarios(config.SCENARIO_ROOTS, this.uploads);
+    // a mod's own scenario folders first: a map found there keeps that mod (see scanScenarios)
+    const result = await scanScenarios(
+      [...config.MOD_SCENARIO_ROOTS, ...config.SCENARIO_ROOTS],
+      this.uploads,
+    );
     this.registry = result.registry;
     return result;
   }
 
-  /** Latest scenario listing (rescans on every call — cheap, header-only). */
-  async listScenarios() {
+  /** Latest scenario listing (rescans on every call — cheap, header-only). Each entry the
+   *  caller will show (`wanted`, default all) carries the id of its mod — decided once per
+   *  file (see modOf), and not at all for entries that are filtered out anyway. */
+  async listScenarios(wanted?: (entry: ScenarioEntry) => boolean) {
     // Preview records are deliberately ownerless (capability URLs), hence hidden from the
     // listing. Still remove expired ones before the scan so stale files do not accumulate.
     await this.sweepExpiredPreviews();
     const result = await this.refresh();
+    for (const entry of result.entries) {
+      if (wanted && !wanted(entry)) continue;
+      entry.mod = (await this.modOf(entry.id))?.id;
+    }
     return result.entries;
+  }
+
+  /**
+   * The mod a map is opened against, and how well the map fits it.
+   *
+   * Decided in this order: the mod the map is KNOWN to belong to (its mod's own scenario
+   * folder, or an explicit choice); else the mod its id references fit best; else — the ids
+   * fit several mod families equally, or there are no id tables at all — the default mod.
+   * The fit (ids the mod does not define) is reported for whichever mod was decided.
+   * Cached per file version, so a listing matches each map only once.
+   */
+  async modOf(id: string): Promise<MapMod | undefined> {
+    const rec = await this.resolve(id);
+    if (!rec) return undefined;
+    this.mods.refresh();
+    let mtimeMs: number;
+    try {
+      mtimeMs = (await stat(rec.realPath)).mtimeMs;
+    } catch {
+      return undefined;
+    }
+    const key = `${mtimeMs}:${this.mods.revision}:${rec.modId ?? ""}`;
+    const cached = this.modCache.get(id);
+    if (cached?.key === key) return cached.mod;
+
+    // a map can only be OPENED on a mod whose graphics are built; a known mod that is still
+    // data-only is treated as unknown, and the map is matched among the ready mods instead
+    const known =
+      this.mods.has(rec.modId) && this.mods.get(rec.modId).info.status === "ready"
+        ? rec.modId!
+        : undefined;
+    const analysis = await this.mods.analyze(new Uint8Array(await readFile(rec.realPath)));
+    let mod: MapMod;
+    if (known) {
+      mod = { id: known, source: rec.source === "install" ? "install" : "choice" };
+    } else if (analysis?.detection.status === "detected" && analysis.detection.modId) {
+      mod = { id: analysis.detection.modId, source: "detected" };
+    } else {
+      mod = { id: this.mods.default().id, source: "default" };
+    }
+    if (analysis) {
+      const fit = analysis.all.find((c) => c.modId === mod.id);
+      if (fit) {
+        mod.missing = fit.missing;
+        mod.missingByTable = fit.missingByTable;
+        mod.scriptMissing = fit.scriptMissing;
+        mod.scriptMissingByTable = fit.scriptMissingByTable;
+      }
+      mod.candidates = analysis.all.map((c) => ({
+        modId: c.modId,
+        missing: c.missing,
+        scriptMissing: c.scriptMissing,
+      }));
+    }
+    this.modCache.delete(id);
+    this.modCache.set(id, { key, mod });
+    while (this.modCache.size > MOD_CACHE_MAX) {
+      const oldest = this.modCache.keys().next().value;
+      if (oldest === undefined) break;
+      this.modCache.delete(oldest);
+    }
+    return mod;
+  }
+
+  /**
+   * Set (or with `undefined` clear) the mod of an UPLOADED map explicitly. Install maps take
+   * their mod from the folder they live in and cannot be re-assigned. Returns false when the
+   * map is not an upload.
+   */
+  async setMod(id: string, modId: string | undefined): Promise<boolean> {
+    const rec = await this.resolve(id);
+    if (!rec || rec.source !== "upload") return false;
+    rec.modId = modId;
+    await this.saveUploads(true);
+    return true;
+  }
+
+  /** The owner token of an uploaded map (undefined for installs and ownerless uploads). */
+  async ownerOf(id: string): Promise<string | undefined> {
+    return (await this.resolve(id))?.owner;
   }
 
   /** Register an uploaded `.sg` file (already written to disk). `owner` = the anonymous
@@ -168,7 +272,13 @@ export class MapStore {
   async registerUpload(
     absPath: string,
     owner?: string,
-    opts?: { ephemeral?: boolean; previewExpiresAtMs?: number; previewContentHash?: string },
+    opts?: {
+      ephemeral?: boolean;
+      previewExpiresAtMs?: number;
+      previewContentHash?: string;
+      /** The map's mod, when known (a new map's chosen mod, a clone's source mod). */
+      modId?: string;
+    },
   ): Promise<ScenarioRecord> {
     await this.loadUploads();
     const real = await realpath(absPath);
@@ -184,6 +294,7 @@ export class MapStore {
       lastAccessMs: Date.now(),
       previewExpiresAtMs: opts?.previewExpiresAtMs,
       previewContentHash: opts?.previewContentHash,
+      modId: opts?.modId,
     };
     this.uploads = this.uploads.filter((u) => u.id !== id).concat(rec);
     this.registry.set(id, rec);
@@ -350,13 +461,20 @@ export class MapStore {
     return { bytes, etag: etagFor(id, st.mtimeMs), mtimeMs: st.mtimeMs };
   }
 
-  /** Cheap header-derived meta for an id (uses the full parse cache if warm). */
-  async getMeta(id: string): Promise<MapMeta | undefined> {
+  /** Cheap header-derived meta for an id (uses the full parse cache if warm). `viewer` is
+   *  the caller's anonymous id: the owner of an uploaded map may change its mod. */
+  async getMeta(id: string, viewer?: string): Promise<MapMeta | undefined> {
     const policy = await this.getAccessPolicy(id);
     if (!policy) return undefined;
     const loaded = await this.getMap(id);
     if (!loaded) return undefined;
     const { doc } = loaded;
+    const rec = await this.resolve(id);
+    const modEditable =
+      !policy.readOnly &&
+      rec?.source === "upload" &&
+      rec.owner !== undefined &&
+      rec.owner === viewer;
     return {
       id,
       name: doc.header.name,
@@ -366,6 +484,8 @@ export class MapStore {
       description: doc.header.description ?? "",
       readOnly: policy.readOnly || undefined,
       expiresAt: policy.expiresAt,
+      mod: await this.modOf(id),
+      modEditable: modEditable || undefined,
     };
   }
 

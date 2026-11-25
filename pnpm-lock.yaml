@@ -32,6 +32,9 @@ importers:
       '@d2/mapgen':
         specifier: workspace:*
         version: link:../../packages/mapgen
+      '@d2/mod-catalog':
+        specifier: workspace:*
+        version: link:../../packages/mod-catalog
       '@d2/sg-parser':
         specifier: workspace:*
         version: link:../../packages/sg-parser

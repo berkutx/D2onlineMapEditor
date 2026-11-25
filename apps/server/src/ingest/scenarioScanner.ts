@@ -35,6 +35,15 @@ export interface ScenarioRecord {
   previewExpiresAtMs?: number;
   /** SHA-256 of the original `.sg`; active previews are deduplicated by this value. */
   previewContentHash?: string;
+  /** The mod this map is known to belong to: the mod whose scenario folder it lives in
+   *  (install), or the one set explicitly for an upload. Absent = decided by detection. */
+  modId?: string;
+}
+
+/** A folder to scan; `modId` marks every map in it as that mod's. */
+export interface ScanRoot {
+  path: string;
+  modId?: string;
 }
 
 function lowerExt(name: string): string {
@@ -82,28 +91,35 @@ export interface ScanResult {
  * cannot break the listing. Header parsing is header-only (cheap).
  */
 export async function scanScenarios(
-  roots: readonly string[],
+  roots: readonly (string | ScanRoot)[],
   uploadRecords: readonly ScenarioRecord[] = [],
 ): Promise<ScanResult> {
   const registry = new Map<string, ScenarioRecord>();
   const entries: ScenarioEntry[] = [];
 
-  // 1) installed scenarios from the game roots
-  const candidates: string[] = [];
+  // 1) installed scenarios from the game roots. Roots are scanned in order and a file is
+  //    taken from the FIRST root that holds it, so a mod's own folder (listed first) keeps
+  //    its mod even when a plain root covers the same directory.
+  const candidates: { path: string; modId?: string }[] = [];
   for (const root of roots) {
-    await walk(root, candidates);
+    const { path, modId } = typeof root === "string" ? { path: root, modId: undefined } : root;
+    const found: string[] = [];
+    await walk(path, found);
+    for (const f of found) candidates.push({ path: f, modId });
   }
 
-  for (const path of candidates) {
+  for (const { path, modId } of candidates) {
     try {
       const real = await realpath(path);
       const st = await stat(real);
       const id = idForPath(real);
+      if (registry.has(id)) continue; // already taken from an earlier root
       registry.set(id, {
         id,
         realPath: real,
         source: "install",
         mtimeMs: st.mtimeMs,
+        modId,
       });
 
       const buf = new Uint8Array(await readFile(real));

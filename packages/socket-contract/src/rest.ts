@@ -1,6 +1,70 @@
 import { z } from "zod";
 import type { EditOp } from "./ops.js";
 
+/**
+ * A mod data set the server serves (v0.3, additive). A mod is one game data set — Globals
+ * tables, sprites, scripts — that maps are opened against. A deployment that still has the
+ * flat pre-multi-mod assets layout reports exactly one mod, `default`.
+ */
+export const ModInfo = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Mods of one family are versions of the same line; the highest `familyOrder` is newest. */
+  family: z.string(),
+  familyOrder: z.number().int(),
+  /** `data-only`: tables are available for compatibility checks, graphics are not built. */
+  status: z.enum(["ready", "data-only"]),
+  /** Identity of the mod's source data; absent for the implicit `default` mod. */
+  contentFingerprint: z.string().optional(),
+  /** Changes whenever the mod's files are rebuilt. */
+  rev: z.string(),
+  /**
+   * Root-relative base URL of the mod's files, no trailing slash. Every asset of the mod —
+   * catalogs, icons, atlas pages — is `<assetBase>/<logical name>`. It contains `rev`, so
+   * the files may be cached forever and a rebuild is picked up at once.
+   */
+  assetBase: z.string(),
+});
+export type ModInfo = z.infer<typeof ModInfo>;
+
+export const ModList = z.object({
+  /** The mod used for a map whose own mod cannot be determined. */
+  defaultModId: z.string(),
+  mods: z.array(ModInfo),
+});
+export type ModList = z.infer<typeof ModList>;
+
+/**
+ * How a map's mod was decided:
+ *  - `install`  the map lives in a mod's own scenario folder;
+ *  - `choice`   set explicitly (the creator picked it, or it was inherited by a clone);
+ *  - `detected` the ids the map references fit one mod family best;
+ *  - `default`  nothing tells the mods apart for this map — the server's default mod.
+ */
+export const MapModSource = z.enum(["install", "choice", "detected", "default"]);
+export type MapModSource = z.infer<typeof MapModSource>;
+
+/** The mod of a map, and how well the map fits it. */
+export const MapMod = z.object({
+  id: z.string(),
+  source: MapModSource,
+  /**
+   * Ids the map references that this mod does not define, by Globals table code (`UU`
+   * units, `IG` items, …). Present only when the mod has id tables to check against.
+   * `missing` counts id FIELDS (the game refuses such a map); `scriptMissing` counts ids
+   * quoted in script text embedded in the map (the script fails at run time).
+   */
+  missing: z.number().int().optional(),
+  missingByTable: z.record(z.string(), z.array(z.string())).optional(),
+  scriptMissing: z.number().int().optional(),
+  scriptMissingByTable: z.record(z.string(), z.array(z.string())).optional(),
+  /** Every mod the map was matched against, best fit first. */
+  candidates: z
+    .array(z.object({ modId: z.string(), missing: z.number().int(), scriptMissing: z.number().int() }))
+    .optional(),
+});
+export type MapMod = z.infer<typeof MapMod>;
+
 /** A discoverable scenario (from the game install or an upload). Public URLs use the opaque id. */
 export const ScenarioEntry = z.object({
   id: z.string(), // opaque base32 id (never a raw filesystem path)
@@ -15,6 +79,8 @@ export const ScenarioEntry = z.object({
   /** Anonymous owner (x-client-id) of an uploaded/new map (v0.2, additive). The server
    *  lists an owned upload ONLY to its owner; install maps have no owner. */
   owner: z.string().optional(),
+  /** Id of the map's mod (v0.3, additive) — see MapMeta.mod for how it was decided. */
+  mod: z.string().optional(),
 });
 export type ScenarioEntry = z.infer<typeof ScenarioEntry>;
 
@@ -30,6 +96,11 @@ export const MapMeta = z.object({
    * absent on ordinary editable maps so older clients keep working unchanged. */
   readOnly: z.boolean().optional(),
   expiresAt: z.number().int().optional(),
+  /** The mod the map is opened against (v0.3, additive). Absent from servers that predate
+   *  mods; a client then uses the `default` mod. */
+  mod: MapMod.optional(),
+  /** The caller may change the map's mod (PUT REST.mapMod): it is their own uploaded map. */
+  modEditable: z.boolean().optional(),
 });
 export type MapMeta = z.infer<typeof MapMeta>;
 
@@ -142,10 +213,12 @@ export const REST = {
   mapExportAt: (id: string) => `/api/maps/${id}/export-at`, // GET ?channel&seq -> .sg bytes of the room log up to seq ("выкачать промежуток")
   mapGenerate: (id: string) => `/api/maps/${id}/generate`, // POST { project, recipeId, region, seed? } -> { ops, report }
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
-  mapNew: "/api/maps/new", // POST { size, fill?, name? } -> { id } (from-scratch blank terrain)
+  mods: "/api/mods", // GET -> ModList (the mod data sets this server serves)
+  mapMod: (id: string) => `/api/maps/${id}/mod`, // PUT { modId } -> MapMeta (owner of an uploaded map only)
+  mapNew: "/api/maps/new", // POST { size, fill?, name?, modId? } -> { id } (from-scratch blank terrain)
   mapClone: (id: string) => `/api/maps/${id}/clone`, // POST -> { id } (byte-exact personal copy, owned by x-client-id)
   mapProject: (id: string) => `/api/maps/${id}/project`, // GET -> saved EditorProject (per x-client-id) | 404; PUT EditorProject -> {ok}
-  assetsManifest: "/api/assets/manifest", // GET -> AssetManifest
+  assetsManifest: "/api/assets/manifest", // GET [?mod=<id>] -> AssetManifest (default mod when omitted)
   upload: "/api/maps/upload", // POST .sg -> { id }
   previewUpload: "/api/maps/preview", // public POST .sg -> one-hour read-only preview
   voiceHandoff: (id: string) => `/api/maps/${id}/voice/handoff`,
