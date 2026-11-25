@@ -89,9 +89,53 @@ alpine container, so it needs no host sudo). If the server is ever rebuilt: crea
 disk; the deploy step recreates the dirs (bind volumes fail on a missing dir → the container
 won't start, so the dirs must exist before `docker compose up`).
 
-### 3. Populate the atlas volume (253 MB, not in git)
-The atlases are built offline from the GOG install and are gitignored, so they ship out of
-band — **once** — from a machine that has `public/assets/` (the dev box). From the repo root:
+### 3. Populate the asset volume — the MOD STORE (several mods, not in git)
+The editor serves several mods (game data sets) side by side from one content-addressed store
+inside the same `d2editor_assets` volume:
+
+```
+mods/index.json              the installed mods + the default one
+mods/<mod-id>/mod.json       one mod: identity + logical file name -> blob
+blobs/<xx>/<sha256>.<ext>    immutable files; a file two mods share is stored once
+```
+
+Build each mod on a machine that has its game install (see `tools/asset-pipeline/README.md`):
+
+```sh
+python tools/asset-pipeline/build_mod.py --game "<MOD>/Game" --mod-id semga --name "Сёмга" \
+  --family semga --family-order 1 --store public/assets --graphics --default
+```
+
+then ship **only the store** (`mods/` + `blobs/`) into the volume:
+
+```sh
+tar czf - -C public/assets mods blobs | ssh <USER>@<HOST> \
+  'docker volume create d2editor_assets >/dev/null; \
+   docker run --rm -i -v d2editor_assets:/dst alpine sh -c "cd /dst && tar xzf -"'
+```
+
+- **Adding or rebuilding a mod is the same command again.** Blobs are immutable and named by
+  their hash, so re-sending is idempotent and never disturbs files in use; `mod.json` and
+  `index.json` are small and replaced last by tar. The server notices a changed
+  `mods/index.json` / `mod.json` on the next request — no restart.
+- **No `?v` bump, no cache purge.** A mod's files are requested as
+  `/assets/mods/<id>/<rev>/<name>` (`rev` = hash of its `mod.json`) and sprite sheets as
+  `/assets/blobs/<xx>/<sha>.png`; both are served `immutable`. A rebuilt mod has a new `rev`,
+  so every client asks for new URLs by itself.
+- **Which maps belong to which mod**: a map in a mod's own scenario folder is that mod's;
+  list the folders in the `MOD_SCENARIO_ROOTS` env (`modId=path;modId=path;…`) or in a
+  `mods.local.json` at the repo root (`{ "scenarioRoots": { "<modId>": ["<dir>", …] } }`, see
+  `mods.local.json.example`). Uploaded maps are matched to a mod by the ids they reference.
+- **A volume without `mods/index.json` keeps working** exactly as before: its flat files are
+  served as one implicit mod `default` (sections 3a–3c below describe that older layout).
+  So the store can be uploaded before or after the code that reads it.
+- Old blobs no mod refers to any more are never deleted by a build; clear them out by hand
+  when space matters (a blob is in use iff some `mods/*/mod.json` lists it).
+
+### 3a. The older flat layout (one mod, 253 MB of atlas pages)
+Before the mod store, the volume held ONE mod's files flat. The atlases are built offline from
+the GOG install and are gitignored, so they ship out of band from a machine that has
+`public/assets/` (the dev box). From the repo root:
 
 ```sh
 # creates/fills the named volume the container mounts read-only at /app/public/assets
