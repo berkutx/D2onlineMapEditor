@@ -227,6 +227,19 @@ class TestBuildModGenerators(TempDirCase):
         self.assertEqual(d["LATTR"], [{"ID": 1, "TEXT": "L_ALL", "MELEE": False}, {"ID": 2, "TEXT": "L_ANY", "MELEE": True}])
         self.assertEqual(dbf.REPORT.missing_columns(), [])
 
+    def test_reports_races_that_depart_from_the_editors_reference_table(self):
+        ref = {k: {"key": k, "raceId": v[0], "raceType": v[1], "guardian": v[2], "leader": v[3], "lord": v[4],
+                   "terrain": v[5], "guardianHp": 1, "leaderHp": 2} for k, v in build_mod.REFERENCE_RACES.items()}
+        same = {"races": list(ref.values())}
+        self.assertEqual(build_mod.race_table_differences(same), [])  # hit points are free to differ
+        changed = dict(ref)
+        changed["elves"] = dict(ref["elves"], guardian="G070UU9000")
+        del changed["undead"]
+        diffs = build_mod.race_table_differences({"races": list(changed.values())})
+        self.assertEqual(len(diffs), 2)
+        self.assertTrue(diffs[0].startswith("elves: ") and "G070UU9000" in diffs[0])
+        self.assertEqual(diffs[1], "undead: absent")
+
     def test_profile_follows_each_mods_own_tables(self):
         a, b = os.path.join(self.tmp, "a", "Globals"), os.path.join(self.tmp, "b", "Globals")
         os.makedirs(os.path.dirname(a))

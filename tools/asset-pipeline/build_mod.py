@@ -93,6 +93,32 @@ FINGERPRINT_ARCHIVES = [
 RACE_KEYS = {"HU": "empire", "DW": "clans", "HE": "legions", "UN": "undead", "EL": "elves", "NE": "neutral"}
 #: The item a new capital starts with (toolsqt D2MapEditor::addRace), when the mod has it.
 CAPITAL_ITEM = "G000IG0006"
+#: What the editor's own code still assumes about races, whatever the mod (its reference
+#: RACES table, packages/sg-parser createBlankMap.ts): race key -> (RACE_ID, RACE_TYPE,
+#: guardian, first leader, category-0 lord, capital terrain). Hit points come from the
+#: profile; these ids do not, so a mod that changes them is reported at build time.
+REFERENCE_RACES = {
+    "empire": ("G000RR0000", 0, "G000UU3001", "G000UU0019", "G000LR0003", 1),
+    "clans": ("G000RR0001", 3, "G000UU3002", "G000UU0044", "G000LR0006", 2),
+    "legions": ("G000RR0002", 2, "G000UU3003", "G000UU0070", "G000LR0009", 3),
+    "undead": ("G000RR0003", 1, "G000UU3004", "G000UU0096", "G000LR0012", 4),
+    "elves": ("G000RR0005", 5, "G000UU8040", "G000UU8009", "G000LR0018", 6),
+}
+
+
+def race_table_differences(profile):
+    """Where a mod's races depart from REFERENCE_RACES (ids and types, not hit points)."""
+    by_key = {r["key"]: r for r in profile["races"]}
+    out = []
+    for key, ref in sorted(REFERENCE_RACES.items()):
+        r = by_key.get(key)
+        if not r:
+            out.append("%s: absent" % key)
+            continue
+        got = (r["raceId"], r["raceType"], r.get("guardian"), r.get("leader"), r.get("lord"), r.get("terrain"))
+        if got != ref:
+            out.append("%s: %s (editor assumes %s)" % (key, got, ref))
+    return out
 
 
 class BuildError(Exception):
@@ -629,6 +655,8 @@ def main(argv=None):
     print("  files        %d logical (%d atlas, %d modifier scripts), built %.1f MB" % (
         len(files), len(atlas_names), script_count, staged_bytes / 1048576.0))
     print("  store        %s" % store.summary())
+    for diff in race_table_differences(new_files["profile.json"]):
+        print("  RACE TABLE DIFFERS from the editor's reference — %s" % diff)
     if report.missing_columns():
         print("  columns this mod lacks: %s" % ", ".join(report.missing_columns()))
     if report.absent:

@@ -35,6 +35,40 @@ export const ModRace = z.object({
 });
 export type ModRace = z.infer<typeof ModRace>;
 
+/**
+ * A race with everything "add race" needs present — the shape of one entry of the editor's
+ * reference RACES table, so a mod's own numbers can stand in for it.
+ */
+export interface RaceFacts {
+  raceId: string;
+  raceType: number;
+  guardian: string;
+  guardianHp: number;
+  leader: string;
+  leaderHp: number;
+  lord: string;
+  terrain: number;
+  name: string;
+}
+
+/**
+ * The playable races of a profile that are complete enough to create a player from, by race
+ * key. A race lacking a guardian, a leader, a lord, their hit points or a terrain is left
+ * out — the caller then falls back to its reference data for that race.
+ */
+export function raceFacts(profile: ModProfile): Record<string, RaceFacts> {
+  const out: Record<string, RaceFacts> = {};
+  for (const r of profile.races) {
+    if (!r.playable) continue;
+    const { guardian, guardianHp, leader, leaderHp, lord, terrain } = r;
+    if (!guardian || !leader || !lord || guardianHp === undefined || leaderHp === undefined || terrain === undefined) {
+      continue;
+    }
+    out[r.key] = { raceId: r.raceId, raceType: r.raceType, guardian, guardianHp, leader, leaderHp, lord, terrain, name: r.name };
+  }
+  return out;
+}
+
 export const ModProfile = z.object({
   schemaVersion: z.literal(MOD_SCHEMA_VERSION),
   races: z.array(ModRace).default([]),

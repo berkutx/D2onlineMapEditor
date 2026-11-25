@@ -388,7 +388,9 @@ export async function registerMapRoutes(
       }
       let bytes: Uint8Array;
       try {
-        bytes = createBlankMap({ size, fill, name, author: "web-editor", races });
+        // the capital's guardian and hero are written with the base hit points of THIS mod
+        const raceDefs = await mods.get(modId).raceFacts();
+        bytes = createBlankMap({ size, fill, name, author: "web-editor", races, raceDefs });
       } catch (e) {
         return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) });
       }

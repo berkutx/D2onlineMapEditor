@@ -72,6 +72,22 @@ export const EditOp = z.discriminatedUnion("kind", [
         lordId: z.string().optional(),
         name: z.string().optional(),
         ids: z.record(z.unknown()),
+        // The faction data of the map's mod, resolved by the client that built the op (v0.3,
+        // additive). It travels in the op so every peer synthesizes identical units; an op
+        // without it (recorded before mods) uses the reference RACES table.
+        def: z
+          .object({
+            raceId: z.string(),
+            raceType: z.number().int(),
+            guardian: z.string(),
+            guardianHp: z.number().int(),
+            leader: z.string(),
+            leaderHp: z.number().int(),
+            lord: z.string(),
+            terrain: z.number().int(),
+            name: z.string(),
+          })
+          .optional(),
       })
       .optional(),
     snapshot: z.record(z.unknown()).optional(),

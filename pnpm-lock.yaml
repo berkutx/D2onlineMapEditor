@@ -75,6 +75,9 @@ importers:
       '@d2/map-schema':
         specifier: workspace:*
         version: link:../../packages/map-schema
+      '@d2/mod-catalog':
+        specifier: workspace:*
+        version: link:../../packages/mod-catalog
       '@d2/pixi-render':
         specifier: workspace:*
         version: link:../../packages/pixi-render

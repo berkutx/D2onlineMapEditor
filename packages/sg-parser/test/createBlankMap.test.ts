@@ -10,6 +10,7 @@ import {
   FILL_VALUE,
   TERRAIN_FILLS,
   MOUNTAIN_CELL,
+  RACES,
 } from "../src/index";
 
 const SIZES = [48, 72] as const;
@@ -95,6 +96,34 @@ describe("@d2/sg-parser createBlankMap — races (addRace port)", () => {
     expect(v.errors).toEqual([]);
     expect(v.ok).toBe(true);
     expect(roundTripIdentity(bytes)).toBe(true);
+  });
+
+  it("uses the mod's own faction data where given, the reference table otherwise", () => {
+    // another mod: same ids, other base hit points for the empire's guardian and hero
+    const bytes = createBlankMap({
+      size: 48,
+      fill: "default",
+      races: ["empire", "undead"],
+      raceDefs: { empire: { ...RACES.empire, guardianHp: 250, leaderHp: 150 } },
+    });
+    const doc = parseScenario(bytes);
+    const hpOf = (raceName: string): { guardian: number; hero: number } => {
+      const player = doc.players.find((p) => p.name === raceName)!;
+      const capital = doc.objects.find((o) => o.type === "capital" && (o as { owner?: string }).owner === player.id)!;
+      const stack = doc.objects.find((o) => o.type === "stack" && (o as { owner?: string }).owner === player.id)!;
+      const unit = (o: unknown): { hp: number } =>
+        (o as { garrison: ({ hp: number } | null)[] }).garrison.find(Boolean)!;
+      return { guardian: unit(capital).hp, hero: unit(stack).hp };
+    };
+    expect(hpOf("Империя")).toEqual({ guardian: 250, hero: 150 });
+    // a race the mod data does not cover keeps the reference numbers
+    expect(hpOf("Орды Нежити")).toEqual({ guardian: RACES.undead.guardianHp, hero: RACES.undead.leaderHp });
+    expect(validateMap(doc).ok).toBe(true);
+    expect(roundTripIdentity(bytes)).toBe(true);
+    // without mod data the output is exactly what it always was
+    expect(createBlankMap({ size: 48, races: ["empire"], raceDefs: {} })).toEqual(
+      createBlankMap({ size: 48, races: ["empire"] }),
+    );
   });
 
   it("all 5 races fit and validate on a 72 map", () => {

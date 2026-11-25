@@ -13,6 +13,7 @@ import { Plus, Delete } from "@element-plus/icons-vue";
 import { useEditStore } from "../stores/editStore";
 import { useLordStore } from "../stores/lordStore";
 import { useCollabStore } from "../stores/collabStore";
+import { useModStore } from "../stores/modStore";
 import { assetUrl } from "../services/api";
 import {
   RACES, RACE_KEYS, raceAlreadyPresent, mintPlayerIds, findFreeCapitalSpot, type EditOp,
@@ -27,15 +28,28 @@ const onImgErr = (e: Event): void => { (e.target as HTMLImageElement).style.visi
 const edit = useEditStore();
 const lord = useLordStore();
 const collab = useCollabStore();
+const mods = useModStore();
 const players = computed(() => edit.liveDoc?.players ?? []);
-onMounted(() => { if (!lord.loaded && !lord.loading) void lord.load(); });
+onMounted(() => {
+  if (!lord.loaded && !lord.loading) void lord.load();
+  void mods.loadProfile();
+});
 
-/** Grace race INDEX (RR#### number, = p.race) → RU name, per the TARGET mod's Grace.dbf:
- *  1 = Кланы Гор, 2 = Легионы Проклятых, 3 = Орды Нежити (NOT the base-game order — #123). */
+/** Grace race INDEX (RR#### number, = p.race) → RU name. The names of the map's mod (its
+ *  profile) win; this table is the fallback for a mod without a profile, per the reference
+ *  mod's Grace.dbf: 1 = Кланы Гор, 2 = Легионы Проклятых, 3 = Орды Нежити (NOT the base-game
+ *  order — #123). */
 const RACE_NAMES: Record<number, string> = {
   0: "Империя", 1: "Кланы Гор", 2: "Легионы Проклятых", 3: "Орды Нежити", 4: "Нейтралы", 5: "Эльфийский Союз",
 };
-const raceName = (r: number): string => RACE_NAMES[r] ?? `Раса ${r}`;
+const modRaceNames = computed(() => {
+  const out: Record<number, string> = {};
+  for (const f of Object.values(mods.raceFactsByKey)) {
+    if (f.name) out[parseInt(f.raceId.slice(6), 16)] = f.name;
+  }
+  return out;
+});
+const raceName = (r: number): string => modRaceNames.value[r] ?? RACE_NAMES[r] ?? `Раса ${r}`;
 const isNeutral = (p: { race: number }): boolean => p.race === 4;
 
 // BANK / стартовые ресурсы: "G####:R####:Y####:E####:W####:B####" (letter + 4-digit amount).
@@ -83,16 +97,21 @@ function openAdd(): void {
   addRaceKey.value = avail[0]!.key;
   addOpen.value = true;
 }
-function confirmAdd(): void {
-  const doc = edit.liveDoc;
+async function confirmAdd(): Promise<void> {
   const key = addRaceKey.value;
-  if (!doc || !key) return;
+  if (!key) return;
+  // The guardian and hero come with the base hit points of the MAP'S MOD. The data goes
+  // INTO the op, so every collaborator and the server create the same units from it; a mod
+  // without a profile leaves it out and the reference table applies.
+  const def = (await mods.loadProfile())[key];
+  const doc = edit.liveDoc;
+  if (!doc) return;
   const spot = findFreeCapitalSpot(doc);
   if (!spot) { ElMessage.warning("На карте нет свободного места 5×5 (суша) для новой столицы"); return; }
   const ids = mintPlayerIds(doc, collab.idSlot); // collab id band (M4) — concurrent adds don't collide
   const name = availableRaces.value.find((r) => r.key === key)?.name;
   try {
-    edit.commit([{ kind: "addPlayer", spec: { race: key, x: spot.x, y: spot.y, lordId: addLordId.value ?? undefined, name, ids } } as unknown as EditOp]);
+    edit.commit([{ kind: "addPlayer", spec: { race: key, x: spot.x, y: spot.y, lordId: addLordId.value ?? undefined, name, ids, def } } as unknown as EditOp]);
     addOpen.value = false;
     ElMessage.success(`Фракция добавлена — столица на клетке ${spot.x},${spot.y} (можно перетащить)`);
   } catch (e) {

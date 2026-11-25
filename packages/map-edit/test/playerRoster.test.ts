@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { parseScenario, serializeMapFromModelBytes, validateMap, verifyBlockIntegrity } from "@d2/sg-parser";
 import type { MapDocument } from "@d2/map-schema";
 import {
-  applyOp, materializeForExport, mintPlayerIds, raceAlreadyPresent, roundTripSemantic, RACE_KEYS, type EditOp,
+  applyOp, materializeForExport, mintPlayerIds, raceAlreadyPresent, roundTripSemantic, RACES, RACE_KEYS, type EditOp,
 } from "@d2/map-edit";
 import { campaignMap } from "../../../test-helpers/gameDir";
 
@@ -64,6 +64,25 @@ describe("player roster — add / remove a faction", () => {
     const re = parseScenario(bytes);
     expect(re.players.some((p) => p.id === ids.pl)).toBe(true);
     expect(re.players.length).toBe(doc.players.length + 1);
+  });
+
+  it("creates the guardian and hero from the faction data the op carries (the map's mod)", () => {
+    const plain = addOp() as { kind: "addPlayer"; spec: { race: keyof typeof RACES; ids: { ft: string; kc: string } } };
+    const unitsOf = (op: EditOp): { guardian: number; hero: number } => {
+      const { doc: d2 } = applyOp(doc, op);
+      const hp = (id: string): number =>
+        (d2.objects.find((o) => o.id === id) as unknown as { garrison: ({ hp: number } | null)[] }).garrison.find(Boolean)!.hp;
+      return { guardian: hp(plain.spec.ids.ft), hero: hp(plain.spec.ids.kc) };
+    };
+    const reference = RACES[plain.spec.race];
+    // an op recorded before mods carries no data: the reference table applies
+    expect(unitsOf(plain as EditOp)).toEqual({ guardian: reference.guardianHp, hero: reference.leaderHp });
+    // the same op built for another mod: other base hit points, same ids
+    const forMod = { ...plain, spec: { ...plain.spec, def: { ...reference, guardianHp: 250, leaderHp: 150 } } } as EditOp;
+    expect(unitsOf(forMod)).toEqual({ guardian: 250, hero: 150 });
+    // …and it still exports to a map the reader agrees with
+    const bytes = serializeMapFromModelBytes(base, materializeForExport(doc, [forMod], {}));
+    expect(roundTripSemantic(doc, bytes, [forMod]).ok).toBe(true);
   });
 
   it("undo of addPlayer (removePlayer inverse) restores the exact prior counts", () => {

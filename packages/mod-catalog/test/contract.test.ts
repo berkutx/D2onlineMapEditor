@@ -9,6 +9,7 @@ import {
   ModProfile,
   ScenVariableCatalog,
   findScenVariable,
+  raceFacts,
   summaryOf,
   tableOf,
 } from "../src/index";
@@ -106,6 +107,25 @@ describe("@d2/mod-catalog data contracts", () => {
       ],
     });
     expect(p.races.filter((r) => r.playable).map((r) => r.key)).toEqual(["empire"]);
+  });
+
+  it("raceFacts keeps the playable races that are complete enough to create a player from", () => {
+    const facts = raceFacts(
+      ModProfile.parse({
+        schemaVersion: 1,
+        races: [
+          { key: "empire", raceId: "G000RR0000", raceType: 0, name: "Империя", playable: true, guardian: "G000UU3001", guardianHp: 250, leader: "G000UU0019", leaderHp: 150, lord: "G000LR0003", terrain: 1 },
+          { key: "neutral", raceId: "G000RR0004", raceType: 4, name: "Нейтралы", playable: false, lord: "G000LR0015", terrain: 5 },
+          // playable, but the tables lack its leader's hit points: left to the caller's fallback
+          { key: "elves", raceId: "G000RR0005", raceType: 5, name: "Эльфы", playable: true, guardian: "G000UU8040", guardianHp: 250, leader: "G000UU8009", lord: "G000LR0018", terrain: 6 },
+        ],
+      }),
+    );
+    expect(Object.keys(facts)).toEqual(["empire"]);
+    expect(facts["empire"]).toEqual({
+      raceId: "G000RR0000", raceType: 0, guardian: "G000UU3001", guardianHp: 250,
+      leader: "G000UU0019", leaderHp: 150, lord: "G000LR0003", terrain: 1, name: "Империя",
+    });
   });
 });
 

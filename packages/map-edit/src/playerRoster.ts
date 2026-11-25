@@ -110,13 +110,23 @@ export function mintPlayerIds(doc: MapDocument, slot = 0): PlayerIds {
   };
 }
 
-/** Spec for a fresh add-player (all faction data derived from RACES[race]). */
+/** The faction data a fresh player is synthesized from (one {@link RACES} entry's shape). */
+export type RaceFactsDef = (typeof RACES)[RaceKey];
+
+/** Spec for a fresh add-player. */
 export interface AddPlayerSpec {
   race: RaceKey;
   x: number; y: number;
   lordId?: string;
   name?: string;
   ids: PlayerIds;
+  /**
+   * The faction data of the MAP'S MOD (guardian, leader, their base hit points, lord…), put
+   * into the op by whoever built it. Carried IN the op — not looked up when applying — so
+   * every peer and the server synthesize the same units whatever tables they have loaded.
+   * Absent in ops recorded before mods existed: those use the reference RACES[race].
+   */
+  def?: RaceFactsDef;
 }
 
 /** Is this race already on the map? (one player per race — hard game constraint.) */
@@ -240,7 +250,7 @@ const emptySats = (): Sats => ({
 /** Build a fresh player cluster (deterministic given doc + spec.ids). Mirrors addRace, minus the
  *  cosmetic terrain stamp. */
 export function synthesizeCluster(doc: MapDocument, spec: AddPlayerSpec): PlayerCluster {
-  const race = RACES[spec.race];
+  const race = spec.def ?? RACES[spec.race];
   const { ids } = spec;
   const raceType = race.raceType;
   const graceIdx = parseInt(race.raceId.slice(6), 16);

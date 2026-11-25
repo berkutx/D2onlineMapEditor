@@ -139,6 +139,13 @@ export interface BlankMapOptions {
   /** Playable races to add (each = player + fog + capital + guardian + hero, the
    *  addRace port). Order picks the capital corner. Max 5. */
   races?: RaceKey[];
+  /**
+   * The faction data of the mod the map is made for (from the mod's profile). A race given
+   * here replaces its {@link RACES} entry: the reference table holds ONE mod's numbers, and
+   * mods differ — a guardian has 900 hit points in one mod and 250 in another, and a unit
+   * written with the wrong base hit points is a wrong map. Races absent here use RACES.
+   */
+  raceDefs?: Partial<Record<RaceKey, RaceDef>>;
 }
 
 const hex4 = (n: number): string => (n >>> 0).toString(16).padStart(4, "0");
@@ -157,6 +164,8 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   const races = opts.races ?? [];
   if (races.length > 5) throw new Error("createBlankMap: max 5 races");
   for (const r of races) if (!RACES[r]) throw new Error(`createBlankMap: unknown race '${r}'`);
+  // the mod's own faction data where given, the reference table otherwise
+  const raceOf = (key: RaceKey): RaceDef => opts.raceDefs?.[key] ?? RACES[key];
   if (size < 24 && races.length > 0) throw new Error("createBlankMap: races need size >= 24");
 
   if (cp1251Length(name) > 64) throw new Error("createBlankMap: name too long (max 64 bytes)");
@@ -178,7 +187,7 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   // value = the terrain id; the reference writes it verbatim, no ground bits).
   races.forEach((key, idx) => {
     const spot = capitalSpot(idx, size);
-    const t = RACES[key].terrain;
+    const t = raceOf(key).terrain;
     for (let i = 0; i < 5; i++)
       for (let k = 0; k < 5; k++) grid[(spot.y + k) * size + (spot.x + i)] = t;
   });
@@ -228,7 +237,7 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   // An EMPTY blob makes the game read the "S143" sentinel as a huge count and crash.
   // Decoded from real maps: neutral race index = 4 (matches RACE_ID RR0004). With races
   // this is updateSubraces verbatim: one record per MidPlayer in block order.
-  const playerRaceTypes = [4, ...races.map((r) => RACES[r].raceType)];
+  const playerRaceTypes = [4, ...races.map((r) => raceOf(r).raceType)];
   w.i32(playerRaceTypes.length);
   for (const rt of playerRaceTypes) w.i32(rt).repitable(0, 36);
   w.cp(VERSION);
@@ -438,7 +447,7 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   const neutralId = fullId("PL", 0);
   subRaceBlock(0, 5, neutralId, 4); // SR0000: neutral player's subrace
   races.forEach((key, idx) => {
-    const sub = RACES[key].raceType + 1; // verified: subrace = raceType + 1
+    const sub = raceOf(key).raceType + 1; // verified: subrace = raceType + 1
     subRaceBlock(idx + 1, sub, fullId("PL", idx + 1), sub - 1); // SR<playerNo>, banner=sub-1
   });
   // fixed neutral-special tail SR (subrace 6..13, banner 5..12), ids after the race SRs
@@ -452,7 +461,7 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
   // by PLAYER index (matching Riders: player n -> FGn), NOT the race index — the neutral's
   // FG0000 already exists above. The capital's SUBRACE ref = SR<playerNo> (emitted above).
   races.forEach((key, idx) => {
-    const race = RACES[key];
+    const race = raceOf(key);
     const spot = capitalSpot(idx, size);
     const playerNo = idx + 1;
     const playerId = fullId("PL", playerNo);

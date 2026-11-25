@@ -15,6 +15,7 @@
     "@d2/asset-manifest": "workspace:*",
     "@d2/map-edit": "workspace:*",
     "@d2/map-schema": "workspace:*",
+    "@d2/mod-catalog": "workspace:*",
     "@d2/pixi-render": "workspace:*",
     "@d2/socket-contract": "workspace:*",
     "@element-plus/icons-vue": "^2.3.1",

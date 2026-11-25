@@ -27,11 +27,14 @@ import {
   IdSets,
   ModIndex,
   ModManifest,
+  ModProfile,
   detectMod,
   indexIdSets,
+  raceFacts,
   type IdIndex,
   type ModCompatibility,
   type ModDetection,
+  type RaceFacts,
 } from "@d2/mod-catalog";
 import type { ModInfo } from "@d2/socket-contract";
 import { config } from "../config.js";
@@ -77,6 +80,7 @@ export class ModContext {
   private landmarkFn: LandmarkSizeFn | null = null;
   private manifestCache: { mtimeMs: number; json: unknown } | null = null;
   private ids: IdIndex | null | undefined;
+  private races: Record<string, RaceFacts> | null = null;
 
   constructor(
     readonly id: string,
@@ -226,6 +230,27 @@ export class ModContext {
       this.manifestCache = { mtimeMs: st.mtimeMs, json: JSON.parse(await readFile(path, "utf8")) };
     }
     return this.manifestCache.json;
+  }
+
+  /**
+   * The mod's own faction data (guardian, leader, lord and their base hit points per race),
+   * by race key — what a new map or a new player of THIS mod is created from. Empty when
+   * the mod has no profile (the flat layout): callers then use their reference table.
+   */
+  async raceFacts(): Promise<Record<string, RaceFacts>> {
+    if (this.races) return this.races;
+    if (this.source.kind === "flat" || !this.source.manifest.files["profile.json"]) {
+      this.races = {};
+      return this.races;
+    }
+    try {
+      this.races = raceFacts(ModProfile.parse(await this.readJson("profile.json")));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(`[mods:${this.id}] profile.json unreadable — reference faction data is used (${String(e)})`);
+      return {};
+    }
+    return this.races;
   }
 
   /**

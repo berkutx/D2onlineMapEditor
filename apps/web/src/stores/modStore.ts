@@ -13,8 +13,9 @@
  * see mapStore.openMap).
  */
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
 import type { ModInfo, ModList } from "@d2/socket-contract";
+import { ModProfile, raceFacts, type RaceFacts } from "@d2/mod-catalog";
 import {
   DEFAULT_MOD_ID,
   activeAssetsAreFlat,
@@ -100,5 +101,31 @@ export const useModStore = defineStore("mod", () => {
     return ready;
   }
 
-  return { mods, defaultModId, activeModId, activeMod, openableMods, loadMods, nameOf, activate, whenReady };
+  /**
+   * The active mod's own faction data (guardian, leader, lord, their base hit points per
+   * race), by race key. Empty for a mod without a profile (the flat layout) — whoever builds
+   * an operation then leaves the faction data out and the reference table applies.
+   */
+  const raceFactsByKey = shallowRef<Record<string, RaceFacts>>({});
+  let profileP: Promise<Record<string, RaceFacts>> | null = null;
+
+  /** Load the active mod's profile (once per session; waits for the mod to be known). */
+  function loadProfile(): Promise<Record<string, RaceFacts>> {
+    if (!profileP) {
+      profileP = modAssetUrl("profile.json")
+        .then((url) => fetch(url))
+        .then(async (res) => (res.ok ? raceFacts(ModProfile.parse(await res.json())) : {}))
+        .catch(() => ({}))
+        .then((facts) => {
+          raceFactsByKey.value = facts;
+          return facts;
+        });
+    }
+    return profileP;
+  }
+
+  return {
+    mods, defaultModId, activeModId, activeMod, openableMods, raceFactsByKey,
+    loadMods, loadProfile, nameOf, activate, whenReady,
+  };
 });

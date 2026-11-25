@@ -71,6 +71,17 @@ beforeAll(async () => {
           "decorCatalog.json": {},
           "manifest.json": { manifestVersion: "0.1.0", of: "alpha" },
           "itemicons/g000ig0001.png": ICON,
+          // alpha's own tables: the empire's guardian has 250 hit points, not the reference 900
+          "profile.json": {
+            schemaVersion: 1,
+            races: [
+              {
+                key: "empire", raceId: "G000RR0000", raceType: 0, name: "Империя", playable: true,
+                guardian: "G000UU3001", guardianHp: 250, leader: "G000UU0019", leaderHp: 150,
+                lord: "G000LR0003", terrain: 1,
+              },
+            ],
+          },
         },
       },
       {
@@ -247,6 +258,18 @@ describe("the mod of a map", () => {
     expect(res.statusCode).toBe(201);
     const copy = (res.json() as { id: string }).id;
     expect((await metaOf(copy, STRANGER)).mod).toMatchObject({ id: "beta", source: "choice" });
+  });
+
+  it("builds a new map from the faction data of the mod it is made for", async () => {
+    const hpOfCapitalGuard = async (modId: string): Promise<number> => {
+      const id = ((await newMap({ modId })).json() as { id: string }).id;
+      const doc = (await get(REST.map(id), OWNER)).json() as {
+        objects: { type: string; garrison?: ({ hp: number } | null)[] }[];
+      };
+      return doc.objects.find((o) => o.type === "capital")!.garrison!.find(Boolean)!.hp;
+    };
+    expect(await hpOfCapitalGuard("alpha")).toBe(250); // alpha's profile
+    expect(await hpOfCapitalGuard("beta")).toBe(900); // beta has no profile: the reference table
   });
 
   it("validates a map with its own mod's catalogs", async () => {
