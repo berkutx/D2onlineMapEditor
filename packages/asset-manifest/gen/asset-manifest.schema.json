@@ -1,5 +1,5 @@
 {
-  "manifestVersion": "0.1.0",
+  "manifestVersion": "0.2.0",
   "$ref": "#/definitions/AssetManifest",
   "definitions": {
     "AssetManifest": {
@@ -46,16 +46,77 @@
               "bytes": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "lazy": {
+                "type": "boolean"
+              },
+              "size": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": [
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  }
+                ]
               }
             },
             "required": [
               "id",
-              "image",
-              "meta"
+              "image"
             ],
             "additionalProperties": false
           },
           "default": []
+        },
+        "frames": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 9,
+            "maxItems": 9,
+            "items": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            ]
+          }
         },
         "index": {
           "type": "object",

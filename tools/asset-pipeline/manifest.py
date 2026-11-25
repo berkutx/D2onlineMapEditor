@@ -156,7 +156,12 @@ def validate_against_schema(node, sch, path, errs):
             errs.append("%s: expected array" % path)
             return
         items = sch.get("items")
-        if items:
+        if isinstance(items, list):  # a tuple: one schema per position
+            if len(node) != len(items):
+                errs.append("%s: expected %d items, got %d" % (path, len(items), len(node)))
+            for i, (e, item) in enumerate(zip(node, items)):
+                validate_against_schema(e, item, "%s[%d]" % (path, i), errs)
+        elif items:
             for i, e in enumerate(node):
                 validate_against_schema(e, items, "%s[%d]" % (path, i), errs)
     elif t == "string":
@@ -167,6 +172,9 @@ def validate_against_schema(node, sch, path, errs):
     elif t == "number":
         if not isinstance(node, (int, float)) or isinstance(node, bool):
             errs.append("%s: expected number" % path)
+    elif t == "integer":
+        if not isinstance(node, int) or isinstance(node, bool):
+            errs.append("%s: expected integer" % path)
     elif t == "boolean":
         if not isinstance(node, bool):
             errs.append("%s: expected boolean" % path)

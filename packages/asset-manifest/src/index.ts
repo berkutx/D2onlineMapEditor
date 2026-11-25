@@ -2,6 +2,7 @@ export {
   MANIFEST_VERSION,
   D2_TICK_MS,
   SpritesheetRef,
+  FrameEntry,
   AnimationDef,
   TerrainIndex,
   AssetIndex,

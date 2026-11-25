@@ -6,19 +6,26 @@
  * under vitest (needs a browser/WebGL to actually run). Structured so a browser
  * host can `await store.load(...)` once and then synchronously resolve textures.
  *
- * Loading strategy (framework-agnostic, no bundler magic):
- *   1. `fetch` each `SpritesheetRef.meta` JSON (a Pixi-native spritesheet hash).
- *   2. `Assets.load` the atlas image -> base `Texture`.
- *   3. `new Spritesheet(baseTexture, json)` + `await sheet.parse()`.
- * The resulting per-sheet `textures` / `animations` maps are merged into global
- * lookups keyed by the manifest's logical frame keys.
+ * Two manifest generations are read (see MANIFEST_VERSION in @d2/asset-manifest):
+ *
+ *   0.2 — the manifest has a `frames` table. A sheet is just an image (one per source image
+ *         record, a few KB); its frames are cut by the table, no JSON per sheet. Which
+ *         sheets load up front and which on demand is the sheet's own `lazy` flag, and a
+ *         map pulls exactly the sheets of the frame keys it uses.
+ *   0.1 — atlas pages, each with a Pixi spritesheet JSON:
+ *           1. `fetch` each `SpritesheetRef.meta` JSON (a Pixi-native spritesheet hash).
+ *           2. `Assets.load` the atlas image -> base `Texture`.
+ *           3. `new Spritesheet(baseTexture, json)` + `await sheet.parse()`.
+ *
+ * Either way the textures end up in global lookups keyed by the logical frame keys.
  */
-import { Assets, Spritesheet, Texture } from "pixi.js";
-import type { SpritesheetData } from "pixi.js";
+import { Assets, Rectangle, Spritesheet, Texture } from "pixi.js";
+import type { SpritesheetData, TextureSource } from "pixi.js";
 import type {
   AssetManifest,
   SpritesheetRef,
   AnimationDef,
+  FrameEntry,
 } from "@d2/asset-manifest";
 
 /** Optional override hooks so a host can control URL resolution / fetching. */
@@ -29,13 +36,21 @@ export interface AssetStoreOptions {
    * the instance out early) still fetches from the right place once loading starts.
    */
   baseUrl?: string | (() => string);
+  /**
+   * Prefix for manifest paths that begin with `blobs/` — files of the content-addressed
+   * asset store, shared by every mod (so they are NOT under a mod's own base URL).
+   * Defaults to `baseUrl`.
+   */
+  blobBaseUrl?: string | (() => string);
   /** Custom JSON fetcher (defaults to global `fetch`). Useful for tests/SSR. */
   fetchJson?: (url: string) => Promise<unknown>;
 }
 
 interface LoadedSheet {
   ref: SpritesheetRef;
-  sheet: Spritesheet;
+  /** The Pixi spritesheet of a 0.1 atlas page; a 0.2 sheet has none (the table cuts its frames). */
+  sheet?: Spritesheet;
+  source: TextureSource;
 }
 
 export class AssetStore {
@@ -62,6 +77,13 @@ export class AssetStore {
   /** Sheets loaded whose ref lacks `bytes` (old manifest) — makes the counter honest. */
   private bytesUnknown = 0;
 
+  /** 0.2: the manifest's frame table (frame key -> where it sits); undefined for 0.1. */
+  private frameTable?: Record<string, FrameEntry>;
+  /** 0.2: sheet index -> the frame keys cut from it. */
+  private readonly framesBySheet = new Map<number, string[]>();
+  /** 0.2: sheet id -> its index in `manifest.spritesheets` (what a FrameEntry refers to). */
+  private readonly sheetIndex = new Map<string, number>();
+
   private loaded = false;
 
   constructor(options: AssetStoreOptions = {}) {
@@ -75,12 +97,17 @@ export class AssetStore {
    *    ObjectLayer falls back to it when an animation isn't built) — {@link ensureAnimations};
    *  - "capital-*" city-screen backgrounds (66 MB) — not referenced by the map renderer
    *    at all today, reachable via ensureLoaded if a future feature needs them. */
-  private static isLazy(ref: SpritesheetRef): boolean {
+  private static isLazyPage(ref: SpritesheetRef): boolean {
     return (
       ref.id.startsWith("unit-") ||
       ref.id.startsWith("iso-anim-") ||
       ref.id.startsWith("capital-")
     );
+  }
+
+  /** 0.2 sheets say it themselves; 0.1 pages are told apart by their id (see isLazyPage). */
+  private isLazy(ref: SpritesheetRef): boolean {
+    return this.frameTable ? ref.lazy === true : AssetStore.isLazyPage(ref);
   }
 
   /** True once {@link load} has completed. */
@@ -89,7 +116,8 @@ export class AssetStore {
   }
 
   private url(path: string): string {
-    const opt = this.opts.baseUrl;
+    const opt =
+      path.startsWith("blobs/") && this.opts.blobBaseUrl !== undefined ? this.opts.blobBaseUrl : this.opts.baseUrl;
     const base = (typeof opt === "function" ? opt() : opt) ?? "";
     if (!base) return path;
     const sep = base.endsWith("/") || path.startsWith("/") ? "" : "/";
@@ -118,15 +146,27 @@ export class AssetStore {
     this.refById.clear();
     this.animDefs.clear();
     this.frameLocCache.clear();
+    this.framesBySheet.clear();
+    this.sheetIndex.clear();
     this.bytesLoaded = 0;
     this.bytesUnknown = 0;
     for (const ref of manifest.spritesheets) this.refById.set(ref.id, ref);
     for (const anim of manifest.animations) this.animDefs.set(anim.id, anim);
+    this.frameTable = manifest.frames;
+    if (this.frameTable) {
+      manifest.spritesheets.forEach((ref, i) => this.sheetIndex.set(ref.id, i));
+      for (const [key, entry] of Object.entries(this.frameTable)) {
+        const list = this.framesBySheet.get(entry[0]);
+        if (list) list.push(key);
+        else this.framesBySheet.set(entry[0], [key]);
+      }
+    }
 
-    // Load everything EXCEPT the lazy sheets (units / animation atlases / capitals).
+    // Load everything EXCEPT the lazy sheets (0.2: whatever is flagged `lazy`;
+    // 0.1: units / animation atlases / capitals).
     await Promise.all(
       manifest.spritesheets
-        .filter((ref) => !AssetStore.isLazy(ref))
+        .filter((ref) => !this.isLazy(ref))
         .map((ref) => this.loadSheet(ref)),
     );
 
@@ -167,6 +207,12 @@ export class AssetStore {
     }
     if (defs.length === 0) return;
 
+    if (this.frameTable) {
+      await this.loadSheetsOf(frames);
+      for (const def of defs) this.buildAnimation(def);
+      return;
+    }
+
     const sheetIds = new Set<string>();
     const groups = new Set<string>();
     for (const f of frames) {
@@ -199,6 +245,7 @@ export class AssetStore {
       const refs = [...this.refById.values()].filter((r) => r.id.startsWith(`${group}-`));
       await Promise.all(
         refs.map(async (ref) => {
+          if (!ref.meta) return;
           const json = (await this.fetchJson(this.url(ref.meta))) as SpritesheetData;
           for (const key of Object.keys(json.frames ?? {})) loc.set(key, ref.id);
         }),
@@ -216,6 +263,14 @@ export class AssetStore {
    * Keys whose sheet is already loaded (or unknown) are skipped.
    */
   async ensureLoaded(keys: Iterable<string>): Promise<void> {
+    if (this.frameTable) {
+      // A key that is only an animation id still has to SHOW when animations are off:
+      // its first frame is its still.
+      const frames: string[] = [];
+      for (const key of keys) frames.push(this.frameTable[key] ? key : this.animDefs.get(key)?.frames[0] ?? key);
+      await this.loadSheetsOf(frames);
+      return;
+    }
     const index = this.manifest?.index;
     if (!index) return;
     const sheetIds = new Set<string>();
@@ -224,6 +279,45 @@ export class AssetStore {
       if (entry && !this.sheets.has(entry.sheet)) sheetIds.add(entry.sheet);
     }
     await Promise.all([...sheetIds].map((id) => this.loadSheetOnce(id)));
+  }
+
+  /** 0.2: load the sheets the given frame keys are cut from (unknown keys are skipped). */
+  private async loadSheetsOf(frameKeys: Iterable<string>): Promise<void> {
+    const table = this.frameTable;
+    const sheets = this.manifest?.spritesheets;
+    if (!table || !sheets) return;
+    const ids = new Set<string>();
+    for (const key of frameKeys) {
+      const ref = sheets[table[key]?.[0] ?? -1];
+      if (ref && !this.sheets.has(ref.id)) ids.add(ref.id);
+    }
+    await Promise.all([...ids].map((id) => this.loadSheetOnce(id)));
+  }
+
+  /** 0.2: a sheet is an image; its frames are cut by the manifest's table. */
+  private async loadTableSheet(ref: SpritesheetRef, table: Record<string, FrameEntry>): Promise<void> {
+    const base = await Assets.load<Texture>(this.url(ref.image));
+    base.source.scaleMode = "nearest"; // pixel art, as in loadSheet below
+    for (const key of this.framesBySheet.get(this.sheetIndex.get(ref.id) ?? -1) ?? []) {
+      if (this.textures.has(key)) continue;
+      const [, x, y, w, h, trimX, trimY, srcW, srcH] = table[key]!;
+      const trimmed = trimX !== 0 || trimY !== 0 || w !== srcW || h !== srcH;
+      // the same three rectangles Pixi's own Spritesheet gives a frame: `orig` + `trim`
+      // put the cut-down picture back where it sat in the full image (the iso anchor)
+      this.textures.set(
+        key,
+        new Texture({
+          source: base.source,
+          frame: new Rectangle(x, y, w, h),
+          orig: new Rectangle(0, 0, srcW, srcH),
+          trim: trimmed ? new Rectangle(trimX, trimY, w, h) : undefined,
+          label: key,
+        }),
+      );
+    }
+    this.sheets.set(ref.id, { ref, source: base.source });
+    if (typeof ref.bytes === "number") this.bytesLoaded += ref.bytes;
+    else this.bytesUnknown++;
   }
 
   /** Load a sheet by id at most once (dedupes in-flight + already-loaded). */
@@ -239,6 +333,8 @@ export class AssetStore {
   }
 
   private async loadSheet(ref: SpritesheetRef): Promise<void> {
+    if (this.frameTable) return this.loadTableSheet(ref, this.frameTable);
+    if (!ref.meta) throw new Error(`AssetStore: sheet ${ref.id} has no meta, and the manifest no frame table`);
     const metaUrl = this.url(ref.meta);
     const json = (await this.fetchJson(metaUrl)) as SpritesheetData;
 
@@ -256,7 +352,7 @@ export class AssetStore {
     const sheet = new Spritesheet(baseTexture, json);
     await sheet.parse();
 
-    this.sheets.set(ref.id, { ref, sheet });
+    this.sheets.set(ref.id, { ref, sheet, source: baseTexture.source });
     // download accounting: manifest-declared file sizes (see bytesLoaded docstring)
     if (typeof ref.bytes === "number") this.bytesLoaded += ref.bytes;
     else this.bytesUnknown++;
@@ -285,6 +381,10 @@ export class AssetStore {
         this.textures.get(key);
       if (tex) frames.push(tex);
     }
+    // 0.2 sheets arrive one by one: an animation exists only once ALL its frames do (a
+    // 0.1 atlas page always brought the whole set, so "any" was enough there). The first
+    // definition of an id stays.
+    if (this.frameTable && (frames.length !== anim.frames.length || this.animations.has(anim.id))) return;
     if (frames.length > 0) this.animations.set(anim.id, frames);
   }
 
@@ -304,18 +404,23 @@ export class AssetStore {
     const indexEntry = this.manifest?.index?.[name];
     if (indexEntry) {
       const viaIndex =
-        this.sheets.get(indexEntry.sheet)?.sheet.textures[indexEntry.frame] ??
+        this.sheets.get(indexEntry.sheet)?.sheet?.textures[indexEntry.frame] ??
         this.textures.get(`${indexEntry.sheet}/${indexEntry.frame}`) ??
         this.textures.get(indexEntry.frame);
       if (viaIndex) return viaIndex;
     }
 
-    return this.textures.get(name) ?? Texture.EMPTY;
+    const direct = this.textures.get(name);
+    if (direct) return direct;
+    // an animation id without a still of its own shows its first frame
+    const first = this.animDefs.get(name)?.frames[0];
+    return (first !== undefined ? this.textures.get(first) : undefined) ?? Texture.EMPTY;
   }
 
   /** True if `name` resolves to a real (non-empty) texture. */
   hasTexture(name: string | undefined): boolean {
     if (!name) return false;
+    if (this.frameTable?.[name]) return true;
     if (this.manifest?.index?.[name]) return true;
     return this.textures.has(name);
   }
@@ -347,8 +452,8 @@ export class AssetStore {
    *  what is on screen — complements the Scene's visible-only estimate. */
   textureBytes(): number {
     let b = 0;
-    for (const { sheet } of this.sheets.values()) {
-      const s = sheet.textureSource as { pixelWidth?: number; pixelHeight?: number; width: number; height: number };
+    for (const { source } of this.sheets.values()) {
+      const s = source as { pixelWidth?: number; pixelHeight?: number; width: number; height: number };
       b += (s.pixelWidth ?? s.width) * (s.pixelHeight ?? s.height) * 4;
     }
     return b;
@@ -362,7 +467,7 @@ export class AssetStore {
   /** Free GPU resources. Does not unload the shared Assets cache by default. */
   destroy(): void {
     for (const { sheet } of this.sheets.values()) {
-      sheet.destroy(false);
+      sheet?.destroy(false);
     }
     this.sheets.clear();
     this.textures.clear();

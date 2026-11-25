@@ -10,7 +10,7 @@ editor. Several mods live side by side in one store and share every byte-identic
     python tools/asset-pipeline/build_mod.py \
         --game "C:/Games/SomeMod" --mod-id some-mod --name "Some Mod" \
         --family some --family-order 1 --store public/assets \
-        [--ingest-atlases <dir with an existing pipeline.py output>]
+        [--graphics]
 
 ``--game`` is the directory that holds ``Globals`` / ``Imgs`` / ``Scripts`` (for an original
 install that is ``<root>/Game``).
@@ -26,9 +26,10 @@ What is built here (the DATA of a mod):
   * ``dbfSchema.json``     columns of every Globals table, and which expected ones are absent
   * ``modscripts/**``      the Lua sources of scripted modifiers
 
-Graphics are not converted here yet: ``--ingest-atlases`` takes in the atlases an earlier
-``pipeline.py`` run produced (and builds the decoration catalog, which needs them). Without
-graphics the mod is registered as ``data-only``.
+``--graphics`` also builds the mod's sprites (build_sheets: one small palette sheet per
+source image record, AssetManifest 0.2) and the decoration catalog, which needs them.
+``--ingest-atlases`` instead takes in the atlas pages an earlier ``pipeline.py`` run produced
+(AssetManifest 0.1). Without either the mod is registered as ``data-only``.
 
 Everything is written through fflib.blobstore, so a file two mods share is stored once.
 The contract of the JSON files is packages/mod-catalog (Contract D).
@@ -49,7 +50,7 @@ from fflib import dbf  # noqa: E402
 from fflib.blobstore import BlobStore, sha256_file  # noqa: E402
 import manifest as manifest_mod  # noqa: E402
 
-PIPELINE_VERSION = "2.0.0"
+PIPELINE_VERSION = "2.1.0"
 SCHEMA_VERSION = 1
 MOD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 NULL_ID = "G000000000"
@@ -67,7 +68,7 @@ DATA_BUILDERS = [
     "build_lord_icons",
     "build_unit_icons",
 ]
-#: Builders that read the atlas pages from --out; run only when graphics are present.
+#: Builders that read the sprite sheets from --out; run only when graphics are present.
 GRAPHICS_BUILDERS = ["build_decor_catalog"]
 
 #: Table code inside a global id -> (table file, id column). Mirrors ID_TABLES of Contract D.
@@ -480,6 +481,11 @@ def run_builder(name, game, out_dir):
         raise BuildError("%s failed: %s" % (name, rc))
 
 
+def pillow_version():
+    import PIL
+    return getattr(PIL, "__version__", None) or getattr(PIL, "PILLOW_VERSION", "?")
+
+
 # ---- graphics an earlier pipeline.py run produced ------------------------------------
 
 def atlas_file_names(atlas_dir):
@@ -542,8 +548,12 @@ def main(argv=None):
     ap.add_argument("--family", default=None, help="version line the mod belongs to (default: the mod id)")
     ap.add_argument("--family-order", type=int, default=0, help="higher = newer version of the family")
     ap.add_argument("--store", required=True, help="asset store root (e.g. public/assets)")
+    ap.add_argument("--graphics", action="store_true",
+                    help="build the sprite sheets from the game's archives (build_sheets)")
+    ap.add_argument("--with-capital", action="store_true",
+                    help="with --graphics: also build Capital.ff (city screens; nothing draws them yet)")
     ap.add_argument("--ingest-atlases", default=None, metavar="DIR",
-                    help="take in the atlases of an existing pipeline.py output (manifest.json + pages)")
+                    help="instead of --graphics: take in an existing pipeline.py output (manifest.json + pages)")
     ap.add_argument("--default", action="store_true", help="make this the store's default mod")
     ap.add_argument("--dry-run", action="store_true",
                     help="build and report sizes, but leave the store untouched")
@@ -551,6 +561,8 @@ def main(argv=None):
 
     if not MOD_ID_RE.match(args.mod_id):
         ap.error("--mod-id must be a lowercase slug ([a-z0-9-], up to 40 chars)")
+    if args.graphics and args.ingest_atlases:
+        ap.error("--graphics and --ingest-atlases are two ways to the same thing; give one")
     game = os.path.abspath(args.game)
     globals_dir = find_dir(game, "Globals")
     if not globals_dir:
@@ -595,8 +607,22 @@ def main(argv=None):
                 except OSError:
                     shutil.copyfile(blob_abs, os.path.join(stage, name))
 
+        # 1b. ... or graphics built here: sheets + manifest.json into the stage directory.
+        #     A sheet's blob path is its hash, so the manifest can name it before step 5
+        #     moves the file into the store.
+        sheet_stats = None
+        if args.graphics:
+            import build_sheets
+            log("[%s] sprite sheets ..." % args.mod_id)
+            sheet_stats = build_sheets.build(
+                game, stage, blob_rel=lambda path: store.rel(sha256_file(path), "png"),
+                with_capital=args.with_capital, log=log)
+            ok, msg = manifest_mod.validate(sheet_stats["manifest"])
+            if not ok:
+                raise BuildError("manifest.json: " + msg)
+
         # 2. the existing catalog / icon builders, unchanged, into the stage directory
-        for name in DATA_BUILDERS + (GRAPHICS_BUILDERS if atlas_names else []):
+        for name in DATA_BUILDERS + (GRAPHICS_BUILDERS if atlas_names or sheet_stats else []):
             log("[%s] %s ..." % (args.mod_id, name))
             run_builder(name, game, stage)
 
@@ -662,7 +688,8 @@ def main(argv=None):
         "familyOrder": args.family_order,
         "status": status,
         "contentFingerprint": content_fp,
-        "pipelineVersion": PIPELINE_VERSION,
+        # sheets are PNGs written by Pillow: its version is part of what "same bytes" means
+        "pipelineVersion": PIPELINE_VERSION + (" (Pillow %s)" % pillow_version() if sheet_stats else ""),
         "source": source,
         "capabilities": [],
         "files": {k: files[k] for k in sorted(files)},
@@ -678,6 +705,12 @@ def main(argv=None):
     print("  variables    %s" % (", ".join(v["name"] + ("*" if v.get("prefix") else "") for v in new_files["scenVariables.json"]["variables"]) or "-"))
     print("  files        %d logical (%d atlas, %d modifier scripts), built %.1f MB" % (
         len(files), len(atlas_names), script_count, staged_bytes / 1048576.0))
+    if sheet_stats:
+        print("  sheets       %d (%d palette, %d RGBA), %.1f MB; %d frames, %d animations" % (
+            sheet_stats["sheets"], sheet_stats["palette"], sheet_stats["rgba"],
+            sheet_stats["bytes"] / 1048576.0, sheet_stats["frames"], sheet_stats["animations"]))
+        if sheet_stats["missing"]:
+            print("  archives this mod lacks: %s" % ", ".join(sheet_stats["missing"]))
     print("  store        %s" % store.summary())
     for diff in race_table_differences(new_files["profile.json"]):
         print("  RACE TABLE DIFFERS from the editor's reference — %s" % diff)

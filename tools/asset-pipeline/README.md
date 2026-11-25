@@ -86,6 +86,33 @@ output) plus:
 The JSON shapes are **Contract D** (`packages/mod-catalog`); `build_mod.py` checks its
 output against the JSON Schemas in `packages/mod-catalog/gen/`.
 
+### Graphics: one sheet per source image record (`build_sheets.py`)
+
+`build_mod.py --graphics` builds the mod's sprites itself (no `pipeline.py` run needed):
+
+- **One sheet per source image record** of `IsoTerrn / IsoStill / IsoCmon / City / IsoAnim`
+  (a record already holds what belongs together: one landmark, one animation, one forest
+  set), one per unit for the idle frames of `IsoUnit`, and the shared terrain tile atlases.
+- Frames are assembled from the record's parts exactly as `GameResource` does, but **stay in
+  palette indices**: a sheet is a palette PNG whose colour-key entries are transparent
+  (`tRNS`). Only frames that do not share one palette (a unit's eight facings) are RGBA.
+- A sheet depends on nothing but its record and the shader, so **the same record in two mods
+  gives the same bytes** — one blob in the store, one cached copy in a browser.
+- Frame rectangles are in the manifest's own `frames` table (**AssetManifest 0.2**); a sheet
+  says itself whether it loads up front or on demand. An animation lists existing frame
+  keys instead of getting a copy of the pixels.
+- Frame names are unique only inside one archive (`A`, `0H`, …). The plain key belongs to
+  the first archive that defines it; a later one is kept as `<archive>:<KEY>`, and each
+  archive's animations are resolved through its own keys.
+
+For the reference install this is 1 406 sheets / 38 MB instead of 239 MB of atlas pages
+(animations: 9 MB instead of 82 MB); a map downloads about 10 MB instead of 39 MB.
+`tests/test_sheets.py` rebuilds every frame from the sheets and compares it, pixel for pixel,
+with `GameResource.get_frames` (needs a game install; skipped without one).
+
+`--ingest-atlases <dir>` is the older way: it takes in the atlas pages of an existing
+`pipeline.py` output (AssetManifest 0.1), which the editor still reads.
+
 `data/scen_variables.json` is the one hand-written input: what each scenario variable the
 toolset or a mod's Lua reads MEANS (title, description, ready-made choices, what the game
 assumes when the variable is absent, whether a race-prefixed variable replaces the common one

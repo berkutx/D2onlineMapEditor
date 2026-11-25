@@ -180,21 +180,40 @@ def main(argv=None):
     for r in read_dbf(_find(globals_dir, "Tglobal.dbf")):
         names[r["TXT_ID"].decode("latin1").strip().lower()] = r["TEXT"].decode("cp866", "replace").strip()
 
-    # frame key -> {page,x,y,w,h} across the decoration atlases (first occurrence wins)
+    # frame key -> {page,x,y,w,h}: where the palette crops a thumbnail from. `page` is the
+    # image as the manifest names it (what the browser fetches); `page_file` maps it to the
+    # file in the build directory, which for a blob-addressed sheet is another path.
     floc = {}
     page_cache = {}
-    for grp in ("iso-still", "iso-cmon", "iso-anim", "iso-terrn"):
-        for jp in sorted(glob.glob(os.path.join(A, grp + "-*.json"))):
-            j = json.load(open(jp))
-            page = os.path.basename(j["meta"]["image"])
-            for k, v in j["frames"].items():
-                if k not in floc:
-                    f = v["frame"]
-                    floc[k] = {"page": page, "x": f["x"], "y": f["y"], "w": f["w"], "h": f["h"]}
+    page_file = {}
+    manifest_path = os.path.join(A, "manifest.json")
+    manifest = json.load(open(manifest_path, encoding="utf-8")) if os.path.isfile(manifest_path) else {}
+    if manifest.get("frames"):
+        # manifest 0.2 (build_sheets): one table for every frame, one sheet per source record
+        sheets = manifest["spritesheets"]
+        for k, (si, x, y, w, h) in ((k, v[:5]) for k, v in manifest["frames"].items()):
+            sheet = sheets[si]
+            if sheet["id"].split("/")[0] not in ("iso-still", "iso-cmon", "iso-anim", "iso-terrn"):
+                continue
+            floc[k] = {"page": sheet["image"], "x": x, "y": y, "w": w, "h": h}
+            page_file[sheet["image"]] = os.path.join("sheets", *(sheet["id"] + ".png").split("/"))
+    else:
+        # manifest 0.1 (pipeline.py): atlas pages with a JSON each (first occurrence wins)
+        for grp in ("iso-still", "iso-cmon", "iso-anim", "iso-terrn"):
+            for jp in sorted(glob.glob(os.path.join(A, grp + "-*.json"))):
+                j = json.load(open(jp))
+                page = os.path.basename(j["meta"]["image"])
+                for k, v in j["frames"].items():
+                    if k not in floc:
+                        f = v["frame"]
+                        floc[k] = {"page": page, "x": f["x"], "y": f["y"], "w": f["w"], "h": f["h"]}
 
     def page_img(page):
         if page not in page_cache:
-            page_cache[page] = np.asarray(Image.open(os.path.join(A, page)).convert("RGBA"))
+            if len(page_cache) > 64:  # hundreds of small sheets: keep only the recent ones
+                page_cache.clear()
+            path = os.path.join(A, page_file.get(page, page))
+            page_cache[page] = np.asarray(Image.open(path).convert("RGBA"))
         return page_cache[page]
 
     def stats(key):

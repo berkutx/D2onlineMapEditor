@@ -10,7 +10,7 @@
  * imperatively to drive the renderer.
  */
 import { Scene, AssetStore } from "@d2/pixi-render";
-import { assetBaseUrl } from "../services/api";
+import { assetBaseUrl, assetStoreUrl } from "../services/api";
 
 interface Holder {
   scene: Scene | null;
@@ -24,7 +24,7 @@ const holder: Holder = { scene: null, assets: null };
  *  the session's mod is known (the canvas host exposes it as a debug handle at mount). */
 export function getAssetStore(): AssetStore {
   if (!holder.assets) {
-    holder.assets = new AssetStore({ baseUrl: assetBaseUrl });
+    holder.assets = new AssetStore({ baseUrl: assetBaseUrl, blobBaseUrl: assetStoreUrl });
   }
   return holder.assets;
 }

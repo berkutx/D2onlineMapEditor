@@ -52,7 +52,8 @@ class GameResource:
 
     def __init__(self, path):
         self.path = path
-        self._d = open(path, "rb").read()
+        with open(path, "rb") as fp:
+            self._d = fp.read()
         self.resources = []  # list[ResourceDesc]
         self._by_uid = {}
         self._by_name = {}  # upper, .PNG stripped -> ResourceDesc
@@ -218,6 +219,75 @@ class GameResource:
                     out.append(frame)
         return out
 
+    # ---- by SOURCE RECORD (build_sheets) ----
+    # get_frames() answers "the frames of this name" and re-decodes the source PNG for every
+    # frame, colour-keyed to RGBA. The sheet builder works the other way round: one source
+    # record at a time, every frame it holds, still in palette indices.
+
+    def image_records(self):
+        """The image records an index names, in file order:
+        ``[(uid, [index names], [(name, w, h, parts), ...])]``. Only for indexed archives."""
+        order = []
+        names = {}
+        block = {}
+        for name in self._index_orig:
+            uid, ro, rs = self._index[name.lower()]
+            if uid == -1:
+                continue
+            if uid not in names:
+                names[uid] = []
+                block[uid] = (ro, rs)
+                order.append(uid)
+            names[uid].append(name)
+        return [(uid, names[uid], self._image_data(*block[uid])) for uid in order]
+
+    def animation_names(self):
+        """``[(name, [frame names])]`` of the index entries that are animations."""
+        out = []
+        for name in self._index_orig:
+            uid, ro, rs = self._index[name.lower()]
+            if uid == -1:
+                out.append((name, self._anim_frames(ro, rs)))
+        return out
+
+    def source_pixels(self, uid):
+        """A record's source PNG, undecorated: ``("P", indices HxW, palette 256x3)`` or
+        ``("RGB", HxWx3, None)``; None when the record is missing or not a PNG."""
+        desc = self._by_uid.get(uid)
+        if desc is None:
+            return None
+        src = self._load_png(self._payload(desc))
+        if src is None:
+            return None
+        if src.mode == "P":
+            pal = np.zeros((256, 3), np.uint8)
+            got = np.array(src.getpalette() or [], dtype=np.uint8).reshape(-1, 3)[:256]
+            pal[: len(got)] = got
+            return "P", np.array(src), pal
+        return "RGB", np.array(src.convert("RGB")), None
+
+    def standalone_images(self):
+        """``[(uid, name)]`` of the PNG records of an archive WITHOUT an index (name = id)."""
+        return [(d.uid, d.name[:-4]) for d in self.resources
+                if d.name and d.name.upper().endswith(".PNG")]
+
+    def resolve_first(self, name):
+        """Where the FIRST frame of a logical id lives: ``(uid, w, h, parts)`` or None.
+        (An animation's first frame; the image itself for a simple id.)"""
+        desc = self._index.get(name.lower())
+        if desc is None:
+            return None
+        uid, ro, rs = desc
+        frame_names = [name] if uid != -1 else self._anim_frames(ro, rs)
+        for fn in frame_names:
+            sdesc = self._index.get(fn.lower())
+            if sdesc is None or sdesc[0] == -1 or sdesc[0] not in self._by_uid:
+                continue
+            for (iname, w, h, parts) in self._image_data(sdesc[1], sdesc[2]):
+                if iname == fn and parts:
+                    return sdesc[0], w, h, parts
+        return None
+
     # ---- internals ----
     @staticmethod
     def _load_png(data):
@@ -257,6 +327,29 @@ class GameResource:
             frame[sy : sy + ph, sx : sx + pw, :3] = srgb[ty : ty + ph, tx : tx + pw]
             frame[sy : sy + ph, sx : sx + pw, 3] = 255
         return _shade(frame if isinstance(frame, np.ndarray) else np.array(frame), shader)
+
+
+def transparent_colors(rgb, shader):
+    """Which colours a shader keys out: bool array over an ``...x3`` uint8 array (a palette or
+    an image). The same thresholds as _process_parts / _shade below."""
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    transp = np.zeros(rgb.shape[:-1], bool)
+    if shader & SH_DEFAULT:
+        transp |= (r > 247) & (b > 247) & (g < 8)
+    if shader & SH_TRANSP_BLACK:
+        transp |= (r < 5) & (g < 5) & (b < 5)
+    if shader & SH_BORDER:
+        transp |= ((r > 250) & (b > 250) & (g < 5)) | ((r > 250) & (b > 250) & (g > 250))
+    return transp
+
+
+def assemble(source, w, h, parts):
+    """A frame put together from its parts: frame[sx,sy] <- source[tx,ty] per part. ``source``
+    is an HxW index array or an HxWx3 colour array; uncovered pixels stay 0."""
+    frame = np.zeros((h, w) + source.shape[2:], source.dtype)
+    for (sx, sy, tx, ty, pw, ph) in parts:
+        frame[sy : sy + ph, sx : sx + pw] = source[ty : ty + ph, tx : tx + pw]
+    return frame
 
 
 def _shade(img, shader):

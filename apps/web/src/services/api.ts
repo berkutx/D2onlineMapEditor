@@ -498,5 +498,17 @@ export const activeAssetsAreFlat = (): boolean => activeAssetBase.value === modA
 /** Base URL of the ACTIVE mod's assets (what the AssetStore prepends to manifest paths). */
 export const assetBaseUrl = (): string => activeAssetBase.value;
 
-/** Build a URL for a file of the active mod (catalogs, icons, sprite sheets). */
-export const assetUrl = (rel: string): string => `${activeAssetBase.value}/${rel.replace(/^\//, "")}`;
+/**
+ * Root URL of the asset store. Paths that begin with `blobs/` live here: content-addressed
+ * files (sprite sheets) shared by every mod, so one URL — and one cached copy — serves them all.
+ */
+export const assetStoreUrl = (): string => `${BASE}/assets`;
+
+/**
+ * Build a URL for a file of the active mod (catalogs, icons), or — for a `blobs/…` path, as
+ * a manifest or a catalog names a sprite sheet — of the shared store.
+ */
+export const assetUrl = (rel: string): string => {
+  const path = rel.replace(/^\//, "");
+  return path.startsWith("blobs/") ? `${assetStoreUrl()}/${path}` : `${activeAssetBase.value}/${path}`;
+};

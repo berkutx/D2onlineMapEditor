@@ -20,7 +20,9 @@ export interface SpriteRect {
 
 interface ManifestLite {
   index: Record<string, { sheet: string; frame: string }>;
-  spritesheets: { id: string; image: string; meta: string }[];
+  spritesheets: { id: string; image: string; meta?: string }[];
+  /** manifest 0.2: frame key -> [sheet, x, y, w, h, trimX, trimY, sourceW, sourceH] */
+  frames?: Record<string, number[]>;
 }
 
 export const useSpriteStore = defineStore("sprite", () => {
@@ -63,12 +65,24 @@ export const useSpriteStore = defineStore("sprite", () => {
   /** Ensure the atlas pages backing these sprite keys are resolved (idempotent). */
   async function ensureKeys(keys: readonly string[]): Promise<void> {
     const m = await manifest();
+    if (m.frames) {
+      // manifest 0.2: the rectangles are in the manifest itself — nothing more to fetch
+      const add: Record<string, SpriteRect> = {};
+      for (const k of keys) {
+        const f = m.frames[k];
+        const sheet = f ? m.spritesheets[f[0]!] : undefined;
+        if (!f || !sheet || frames.value[k]) continue;
+        add[k] = { page: sheet.image, x: f[1]!, y: f[2]!, w: f[3]!, h: f[4]!, sw: f[7]!, sh: f[8]! };
+      }
+      if (Object.keys(add).length > 0) frames.value = { ...frames.value, ...add };
+      return;
+    }
     const metas = new Map<string, string>(); // meta file -> page image
     for (const k of keys) {
       const e = m.index[k];
       if (!e) continue;
       for (const s of m.spritesheets) {
-        if (s.id === e.sheet || s.id.startsWith(`${e.sheet}-`)) metas.set(s.meta, s.image);
+        if (s.meta && (s.id === e.sheet || s.id.startsWith(`${e.sheet}-`))) metas.set(s.meta, s.image);
       }
     }
     await Promise.all([...metas].map(([meta, img]) => loadPageMeta(meta, img)));
