@@ -31,6 +31,8 @@ let app: FastifyInstance;
 let restoreScenarioRoots: (() => void) | undefined;
 let fixtureId = "";
 let mods: ModList;
+/** What the realtime layer is told: every change of the mod a map is opened against. */
+const changes: { id: string; modId: string }[] = [];
 
 const OWNER = "mod-owner-aaaa";
 const STRANGER = "mod-stranger-bbbb";
@@ -100,7 +102,9 @@ beforeAll(async () => {
   );
   const fixture = await installScenarioFixture();
   restoreScenarioRoots = fixture.restore;
-  ({ app } = await buildApp());
+  const built = await buildApp();
+  app = built.app;
+  built.store.onModChanged((id, modId) => changes.push({ id, modId }));
   await app.ready();
   mods = (await get(REST.mods)).json() as ModList;
   const list = (await get(REST.scenarios)).json() as ScenarioEntry[];
@@ -241,6 +245,15 @@ describe("the mod of a map", () => {
 
     const cleared = await put(null, OWNER);
     expect((cleared.json() as MapMeta).mod).toMatchObject({ id: "alpha", source: "detected" });
+
+    // The open editors of the map are told — once per change of the mod IN EFFECT. Clearing
+    // the choice above kept the map on alpha (now by detection), so that was not one; the
+    // refused requests were not either.
+    expect(changes.filter((c) => c.id === id)).toEqual([{ id, modId: "alpha" }]);
+    changes.length = 0;
+    await put("beta", OWNER);
+    await put("beta", OWNER); // same mod again: nothing to tell
+    expect(changes).toEqual([{ id, modId: "beta" }]);
 
     // an install map has no owner
     const install = await app.inject({

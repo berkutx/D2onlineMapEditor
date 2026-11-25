@@ -19,6 +19,8 @@ import { getSocket } from "../realtime/socket";
 import { getChannelId, getClientId } from "../services/clientId";
 import { useEditStore } from "./editStore";
 import { useDecorStore } from "./decorStore";
+import { useModStore } from "./modStore";
+import { reloadOnMap } from "./mapStore";
 import { summarize, summarizeBatch, detailOf, detailBatch, type OpContext } from "../services/historyPresentation";
 import { pendingJournalEntries } from "../services/journalSync";
 
@@ -279,6 +281,15 @@ export const useCollabStore = defineStore("collab", () => {
     socket.on("server:error", (e) => {
       // eslint-disable-next-line no-console
       console.warn("[collab] server error", e);
+    });
+    // The owner moved the map to another mod. This session holds the data (catalogs, sprites)
+    // of the old one and never swaps it, so the map has to be opened afresh. The owner's own
+    // tab that made the change reloads by itself — a second reload request is harmless.
+    socket.on("map:modChanged", ({ mapId: changed, modId }) => {
+      const mods = useModStore();
+      if (changed !== mapId.value || modId === mods.activeModId) return;
+      ElMessage.info(`Мод карты изменён на «${mods.nameOf(modId)}» — редактор откроет карту заново`);
+      setTimeout(() => reloadOnMap(changed), 1500);
     });
     // a reconnect re-joins the same room and replays only the MISSED ops (not a snapshot —
     // the journal already holds everything we saw; a snapshot would double-apply it)

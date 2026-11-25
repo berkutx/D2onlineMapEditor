@@ -56,6 +56,15 @@ export function createIo(httpServer: HttpServer, store: MapStore, log: EditLog):
   // bounds memory so a long-lived server that has touched thousands of rooms doesn't leak them all.
   const evictor = new RoomEvictor(rooms, log, snapshots, config.ROOM_EVICT_MS);
 
+  // The owner re-assigned a map's mod: every editor that has the map open holds the OLD mod's
+  // data, so tell them all. Rooms are per (map, channel) — a map can be open in several — hence
+  // by the map each socket joined rather than by room.
+  store.onModChanged((mapId, modId) => {
+    for (const socket of io.sockets.sockets.values()) {
+      if (socket.data.mapId === mapId) socket.emit("map:modChanged", { mapId, modId });
+    }
+  });
+
   io.on("connection", (socket) => {
     socket.data.userId = randomUUID();
     // persistent anonymous browser identity (v0.2) — optional, for future attribution

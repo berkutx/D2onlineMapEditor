@@ -256,9 +256,33 @@ export class MapStore {
   async setMod(id: string, modId: string | undefined): Promise<boolean> {
     const rec = await this.resolve(id);
     if (!rec || rec.source !== "upload") return false;
+    const before = (await this.modOf(id))?.id;
     rec.modId = modId;
     await this.saveUploads(true);
+    // the mod now in effect (clearing the choice hands the decision back to detection)
+    const after = (await this.modOf(id))?.id;
+    if (after && after !== before) {
+      for (const listener of this.modListeners) {
+        try {
+          listener(id, after);
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn("[MapStore] mod-change listener failed:", e);
+        }
+      }
+    }
     return true;
+  }
+
+  private modListeners = new Set<(id: string, modId: string) => void>();
+
+  /**
+   * Be told when the mod a map is opened against changes through {@link setMod} (the realtime
+   * layer tells the map's open editors, which hold the old mod's data). Returns "unsubscribe".
+   */
+  onModChanged(listener: (id: string, modId: string) => void): () => void {
+    this.modListeners.add(listener);
+    return () => void this.modListeners.delete(listener);
   }
 
   /** The owner token of an uploaded map (undefined for installs and ownerless uploads). */

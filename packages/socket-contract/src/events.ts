@@ -156,6 +156,13 @@ export interface ServerToClientEvents {
 
   "assets:reload": (p: { version: string }) => void;
   "map:reloaded": (p: { mapId: string; seq: number }) => void;
+  /**
+   * The map's owner re-assigned its mod (PUT /api/maps/:id/mod); `modId` is the mod now in
+   * effect. Sent to every socket that has the map open, whatever its channel. A page session
+   * holds the data (catalogs, sprites) of exactly one mod, so a client receiving this for its
+   * open map starts a fresh session on that map.
+   */
+  "map:modChanged": (p: { mapId: string; modId: string }) => void;
   "server:error": (p: { code: string; message: string }) => void;
 }
 
@@ -193,5 +200,6 @@ export const EVENTS = {
   editRejected: "edit:rejected",
   assetsReload: "assets:reload",
   mapReloaded: "map:reloaded",
+  mapModChanged: "map:modChanged",
   serverError: "server:error",
 } as const;
