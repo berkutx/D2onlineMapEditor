@@ -212,6 +212,29 @@ export function buildOccupiedSet(
 /** 1×1 decoration landmark ids grouped by catalog `shape` (rock / vegetation / …). */
 export type DecorSet = Record<string, string[]>;
 
+/**
+ * What a mod LACKS for a recipe, in a mapmaker's words — undefined when it has everything the
+ * recipe places. A scatter recipe needs 1×1 decorations of its shape in the mod's catalogue
+ * (Nazar's Legacy has no rocks, so «Камни» would run and place nothing); the maze needs a
+ * complete set of wall pieces.
+ */
+export function recipeLacks(
+  recipeId: string,
+  sets: { walls: WallSet; decor: DecorSet },
+): string | undefined {
+  const table = DECODE_TABLES[recipeId];
+  if (!table) return undefined;
+  for (const action of Object.values(table)) {
+    if (action.kind === "decor" && !sets.decor[action.shape]?.length) {
+      return "в этом моде нет таких украшений";
+    }
+    if (action.kind === "wall" && !sets.walls.styles.length) {
+      return "в этом моде нет стен для лабиринта";
+    }
+  }
+  return undefined;
+}
+
 /** Group the catalog's 1×1 decorations by shape, for scatter recipes. */
 export function buildDecorSet(
   catalog: Record<string, WallCatalogEntry> | WallCatalogEntry[],

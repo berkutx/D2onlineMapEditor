@@ -249,6 +249,12 @@ export interface GenRecipeInfo {
   varies?: boolean;
   /** The same for a drawn stroke: true only when the recipe is sprinkled along it. */
   strokeVaries?: boolean;
+  /**
+   * Present when the list was asked for a mod (`?mod=`) that has nothing this recipe places:
+   * what it lacks, in a mapmaker's words («в этом моде нет таких украшений»). The recipe would
+   * run and change nothing, so a palette greys it out and says why.
+   */
+  lacks?: string;
 }
 export interface GenRecipeList {
   recipes: GenRecipeInfo[];
@@ -298,7 +304,7 @@ export const REST = {
   mapExport: (id: string) => `/api/maps/${id}/export`, // POST EditorProject -> .sg bytes (or 422 + report)
   mapExportAt: (id: string) => `/api/maps/${id}/export-at`, // GET ?channel&seq -> .sg bytes of the room log up to seq ("выкачать промежуток")
   mapGenerate: (id: string) => `/api/maps/${id}/generate`, // POST { project, recipeId, region, seed?, amount?, cells?, stroke?, protect? } -> { ops, report, debug }
-  generateRecipes: "/api/generate/recipes", // GET -> GenRecipeList (what can be generated, as a palette lists it)
+  generateRecipes: "/api/generate/recipes", // GET [?mod=<id>] -> GenRecipeList (what can be generated, as a palette lists it; with a mod, what that mod lacks for a recipe)
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
   mods: "/api/mods", // GET -> ModList (the mod data sets this server serves)
   mod: (id: string) => `/api/mods/${id}`, // GET -> ModPassport (ETag = the mod's rev) | 404

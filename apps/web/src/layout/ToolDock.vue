@@ -118,10 +118,11 @@ interface DrawGen { id: string; label: string; stroke?: { mode: "line" | "brush"
 const DRAW_GEN_FALLBACK: DrawGen[] = [
   { id: "road_path", label: "🛣 Дорога — линией" },
   { id: "river", label: "🌊 Река — линией" },
-  { id: "decor_rocks", label: "🪨 Камни — кистью" },
+  // (no rock or headstone emoji here: Windows 10 has no glyphs for them)
+  { id: "decor_rocks", label: "🗿 Камни — кистью" },
   { id: "decor_bushes", label: "🌿 Кусты — кистью" },
   { id: "decor_ruins", label: "🏚 Руины — кистью" },
-  { id: "decor_graves", label: "🪦 Могилы — кистью" },
+  { id: "decor_graves", label: "⚰ Могилы — кистью" },
 ];
 const gen = useGenStore();
 void gen.loadCatalog().catch(() => undefined);

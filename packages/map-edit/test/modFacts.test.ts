@@ -3,7 +3,7 @@
  * instead of being read from the editor's reference tables.
  */
 import { describe, it, expect } from "vitest";
-import { buildWallSet, diplomacyRaceCategory } from "../src/index";
+import { DECODE_TABLES, buildDecorSet, buildWallSet, diplomacyRaceCategory, recipeLacks } from "../src/index";
 
 describe("diplomacyRaceCategory", () => {
   it("uses the reference table of the stock factions when no mod table is given", () => {
@@ -42,5 +42,39 @@ describe("buildWallSet: the tower at maze junctions", () => {
   it("falls back to a neutral turret when the preferred one is not in the catalog", () => {
     const without = catalog.filter((e) => e.id !== "G000MG0149");
     expect(towerOf(buildWallSet(without as never))).toBe("G000MG0100");
+  });
+});
+
+describe("recipeLacks: what a mod has nothing to place for", () => {
+  const wall = (id: string, orient: string) => ({ id, shape: "wall", cx: 1, cy: 1, iso: { orient } });
+  const decor = (id: string, shape: string, cx = 1) => ({ id, shape, cx, cy: cx });
+  const full = [
+    wall("G000MG0201", "NE-SW"), wall("G000MG0202", "NW-SE"), wall("G000MG0203", "corner"),
+    decor("G000MG8109", "rock"), decor("G000MG0136", "vegetation"),
+    decor("G000MG0033", "ruin-building"), decor("G000MG0031", "grave"),
+  ];
+  const sets = (catalog: object[]) => ({
+    walls: buildWallSet(catalog as never),
+    decor: buildDecorSet(catalog as never),
+  });
+
+  it("is nothing for a mod that has every kind of decoration and a wall set", () => {
+    for (const id of Object.keys(DECODE_TABLES)) expect(recipeLacks(id, sets(full)), id).toBeUndefined();
+  });
+
+  it("names the missing decorations: a mod without 1×1 rocks cannot scatter rocks", () => {
+    // Nazar's Legacy has no rock at all; a big rock (3×3) is not something to scatter either
+    const noRocks = [...full.filter((e) => e.shape !== "rock"), decor("G000MG9000", "rock", 3)];
+    expect(recipeLacks("decor_rocks", sets(noRocks))).toBe("в этом моде нет таких украшений");
+    expect(recipeLacks("decor_bushes", sets(noRocks))).toBeUndefined();
+    // terrain recipes need nothing from the catalogue
+    for (const id of ["mountain_blob", "relief_ridge", "water_lake", "forest_fill", "road_path", "snow_patches"]) {
+      expect(recipeLacks(id, sets([])), id).toBeUndefined();
+    }
+  });
+
+  it("names the missing walls for the maze, and says nothing about an unknown recipe", () => {
+    expect(recipeLacks("wall_maze", sets(full.filter((e) => e.shape !== "wall")))).toBe("в этом моде нет стен для лабиринта");
+    expect(recipeLacks("no_such_recipe", sets([]))).toBeUndefined();
   });
 });

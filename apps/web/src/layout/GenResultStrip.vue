@@ -68,6 +68,8 @@ async function copySeed(): Promise<void> {
     <span class="gs-title">{{ gen.iconOf(s.recipeId) }} {{ gen.titleOf(s.recipeId) }}</span>
     <span class="gs-meta">{{ where }}</span>
     <span v-if="!s.valid" class="gs-warn" title="Этот вариант не прошёл проверку карты и не применён">не применён</span>
+    <!-- nothing came out because the mod has nothing of the kind (a typed «камни» on a mod without rocks) -->
+    <span v-else-if="s.opCount === 0 && info?.lacks" class="gs-warn" :title="`Ничего не поставлено: ${info.lacks}`">{{ info.lacks }}</span>
     <span v-else-if="s.opCount === 0" class="gs-warn" title="Вариант ничего не изменил: место занято или защищено">ничего не изменил</span>
 
     <span class="gs-spring" />

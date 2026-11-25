@@ -41,6 +41,7 @@ import {
   occupancyErrors,
   planCoverageErrors,
   DECODE_TABLES,
+  recipeLacks,
 } from "@d2/map-edit";
 import { AMOUNT_MAX, AMOUNT_MIN, getRecipe, recipeCatalog } from "@d2/mapgen";
 import { clientIdOf } from "./routes.scenarios.js";
@@ -582,8 +583,24 @@ export async function registerMapRoutes(
   // and decode, with the name a mapmaker knows it by, its group, whether its amount can be
   // tuned and whether it can follow a drawn stroke. The client's palette is built from this,
   // so it never offers a recipe the server lacks.
-  app.get(REST.generateRecipes, async (_req, reply) => {
+  // With `?mod=<id>` each recipe also says what THAT mod lacks for it (a scatter recipe needs
+  // decorations of its kind in the mod's catalogue; not every mod has rocks).
+  app.get<{ Querystring: { mod?: string } }>(REST.generateRecipes, async (req, reply) => {
     const list: GenRecipeList = { recipes: recipeCatalog().filter((r) => !!DECODE_TABLES[r.id]) };
+    const modId = req.query.mod;
+    if (modId !== undefined) {
+      mods.refresh();
+      if (!isOpenableMod(modId)) return reply.code(404).send({ error: `unknown or not yet usable mod '${modId}'` });
+      try {
+        const sets = await mods.get(modId).catalogSets();
+        list.recipes = list.recipes.map((r) => {
+          const lacks = recipeLacks(r.id, sets);
+          return lacks ? { ...r, lacks } : r;
+        });
+      } catch {
+        // a data set without a decoration catalogue: nothing can be said — offer everything
+      }
+    }
     return reply.header("cache-control", "no-cache").send(list);
   });
 

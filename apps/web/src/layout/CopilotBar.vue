@@ -799,13 +799,21 @@ watch(
           <div v-for="g in gen.groups" :key="g.id" class="cp-ex-group">
             <div class="cp-ex-gtitle">{{ g.icon }} {{ g.title }}</div>
             <div class="cp-pal-grid">
-              <div v-for="r in g.recipes" :key="r.id" class="cp-pal-tile">
-                <button class="cp-pal-main" :disabled="sending || gen.busy" :title="`Сгенерировать: ${r.title}`" @click="runTile(r)">
+              <div v-for="r in g.recipes" :key="r.id" class="cp-pal-tile" :class="{ lacking: !!r.lacks }">
+                <!-- a recipe this mod has nothing to place for stays in the list, greyed out,
+                     with the reason: silently missing it would look like a bug -->
+                <button
+                  class="cp-pal-main"
+                  :disabled="sending || gen.busy || !!r.lacks"
+                  :title="r.lacks ? `${r.title}: ${r.lacks}` : `Сгенерировать: ${r.title}`"
+                  @click="runTile(r)"
+                >
                   <span class="cp-pal-name">{{ r.title }}</span>
-                  <span v-if="r.amountLabel" class="cp-pal-tune" :title="`Количество настраивается: ${r.amountLabel}`">±</span>
+                  <span v-if="r.lacks" class="cp-pal-tune" aria-hidden="true">нет в моде</span>
+                  <span v-else-if="r.amountLabel" class="cp-pal-tune" :title="`Количество настраивается: ${r.amountLabel}`">±</span>
                 </button>
                 <button
-                  v-if="r.stroke"
+                  v-if="r.stroke && !r.lacks"
                   class="cp-pal-draw"
                   :title="r.stroke === 'line' ? `Нарисовать линией: ${r.title}` : `Нарисовать кистью: ${r.title}`"
                   :aria-label="`Нарисовать: ${r.title}`"
@@ -1155,6 +1163,7 @@ watch(
 .cp-pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
 .cp-pal-tile { display: flex; min-width: 0; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; overflow: hidden; }
 .cp-pal-tile:hover { border-color: var(--el-color-primary); }
+.cp-pal-tile.lacking:hover { border-color: var(--el-border-color-lighter); }
 .cp-pal-main, .cp-pal-draw {
   border: 0;
   background: transparent;

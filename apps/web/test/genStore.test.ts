@@ -12,11 +12,15 @@ import { MapDocument } from "@d2/map-schema";
 import { emptyProject, makeCell } from "@d2/map-edit";
 import { useEditStore } from "../src/stores/editStore";
 import { useGenStore, type GenRequest } from "../src/stores/genStore";
+import { useModStore } from "../src/stores/modStore";
 import * as api from "../src/services/api";
 
 vi.mock("../src/services/api", () => ({
   validateProject: vi.fn(), exportProject: vi.fn(), generateRegion: vi.fn(), copilotLlm: vi.fn(),
   fetchProjectRemote: vi.fn(), saveProjectRemote: vi.fn(), fetchGenRecipes: vi.fn(),
+  // what the mod store takes from the API module (the catalogue is loaded for the map's mod)
+  DEFAULT_MOD_ID: "default", activeAssetsAreFlat: () => false, assetUrl: (p: string) => p,
+  fetchMods: vi.fn(), setActiveAssetMod: vi.fn(),
 }));
 
 const generateRegion = vi.mocked(api.generateRegion);
@@ -177,19 +181,31 @@ describe("what a generation request carries", () => {
     expect(gen.session).toMatchObject({ seeds: [42], stroke: true, protect: true, amount: 0.75 });
   });
 
-  it("loads the catalogue once and names recipes by it", async () => {
+  it("loads the catalogue once, for the session's mod, and names recipes by it", async () => {
+    vi.mocked(api.fetchGenRecipes).mockReset();
     vi.mocked(api.fetchGenRecipes).mockResolvedValue([
       { id: "relief_ridge", title: "Горная гряда", group: "mountains", stroke: "line", strokeWidth: 3 },
       { id: "water_lake", title: "Озеро", group: "water", amountLabel: "размер озера" },
+      { id: "decor_rocks", title: "Камни", group: "decor", stroke: "brush", strokeWidth: 3, lacks: "в этом моде нет таких украшений" },
       { id: "odd", title: "Нечто", group: "unknown-group" },
     ]);
     const { gen } = setup(false);
     expect(gen.titleOf("relief_ridge")).toBe("relief ridge"); // before the list arrives
-    await Promise.all([gen.loadCatalog(), gen.loadCatalog()]);
+    // the list waits for the map's mod: what a mod lacks is part of the answer
+    const loading = Promise.all([gen.loadCatalog(), gen.loadCatalog()]);
+    await Promise.resolve();
+    expect(api.fetchGenRecipes).not.toHaveBeenCalled();
+    const mods = useModStore();
+    mods.mods = [{ id: "test-mod", name: "Test", family: "t", familyOrder: 1, status: "ready", contentFingerprint: "", rev: "r1", assetBase: "/assets/mods/test-mod/r1" }] as never;
+    expect(mods.activate("test-mod")).toBe(true);
+    await loading;
     expect(api.fetchGenRecipes).toHaveBeenCalledTimes(1);
+    expect(api.fetchGenRecipes).toHaveBeenCalledWith("test-mod");
     expect(gen.titleOf("relief_ridge")).toBe("Горная гряда");
     expect(gen.iconOf("water_lake")).toBe("🌊");
-    expect(gen.groups.map((g) => g.id)).toEqual(["mountains", "water", "unknown-group"]); // known order, strangers last
+    expect(gen.groups.map((g) => g.id)).toEqual(["mountains", "water", "decor", "unknown-group"]); // known order, strangers last
+    // a recipe the mod has nothing to place for stays listed (greyed out), but is not offered for drawing
+    expect(gen.infoOf("decor_rocks")?.lacks).toBe("в этом моде нет таких украшений");
     expect(gen.drawable.map((r) => r.id)).toEqual(["relief_ridge"]);
   });
 });

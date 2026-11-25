@@ -149,6 +149,27 @@ describe("GET /api/generate/recipes", () => {
     expect(groups.filter((g, i) => g !== groups[i - 1]).length).toBe(new Set(groups).size);
   });
 
+  it("asked for a mod, says what that mod lacks for a recipe", async () => {
+    const unknown = await app.inject({ method: "GET", url: `${REST.generateRecipes}?mod=no-such-mod` });
+    expect(unknown.statusCode).toBe(404);
+
+    const { mods } = (await app.inject({ method: "GET", url: REST.mods })).json() as { mods: { id: string; status: string }[] };
+    const plain = ((await app.inject({ method: "GET", url: REST.generateRecipes })).json() as GenRecipeList).recipes;
+    expect(plain.some((r) => r.lacks !== undefined)).toBe(false); // no mod asked: nothing is said
+    for (const mod of mods.filter((m) => m.status === "ready")) {
+      const res = await app.inject({ method: "GET", url: `${REST.generateRecipes}?mod=${mod.id}` });
+      expect(res.statusCode, mod.id).toBe(200);
+      const { recipes } = res.json() as GenRecipeList;
+      expect(recipes.map((r) => r.id), mod.id).toEqual(plain.map((r) => r.id)); // the same list, annotated
+      // relief, water, forest and roads are drawn with terrain: every mod can make them
+      for (const r of recipes.filter((x) => !["decor", "structures"].includes(x.group))) expect(r.lacks, `${mod.id} ${r.id}`).toBeUndefined();
+      for (const r of recipes) if (r.lacks !== undefined) expect(r.lacks.length, r.id).toBeGreaterThan(5);
+      // Nazar's Legacy has no 1×1 rock decorations: «Камни» has nothing to scatter there
+      if (mod.id === "nazar-legacy") expect(recipes.find((r) => r.id === "decor_rocks")?.lacks).toBe("в этом моде нет таких украшений");
+      if (mod.id === "semga") expect(recipes.some((r) => r.lacks !== undefined)).toBe(false);
+    }
+  });
+
   it("offers only recipes the server can really run", async () => {
     const { recipes } = (await app.inject({ method: "GET", url: REST.generateRecipes })).json() as GenRecipeList;
     for (const r of recipes) {

@@ -20,6 +20,7 @@ import { computed, ref, shallowRef, watch } from "vue";
 import type { GenRecipeInfo, ValidationReport } from "@d2/socket-contract";
 import { fetchGenRecipes } from "../services/api";
 import { useEditStore } from "./editStore";
+import { useModStore } from "./modStore";
 
 export interface GenRegion { x: number; y: number; w: number; h: number }
 
@@ -59,7 +60,8 @@ export const GEN_GROUPS: readonly { id: string; title: string; icon: string }[] 
   { id: "snow", title: "Снег", icon: "❄" },
   { id: "ground", title: "Земля", icon: "🌱" },
   { id: "structures", title: "Дорога и стены", icon: "🧱" },
-  { id: "decor", title: "Декор", icon: "🪨" },
+  // 🗿, not the rock emoji: Windows 10 has no glyph for that one (it shows an empty box)
+  { id: "decor", title: "Декор", icon: "🗿" },
 ];
 const groupOf = (id: string): { id: string; title: string; icon: string } =>
   GEN_GROUPS.find((g) => g.id === id) ?? { id, title: id, icon: "✦" };
@@ -72,10 +74,14 @@ export const useGenStore = defineStore("gen", () => {
   // ----- the catalogue (what the server can generate) -----------------------------------
   const catalog = shallowRef<GenRecipeInfo[]>([]);
   let catalogP: Promise<GenRecipeInfo[]> | null = null;
-  /** Load the recipe list once per session (a failed fetch is retried on the next call). */
+  /**
+   * Load the recipe list once per session (a failed fetch is retried on the next call). It is
+   * asked for the session's mod — known once a map is open — so each recipe also says what
+   * this mod lacks for it (`lacks`): not every mod has rocks to scatter.
+   */
   function loadCatalog(): Promise<GenRecipeInfo[]> {
     if (!catalogP) {
-      catalogP = fetchGenRecipes().then((list) => {
+      catalogP = useModStore().whenReady().then((modId) => fetchGenRecipes(modId)).then((list) => {
         catalog.value = list;
         return list;
       });
@@ -96,8 +102,8 @@ export const useGenStore = defineStore("gen", () => {
         return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
       }),
   );
-  /** Recipes that can follow a drawn stroke («По рисунку»). */
-  const drawable = computed(() => catalog.value.filter((r) => r.stroke));
+  /** Recipes that can follow a drawn stroke («По рисунку») — those this mod has material for. */
+  const drawable = computed(() => catalog.value.filter((r) => r.stroke && !r.lacks));
 
   // ----- the session -------------------------------------------------------------------
   const session = ref<GenSession | null>(null);

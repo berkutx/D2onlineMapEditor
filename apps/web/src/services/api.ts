@@ -322,8 +322,9 @@ export async function generateRegion(
 }
 
 /** GET /api/generate/recipes — what the server can generate, as a palette lists it. */
-export async function fetchGenRecipes(): Promise<GenRecipeInfo[]> {
-  const res = await fetch(u(REST.generateRecipes));
+export async function fetchGenRecipes(modId?: string): Promise<GenRecipeInfo[]> {
+  // with a mod, the list also says what that mod lacks for a recipe (`lacks`)
+  const res = await fetch(u(REST.generateRecipes) + (modId ? `?mod=${encodeURIComponent(modId)}` : ""));
   if (!res.ok) throw new Error(`recipes: ${res.status} ${res.statusText}`);
   return ((await res.json()) as GenRecipeList).recipes;
 }
