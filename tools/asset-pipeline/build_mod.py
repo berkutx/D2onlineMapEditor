@@ -370,13 +370,15 @@ def build_scen_variables(game, scripts_dir):
 
     variables = []
     described = set()
-    for c in curated["variables"]:
-        entry = {k: v for k, v in c.items()}
+    for c in expand_curated(curated["variables"]):
+        # 'probe' is for this function only: what to look for in the dll when the toolset
+        # builds the name from a format string ("TIER_{:d}_CITY_INCOME")
+        entry = {k: v for k, v in c.items() if k != "probe"}
         key = (c["name"], bool(c.get("prefix", False)))
         if c["source"] == "mss32":
             # the toolset build of THIS mod has to know the name; the format string of the
             # per-race form ("{:s}NAME") contains it too, so one search covers both
-            if c["name"].encode("ascii") not in dll:
+            if c.get("probe", c["name"]).encode("ascii") not in dll:
                 continue
         else:
             if key not in lua:
@@ -391,11 +393,33 @@ def build_scen_variables(game, scripts_dir):
         if is_prefix:
             entry["prefix"] = True
         variables.append(entry)
+    used_groups = set(v["group"] for v in variables if v.get("group"))
     return {
         "schemaVersion": SCHEMA_VERSION,
         "racePrefixes": curated["racePrefixes"] if any(v["source"] == "mss32" for v in variables) else {},
+        "groups": [g for g in curated.get("groups", []) if g["id"] in used_groups],
         "variables": variables,
     }
+
+
+def expand_curated(entries):
+    """Curated entries with every 'each' series written out.
+
+    ``{"name": "TIER_{n}_CITY_INCOME", "each": [{"n": "0", "title": "Столица"}, ...]}`` stands
+    for one entry per item: ``{n}`` in the name is replaced and the item's title is taken."""
+    out = []
+    for c in entries:
+        series = c.get("each")
+        if not series:
+            out.append(c)
+            continue
+        for item in series:
+            entry = {k: v for k, v in c.items() if k != "each"}
+            entry["name"] = c["name"].replace("{n}", item["n"])
+            if item.get("title"):
+                entry["title"] = item["title"]
+            out.append(entry)
+    return out
 
 
 _LUA_ASSIGN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*,?\s*$")

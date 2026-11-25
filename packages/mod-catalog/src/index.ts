@@ -18,9 +18,15 @@ export type { RaceFacts } from "./profile.js";
 export {
   ScenVariablePreset,
   ScenVariableDef,
+  ScenVariableGroup,
   ScenVariableCatalog,
   findScenVariable,
+  variableForms,
+  readVariable,
+  writeVariable,
+  setRule,
 } from "./scenVariables.js";
+export type { ScenVariableValue, ScenVariableForm, RuleChange } from "./scenVariables.js";
 export {
   UNRESOLVED_GLOBAL_ID,
   UNRESOLVED_SCRIPT_ID,

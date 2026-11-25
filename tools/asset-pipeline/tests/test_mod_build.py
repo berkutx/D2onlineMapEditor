@@ -289,6 +289,44 @@ class TestBuildModGenerators(TempDirCase):
         cat = build_mod.build_scen_variables(os.path.join(self.tmp, "game"), os.path.join(self.tmp, "game", "Scripts"))
         self.assertEqual(cat["variables"], [])
         self.assertEqual(cat["racePrefixes"], {})
+        self.assertEqual(cat["groups"], [])
+
+    def test_series_are_written_out_and_matched_by_their_format_string(self):
+        os.makedirs(os.path.join(self.tmp, "game", "Scripts"))
+        with open(self.path("game", "mss32.dll"), "wb") as fp:
+            # the toolset builds these names at run time: the dll holds the format strings only
+            fp.write(b"\x00{:s}TIER_{:d}_CITY_GOLD_INCOME\x00TIER_{:d}_CITY_GOLD_INCOME\x00{:s}_MANA_INCOME\x00")
+        game = os.path.join(self.tmp, "game")
+        cat = build_mod.build_scen_variables(game, os.path.join(game, "Scripts"))
+        by_name = dict((v["name"], v) for v in cat["variables"])
+        self.assertEqual(sorted(by_name), sorted(
+            ["TIER_%d_CITY_GOLD_INCOME" % i for i in range(6)]
+            + ["WARRIOR_MANA_INCOME", "MAGE_MANA_INCOME", "GUILDMASTER_MANA_INCOME"]))
+        capital = by_name["TIER_0_CITY_GOLD_INCOME"]
+        self.assertEqual((capital["group"], capital["scope"], capital["raceMode"]), ("cityGold", "perRace", "add"))
+        self.assertEqual(capital["title"], u"Столица")
+        self.assertNotIn("probe", capital)  # builder-only keys stay out of the mod's catalog
+        self.assertNotIn("each", capital)
+        # only the groups this mod has variables in
+        self.assertEqual([g["id"] for g in cat["groups"]], ["cityGold", "lordIncome"])
+
+    def test_curated_catalog_is_consistent(self):
+        with open(os.path.join(os.path.dirname(build_mod.__file__), "data", "scen_variables.json"), encoding="utf-8") as fp:
+            curated = json.load(fp)
+        entries = build_mod.expand_curated(curated["variables"])
+        names = [(e["name"], bool(e.get("prefix"))) for e in entries]
+        self.assertEqual(len(names), len(set(names)), "a variable is described twice")
+        groups = set(g["id"] for g in curated["groups"])
+        for e in entries:
+            self.assertNotIn("{", e["name"], "unexpanded series")
+            if e.get("group"):
+                self.assertIn(e["group"], groups)
+                self.assertNotIn("presets", e)  # a group is a table of plain numbers
+            for p in e.get("presets", []):
+                self.assertTrue(p["value"] is None or isinstance(p["value"], int))
+            # the choice "no variable" is offered exactly when presets exist
+            if e.get("presets"):
+                self.assertEqual([p["value"] for p in e["presets"]].count(None), 1, e["name"])
 
     def test_settings_keeps_numbers_and_flags_only(self):
         with open(self.path("Scripts", "settings.lua"), "wb") as fp:

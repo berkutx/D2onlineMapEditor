@@ -15,7 +15,7 @@
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import type { ModInfo, ModList } from "@d2/socket-contract";
-import { ModProfile, raceFacts, type RaceFacts } from "@d2/mod-catalog";
+import { ModProfile, ScenVariableCatalog, raceFacts, type RaceFacts } from "@d2/mod-catalog";
 import {
   DEFAULT_MOD_ID,
   activeAssetsAreFlat,
@@ -124,8 +124,30 @@ export const useModStore = defineStore("mod", () => {
     return profileP;
   }
 
+  /**
+   * The scenario variables the active mod gives a meaning to (the map-restrictions panel),
+   * or null when the mod has no such catalog (the flat layout) / until it has loaded.
+   */
+  const scenVariables = shallowRef<ScenVariableCatalog | null>(null);
+  let scenVariablesP: Promise<ScenVariableCatalog | null> | null = null;
+
+  /** Load the active mod's scenario-variable catalog (once per session). */
+  function loadScenVariables(): Promise<ScenVariableCatalog | null> {
+    if (!scenVariablesP) {
+      scenVariablesP = modAssetUrl("scenVariables.json")
+        .then((url) => fetch(url))
+        .then(async (res) => (res.ok ? ScenVariableCatalog.parse(await res.json()) : null))
+        .catch(() => null)
+        .then((catalog) => {
+          scenVariables.value = catalog;
+          return catalog;
+        });
+    }
+    return scenVariablesP;
+  }
+
   return {
-    mods, defaultModId, activeModId, activeMod, openableMods, raceFactsByKey,
-    loadMods, loadProfile, nameOf, activate, whenReady,
+    mods, defaultModId, activeModId, activeMod, openableMods, raceFactsByKey, scenVariables,
+    loadMods, loadProfile, loadScenVariables, nameOf, activate, whenReady,
   };
 });

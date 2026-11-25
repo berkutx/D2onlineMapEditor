@@ -1,5 +1,13 @@
 {
-  "comment": "Curated meaning of scenario variables. build_mod.py merges this with what it finds in a mod: an mss32 entry is kept only when the mod's mss32.dll contains the name; a lua entry only when the mod's scripts read it. Names found in scripts but not listed here are added without a description.",
+  "comment": [
+    "Curated meaning of scenario variables. build_mod.py merges this with what it finds in a mod:",
+    "an mss32 entry is kept only when the mod's mss32.dll contains the name (or the entry's 'probe',",
+    "for names the toolset builds from a format string); a lua entry only when the mod's scripts read it.",
+    "Names found in scripts but not listed here are added without a description.",
+    "'each' expands one entry into several: every item replaces {n} in the name and gives the title.",
+    "'probe' and 'each' are for the builder only and are not written to the mod's catalog.",
+    "Semantics were read from the toolset sources (mss32/src/<origin>), not guessed."
+  ],
   "racePrefixes": {
     "empire": "EMPIRE_",
     "legions": "LEGIONS_",
@@ -7,6 +15,28 @@
     "undead": "HORDES_",
     "elves": "ELVES_"
   },
+  "groups": [
+    {
+      "id": "cityGold",
+      "title": "Доход городов: золото",
+      "description": "Прибавка к ежедневному доходу золота: за столицу и за каждый свой город указанного уровня. Общее значение и значение расы складываются между собой и с настройкой мода; отрицательное число уменьшает доход, итоговый доход не опускается ниже 0."
+    },
+    {
+      "id": "cityMana",
+      "title": "Доход городов: мана",
+      "description": "То же для маны своей расы: за столицу и за каждый свой город указанного уровня. Общее значение и значение расы складываются."
+    },
+    {
+      "id": "cityGoldOld",
+      "title": "Доход городов: золото (прежние имена)",
+      "description": "Прежние имена тех же переменных золота. Игра читает оба набора и складывает их, поэтому значения здесь прибавляются к таблице «Доход городов: золото»."
+    },
+    {
+      "id": "lordIncome",
+      "title": "Доход по типу лорда",
+      "description": "Прибавка к ежедневному доходу игрока, чей лорд — воин, маг или глава гильдии. Мана — своей расы."
+    }
+  ],
   "variables": [
     {
       "name": "MULTIPLE_BUILD_CAPITAL",
@@ -15,7 +45,7 @@
       "source": "mss32",
       "origin": "mss32/src/hooks.cpp",
       "title": "Строительство в столице",
-      "description": "Положительное значение снимает ограничение «одна постройка в день». Отрицательное запрещает строительство: любая постройка считается уже возведённой сегодня. Ноль или отсутствие переменной — обычные правила. Вариант с префиксом расы действует только на неё и важнее общего.",
+      "description": "Положительное значение снимает ограничение «одна постройка в день». Отрицательное запрещает строительство: любая постройка считается уже возведённой сегодня. Ноль или отсутствие переменной — обычные правила. Переменная с префиксом расы, если она есть, заменяет общую для этой расы при любом значении, включая 0.",
       "presets": [
         { "value": null, "label": "Одна постройка в день (обычные правила)" },
         { "value": 1, "label": "Несколько построек в день" },
@@ -29,7 +59,7 @@
       "source": "mss32",
       "origin": "mss32/src/unitsforhirehooks.cpp",
       "title": "Найм юнитов любой расы",
-      "description": "Ненулевое значение добавляет в список найма столицы юнитов всех рас, а не только своей. Вариант с префиксом расы действует только на неё и важнее общего.",
+      "description": "Ненулевое значение добавляет в список найма столицы юнитов всех рас, а не только своей. Переменная с префиксом расы, если она есть, заменяет общую для этой расы при любом значении, включая 0.",
       "presets": [
         { "value": null, "label": "Только своя раса" },
         { "value": 1, "label": "Юниты всех рас" }
@@ -42,7 +72,7 @@
       "source": "mss32",
       "origin": "mss32/src/unitsforhirehooks.cpp",
       "title": "Найм улучшенных юнитов",
-      "description": "Значение больше 1 разрешает нанимать в столице юнитов до указанного уровня развития, если построены нужные здания. Вариант с префиксом расы действует только на неё и важнее общего.",
+      "description": "Значение больше 1 разрешает нанимать в столице юнитов до указанного уровня развития, если построены нужные здания. Переменная с префиксом расы, если она есть, заменяет общую для этой расы при любом значении, включая 0.",
       "presets": [
         { "value": null, "label": "Только базовые юниты" },
         { "value": 2, "label": "До 2-го уровня" },
@@ -59,6 +89,146 @@
       "origin": "mss32/src/unitsforhirehooks.cpp",
       "title": "Найм улучшенных юнитов (старое имя)",
       "description": "Прежнее имя переменной HIRE_UNIT_TIER_MAX; действует на все расы. В новых картах используйте HIRE_UNIT_TIER_MAX."
+    },
+    {
+      "name": "START_LEADER_CHANGE_MODE",
+      "scope": "global",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/leadersforhirehooks.cpp",
+      "title": "Стартовый отряд столицы",
+      "description": "В начале игры лидер отряда в столице заменяется лидером, которого выбрал игрок (или импортированным). Переменная меняет это: 1 — замена не делается, 2 — импортированный лидер не используется, 3 — и то и другое, −1 — отряд из столицы убирается совсем.",
+      "presets": [
+        { "value": null, "label": "Лидер заменяется выбранным (обычные правила)" },
+        { "value": 1, "label": "Отряд остаётся как на карте" },
+        { "value": 2, "label": "Без импортированного лидера" },
+        { "value": 3, "label": "Как на карте и без импортированного лидера" },
+        { "value": -1, "label": "Убрать отряд из столицы" }
+      ]
+    },
+    {
+      "name": "CITY_CAPITAL_TRANSF_COOLDOWN_MOD",
+      "scope": "global",
+      "kind": "number",
+      "absentValue": -1,
+      "source": "mss32",
+      "origin": "mss32/src/itemtransferhooks.cpp",
+      "title": "Отправка предметов из города в столицу",
+      "description": "Кнопка в окне города переносит все его предметы в столицу владельца. Без переменной или при −1 она выключена; 0 — без ограничений; положительное число — после отправки следующая возможна через столько ходов (счёт общий для всех городов расы). Счёт игра ведёт в служебных переменных по расам и без них отправку не разрешает — редактор создаёт их вместе с правилом.",
+      "presets": [
+        { "value": null, "label": "Выключена" },
+        { "value": 0, "label": "Без ограничений" },
+        { "value": 1, "label": "Раз в ход" }
+      ],
+      "companions": [
+        "CITY_CAPITAL_TRANSF_COOLDOWN_HU",
+        "CITY_CAPITAL_TRANSF_COOLDOWN_UN",
+        "CITY_CAPITAL_TRANSF_COOLDOWN_HE",
+        "CITY_CAPITAL_TRANSF_COOLDOWN_DW",
+        "CITY_CAPITAL_TRANSF_COOLDOWN_EL"
+      ]
+    },
+    {
+      "name": "SPELL_CAN_STEAL_LESS_COST_SUM",
+      "scope": "global",
+      "kind": "number",
+      "absentValue": null,
+      "source": "mss32",
+      "origin": "mss32/src/addstealspellhooks.cpp",
+      "title": "Кража заклинаний: порог стоимости",
+      "description": "Украсть можно только заклинание, суммарная стоимость которого меньше этого числа; 0 запрещает кражу совсем. Без переменной действует порог из таблиц мода (GVars)."
+    },
+    {
+      "name": "ITEM_CAN_STEAL_LESS_COST_SUM",
+      "scope": "global",
+      "kind": "number",
+      "absentValue": null,
+      "source": "mss32",
+      "origin": "mss32/src/stealitemhooks.cpp",
+      "title": "Кража предметов: порог стоимости",
+      "description": "Украсть можно только предмет, суммарная стоимость которого меньше этого числа; 0 запрещает кражу совсем. Без переменной действует порог из таблиц мода (GVars)."
+    },
+    {
+      "name": "TIER_{n}_CITY_GOLD_INCOME",
+      "probe": "TIER_{:d}_CITY_GOLD_INCOME",
+      "each": [
+        { "n": "0", "title": "Столица" },
+        { "n": "1", "title": "Город 1-го уровня" },
+        { "n": "2", "title": "Город 2-го уровня" },
+        { "n": "3", "title": "Город 3-го уровня" },
+        { "n": "4", "title": "Город 4-го уровня" },
+        { "n": "5", "title": "Город 5-го уровня" }
+      ],
+      "group": "cityGold",
+      "scope": "perRace",
+      "raceMode": "add",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/playerincomehooks.cpp"
+    },
+    {
+      "name": "TIER_{n}_CITY_MANA_INCOME",
+      "probe": "TIER_{:d}_CITY_MANA_INCOME",
+      "each": [
+        { "n": "0", "title": "Столица" },
+        { "n": "1", "title": "Город 1-го уровня" },
+        { "n": "2", "title": "Город 2-го уровня" },
+        { "n": "3", "title": "Город 3-го уровня" },
+        { "n": "4", "title": "Город 4-го уровня" },
+        { "n": "5", "title": "Город 5-го уровня" }
+      ],
+      "group": "cityMana",
+      "scope": "perRace",
+      "raceMode": "add",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/playerincomehooks.cpp"
+    },
+    {
+      "name": "TIER_{n}_CITY_INCOME",
+      "probe": "TIER_{:d}_CITY_INCOME",
+      "each": [
+        { "n": "0", "title": "Столица" },
+        { "n": "1", "title": "Город 1-го уровня" },
+        { "n": "2", "title": "Город 2-го уровня" },
+        { "n": "3", "title": "Город 3-го уровня" },
+        { "n": "4", "title": "Город 4-го уровня" },
+        { "n": "5", "title": "Город 5-го уровня" }
+      ],
+      "group": "cityGoldOld",
+      "scope": "perRace",
+      "raceMode": "add",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/playerincomehooks.cpp"
+    },
+    {
+      "name": "{n}_GOLD_INCOME",
+      "probe": "{:s}_GOLD_INCOME",
+      "each": [
+        { "n": "WARRIOR", "title": "Лорд-воин: золото" },
+        { "n": "MAGE", "title": "Лорд-маг: золото" },
+        { "n": "GUILDMASTER", "title": "Глава гильдии: золото" }
+      ],
+      "group": "lordIncome",
+      "scope": "global",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/playerincomehooks.cpp"
+    },
+    {
+      "name": "{n}_MANA_INCOME",
+      "probe": "{:s}_MANA_INCOME",
+      "each": [
+        { "n": "WARRIOR", "title": "Лорд-воин: мана" },
+        { "n": "MAGE", "title": "Лорд-маг: мана" },
+        { "n": "GUILDMASTER", "title": "Глава гильдии: мана" }
+      ],
+      "group": "lordIncome",
+      "scope": "global",
+      "kind": "number",
+      "source": "mss32",
+      "origin": "mss32/src/playerincomehooks.cpp"
     },
     {
       "name": "ENABLE_GLOBAL_CUSTOM_MAPMOD",

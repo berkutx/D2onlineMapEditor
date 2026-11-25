@@ -86,6 +86,14 @@ output) plus:
 The JSON shapes are **Contract D** (`packages/mod-catalog`); `build_mod.py` checks its
 output against the JSON Schemas in `packages/mod-catalog/gen/`.
 
+`data/scen_variables.json` is the one hand-written input: what each scenario variable the
+toolset or a mod's Lua reads MEANS (title, description, ready-made choices, what the game
+assumes when the variable is absent, whether a race-prefixed variable replaces the common one
+or is added to it). Each entry was written from the reading code, whose file is named in
+`origin` — add an entry the same way, not from a guess. A mod's catalog keeps an mss32 entry
+only when that mod's `mss32.dll` contains the name (or the entry's `probe`, for names the
+toolset builds from a format string), so one curated file serves every toolset version.
+
 All table reads go through `fflib/dbf.py`. The mods do not have the same columns (a field
 is wider, added or missing), so a row answers a missing column with an empty value and the
 miss is listed in the build summary and in `dbfSchema.json` instead of failing the build.

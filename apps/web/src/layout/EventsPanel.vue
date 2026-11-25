@@ -26,6 +26,7 @@ import EventSummaryCard from "./EventSummaryCard.vue";
 import VariablesEditor from "./VariablesEditor.vue";
 import TemplatesEditor from "./TemplatesEditor.vue";
 import ScenarioSettingsEditor from "./ScenarioSettingsEditor.vue";
+import MapRestrictionsEditor from "./MapRestrictionsEditor.vue";
 import DiplomacyEditor from "./DiplomacyEditor.vue";
 import PlayerEditor from "./PlayerEditor.vue";
 
@@ -262,6 +263,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
     <el-tabs v-model="store.panelTab" class="ev-tabs">
       <el-tab-pane label="События" name="events" />
       <el-tab-pane label="Настройки" name="settings" />
+      <el-tab-pane label="Ограничения" name="restrictions" />
       <el-tab-pane label="Игроки" name="players" />
       <el-tab-pane label="Дипломатия" name="diplomacy" />
       <el-tab-pane label="Переменные" name="vars" />
@@ -296,6 +298,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 
     <div class="sc-body">
       <ScenarioSettingsEditor v-if="store.panelTab === 'settings'" class="ev-sub" />
+      <MapRestrictionsEditor v-else-if="store.panelTab === 'restrictions'" class="ev-sub" />
       <PlayerEditor v-else-if="store.panelTab === 'players'" class="ev-sub" />
       <DiplomacyEditor v-else-if="store.panelTab === 'diplomacy'" class="ev-sub" />
       <VariablesEditor v-else-if="store.panelTab === 'vars'" class="ev-sub" />

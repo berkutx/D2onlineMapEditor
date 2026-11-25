@@ -10,8 +10,12 @@ import {
   ScenVariableCatalog,
   findScenVariable,
   raceFacts,
+  readVariable,
+  setRule,
   summaryOf,
   tableOf,
+  variableForms,
+  writeVariable,
 } from "../src/index";
 
 const SHA_A = "a".repeat(64);
@@ -165,5 +169,126 @@ describe("findScenVariable", () => {
   it("returns undefined for names the mod gives no meaning to, case-sensitively", () => {
     expect(findScenVariable(catalog, "SMNS_INFO_TURN")).toBeUndefined();
     expect(findScenVariable(catalog, "hire_unit_any_race")).toBeUndefined();
+  });
+
+  it("lists the names a definition is read under", () => {
+    const build = catalog.variables[0]!;
+    expect(variableForms(catalog, build)).toEqual([
+      { name: "MULTIPLE_BUILD_CAPITAL", race: null },
+      { name: "EMPIRE_MULTIPLE_BUILD_CAPITAL", race: "empire" },
+      { name: "ELVES_MULTIPLE_BUILD_CAPITAL", race: "elves" },
+    ]);
+    expect(variableForms(catalog, catalog.variables[3]!)).toEqual([{ name: "PERK_LVL_SPECIAL", race: null }]);
+    expect(variableForms(catalog, catalog.variables[2]!)).toEqual([]); // a prefix has no fixed names
+  });
+});
+
+describe("reading and writing a map's scenario variables", () => {
+  const vars = [
+    { id: 1, name: "COUNTER", value: 5 },
+    { id: 4, name: "MULTIPLE_BUILD_CAPITAL", value: -1 },
+  ];
+
+  it("reads a value, or null when the map has no such variable", () => {
+    expect(readVariable(vars, "MULTIPLE_BUILD_CAPITAL")).toBe(-1);
+    expect(readVariable(vars, "HIRE_UNIT_ANY_RACE")).toBeNull();
+  });
+
+  it("changes a value in place, keeping the id events refer to", () => {
+    const next = writeVariable(vars, "MULTIPLE_BUILD_CAPITAL", 1);
+    expect(next).toEqual([vars[0], { id: 4, name: "MULTIPLE_BUILD_CAPITAL", value: 1 }]);
+    expect(vars[1]!.value).toBe(-1); // the input is not modified
+  });
+
+  it("adds a new variable under the next free id", () => {
+    expect(writeVariable(vars, "EMPIRE_MULTIPLE_BUILD_CAPITAL", -1)).toEqual([
+      ...vars,
+      { id: 5, name: "EMPIRE_MULTIPLE_BUILD_CAPITAL", value: -1 },
+    ]);
+    expect(writeVariable([], "HIRE_UNIT_ANY_RACE", 1)).toEqual([{ id: 1, name: "HIRE_UNIT_ANY_RACE", value: 1 }]);
+  });
+
+  it("removes a variable with null and returns the same list when nothing changes", () => {
+    expect(writeVariable(vars, "MULTIPLE_BUILD_CAPITAL", null)).toEqual([vars[0]]);
+    expect(writeVariable(vars, "NOPE", null)).toBe(vars);
+    expect(writeVariable(vars, "COUNTER", 5)).toBe(vars);
+  });
+});
+
+describe("setRule", () => {
+  const catalog = ScenVariableCatalog.parse({
+    schemaVersion: 1,
+    racePrefixes: { empire: "EMPIRE_", elves: "ELVES_" },
+    groups: [{ id: "cityGold", title: "City income: gold" }],
+    variables: [
+      { name: "MULTIPLE_BUILD_CAPITAL", scope: "perRace", source: "mss32" },
+      { name: "TIER_1_CITY_GOLD_INCOME", scope: "perRace", raceMode: "add", group: "cityGold", source: "mss32" },
+      { name: "ITEM_CAN_STEAL_LESS_COST_SUM", absentValue: null, source: "mss32" },
+      {
+        name: "TRANSF_COOLDOWN_MOD",
+        absentValue: -1,
+        source: "mss32",
+        companions: ["TRANSF_COOLDOWN_HU", "TRANSF_COOLDOWN_EL"],
+      },
+    ],
+  });
+  const [build, income, steal, cooldown] = catalog.variables as [
+    (typeof catalog.variables)[0], (typeof catalog.variables)[0], (typeof catalog.variables)[0], (typeof catalog.variables)[0],
+  ];
+  const names = (list: readonly { name: string; value: number }[]): string[] => list.map((v) => `${v.name}=${v.value}`);
+
+  it("defaults: a race form overrides, absence reads as 0", () => {
+    expect(build.raceMode).toBe("override");
+    expect(build.absentValue).toBe(0);
+    expect(catalog.groups).toEqual([{ id: "cityGold", title: "City income: gold" }]);
+  });
+
+  it("sets and removes a variable no event refers to", () => {
+    const set = setRule(catalog, [], build, "EMPIRE_MULTIPLE_BUILD_CAPITAL", -1);
+    expect(set).toEqual({ variables: [{ id: 1, name: "EMPIRE_MULTIPLE_BUILD_CAPITAL", value: -1 }], blocked: false });
+    expect(setRule(catalog, set.variables, build, "EMPIRE_MULTIPLE_BUILD_CAPITAL", null).variables).toEqual([]);
+  });
+
+  it("keeps a variable an event refers to, giving it the value its absence means", () => {
+    const vars = [{ id: 7, name: "MULTIPLE_BUILD_CAPITAL", value: 3 }];
+    const out = setRule(catalog, vars, build, "MULTIPLE_BUILD_CAPITAL", null, new Set([7]));
+    expect(out).toEqual({ variables: [{ id: 7, name: "MULTIPLE_BUILD_CAPITAL", value: 0 }], blocked: false });
+  });
+
+  it("does not pretend a race override can be switched off by a number", () => {
+    // EMPIRE_…=0 would still replace the common rule for the Empire: nothing equals "no variable"
+    const vars = [{ id: 7, name: "EMPIRE_MULTIPLE_BUILD_CAPITAL", value: -1 }];
+    const out = setRule(catalog, vars, build, "EMPIRE_MULTIPLE_BUILD_CAPITAL", null, new Set([7]));
+    expect(out.blocked).toBe(true);
+    expect(out.variables).toBe(vars);
+    // a race value that is ADDED to the common one is switched off by 0
+    const inc = [{ id: 2, name: "ELVES_TIER_1_CITY_GOLD_INCOME", value: 40 }];
+    expect(setRule(catalog, inc, income, "ELVES_TIER_1_CITY_GOLD_INCOME", null, new Set([2]))).toEqual({
+      variables: [{ id: 2, name: "ELVES_TIER_1_CITY_GOLD_INCOME", value: 0 }],
+      blocked: false,
+    });
+  });
+
+  it("blocks when absence means something no number says", () => {
+    const vars = [{ id: 3, name: "ITEM_CAN_STEAL_LESS_COST_SUM", value: 500 }];
+    expect(setRule(catalog, vars, steal, "ITEM_CAN_STEAL_LESS_COST_SUM", null, new Set([3])).blocked).toBe(true);
+    expect(setRule(catalog, vars, steal, "ITEM_CAN_STEAL_LESS_COST_SUM", null).variables).toEqual([]);
+  });
+
+  it("creates the game's state variables with the rule and removes them with it", () => {
+    const on = setRule(catalog, [{ id: 4, name: "COUNTER", value: 1 }], cooldown, "TRANSF_COOLDOWN_MOD", 2);
+    expect(names(on.variables)).toEqual([
+      "COUNTER=1", "TRANSF_COOLDOWN_MOD=2", "TRANSF_COOLDOWN_HU=0", "TRANSF_COOLDOWN_EL=0",
+    ]);
+    // changing the value leaves the state variables (and whatever the game stored) alone
+    const changed = setRule(catalog, on.variables.map((v) => (v.name === "TRANSF_COOLDOWN_HU" ? { ...v, value: 9 } : v)), cooldown, "TRANSF_COOLDOWN_MOD", 5);
+    expect(names(changed.variables)).toContain("TRANSF_COOLDOWN_HU=9");
+    // the absent value switches the rule off just like removing it
+    expect(names(setRule(catalog, on.variables, cooldown, "TRANSF_COOLDOWN_MOD", -1).variables)).toEqual([
+      "COUNTER=1", "TRANSF_COOLDOWN_MOD=-1",
+    ]);
+    const hu = on.variables.find((v) => v.name === "TRANSF_COOLDOWN_HU")!;
+    const off = setRule(catalog, on.variables, cooldown, "TRANSF_COOLDOWN_MOD", null, new Set([hu.id]));
+    expect(names(off.variables)).toEqual(["COUNTER=1", "TRANSF_COOLDOWN_HU=0"]); // an event still uses HU
   });
 });
