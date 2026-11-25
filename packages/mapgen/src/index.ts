@@ -4,4 +4,18 @@
  * the game/tiles; decoding the symbol grid into EditOps lives in @d2/map-edit.
  */
 export { runRecipe, type RecipeGrid } from "./runRecipe.js";
-export { RECIPES, getRecipe, type Recipe, type RecipeInputMode, type RecipeKind } from "./recipes.js";
+export {
+  RECIPES,
+  RECIPE_GROUPS,
+  AMOUNT_MIN,
+  AMOUNT_MAX,
+  getRecipe,
+  isTunable,
+  tuneRecipe,
+  recipeCatalog,
+  type Recipe,
+  type RecipeGroup,
+  type RecipeInfo,
+  type RecipeInputMode,
+  type RecipeKind,
+} from "./recipes.js";

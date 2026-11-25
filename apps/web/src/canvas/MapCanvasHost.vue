@@ -46,6 +46,7 @@ import { useAssetStore } from "../stores/assetStore";
 import { useViewStore, OVERLAY_TINTS } from "../stores/viewStore";
 import { useToolStore, type PlaceObjectKind } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
+import { useGenStore } from "../stores/genStore";
 import {
   locationRoleCounts,
   locationSummaries,
@@ -69,6 +70,7 @@ const assetStore = useAssetStore();
 const viewStore = useViewStore();
 const toolStore = useToolStore();
 const editStore = useEditStore();
+const genStore = useGenStore();
 const decorStore = useDecorStore();
 const unitStore = useUnitStore();
 const collabStore = useCollabStore();
@@ -1615,16 +1617,18 @@ function onPointerUp(e: PointerEvent): void {
       // «По рисунку»: an armed generator fires as soon as the stroke lands — the drawn
       // mask IS the shape (roads/rivers follow the line, decor sprinkles along the brush).
       // protect=true: a hand stroke must not carve through existing water/mountains.
-      const gen = toolStore.drawGenRecipe;
+      // It goes through genStore like every generation, so the stroke gets the same
+      // variant controls (another one, more / less, take it away) as a palette tile.
+      const genRecipe = toolStore.drawGenRecipe;
       const genRegion = toolStore.region;
-      if (gen && genRegion) {
+      if (genRecipe && genRegion) {
         const cells = toolStore.regionMask
           ? toolStore.regionMask.map((k) => k.split(",").map(Number) as [number, number])
           : null;
-        void editStore
-          .generate(gen, genRegion, undefined, cells, true)
+        void genStore
+          .run({ recipeId: genRecipe, region: genRegion, cells, stroke: true, protect: true })
           .then((rep) => {
-            if (rep && !rep.ok) ElMessage.warning("Генерация по рисунку не прошла валидацию — откачено");
+            if (rep && !rep.ok) ElMessage.warning("Генерация по рисунку не прошла проверку карты — не применена");
           })
           .catch((err) => ElMessage.error("⚠ " + (err instanceof Error ? err.message : String(err))))
           .finally(() => toolStore.clearZone()); // the veil clears; ready for the next stroke

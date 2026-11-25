@@ -9,7 +9,7 @@
  * Each step is decoded against a working doc threaded through the prior steps' ops, so a
  * later step (e.g. walls around a lake) sees the cells an earlier step changed.
  */
-import { runRecipe, getRecipe } from "@d2/mapgen";
+import { runRecipe, getRecipe, tuneRecipe } from "@d2/mapgen";
 import { decodeGrid, applyOps, buildOccupiedSet, DECODE_TABLES, type DecodeTable, type WallSet, type DecorSet, type EditOp } from "@d2/map-edit";
 import type { MapDocument } from "@d2/map-schema";
 
@@ -48,6 +48,17 @@ export interface PlanStep {
   decode?: DecodeTable;
   /** MarkovJunior seed (mj recipes only; ignored by fills). */
   seed?: number;
+  /** How much a registered recipe makes, relative to its stock amount (see tuneRecipe);
+   *  1 or absent = as the library defines it. */
+  amount?: number;
+  /**
+   * The mask is a shape the user DREW for this step (a brush stroke, a line, a frame), so a
+   * recipe that can follow a drawing stamps its symbol along it. Absent/false: the mask only
+   * CLIPS the result — the visible screen, a «по краю» band — and the recipe runs normally
+   * inside the region. Without this distinction «река» on the default 👁 screen area
+   * followed the screen's own mask and flooded everything the user could see.
+   */
+  followMask?: boolean;
 }
 
 /** A symbol grid as @d2/mapgen produces it (structural; no import coupling). */
@@ -230,7 +241,7 @@ export async function runGenerationSteps(
       const r = getRecipe(step.recipeId);
       const t = DECODE_TABLES[step.recipeId];
       if (!r || !t) throw new Error(`unknown recipe '${step.recipeId}'`);
-      recipe = r;
+      recipe = tuneRecipe(r, step.amount ?? 1);
       table = t;
     } else if (step.recipe) {
       assertDecodeTable(step.decode);
@@ -241,11 +252,11 @@ export async function runGenerationSteps(
     }
     const seed = Number.isInteger(step.seed) ? (step.seed as number) : defaultSeed;
     const scale = Number.isInteger(recipe.cellScale) && (recipe.cellScale as number) > 1 ? (recipe.cellScale as number) : 1;
-    // "Follow the drawing": with a HAND-DRAWN mask, recipes that declare a maskSymbol stamp
+    // "Follow the drawing": with a HAND-DRAWN mask (step.followMask), recipes that declare a maskSymbol stamp
     // it on the drawn cells directly (paths at density 1 = every cell; scatter decor at
     // density < 1 = sprinkled along the stroke) instead of running MJ on the bounding box and
     // keeping only the fragments that cross the stroke. No mask → normal MJ in the region.
-    const maskFill = !!mask && typeof recipe.maskSymbol === "string";
+    const maskFill = !!mask && step.followMask === true && typeof recipe.maskSymbol === "string";
     // Snap a scaled maze to the scale grid: align origin + size to a multiple of `scale` so the
     // 2×2 walls sit on even world cells and tile cleanly to the edge («кратно двум по стенам»).
     let genRegion = step.region;

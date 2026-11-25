@@ -219,6 +219,10 @@ export interface GenDebug {
   opCount: number;
   /** registered recipe id (single-recipe /generate path). */
   recipe?: string;
+  /** The seed the variant was made with — the same request with it gives the same result. */
+  seed?: number;
+  /** How much the recipe was asked to make (1 = its stock amount). */
+  amount?: number;
   /** number of plan steps executed (LLM /copilot path). */
   steps?: number;
   /** whether the protect-terrain flag was on. */
@@ -227,6 +231,27 @@ export interface GenDebug {
   protectedInRegion?: number;
   /** validation tier summary. */
   validation: { ok: boolean; identity: boolean; semantic: boolean; structural: boolean };
+}
+
+/** A recipe as a generator palette offers it (GET REST.generateRecipes). */
+export interface GenRecipeInfo {
+  id: string;
+  /** What a mapmaker calls it. */
+  title: string;
+  /** What it makes: "mountains" | "water" | "forest" | "snow" | "ground" | "structures" | "decor". */
+  group: string;
+  /** Present when its amount can be tuned (the request's `amount`): what "more" means. */
+  amountLabel?: string;
+  /** Present when it can follow a hand-drawn stroke: the kind of stroke and its width in cells. */
+  stroke?: "line" | "brush";
+  strokeWidth?: number;
+  /** Another seed gives another result; false for a plain fill (absent = assume it varies). */
+  varies?: boolean;
+  /** The same for a drawn stroke: true only when the recipe is sprinkled along it. */
+  strokeVaries?: boolean;
+}
+export interface GenRecipeList {
+  recipes: GenRecipeInfo[];
 }
 
 /** Generation result: the new EditOps to commit + the validation verdict for them. */
@@ -272,7 +297,8 @@ export const REST = {
   mapValidate: (id: string) => `/api/maps/${id}/validate`, // POST EditorProject -> ValidationReport
   mapExport: (id: string) => `/api/maps/${id}/export`, // POST EditorProject -> .sg bytes (or 422 + report)
   mapExportAt: (id: string) => `/api/maps/${id}/export-at`, // GET ?channel&seq -> .sg bytes of the room log up to seq ("выкачать промежуток")
-  mapGenerate: (id: string) => `/api/maps/${id}/generate`, // POST { project, recipeId, region, seed? } -> { ops, report }
+  mapGenerate: (id: string) => `/api/maps/${id}/generate`, // POST { project, recipeId, region, seed?, amount?, cells?, stroke?, protect? } -> { ops, report, debug }
+  generateRecipes: "/api/generate/recipes", // GET -> GenRecipeList (what can be generated, as a palette lists it)
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
   mods: "/api/mods", // GET -> ModList (the mod data sets this server serves)
   mod: (id: string) => `/api/mods/${id}`, // GET -> ModPassport (ETag = the mod's rev) | 404

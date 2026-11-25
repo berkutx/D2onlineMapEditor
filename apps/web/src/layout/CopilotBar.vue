@@ -3,16 +3,24 @@
  * Copilot — a light, frosted-glass floating command input docked at the bottom-centre of
  * the canvas (NOT a panel). Just a field: type a command, Enter to send. The chat log
  * floats above only while expanded (on focus / after a message). "/" focuses it (viewStore
- * focusCopilot); the ✕ hides it (and "/" brings it back). STUB responder for now (M6).
+ * focusCopilot); the ✕ hides it (and "/" brings it back).
+ *
+ * Three ways to ask for a generation meet here and all go through genStore, so each gets the
+ * same variant controls (GenResultStrip): a TILE of the generator palette (one click, no
+ * typing), a typed COMMAND (the keyword router below), and — from the tool dock — a stroke
+ * drawn «по рисунку».
  */
 import { ref, nextTick, watch, onMounted } from "vue";
 import { ElInput, ElPopover, ElSegmented, ElMessage } from "element-plus";
-import { Promotion, Close, RefreshRight, Reading, ChatLineSquare } from "@element-plus/icons-vue";
+import { Promotion, Close, RefreshRight, Reading, ChatLineSquare, Grid } from "@element-plus/icons-vue";
 import { computed } from "vue";
+import type { GenRecipeInfo } from "@d2/socket-contract";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
 import { useToolStore } from "../stores/toolStore";
+import { AMOUNT_STEPS, useGenStore } from "../stores/genStore";
 import { useFloatingDock } from "../composables/useFloatingDock";
+import GenResultStrip from "./GenResultStrip.vue";
 
 interface Msg {
   role: "user" | "assistant";
@@ -22,6 +30,7 @@ interface Msg {
 const view = useViewStore();
 const editStore = useEditStore();
 const toolStore = useToolStore();
+const gen = useGenStore();
 
 // Draggable + persistent (like the minimap / history docks): grab the ⠿ grip to park the bar
 // anywhere; the position is remembered per browser. Default = bottom-centre (CSS). When dragged
@@ -151,8 +160,9 @@ const placeholder = computed(() =>
     : "напр. «озеро», «река», «лабиринт», «озеро вокруг этой точки 20x20»  ( / )",
 );
 
-/** The last successful generation, so "↻ другой вариант" can roll it back and re-roll. */
-const lastGen = ref<{ mode: "keyword" | "llm"; text: string; recipeId?: string; region?: Region; cells?: [number, number][] | null; protect?: boolean } | null>(null);
+/** The last successful LLM composition, so "↻" can roll it back and ask again. (A recipe
+ *  generation is a genStore session instead — it has real variants.) */
+const lastGen = ref<{ mode: "llm"; text: string; cells?: [number, number][] | null; protect?: boolean } | null>(null);
 
 // --- zone drawing controls (mode / size / hide / accept) ---------------------
 const zoneMode = computed(() => toolStore.zoneMode);
@@ -160,11 +170,14 @@ const regionMask = computed(() => toolStore.regionMask);
 const zoneHidden = computed(() => toolStore.zoneHidden);
 const visibleMaskLen = computed(() => view.visibleMask?.length ?? null);
 /** One-time onboarding: the first time the user focuses the Copilot, draw their eye to the
- *  «Примеры» button (pulse) and pop it open, so they discover the command catalogue. Persisted
- *  so it fires exactly once per browser. */
-const EX_HINT_KEY = "d2.cp.exHinted.v1";
+ *  generator palette (pulse) and pop it open, so they see what can be made with one click.
+ *  Persisted so it fires exactly once per browser. */
+const EX_HINT_KEY = "d2.cp.palHinted.v1"; // v1 of the PALETTE hint (it used to open the phrase list)
 const examplesPulse = ref(false);
 const exBtn = ref<{ $el?: HTMLElement } | null>(null);
+/** The generator palette (tiles) — the first thing a newcomer is shown. */
+const palBtn = ref<{ $el?: HTMLElement } | null>(null);
+const palPop = ref<InstanceType<typeof ElPopover> | null>(null);
 function maybeHintExamples(): void {
   try {
     if (localStorage.getItem(EX_HINT_KEY)) return;
@@ -174,8 +187,8 @@ function maybeHintExamples(): void {
   }
   examplesPulse.value = true;
   window.setTimeout(() => { examplesPulse.value = false; }, 5200);
-  // …and open the popover (trigger="click") by clicking its reference button
-  void nextTick(() => exBtn.value?.$el?.click?.());
+  // …and open the palette (trigger="click") by clicking its reference button
+  void nextTick(() => palBtn.value?.$el?.click?.());
 }
 
 /** First FEW times the Copilot is used, remind that the default area is 👁 Экран (= the
@@ -208,7 +221,12 @@ function onFocus(): void {
 
 // Default the generation area to 👁 Экран so a bare command "just works" on the visible
 // map (no "выдели зону" dead-end). Purely a default — the user can switch any time.
-onMounted(() => setArea("screen"));
+onMounted(() => {
+  setArea("screen");
+  // the palette is built from what the server can generate; without the list it stays empty
+  // and typed commands keep working
+  void gen.loadCatalog().catch(() => undefined);
+});
 
 /** Manual show/hide of the chat log (💬). The ONLY way it opens — never automatic. */
 function toggleLog(): void {
@@ -398,7 +416,10 @@ function pushAi(text: string): void {
   });
 }
 
-type Zone = { region: Region; cells: [number, number][] | null };
+/** `drawn`: the mask is a shape the user drew (brush / line / frame) — a recipe that can
+ *  follow a drawing follows it. A mask that only clips (the visible screen, a «по краю»
+ *  band) is not: there the recipe runs normally and is cut to the mask. */
+type Zone = { region: Region; cells: [number, number][] | null; drawn?: boolean };
 type Need = "screen" | "zone" | "point" | "side";
 
 /** What AREA a command implies, so the right filter (👁/⛶/📍) can be auto-selected. */
@@ -484,7 +505,7 @@ function resolveZoneBase(text: string, size: number): Zone | null {
     return { region: { x: 0, y: 0, w: size, h: size }, cells: null };
   }
   // 3) an explicit drag selection (+ its drawn mask)
-  if (sel) return { region: sel, cells: toPairs(toolStore.regionMask) };
+  if (sel) return { region: sel, cells: toPairs(toolStore.regionMask), drawn: !!toolStore.regionMask?.length };
   // 4) "NxM" centred; «в центре» without a size = a centred ~40% block (v1 ignored the word
   //    and filled the whole screen)
   if (m) {
@@ -576,25 +597,32 @@ async function send(): Promise<void> {
 
   const zone = resolveZone(text, doc.size);
   if (!zone) {
-    // mode-aware dead-end hint (+ the filter is already switched above for point commands)
-    if (area.value === "point") notify("📍 Точка — кликни клетку на карте, потом Enter.", "warning");
-    else if (area.value === "zone") notify("⛶ Зона — обведи область на карте, потом Enter.", "warning");
-    else notify("Не понял область. Наведи карту (👁 Экран) или выбери ⛶ Зона / 📍 Точка, либо укажи размер («25x25») / сторону («север»).", "warning");
+    explainNoZone();
     return;
   }
+  await generateIn(recipeId, zone);
+}
+
+/** Mode-aware dead-end hint: there is no area to generate in yet. */
+function explainNoZone(): void {
+  if (area.value === "point") notify("📍 Точка — кликни клетку на карте, потом повтори.", "warning");
+  else if (area.value === "zone") notify("⛶ Зона — обведи область на карте, потом повтори.", "warning");
+  else notify("Не понял область. Наведи карту (👁 Экран) или выбери ⛶ Зона / 📍 Точка, либо укажи размер («25x25») / сторону («север»).", "warning");
+}
+
+/** Generate `recipeId` in `zone` as a new session of variants, and say what came of it. */
+async function generateIn(recipeId: string, zone: Zone): Promise<void> {
   const { region, cells } = zone;
   sending.value = true;
   const t0 = performance.now();
   try {
-    const rep = await editStore.generate(recipeId, region, undefined, cells, protect.value);
+    const rep = await gen.run({ recipeId, region, cells, stroke: !!zone.drawn, protect: protect.value });
     const ms = Math.round(performance.now() - t0);
-    if (rep?.ok) lastGen.value = { mode: "keyword", text, recipeId, region, cells, protect: protect.value };
-    notify(
-      rep?.ok
-        ? `Готово: ${recipeId.replace(/_/g, " ")} ${region.w}×${region.h} · ${debugLine(ms)} (↻ другой вариант)`
-        : `Валидация не прошла — откатил. · ${debugLine(ms)}${validationReason()}`,
-      rep?.ok ? "success" : "warning",
-    );
+    const what = `${gen.titleOf(recipeId)} ${region.w}×${region.h}`;
+    if (!rep) notify("Карта недоступна для правок.", "warning");
+    else if (!rep.ok) notify(`${what}: карта не прошла проверку — вариант не применён. · ${debugLine(ms)}${validationReason()}`, "warning");
+    else if ((editStore.genDebug?.opCount ?? 0) === 0) notify(`${what}: ничего не изменилось — место занято или защищено (🛡).`, "warning");
+    else notify(`Готово: ${what} · ${debugLine(ms)}`, "success");
   } catch (e) {
     notify("⚠ " + (e instanceof Error ? e.message : String(e)), "warning");
   } finally {
@@ -602,37 +630,70 @@ async function send(): Promise<void> {
   }
 }
 
-/** Roll back the last generation and re-roll it (MJ recipes get a fresh seed → new shape). */
+/** A tile of the palette: generate that recipe in the current area — one click, no typing. */
+async function runTile(r: GenRecipeInfo): Promise<void> {
+  if (sending.value || gen.busy) return;
+  markActive();
+  (palPop.value as unknown as { hide?: () => void } | null)?.hide?.();
+  const doc = editStore.liveDoc;
+  if (!doc) {
+    notify("Карта не загружена.", "warning");
+    return;
+  }
+  log.value.push({ role: "user", text: r.title });
+  const zone = resolveZone("", doc.size);
+  if (!zone) {
+    explainNoZone();
+    return;
+  }
+  await generateIn(r.id, zone);
+}
+
+/** The ✎ corner of a tile: arm «по рисунку» for that recipe — the next stroke on the map is it. */
+function drawTile(r: GenRecipeInfo): void {
+  if (!r.stroke) return;
+  markActive();
+  (palPop.value as unknown as { hide?: () => void } | null)?.hide?.();
+  area.value = "zone"; // the region tool is what draws the stroke
+  toolStore.setEyeZone(false);
+  toolStore.setDrawGen(r.id, { mode: r.stroke, size: r.strokeWidth ?? 1 });
+  notify(r.stroke === "line" ? `✎ ${r.title}: протяни линию на карте` : `✎ ${r.title}: проведи кистью по карте`, "info");
+}
+
+/** What the palette says about where a click will generate. */
+const areaLine = computed(() => {
+  if (area.value === "point") {
+    return region.value ? `📍 вокруг клетки ${region.value.x}, ${region.value.y} — ${POINT_DEFAULT}×${POINT_DEFAULT}` : "📍 точка не выбрана — кликни клетку на карте";
+  }
+  if (area.value === "zone") {
+    if (!region.value) return "⛶ зона не обведена — обведи область на карте";
+    return `⛶ в обведённой зоне — ${regionMask.value?.length ? regionMask.value.length + " кл." : region.value.w + "×" + region.value.h}`;
+  }
+  return `👁 на всём, что видно на экране${visibleMaskLen.value ? " — " + visibleMaskLen.value + " кл." : ""}`;
+});
+
+/** The palette's «меньше … больше» control: the amount a NEW generation starts with. */
+const amountOptions = AMOUNT_STEPS.map((value, i) => ({ value, label: ["−−", "−", "●", "+", "++"][i] ?? String(value) }));
+function onAmount(v: string | number | boolean): void {
+  gen.amount = Number(v);
+}
+
+/** ↻ in the bar: another variant of the generation being tried, or (LLM) ask again. */
 async function retry(): Promise<void> {
+  if (sending.value) return;
+  if (gen.session) {
+    if (!(await gen.another())) notify("После генерации были другие правки — вариант оставлен на карте как есть.", "info");
+    return;
+  }
   const g = lastGen.value;
-  if (!g || sending.value) return;
+  if (!g) return;
   // Mute the canvas so the undo (revert to base) isn't painted — the map jumps straight from
   // the current variant to the new one, no rollback flash in between.
   editStore.setRenderMuted(true);
   try {
     if (editStore.undoable) editStore.undoEdit(); // undo the previous generation commit
-    if (g.mode === "keyword" && g.recipeId && g.region) {
-      log.value.push({ role: "user", text: "↻ другой вариант" });
-      sending.value = true;
-      const t0 = performance.now();
-      try {
-        const rep = await editStore.generate(g.recipeId, g.region, undefined, g.cells ?? null, g.protect); // new random seed
-        const ms = Math.round(performance.now() - t0);
-        notify(
-          rep?.ok
-            ? `↻ ${g.recipeId.replace(/_/g, " ")} ${g.region.w}×${g.region.h} · ${debugLine(ms)}`
-            : `Не прошло — откатил. · ${debugLine(ms)}${validationReason()}`,
-          rep?.ok ? "success" : "warning",
-        );
-      } catch (e) {
-        notify("⚠ " + (e instanceof Error ? e.message : String(e)), "warning");
-      } finally {
-        sending.value = false;
-      }
-    } else if (g.mode === "llm") {
-      log.value.push({ role: "user", text: "↻ другой вариант: " + g.text });
-      await sendLlm(g.text);
-    }
+    log.value.push({ role: "user", text: "↻ другой вариант: " + g.text });
+    await sendLlm(g.text);
   } finally {
     editStore.setRenderMuted(false); // paints the final variant once (MapCanvasHost watcher)
   }
@@ -713,13 +774,52 @@ watch(
         </div>
       </template>
     </div>
+
+    <!-- the generation being tried: variants, more/less, keep or take away -->
+    <GenResultStrip />
     </div>
 
     <div class="copilot-bar d2-float" :class="{ idle: idleEffective }">
       <span class="cp-grip" title="Перетащите копайлот (позиция запомнится)" @pointerdown="onHandlePointerDown">⠿</span>
+      <el-popover ref="palPop" :width="372" placement="top-start" trigger="click" popper-class="cp-ex-pop cp-pal-pop">
+        <template #reference>
+          <el-button ref="palBtn" class="cp-ico cp-examples" :class="{ pulse: examplesPulse }" text :icon="Grid" title="Генератор — выбрать, что сгенерировать" />
+        </template>
+        <div class="cp-ex-head">
+          Генератор — нажми, что сделать
+          <div class="cp-pal-where">{{ areaLine }}</div>
+          <div class="cp-pal-amount">
+            <span>Сколько:</span>
+            <el-segmented :model-value="gen.amount" :options="amountOptions" size="small" @change="onAmount" />
+            <span class="cp-pal-hint">для плиток с ±</span>
+          </div>
+        </div>
+        <div class="cp-ex-scroll">
+          <div v-if="!gen.groups.length" class="cp-pal-empty">Список рецептов не загрузился — команды текстом работают.</div>
+          <div v-for="g in gen.groups" :key="g.id" class="cp-ex-group">
+            <div class="cp-ex-gtitle">{{ g.icon }} {{ g.title }}</div>
+            <div class="cp-pal-grid">
+              <div v-for="r in g.recipes" :key="r.id" class="cp-pal-tile">
+                <button class="cp-pal-main" :disabled="sending || gen.busy" :title="`Сгенерировать: ${r.title}`" @click="runTile(r)">
+                  <span class="cp-pal-name">{{ r.title }}</span>
+                  <span v-if="r.amountLabel" class="cp-pal-tune" :title="`Количество настраивается: ${r.amountLabel}`">±</span>
+                </button>
+                <button
+                  v-if="r.stroke"
+                  class="cp-pal-draw"
+                  :title="r.stroke === 'line' ? `Нарисовать линией: ${r.title}` : `Нарисовать кистью: ${r.title}`"
+                  :aria-label="`Нарисовать: ${r.title}`"
+                  @click="drawTile(r)"
+                >✎</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </el-popover>
+
       <el-popover ref="exPop" :width="328" placement="top-start" trigger="click" popper-class="cp-ex-pop">
         <template #reference>
-          <el-button ref="exBtn" class="cp-ico cp-examples" :class="{ pulse: examplesPulse }" text :icon="Reading" title="Примеры команд" />
+          <el-button ref="exBtn" class="cp-ico" text :icon="Reading" title="Примеры команд текстом" />
         </template>
         <div class="cp-ex-head">
           Примеры — кликни, затем Enter
@@ -785,7 +885,7 @@ watch(
         class="cp-ico"
         text
         :icon="RefreshRight"
-        :disabled="!lastGen || sending"
+        :disabled="(!gen.session && !lastGen) || sending || gen.busy"
         title="Другой вариант (откатит текущий и сгенерит заново)"
         @click="retry()"
       />
@@ -1048,6 +1148,29 @@ watch(
   border-radius: 7px;
   cursor: pointer;
 }
+.cp-pal-where { margin-top: 4px; font-weight: 400; color: var(--el-text-color-regular); }
+.cp-pal-amount { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-weight: 400; }
+.cp-pal-hint { color: var(--el-text-color-secondary); font-size: 11px; }
+.cp-pal-empty { padding: 10px 4px; color: var(--el-text-color-secondary); }
+.cp-pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.cp-pal-tile { display: flex; min-width: 0; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; overflow: hidden; }
+.cp-pal-tile:hover { border-color: var(--el-color-primary); }
+.cp-pal-main, .cp-pal-draw {
+  border: 0;
+  background: transparent;
+  color: var(--el-text-color-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 6px 8px;
+}
+.cp-pal-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; text-align: left; }
+.cp-pal-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-pal-tune { color: var(--el-text-color-secondary); font-size: 11px; }
+.cp-pal-draw { border-left: 1px solid var(--el-border-color-lighter); color: var(--el-text-color-secondary); padding: 6px 7px; }
+.cp-pal-main:hover:not(:disabled), .cp-pal-draw:hover { background: var(--el-fill-color); color: var(--el-color-primary); }
+.cp-pal-main:disabled { opacity: 0.5; cursor: default; }
+.cp-pal-main:focus-visible, .cp-pal-draw:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: -2px; }
 .cp-ex-item:hover {
   background: var(--el-fill-color-light);
 }

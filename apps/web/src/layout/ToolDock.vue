@@ -12,13 +12,14 @@
  * the tool with that preset (enter-tool-with-preset), so the flyout is a faster
  * path than click-tool-then-tune-options. A corner caret marks flyout buttons.
  */
-import { nextTick } from "vue";
+import { computed, nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import { View, MagicStick, Check, EditPen } from "@element-plus/icons-vue";
 import { useViewStore } from "../stores/viewStore";
 import { useToolStore, type EditTool, type ZoneMode, type PlaceObjectKind } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useDecorStore } from "../stores/decorStore";
+import { useGenStore } from "../stores/genStore";
 import { LOC_FILTERS, type LocFilter } from "../services/scenarioRoles";
 import { EDIT_TOOLS } from "./tools";
 
@@ -108,23 +109,39 @@ const OBJECT_KINDS: { value: PlaceObjectKind; label: string }[] = [
   { value: "mercenary", label: "🛡 Наёмники" },
 ];
 
-/** «По рисунку»: draw a stroke → generation follows it (roads/rivers = the line, decor is
- *  sprinkled along the brush). The flyout picks WHAT to generate; the button toggles. */
-const DRAW_GEN: { id: string; label: string }[] = [
-  { id: "road_path", label: "🛣 Дорога по линии" },
-  { id: "river", label: "🌊 Река по линии" },
-  { id: "decor_rocks", label: "🪨 Камни вдоль мазка" },
-  { id: "decor_bushes", label: "🌿 Кусты вдоль мазка" },
-  { id: "decor_ruins", label: "🏚 Руины вдоль мазка" },
-  { id: "decor_graves", label: "🪦 Могилы вдоль мазка" },
+/** «По рисунку»: draw a stroke → generation follows it (a road, a river or a ridge IS the
+ *  line; mountains, forest and snow fill the brush; decor and hills are sprinkled along it).
+ *  The flyout picks WHAT to generate; the button toggles. The list is the server's: every
+ *  recipe that can follow a stroke, with the stroke it wants. */
+interface DrawGen { id: string; label: string; stroke?: { mode: "line" | "brush"; size: number } }
+/** Shown while the server's list has not arrived (or is not available). */
+const DRAW_GEN_FALLBACK: DrawGen[] = [
+  { id: "road_path", label: "🛣 Дорога — линией" },
+  { id: "river", label: "🌊 Река — линией" },
+  { id: "decor_rocks", label: "🪨 Камни — кистью" },
+  { id: "decor_bushes", label: "🌿 Кусты — кистью" },
+  { id: "decor_ruins", label: "🏚 Руины — кистью" },
+  { id: "decor_graves", label: "🪦 Могилы — кистью" },
 ];
+const gen = useGenStore();
+void gen.loadCatalog().catch(() => undefined);
+const drawGen = computed<DrawGen[]>(() =>
+  gen.drawable.length
+    ? gen.drawable.map((r) => ({
+        id: r.id,
+        label: `${gen.iconOf(r.id)} ${r.title} — ${r.stroke === "line" ? "линией" : "кистью"}`,
+        stroke: { mode: r.stroke!, size: r.strokeWidth ?? 1 },
+      }))
+    : DRAW_GEN_FALLBACK,
+);
 const drawGenLabel = (id: string | null): string =>
-  DRAW_GEN.find((d) => d.id === id)?.label ?? "";
-function toggleDrawGen(): void {
-  toolStore.setDrawGen(drawGenRecipe.value ? null : "road_path");
-}
+  drawGen.value.find((d) => d.id === id)?.label ?? "";
 function pickDrawGen(id: string): void {
-  toolStore.setDrawGen(id);
+  toolStore.setDrawGen(id, drawGen.value.find((d) => d.id === id)?.stroke);
+}
+function toggleDrawGen(): void {
+  if (drawGenRecipe.value) toolStore.setDrawGen(null);
+  else pickDrawGen("road_path");
 }
 </script>
 
@@ -247,7 +264,7 @@ function pickDrawGen(id: string): void {
       </el-tooltip>
     </template>
 
-    <el-popover :width="212" placement="right-start" trigger="hover" :show-after="350" :hide-after="120" popper-class="dock-pop">
+    <el-popover :width="236" placement="right-start" trigger="hover" :show-after="350" :hide-after="120" popper-class="dock-pop">
       <template #reference>
         <button
           class="d2-tool-btn has-fly"
@@ -259,7 +276,7 @@ function pickDrawGen(id: string): void {
         </button>
       </template>
       <div class="pop-head">По рисунку — нарисуй штрих, генерация пойдёт по нему</div>
-      <button v-for="d in DRAW_GEN" :key="d.id" class="pop-row" @click="pickDrawGen(d.id)">
+      <button v-for="d in drawGen" :key="d.id" class="pop-row" @click="pickDrawGen(d.id)">
         <el-icon class="pop-ck" :style="{ visibility: drawGenRecipe === d.id ? 'visible' : 'hidden' }"><Check /></el-icon>
         <span class="pop-lbl">{{ d.label }}</span>
       </button>

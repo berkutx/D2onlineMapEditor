@@ -58,6 +58,7 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   decor_forest: { F: { kind: "forest" } },
   forest_scatter: { F: { kind: "forest" } },
   forest_clearings: { F: { kind: "forest" }, B: { kind: "skip" } }, // forest with grown glades
+  forest_fill: { F: { kind: "forest" } }, // solid forest (zone or a brush stroke)
   // Mountains / hills (MJ): M = a 1×1 mountain; ridge = Voronoi border (U), greedy-packed
   // into 2×2/3×3 peaks by the decoder.
   mountain_fill: { M: { kind: "mountain" } },

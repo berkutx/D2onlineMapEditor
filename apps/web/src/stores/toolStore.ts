@@ -105,13 +105,16 @@ export const useToolStore = defineStore("tool", () => {
 
   /** Arm/disarm the «по рисунку» generator: arming enters the region tool with a fitting
    *  draw mode (paths → line, scatter → brush); disarming leaves the tool too. */
-  function setDrawGen(recipeId: string | null): void {
+  function setDrawGen(recipeId: string | null, stroke?: { mode: "line" | "brush"; size: number }): void {
     drawGenRecipe.value = recipeId;
     if (recipeId) {
       tool.value = "region";
+      // how the recipe wants to be drawn (the server's catalogue says); without it, the
+      // two classic paths are lines one cell wide and everything else is a brush
       const isPath = recipeId === "road_path" || recipeId === "river";
-      zoneMode.value = isPath ? "line" : "brush";
-      if (isPath) size.value = 1; // a path follows the stroke exactly (no 3-wide band)
+      zoneMode.value = stroke ? stroke.mode : isPath ? "line" : "brush";
+      if (stroke) size.value = stroke.size;
+      else if (isPath) size.value = 1; // a path follows the stroke exactly (no 3-wide band)
       region.value = null;
       regionMask.value = null;
       zoneHidden.value = false;

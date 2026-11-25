@@ -25,6 +25,8 @@ import ObjectInspector from "./ObjectInspector.vue";
 import ZoneInspector from "./ZoneInspector.vue";
 import StatusBar from "./StatusBar.vue";
 import CopilotBar from "./CopilotBar.vue";
+import GenResultStrip from "./GenResultStrip.vue";
+import { useGenStore } from "../stores/genStore";
 import DecorPalette from "./DecorPalette.vue";
 import EventsPanel from "./EventsPanel.vue";
 import ObjectActionBar from "./ObjectActionBar.vue";
@@ -35,6 +37,7 @@ import MinimapDock from "./MinimapDock.vue";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
 
 const view = useViewStore();
+const gen = useGenStore();
 const toolStore = useToolStore();
 const decorStore = useDecorStore();
 const editStore = useEditStore();
@@ -189,6 +192,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <RoadActionBar v-if="!readOnly && toolStore.tool === 'roadsel'" />
         <SelectionActionBar v-if="!readOnly && toolStore.tool === 'select'" />
         <CopilotBar v-if="!readOnly" v-show="view.copilotVisible" />
+        <!-- The variant controls live above the generator bar; a stroke drawn «по рисунку»
+             while the bar is hidden still gets them, on their own. -->
+        <div v-if="!readOnly && !view.copilotVisible && gen.session" class="gen-strip-solo">
+          <GenResultStrip />
+        </div>
         <HistoryPanel v-if="!readOnly" />
         <MinimapDock v-if="currentScenarioId" />
       </el-main>
@@ -247,5 +255,13 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
 }
 .app-footer {
   padding: 0;
+}
+.gen-strip-solo {
+  position: absolute;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  width: min(680px, 92vw);
+  z-index: 31;
 }
 </style>

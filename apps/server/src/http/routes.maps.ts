@@ -13,7 +13,7 @@
 import { mkdir, writeFile, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { REST, Region, type ValidationReport } from "@d2/socket-contract";
+import { REST, Region, type GenRecipeList, type ValidationReport } from "@d2/socket-contract";
 import {
   parseScenario,
   parseScenarioRaw,
@@ -42,7 +42,7 @@ import {
   planCoverageErrors,
   DECODE_TABLES,
 } from "@d2/map-edit";
-import { getRecipe } from "@d2/mapgen";
+import { AMOUNT_MAX, AMOUNT_MIN, getRecipe, recipeCatalog } from "@d2/mapgen";
 import { clientIdOf } from "./routes.scenarios.js";
 import { runGenerationSteps, type PlanStep } from "../maps/generation.js";
 import { config } from "../config.js";
@@ -578,9 +578,21 @@ export async function registerMapRoutes(
     },
   );
 
+  // GET /api/generate/recipes -> what can be generated: every recipe the server can both run
+  // and decode, with the name a mapmaker knows it by, its group, whether its amount can be
+  // tuned and whether it can follow a drawn stroke. The client's palette is built from this,
+  // so it never offers a recipe the server lacks.
+  app.get(REST.generateRecipes, async (_req, reply) => {
+    const list: GenRecipeList = { recipes: recipeCatalog().filter((r) => !!DECODE_TABLES[r.id]) };
+    return reply.header("cache-control", "no-cache").send(list);
+  });
+
   // POST /api/maps/:id/generate -> run a MarkovJunior recipe over a region, decode to
   // EditOps against the current project, validate, return { ops, report }. The client
   // commits the ops (one undo step). The LLM/keyword router (client) only picks recipe+region.
+  // Optional: `seed` (a variant is reproducible by it), `amount` (how much the recipe makes,
+  // 1 = stock), `cells` (a mask) and `stroke` (the mask is a shape the user DREW, to be
+  // followed — otherwise it only clips the result).
   app.post<{ Params: { id: string } }>(REST.mapGenerate(":id"), async (req, reply) => {
     const { id } = req.params;
     if (!(await requireWritable(id, reply))) return;
@@ -616,6 +628,11 @@ export async function registerMapRoutes(
     const seed = Number.isInteger(body.seed) ? Number(body.seed) : Date.now() & 0x7fffffff;
     const mask = parseMask(body.cells);
     const protect = body.protect === true;
+    const amount =
+      typeof body.amount === "number" && Number.isFinite(body.amount)
+        ? Math.max(AMOUNT_MIN, Math.min(AMOUNT_MAX, body.amount))
+        : 1;
+    const stroke = body.stroke === true && !!mask;
     // Collab id slot (M4): the client sends the slot the room assigned it, so landmark ids
     // this generation mints fall in that slot's disjoint band (no collision with a peer's
     // concurrent generation). nextTypedId clamps an out-of-range/absent slot to 0.
@@ -625,7 +642,7 @@ export async function registerMapRoutes(
     let ops;
     try {
       const { walls, decor, landmarkSizes } = await mod.catalogSets();
-      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed }], walls, seed, mask, protect, decor, landmarkSizes, genSlot);
+      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed, amount, followMask: stroke }], walls, seed, mask, protect, decor, landmarkSizes, genSlot);
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -637,6 +654,8 @@ export async function registerMapRoutes(
       serverMs: Date.now() - t0,
       opCount: ops.length,
       recipe: recipeId,
+      seed,
+      amount,
       protect,
       protectedInRegion: protect ? countProtected(liveDoc, region, mask) : undefined,
       validation: { ok: report.ok, identity: report.identity, semantic: report.semantic.ok, structural: report.structural.ok },

@@ -80,6 +80,13 @@ export const useEditStore = defineStore("edit", () => {
    *  rollback-to-base isn't painted — the map goes straight to the new variant. */
   const renderMuted = ref(false);
   function setRenderMuted(v: boolean): void { renderMuted.value = v; }
+  /**
+   * Bumped whenever MY OWN history moves: a local commit, my undo, my redo. (A peer's edit
+   * does not count — it changes the map, not what my next undo takes back.) Whoever wants to
+   * undo "the thing I just did" — the generator stepping through variants — remembers this
+   * after its commit and only undoes while it is unchanged.
+   */
+  const historyTick = ref(0);
 
   // --- collaboration (Stage 4) ------------------------------------------------
   // When joined to a room, every local commit is ALSO broadcast (set by collabStore via
@@ -353,6 +360,7 @@ export const useEditStore = defineStore("edit", () => {
     pendingPerOp = [];
     const uids = ops.map(() => newOpUid());
     project.value = pushCommit(project.value, ops, uids);
+    historyTick.value++;
     report.value = null;
     persist();
     scheduleAutoValidate();
@@ -397,6 +405,7 @@ export const useEditStore = defineStore("edit", () => {
     const freshOps = fresh.map((x) => x.op), freshUids = fresh.map((x) => x.uid);
     const inverse = applyToLive(freshOps);
     project.value = pushCommit(project.value, freshOps, freshUids);
+    historyTick.value++;
     report.value = null;
     persist();
     scheduleAutoValidate();
@@ -435,6 +444,7 @@ export const useEditStore = defineStore("edit", () => {
       }
       const uids = entry.inverse.map(() => newOpUid());
       project.value = pushCommit(project.value, entry.inverse, uids);
+      historyTick.value++;
       persist();
       outgoing?.(entry.inverse, inv.slice().reverse().map((o) => [o]), uids);
       myUndo.value = myUndo.value.slice(0, -1);
@@ -447,6 +457,7 @@ export const useEditStore = defineStore("edit", () => {
       return;
     }
     project.value = undo(project.value);
+    historyTick.value++;
     recompute();
     report.value = null;
     persist();
@@ -472,6 +483,7 @@ export const useEditStore = defineStore("edit", () => {
       const inv = applyToLive(entry.forward);
       const uids = entry.forward.map(() => newOpUid());
       project.value = pushCommit(project.value, entry.forward, uids);
+      historyTick.value++;
       persist();
       outgoing?.(entry.forward, inv.slice().reverse().map((o) => [o]), uids);
       myRedo.value = myRedo.value.slice(0, -1);
@@ -481,6 +493,7 @@ export const useEditStore = defineStore("edit", () => {
       return;
     }
     project.value = redo(project.value);
+    historyTick.value++;
     recompute();
     report.value = null;
     persist();
@@ -492,6 +505,7 @@ export const useEditStore = defineStore("edit", () => {
     if (!project.value || readOnly.value) return;
     clearTimeout(autoValidateTimer); // a pending auto-check would race the fresh project
     project.value = emptyProject(project.value.baseScenarioId, project.value.meta);
+    historyTick.value++;
     recompute();
     report.value = null;
     persist();
@@ -783,11 +797,16 @@ export const useEditStore = defineStore("edit", () => {
     seed?: number,
     cells?: [number, number][] | null,
     protect?: boolean,
+    /** how much the recipe makes (1 = stock) and whether `cells` is a drawn shape to follow */
+    opts: { amount?: number; stroke?: boolean } = {},
   ): Promise<ValidationReport | null> {
     if (!project.value || readOnly.value) return null;
     busy.value = true;
     try {
-      const res = await generateRegion(project.value.baseScenarioId, project.value, recipeId, region, seed, cells, protect, collabSlot);
+      const res = await generateRegion(
+        project.value.baseScenarioId, project.value, recipeId, region, seed, cells, protect, collabSlot,
+        opts.amount, opts.stroke,
+      );
       report.value = res.report;
       genDebug.value = res.debug ?? null;
       if (res.report.ok && res.ops.length) commit(res.ops);
@@ -846,6 +865,7 @@ export const useEditStore = defineStore("edit", () => {
     objectsRev,
     renderMuted,
     setRenderMuted,
+    historyTick,
     undoable,
     redoable,
     dirty,

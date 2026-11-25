@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { REST, type ScenarioEntry, type ValidationReport } from "@d2/socket-contract";
+import { REST, type GenerateResult, type GenRecipeList, type ScenarioEntry, type ValidationReport } from "@d2/socket-contract";
 import { buildApp } from "../src/app";
 import { config } from "../src/config";
 
@@ -131,6 +131,33 @@ describe("POST /api/maps/:id/export", () => {
   });
 });
 
+describe("GET /api/generate/recipes", () => {
+  it("lists what can be generated, as a palette offers it", async () => {
+    const res = await app.inject({ method: "GET", url: REST.generateRecipes });
+    expect(res.statusCode).toBe(200);
+    const { recipes } = res.json() as GenRecipeList;
+    expect(recipes.length).toBeGreaterThan(20);
+    const byId = new Map(recipes.map((r) => [r.id, r]));
+    expect(byId.get("mountain_blob")).toEqual({
+      id: "mountain_blob", title: "Горный массив", group: "mountains", amountLabel: "размер массива", varies: true, strokeVaries: true,
+    });
+    expect(byId.get("relief_ridge")).toMatchObject({ title: "Горная гряда", stroke: "line", strokeWidth: 3 });
+    expect(byId.get("forest_fill")).toMatchObject({ title: "Сплошной лес", stroke: "brush" });
+    // groups come in one run each (mountains first: relief is what the palette is for)
+    expect(recipes[0]!.group).toBe("mountains");
+    const groups = recipes.map((r) => r.group);
+    expect(groups.filter((g, i) => g !== groups[i - 1]).length).toBe(new Set(groups).size);
+  });
+
+  it("offers only recipes the server can really run", async () => {
+    const { recipes } = (await app.inject({ method: "GET", url: REST.generateRecipes })).json() as GenRecipeList;
+    for (const r of recipes) {
+      const res = await postJson(REST.mapGenerate(id), { project: project(), recipeId: r.id, region: { x: 6, y: 6, w: 8, h: 8 }, seed: 1 });
+      expect(res.statusCode, r.id).toBe(200);
+    }
+  });
+});
+
 describe("POST /api/maps/:id/generate", () => {
   it("wall_maze generates wall landmark ops that validate green", async () => {
     const res = await postJson(REST.mapGenerate(id), {
@@ -158,6 +185,35 @@ describe("POST /api/maps/:id/generate", () => {
     expect(r.ops.length).toBeGreaterThan(0);
     expect(r.ops.every((o) => o.kind === "setCell")).toBe(true);
     expect(r.report.ok).toBe(true);
+  });
+
+  it("says which seed and amount made the variant, so it can be made again", async () => {
+    const body = { project: project(), recipeId: "water_lake", region: { x: 5, y: 5, w: 16, h: 16 }, seed: 4242, amount: 0.6 };
+    const first = (await postJson(REST.mapGenerate(id), body)).json() as GenerateResult;
+    expect(first.debug).toMatchObject({ recipe: "water_lake", seed: 4242, amount: 0.6 });
+    const again = (await postJson(REST.mapGenerate(id), body)).json() as GenerateResult;
+    expect(again.ops).toEqual(first.ops); // the same request is the same variant
+
+    // without a seed the server picks one and reports it; an out-of-range amount is clamped
+    const free = (await postJson(REST.mapGenerate(id), { ...body, seed: undefined, amount: 99 })).json() as GenerateResult;
+    expect(Number.isInteger(free.debug?.seed)).toBe(true);
+    expect(free.debug?.amount).toBe(3);
+    expect(free.ops.length).toBeGreaterThan(first.ops.length); // more really is more
+  });
+
+  it("a mask that only clips (the visible screen) does not turn a river into a flood", async () => {
+    const region = { x: 4, y: 4, w: 20, h: 12 };
+    const cells: [number, number][] = [];
+    for (let y = 0; y < region.h; y++) for (let x = 0; x < region.w; x++) cells.push([region.x + x, region.y + y]);
+    const body = { project: project(), recipeId: "river", region, seed: 3, cells };
+    const clipped = (await postJson(REST.mapGenerate(id), body)).json() as GenerateResult;
+    const drawn = (await postJson(REST.mapGenerate(id), { ...body, stroke: true })).json() as GenerateResult;
+    const water = (r: GenerateResult): number => r.ops.filter((o) => o.kind === "setCell").length;
+    // a river crosses the zone: a band, far from every cell of it
+    expect(water(clipped)).toBeGreaterThan(0);
+    expect(water(clipped)).toBeLessThan(cells.length * 0.5);
+    // a DRAWN shape is followed cell for cell — that is what «по рисунку» means
+    expect(water(drawn)).toBeGreaterThan(water(clipped) * 2);
   });
 
   it("400s on an unknown recipe", async () => {

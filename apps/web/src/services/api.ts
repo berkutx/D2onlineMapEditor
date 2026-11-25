@@ -15,6 +15,8 @@ import type {
   ValidationReport,
   Region,
   GenerateResult,
+  GenRecipeInfo,
+  GenRecipeList,
   CopilotResult,
   VoiceHandoffResult,
   VoiceReturnPreview,
@@ -303,6 +305,10 @@ export async function generateRegion(
   cells?: [number, number][] | null,
   protect?: boolean,
   slot?: number,
+  /** How much the recipe makes, relative to its stock amount (1). */
+  amount?: number,
+  /** `cells` is a shape the user DREW (to be followed), not a mask that only clips. */
+  stroke?: boolean,
 ): Promise<GenerateResult> {
   // pure computation (ops are only committed client-side afterwards) — retry-safe.
   // `slot` = my collab id band (M4): landmark ids mint in it so a peer's concurrent
@@ -310,7 +316,16 @@ export async function generateRegion(
   return postJsonRetry<GenerateResult>(u(REST.mapGenerate(id)), {
     project, recipeId, region, seed, cells: cells ?? undefined, protect: protect || undefined,
     slot: slot || undefined,
+    amount: amount !== undefined && amount !== 1 ? amount : undefined,
+    stroke: stroke || undefined,
   });
+}
+
+/** GET /api/generate/recipes — what the server can generate, as a palette lists it. */
+export async function fetchGenRecipes(): Promise<GenRecipeInfo[]> {
+  const res = await fetch(u(REST.generateRecipes));
+  if (!res.ok) throw new Error(`recipes: ${res.status} ${res.statusText}`);
+  return ((await res.json()) as GenRecipeList).recipes;
 }
 
 /**
