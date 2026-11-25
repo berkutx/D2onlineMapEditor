@@ -25,6 +25,7 @@
 
 import { ByteWriter, EMPTY_REF } from "./byteWriter.js";
 import { cp1251Length } from "./cp1251.js";
+import { MOUNTAIN_RACE } from "./sgRebuild.js";
 
 const VERSION = "S143";
 
@@ -268,14 +269,17 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
     w.stringField("NAME", name);
     w.stringField("DESC", description);
     w.stringField("BRIEFING", "Цели сценария не определены");
-    // writeMultyStringPart: empty next & empty current -> ""; else current + "_"
-    w.stringField("DEBUNKW", "Поздравляем! Вы победили в этом сценарии._" + "_");
+    // writeMultyStringPart: empty next & empty current -> ""; else current + "_". ONE "_": the
+    // text itself has none. (It used to be written with two. The game's editor saves one — 42 of
+    // the installs' maps carry this very default with one, none with two — and our own reader
+    // showed the second as a stray underscore at the end of the text.)
+    w.stringField("DEBUNKW", "Поздравляем! Вы победили в этом сценарии." + "_");
     w.stringField("DEBUNKW2", "");
     w.stringField("DEBUNKW3", "");
     w.stringField("DEBUNKW4", "");
     w.stringField("DEBUNKW5", "");
     w.stringField("DEBUNKL", "Вы потерпели поражение, враги достигли своей цели.");
-    w.stringField("BRIEFLONG1", "Цели сценария_" + "_");
+    w.stringField("BRIEFLONG1", "Цели сценария" + "_");
     w.stringField("BRIEFLONG2", "");
     w.stringField("BRIEFLONG3", "");
     w.stringField("BRIEFLONG4", "");
@@ -305,7 +309,7 @@ export function createBlankMap(opts: BlankMapOptions): Uint8Array {
       w.defaultInt("POS_X", m.x);
       w.defaultInt("POS_Y", m.y);
       w.defaultInt("IMAGE", m.image ?? 0);
-      w.defaultInt("RACE", m.race ?? 0);
+      w.defaultInt("RACE", m.race ?? MOUNTAIN_RACE);
     });
   });
 

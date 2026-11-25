@@ -858,6 +858,14 @@ export function siteFrame(
   });
 }
 
+/**
+ * RACE of a MidMountains entry: neutral (LRace 4). That is every mountain there is — 43 203 of
+ * 43 203 on 133 maps of the four mod installs — and the game's own editor rewrites any other
+ * value to it when it loads a map (and then asks to save a map nobody touched). Found by
+ * letting ScenEdit re-save a generated map: mountains used to be written with RACE 0.
+ */
+export const MOUNTAIN_RACE = 4;
+
 /** One mountain entry written into the MidMountains body. */
 export interface MountainEntry {
   x: number;

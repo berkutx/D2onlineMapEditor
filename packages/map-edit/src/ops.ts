@@ -11,6 +11,7 @@ import { MapEvent } from "@d2/map-schema";
 import { EditOp } from "@d2/socket-contract";
 import { splitMultiString } from "@d2/sg-parser";
 import { makeCell } from "./bits.js";
+import { MOUNTAIN_RACE } from "./place.js";
 import {
   synthesizeCluster, insertCluster, extractCluster, removeCluster, raceAlreadyPresent,
   type PlayerCluster, type AddPlayerSpec, type RaceKey,
@@ -136,7 +137,13 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       if (doc.objects.some((o) => o.id === op.object.id)) {
         throw new Error(`applyOp addObject: id ${op.object.id} already exists`);
       }
-      const objects = doc.objects.concat(op.object);
+      // A mountain placed before MOUNTAIN_RACE existed sits in saved journals with race 0:
+      // apply it as the neutral mountain it is, so an old project exports correctly too.
+      const object =
+        op.object.type === "mountains" && !op.object.race
+          ? { ...op.object, race: MOUNTAIN_RACE }
+          : op.object;
+      const objects = doc.objects.concat(object);
       const inverse: EditOp = { kind: "deleteObject", id: op.object.id };
       return { doc: replaceObjects(doc, objects), inverse };
     }

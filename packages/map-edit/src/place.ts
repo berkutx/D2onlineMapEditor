@@ -11,6 +11,7 @@
  */
 
 import type { MapDocument, MapObject } from "@d2/map-schema";
+import { MOUNTAIN_RACE } from "@d2/sg-parser";
 import type { EditOp } from "./ops.js";
 
 /** Mountain-ground cell value (terrain 5 | ground 4), as the editor stamps. */
@@ -19,6 +20,9 @@ export const MOUNTAIN_CELL = 37;
 /** Cell value a removed mountain's footprint reverts to (terrain 5 | ground 0) — the reference's
  *  mountain-removal restore value (MapStateHolder), i.e. bare mountain terrain, now passable. */
 export const MOUNTAIN_RESTORE = 5;
+
+/** RACE of a mountain (neutral — the only value the game's data has); see @d2/sg-parser. */
+export { MOUNTAIN_RACE };
 
 const NIL_REF = "G000000000";
 
@@ -103,7 +107,7 @@ export function placeMountainOps(
   w: number,
   h: number,
   image: number,
-  race = 0,
+  race = MOUNTAIN_RACE,
 ): EditOp[] {
   const version = doc.header.version || "S143";
   const count = doc.objects.filter((o) => o.type === "mountains").length;

@@ -43,6 +43,7 @@ export {
   landmarkFrame,
   locationFrame,
   mountainsFrame,
+  MOUNTAIN_RACE,
   itemFrame,
   unitFrame,
   stackFrame,

@@ -17,7 +17,7 @@ import {
   playerFrame, subraceFrame, scenarioInfoFrame, mapFrame,
   fogFrame, playerSpellsFrame, playerBuildingsFrame, talismanChargesFrame, stackDestroyedFrame,
   questLogFrame, spellCastFrame, spellEffectsFrame, turnSummaryFrame,
-  planFrame, mapBlockFrame, roadFrame,
+  planFrame, mapBlockFrame, roadFrame, MOUNTAIN_RACE,
 } from "./sgRebuild.js";
 import { eventFrame, scenVariablesFrame, stackTemplateFrame, diplomacyFrame } from "./eventFrame.js";
 import { splitScenario, rebuildScenario, type ScenarioBlock, type ScenarioBlocks } from "./sgBlocks.js";
@@ -542,7 +542,7 @@ function serializeMountainsBlock(blockId: string, doc: MapDocument, version: str
       w: m.w ?? 0,
       h: m.h ?? 0,
       image: m.image ?? 0,
-      race: m.race ?? 0,
+      race: m.race ?? MOUNTAIN_RACE,
       idMount: m.idMount,
     })),
   );

@@ -10,6 +10,7 @@ import {
   FILL_VALUE,
   TERRAIN_FILLS,
   MOUNTAIN_CELL,
+  MOUNTAIN_RACE,
   RACES,
 } from "../src/index";
 
@@ -215,6 +216,19 @@ describe("@d2/sg-parser createBlankMap — mountains", () => {
     const mtns = doc.objects.filter((o) => o.type === "mountains");
     expect(mtns.length).toBe(1);
     expect(mtns[0]!.pos).toEqual({ x: 10, y: 12 });
+    // neutral, like every mountain in the game's data (the game's editor rewrites anything else)
+    expect(mtns[0]).toMatchObject({ race: MOUNTAIN_RACE });
+    expect(MOUNTAIN_RACE).toBe(4);
     expect(validateMap(doc).ok).toBe(true);
+  });
+
+  it("writes the default objectives and victory texts the way the game's editor saves them", () => {
+    const bytes = createBlankMap({ size: 48, name: "Texts" });
+    const { header } = parseScenario(bytes);
+    // one "_" closes a text part; a second one is a stray underscore at the end of the text
+    expect(header.story).toBe("Цели сценария");
+    expect(header.winText).toBe("Поздравляем! Вы победили в этом сценарии.");
+    expect(header.storyParts?.[0]).toBe("Цели сценария_");
+    expect(header.winTextParts?.[0]).toBe("Поздравляем! Вы победили в этом сценарии._");
   });
 });
