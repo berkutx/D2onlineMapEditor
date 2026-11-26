@@ -1,5 +1,9 @@
 {
-  "//": "Copy to mods.local.json (gitignored). Lists, per mod id, the scenario folders of THAT mod's installation. A map found there is that mod's map, with no guessing; maps from the plain SCENARIO_ROOTS and uploaded maps are matched to a mod by the ids they reference. The mod ids are the ones build_mod.py registered in <ASSETS_DIR>/mods/index.json. The MOD_SCENARIO_ROOTS environment variable (modId=path;modId=path) wins over this file.",
+  "//": "Copy to mods.local.json (gitignored). scenarioRoots lists, per mod id, the scenario folders of THAT mod's installation. A map found there is that mod's map, with no guessing; maps from the plain SCENARIO_ROOTS and uploaded maps are matched to a mod by the ids they reference. The mod ids are the ones build_mod.py registered in <ASSETS_DIR>/mods/index.json. The MOD_SCENARIO_ROOTS environment variable (modId=path;modId=path) wins over this file. gameRoots names each mod's game folder (the one with Globals, Imgs, Interf, Scripts) for the tests that read every table and archive of every mod (test-helpers/modRoots.ts); the D2_MOD_ROOTS environment variable (modId=path;modId=path) wins over it.",
+  "gameRoots": {
+    "some-mod": "D:/Games/Some Mod",
+    "another-mod": "D:/Games/Another Mod/Game"
+  },
   "scenarioRoots": {
     "some-mod": ["D:/Games/Some Mod/Exports", "D:/Games/Some Mod/Campaign"],
     "another-mod": ["D:/Games/Another Mod/Exports"]

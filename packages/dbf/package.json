@@ -1,0 +1,21 @@
+{
+  "name": "@d2/dbf",
+  "version": "0.1.0",
+  "description": "Lossless reader and writer for the game's dBASE III tables (Globals, Scens, Interf)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  }
+}
