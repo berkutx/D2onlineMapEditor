@@ -1,14 +1,20 @@
-"""build_unit_icons: extract unit face portraits from Imgs/Faces.ff into per-unit PNGs.
+"""build_unit_icons: a face for every unit, from Imgs/Faces.ff.
 
-Faces.ff records are named UNIT_ID + a suffix. "<id>FACEB" (the big battle portrait) is the
-authoritative per-unit face and is used here; the small "<id>FACE" records are shifted by one
-unit and must NOT be preferred. Colour-keys the magenta border to transparency and writes
-public/assets/uniticons/<id>.png (lowercased) so the unit picker can render <img>.
+Faces.ff has no index: its records are the pictures, named UNIT_ID + a suffix.
+  <id>FACE   the small portrait (70x85; 150x85 for nearly every big unit),
+  <id>FACEB  the big round one (130x142),
+  <id>FACES  a third record a few dozen units carry.
+The icon is the small portrait, FACE, and the others stand in where a unit lacks it.
 
-Only ~479/856 units ship their OWN face; the other 377 are upgrades/variants that reuse a base
-unit's portrait. Gunits.dbf BASE_UNIT chains every such unit to a base that DOES have a face, so
-we resolve through BASE_UNIT and write the base's portrait under the variant's id -> 856/856
-coverage (no UI placeholders). Verified: the chain resolves for all 377.
+(An older version of this file held that FACE records were "shifted by one unit" and took
+FACEB instead. The shift was in the reading of the archive's name table — see fflib/optindex.py
+— and what it called FACEB was this very FACE record.)
+
+Only about half the units ship a face of their OWN; the rest are upgrades/variants that reuse a
+base unit's portrait. Gunits.BASE_UNIT chains every such unit to a base that has one, so a
+faceless unit gets its base's portrait under its own id.
+
+Writes public/assets/uniticons/<id>.png (lowercased) so the unit picker can render <img>.
 
     python tools/asset-pipeline/build_unit_icons.py --game "<D2_GAME_DIR>/Game" --out public/assets
 
@@ -18,11 +24,13 @@ import argparse
 import json
 import os
 
-from PIL import Image
+from fflib import pictures
+from fflib.dbf import read_dbf, find_table, ascii_
 
-import extract_ff
-from fflib import shaders
-from build_item_catalog import read_dbf, ascii_, _find
+NULL_ID = "G000000000"
+FACE_SUFFIXES = ("FACE", "FACEB", "FACES")
+#: How far a BASE_UNIT chain is followed before giving up (a guard against a loop in the table).
+MAX_CHAIN = 6
 
 
 def main():
@@ -34,53 +42,45 @@ def main():
 
     catalog = args.catalog or os.path.join(args.out, "unitCatalog.json")
     with open(catalog, encoding="utf-8") as f:
-        wanted = {e["id"].upper() for e in json.load(f) if e.get("id")}
+        wanted = sorted({e["id"].upper() for e in json.load(f) if e.get("id")})
 
     # BASE_UNIT chain (variant/upgrade -> base unit) so faceless units can reuse a base portrait.
     base_of = {}
-    for r in read_dbf(_find(os.path.join(args.game, "Globals"), "Gunits.dbf")):
+    for r in read_dbf(find_table(os.path.join(args.game, "Globals"), "Gunits.dbf")):
         uid = ascii_(r["UNIT_ID"]).upper()
-        if uid and uid != "G000000000":
+        if uid and uid != NULL_ID:
             base_of[uid] = ascii_(r["BASE_UNIT"]).upper()
 
-    arch = extract_ff.find_archive(args.game, "Faces.ff")
-    if not arch:
-        raise SystemExit("Faces.ff not found under Game/Imgs|Interf")
-    _name, images = extract_ff.extract(arch)
-    by_name = {os.path.splitext(i.name)[0].upper(): i for i in images}
+    archive = pictures.open_archive(args.game, "Faces.ff")
+    faces = {}
 
     def face(uid):
-        # FACEB (the big battle portrait) is the authoritative per-unit face. The small
-        # <id>FACE records in Faces.ff are shifted by one unit — each holds the PREVIOUS
-        # unit's face (verified: G000UU0022FACE shows the archmage, G000UU0023FACE the
-        # archangel, while their FACEB records show the correct archangel/thief). FACEB has
-        # full coverage (479 own + 377 via BASE_UNIT = 856/856), so FACE is never needed.
-        return by_name.get(uid + "FACEB") or by_name.get(uid + "FACES") or by_name.get(uid + "FACE")
+        if uid not in faces:
+            faces[uid] = archive.first([uid + s for s in FACE_SUFFIXES])[1]
+        return faces[uid]
 
-    def resolve(uid, depth=0):
-        """The portrait source for uid: its own face, else its BASE_UNIT chain's face."""
-        img = face(uid)
-        if img:
-            return img
-        base = base_of.get(uid, "G000000000")
-        if base and base != "G000000000" and depth < 6:
-            return resolve(base, depth + 1)
-        return None
+    def resolve(uid):
+        """(portrait, came from a base unit) — the unit's own face, else its BASE_UNIT chain's."""
+        cur = uid
+        for depth in range(MAX_CHAIN + 1):
+            rgba = face(cur)
+            if rgba is not None:
+                return rgba, depth > 0
+            cur = base_of.get(cur, NULL_ID)
+            if not cur or cur == NULL_ID:
+                break
+        return None, False
 
     outdir = os.path.join(args.out, "uniticons")
     os.makedirs(outdir, exist_ok=True)
     seen = via_base = 0
     for uid in wanted:
-        img = face(uid)
-        if not img:
-            img = resolve(uid)
-            if img:
-                via_base += 1
-        if not img:
+        rgba, borrowed = resolve(uid)
+        if rgba is None:
             continue
-        rgba, _ntrans = shaders.colorkey(img.open(), kind="default")
-        Image.fromarray(rgba, "RGBA").save(os.path.join(outdir, uid.lower() + ".png"))
+        pictures.save(rgba, os.path.join(outdir, uid.lower() + ".png"))
         seen += 1
+        via_base += borrowed
     print("wrote %d unit icons -> %s (%d wanted, %d via BASE_UNIT, %d without portrait)" % (
         seen, outdir, len(wanted), via_base, len(wanted) - seen))
 

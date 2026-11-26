@@ -1,8 +1,8 @@
-"""build_spell_icons: extract spell icons from Imgs/IconSpel.ff into per-spell PNGs.
+"""build_spell_icons: the picture of every spell, as the game shows it.
 
-IconSpel.ff records are named DIRECTLY by SPELL_ID ("<id>.PNG"), the clean analog of
-IconItem.ff. Colour-keys the magenta background and writes public/assets/spellicons/<id>.png
-(lowercased). 220/224 spells have an icon; the rest fall back to a placeholder.
+Imgs/IconSpel.ff is asked for a picture by NAME — the SPELL_ID — through its index (see
+fflib/pictures.py). Writes public/assets/spellicons/<id>.png (lowercased); a spell the archive
+does not know keeps the editor's placeholder.
 
     python tools/asset-pipeline/build_spell_icons.py --game "<D2_GAME_DIR>/Game" --out public/assets
 
@@ -12,10 +12,7 @@ import argparse
 import json
 import os
 
-from PIL import Image
-
-import extract_ff
-from fflib import shaders
+from fflib import pictures
 
 
 def main():
@@ -27,26 +24,22 @@ def main():
 
     catalog = args.catalog or os.path.join(args.out, "spellCatalog.json")
     with open(catalog, encoding="utf-8") as f:
-        wanted = {e["id"].lower() for e in json.load(f) if e.get("id")}
+        wanted = sorted({e["id"].upper() for e in json.load(f) if e.get("id")})
 
-    arch = extract_ff.find_archive(args.game, "IconSpel.ff")
-    if not arch:
-        raise SystemExit("IconSpel.ff not found under Game/Imgs|Interf")
-    _name, images = extract_ff.extract(arch)
+    archive = pictures.open_archive(args.game, "IconSpel.ff")
 
     outdir = os.path.join(args.out, "spellicons")
     os.makedirs(outdir, exist_ok=True)
-    seen = set()
-    for img in images:
-        key = os.path.splitext(img.name)[0].lower()
-        if key not in wanted or key in seen:
+    wrote, missing = 0, []
+    for sid in wanted:
+        rgba = archive.picture(sid)
+        if rgba is None:
+            missing.append(sid.lower())
             continue
-        seen.add(key)
-        rgba, _ntrans = shaders.colorkey(img.open(), kind="default")
-        Image.fromarray(rgba, "RGBA").save(os.path.join(outdir, key + ".png"))
-    missing = sorted(wanted - seen)
+        pictures.save(rgba, os.path.join(outdir, sid.lower() + ".png"))
+        wrote += 1
     print("wrote %d spell icons -> %s (%d wanted, %d missing%s)" % (
-        len(seen), outdir, len(wanted), len(missing), ": " + ", ".join(missing[:8]) if missing else ""))
+        wrote, outdir, len(wanted), len(missing), ": " + ", ".join(missing[:8]) if missing else ""))
 
 
 if __name__ == "__main__":

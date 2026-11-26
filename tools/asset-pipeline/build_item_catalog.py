@@ -9,10 +9,11 @@ item lists and the ruin artifact picker. Each entry carries:
   - catKey    <- LmagItm.dbf[cat] (authoritative enum name, e.g. L_ARMOR / L_WEAPON);
                  the RU label lives in the frontend picker so the catalog stays game-sourced data
   - gold      <- the 'g####' part of VALUE
-  - image     <- IMAGE_ID (icon record name in Imgs/IconItem.ff; thumbnails are a later step)
+  - image     <- IMAGE_ID, as stored. It is NOT the name of the item's picture: IconItem.ff
+                 names a picture by the ITEM_ID, and a scroll's by its spell's race — see
+                 build_item_icons.py, which writes the icons.
 
-Phase A: names + category + gold (stdlib only, no Pillow). Phase B will add icon thumbs
-extracted from IconItem.ff.
+Names + category + gold only (stdlib, no Pillow).
 
     python tools/asset-pipeline/build_item_catalog.py \
         --game "<D2_GAME_DIR>/Game" --out public/assets

@@ -1,19 +1,23 @@
 """id <-> name resolution from the MQDB name table (record id == 2).
 
-Promoted and hardened from ``spikes/probe_ff.py::try_name_table``. The spike used a
-fuzzy "does this look like a 260-byte table" heuristic that also matched RGB pixel
-records and produced garbage names. Empirically (see spike notes) the *authoritative*
-table is always the record with ``id == 2``, with this exact layout:
+The table is the record with ``id == 2`` and this layout (toolsqt NamesListData, the same one
+``gameresource.GameResource`` reads):
 
-    int32 nameAreaLen          (length of a leading descriptor string, e.g. "-IMAGES.OPT")
-    char  nameArea[...]        (padded to fill the rest of the first 260-byte block)
-    --- then one 260-byte entry per asset, starting at offset 260: ---
-        int32 id               (matches the MQRC record id of the PNG)
+    int32 count
+    --- then one 260-byte entry per record, starting at offset 4: ---
         char  name[256]        (latin1, NUL-terminated)
+        int32 id               (the MQRC record id that carries this name)
 
-The first 260-byte block (offset 0) is the table's own descriptor (its id field is
-not a real asset id), so entries begin at offset 260. This yields ~99% PNG coverage
-on every Stage-1 archive (IsoTerrn/City/IsoAnim/IsoStill/Capital/GrBorder/Ground).
+The first entries name the archive's own tables (``-INDEX.OPT``, ``-IMAGES.OPT``, …).
+
+An earlier version read each entry as ``id`` then ``name`` from offset 260. Both strides are
+260 bytes, so that reading still produced a tidy table — with every record carrying the name
+of the NEXT entry. Nothing looked broken: coverage stayed at ~99%, and the pictures of an
+archive whose records come in id order were merely each other's neighbours.
+
+Mind what a record name is good for. In an archive WITH an index (``-INDEX.OPT``) a picture
+is found by its index name, and a record holds that picture's parts packed side by side; the
+record's file name is only where the art was imported from. Ask ``GameResource.picture``.
 """
 import struct
 
@@ -21,23 +25,19 @@ from .mqdb import record_by_id
 
 ENTRY_SIZE = 260
 NAME_FIELD = 256
+TABLE_START = 4  # past the entry count
 
 
 def parse_name_table(payload):
     """Parse an id==2 payload into an ``{id: name}`` dict (latin1, all entries)."""
     out = {}
-    off = ENTRY_SIZE  # skip the leading descriptor block
+    off = TABLE_START
     n = len(payload)
     while off + ENTRY_SIZE <= n:
-        rid = struct.unpack_from("<i", payload, off)[0]
-        raw = payload[off + 4 : off + 4 + NAME_FIELD].split(b"\x00", 1)[0]
+        raw = payload[off : off + NAME_FIELD].split(b"\x00", 1)[0]
+        rid = struct.unpack_from("<i", payload, off + NAME_FIELD)[0]
         if raw:
-            try:
-                name = raw.decode("latin1")
-            except Exception:
-                name = ""
-            if name:
-                out[rid] = name
+            out[rid] = raw.decode("latin1")
         off += ENTRY_SIZE
     return out
 

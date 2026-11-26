@@ -168,7 +168,9 @@ location with `D2_GAME_DIR`.
 ```
 fflib/
   mqdb.py        MQDB/MQRC container walk (marker scan) -> Record list
-  optindex.py    id<->name from the record id==2 table (260-byte entries)
+  optindex.py    record id<->file name from the id==2 table (260-byte entries)
+  gameresource.py  a picture by its NAME: the archive's index + the parts it is put together from
+  pictures.py    interface pictures for the icon builders (by name, colour-keyed, trimmed)
   naming.py      name classify/normalize; strips the .PNG.PNG double-extension
   shaders.py     numpy magenta color-key (P + RGB) + shader variants
   packer.py      shelf/row bin-packer, 2048² cap, multi-page split
@@ -191,9 +193,18 @@ spikes/          original de-risk spikes (probe_ff.py, probe_colorkey.py)
 
 - `.ff` = **MQDB** container; 28-byte `MQRC` records, image payloads are embedded
   standalone PNGs (mode `P` or `RGB`).
-- **Names** come from the record with **`id == 2`**: a leading 260-byte descriptor
-  block, then one 260-byte `int32 id + char[256]` entry per asset. ~99% PNG
-  coverage on every Stage-1 archive (incl. GrBorder / Ground).
+- **Record names** come from the record with **`id == 2`**: an `int32` count, then one
+  260-byte `char[256] name + int32 id` entry per record. (Read the other way round —
+  `id` first, from offset 260 — the table still parses, with every record carrying the
+  NEXT entry's name. The icon builders did that until 2026-11: each item showed its
+  neighbour's picture.)
+- **A picture is found by its index name, not by a record's file name.** Most archives
+  carry `-INDEX.OPT` / `-IMAGES.OPT`: name → the record with the pixels + the parts the
+  picture is assembled from (a record holds them packed side by side). A mod repoints a
+  name at new art and leaves the old record in place. Use `GameResource` / `pictures`.
+- **Item pictures** (`IconItem.ff`): named by `ITEM_ID`; a scroll shows `SCROLLHU/UN/HE/DW/EL`
+  by the race of the first lord (Glord order) whose `GspellR` research holds its spell,
+  `SCROLLHU` when no lord learns it. `GItem.IMAGE_ID` is not the picture's name.
 - **Transparency** = magenta color-key `r>247 && b>247 && g<8` (palette index 0 is
   magenta; no `tRNS`). Applied per-pixel for RGB, via the palette for `P`.
 - **Animation clock = 42 ms/frame** uniform → `fps ≈ 23.81`, `animationSpeed = fps/60`.

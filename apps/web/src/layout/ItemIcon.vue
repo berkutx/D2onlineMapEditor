@@ -2,8 +2,8 @@
 /**
  * ItemIcon — a small item thumbnail. Renders the extracted inventory icon
  * (/assets/itemicons/<id>.png, keyed by ITEM_ID) and falls back to a category-coloured
- * dot when the item has no icon asset (generic potions/orbs share UI icons the game does
- * not ship as per-item PNGs).
+ * dot for an item the mod's archive has no picture for. Scrolls share five pictures, one per
+ * race, as they do in the game.
  */
 import { ref, computed, watch } from "vue";
 import { assetUrl } from "../services/api";

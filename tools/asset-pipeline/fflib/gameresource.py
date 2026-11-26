@@ -288,6 +288,33 @@ class GameResource:
                     return sdesc[0], w, h, parts
         return None
 
+    def picture(self, name, shader=SH_DEFAULT):
+        """The picture a name stands for — its first frame, HxWx4 — or None when the archive
+        has no such name. The name is matched without regard to case, as has() matches it
+        (get_frames wants the index's own spelling)."""
+        if self.indexes_opt is None:
+            d = self._by_name.get(name.upper().replace(".PNG", ""))
+            img = self._load_png(self._payload(d)) if d is not None else None
+            return _shade(img, shader) if img is not None else None
+        desc = self._index.get(name.lower())
+        if desc is None:
+            return None
+        uid, ro, rs = desc
+        for fn in ([name] if uid != -1 else self._anim_frames(ro, rs)):
+            sdesc = self._index.get(fn.lower())
+            if sdesc is None or sdesc[0] == -1:
+                continue
+            src_desc = self._by_uid.get(sdesc[0])
+            if src_desc is None:
+                continue
+            for (iname, w, h, parts) in self._image_data(sdesc[1], sdesc[2]):
+                if iname.lower() != fn.lower():
+                    continue
+                frame = self._process_parts(src_desc, w, h, parts, shader)
+                if frame is not None:
+                    return frame
+        return None
+
     # ---- internals ----
     @staticmethod
     def _load_png(data):
