@@ -33,3 +33,4 @@ export * from "./project.js";
 export * from "./diplomacy.js";
 export * from "./fog.js";
 export * from "./passport.js";
+export * from "./guard.js";

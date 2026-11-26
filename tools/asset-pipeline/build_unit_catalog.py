@@ -8,6 +8,19 @@ Catalogs every unit for the editor's garrison + mercenary pickers. Each entry:
   - leaderKey <- LleadC.dbf enum when LEADER_CAT != 0 (fighter/mage/explorer/rod/noble)
   - race      <- Grace[RACE_ID].NAME_TXT (coarse, 6 races); subrace <- GSubRace[RACE_TYPE==SUBRACE].NAME_TXT
   - hp/armor/leadership <- HIT_POINT / ARMOR / LEADERSHIP
+  - xp        <- XP_KILLED: the experience a victory over the unit gives — the game's own
+                 measure of how strong it is (what "a guard worth N" is counted in)
+  - branch    <- BRANCH + LunitB.dbf enum (L_FIGHTER / L_ARCHER / L_MAGE / L_SPECIAL / L_HERO ...)
+  - melee     <- true when the unit's main attack only reaches an adjacent enemy (Gattacks.REACH ->
+                 LattR.MELEE, or L_ADJACENT in a mod whose LattR has no such column): it must
+                 stand in the FRONT line to fight; emitted only when true
+  - area      <- true when that attack hits several targets at once (L_ALL, or a mod's reach whose
+                 MAX_TARGTS is above one); emitted only when true
+  - atk       <- the main attack's class (LattC enum: L_DAMAGE / L_HEAL / L_BOOST_DAMAGE ...)
+  - dyn       <- [DYN_UPG_LV, hp1, xp1, hp2, xp2]: what one level above the base adds to hit
+                 points and to `xp`, before DYN_UPG_LV (GDynUpgr[DYN_UPG1]) and from it on
+                 (GDynUpgr[DYN_UPG2]); omitted for a unit that does not grow
+  - water     <- true for a unit that lives only on water (WATER_ONLY); emitted only when true
 
     python tools/asset-pipeline/build_unit_catalog.py --game "<D2_GAME_DIR>/Game" --out public/assets
 
@@ -41,6 +54,30 @@ def main():
             texts[k] = cp866_(r["TEXT"])
     lunitc = {_int(r, "ID"): ascii_(r["TEXT"]) for r in read_dbf(_find(g, "LunitC.dbf"))}
     lleadc = {_int(r, "ID"): ascii_(r["TEXT"]) for r in read_dbf(_find(g, "LleadC.dbf"))}
+    lunitb = {_int(r, "ID"): ascii_(r["TEXT"]) for r in read_dbf(_find(g, "LunitB.dbf"))}
+    lattc = {_int(r, "ID"): ascii_(r["TEXT"]) for r in read_dbf(_find(g, "LattC.dbf"))}
+    # reach id -> does the attack only hit an adjacent enemy? MSS mods add reaches of their own
+    # and say so in a MELEE column; a table without it has the three stock reaches
+    # The three stock reaches keep their meaning whatever those columns hold for them (one mod
+    # leaves them blank, another fills them with F / 0), and so does a mod's scripted copy of
+    # "any one target" (L_ANY_C, L_ANY_SCRIPT), whose MAX_TARGTS is not always 1.
+    melee_reach = {}
+    area_reach = {}
+    for r in read_dbf(_find(g, "LattR.dbf")):
+        rid = _int(r, "ID")
+        text = ascii_(r["TEXT"]).strip().upper()
+        if text in ("L_ALL", "L_ANY", "L_ADJACENT"):
+            melee_reach[rid] = text == "L_ADJACENT"
+            area_reach[rid] = text == "L_ALL"
+            continue
+        melee_reach[rid] = "MELEE" in r and ascii_(r["MELEE"]).strip().upper() == "T"
+        area_reach[rid] = text not in ("L_ANY_C", "L_ANY_SCRIPT") and "MAX_TARGTS" in r and _int(r, "MAX_TARGTS") > 1
+    attacks = {}
+    for r in read_dbf(_find(g, "Gattacks.dbf")):
+        attacks[ascii_(r["ATT_ID"]).upper()] = (_int(r, "REACH"), _int(r, "CLASS"))
+    dyn_upg = {}
+    for r in read_dbf(_find(g, "GDynUpgr.dbf")):
+        dyn_upg[ascii_(r["UPGRADE_ID"]).upper()] = (_int(r, "HIT_POINT"), _int(r, "XP_KILLED"))
     race_name = {}
     for r in read_dbf(_find(g, "Grace.dbf")):
         race_name[ascii_(r["RACE_ID"]).upper()] = texts.get(ascii_(r["NAME_TXT"]).lower(), "")
@@ -68,9 +105,26 @@ def main():
             "hp": _int(r, "HIT_POINT"),
             "armor": _int(r, "ARMOR"),
             "leadership": _int(r, "LEADERSHIP"),
+            "xp": _int(r, "XP_KILLED"),
+            "branch": lunitb.get(_int(r, "BRANCH"), ""),
         }
+        attack = attacks.get(ascii_(r["ATTACK_ID"]).upper())
+        if attack:
+            if melee_reach.get(attack[0], False):
+                entry["melee"] = True
+            if area_reach.get(attack[0], False):
+                entry["area"] = True
+            entry["atk"] = lattc.get(attack[1], "")
+        up1 = dyn_upg.get(ascii_(r["DYN_UPG1"]).upper())
+        up2 = dyn_upg.get(ascii_(r["DYN_UPG2"]).upper())
+        if up1 or up2:
+            up1 = up1 or (0, 0)
+            up2 = up2 or up1
+            entry["dyn"] = [_int(r, "DYN_UPG_LV"), up1[0], up1[1], up2[0], up2[1]]
         if lead:
             entry["leaderKey"] = lleadc.get(lead, "")
+        if "WATER_ONLY" in r and ascii_(r["WATER_ONLY"]).strip().upper() == "T":
+            entry["water"] = True
         # SIZE_SMALL (DBF logical): 'T' => 1-cell small unit; 'F' or blank => 2-cell BIG unit
         # (dragons/giants/big heroes). Emitted only when large, to keep the JSON compact (like
         # leaderKey/desc). Consumed by unitStore.isLarge for the merged formation slot + placing a

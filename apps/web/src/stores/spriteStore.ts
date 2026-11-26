@@ -92,5 +92,12 @@ export const useSpriteStore = defineStore("sprite", () => {
     return key ? frames.value[key] : undefined;
   }
 
-  return { frames, ensureKeys, frameOf };
+  /** Which of these sprite keys the mod has art for at all — read off its manifest, nothing is
+   *  loaded. (A stack's figure on the map is `<leader unit id>STOP<facing>`.) */
+  async function known(keys: readonly string[]): Promise<Set<string>> {
+    const m = await manifest();
+    return new Set(keys.filter((k) => (m.frames ? k in m.frames : false) || (m.index ? k in m.index : false)));
+  }
+
+  return { frames, ensureKeys, frameOf, known };
 });

@@ -35,6 +35,8 @@ import UnitIcon from "./UnitIcon.vue";
 import SpellPicker from "./SpellPicker.vue";
 import SpellIcon from "./SpellIcon.vue";
 import GarrisonEditor from "./GarrisonEditor.vue";
+import GuardBuilderDialog from "./GuardBuilderDialog.vue";
+import type { GuardApply } from "../services/guardSettings";
 import EventSummaryCard from "./EventSummaryCard.vue";
 import ImagePicker from "./ImagePicker.vue";
 import SpriteThumb from "./SpriteThumb.vue";
@@ -586,6 +588,39 @@ function setStackEquip(slot: string, id: string | null): void {
   }
   editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { equip } }]);
 }
+/** «Охрана по бюджету» for the selected stack: the window proposes a formation (and loot), and
+ *  one click puts it in as ONE step of the history — the units, the leader and the loot together. */
+const guardVisible = ref(false);
+const stackLeaderUnit = computed(() => stackGarrison.value[stackLeaderCell.value]?.unit ?? null);
+const stackOnWater = computed(() => {
+  const doc = editStore.liveDoc;
+  const st = obj.value?.type === "stack" ? obj.value : null;
+  if (!doc || !st) return false;
+  const c = doc.terrain.cells[st.pos.y * doc.size + st.pos.x];
+  return c ? ((c.value >> 3) & 7) === 3 : false; // ground bits: 3 = water
+});
+function applyGuard(p: GuardApply): void {
+  const st = obj.value?.type === "stack" ? obj.value : null;
+  if (!st || readOnly.value) return;
+  const g: (GarrUnit | null)[] = [null, null, null, null, null, null];
+  for (let row = 0; row < 3; row++) {
+    const a = 2 * row, b = a + 1;
+    const front = p.cells[a] ?? null, back = p.cells[b] ?? null;
+    if (front && front === back) {
+      // a big unit: both cells of the row, one shared key — it exports as ONE MidUnit
+      const key = freshBigKey();
+      g[a] = { unit: front.unit, level: front.level, hp: front.hp, key };
+      g[b] = { unit: front.unit, level: front.level, hp: front.hp, key };
+    } else {
+      if (front) g[a] = { unit: front.unit, level: front.level, hp: front.hp };
+      if (back) g[b] = { unit: back.unit, level: back.level, hp: back.hp };
+    }
+  }
+  const fields: Record<string, unknown> = { garrison: g, leaderCell: p.leaderCell, leaderImage: g[p.leaderCell]?.unit };
+  if (p.loot) fields.inventory = p.loot;
+  editStore.commit([{ kind: "patchObject", id: st.id, fields }]);
+}
+
 /** Stack carried inventory — global GItem template ids (MidItem instances re-created on export). */
 const stackInventory = computed(() => (obj.value?.type === "stack" ? obj.value.inventory ?? [] : []));
 function stackAddItem(template: string): void {
@@ -981,6 +1016,10 @@ function close(): void {
         </div>
 
         <div class="d2-sec">{{ tr("Состав отряда") }} <span class="muted">({{ stackCount }}/6)</span></div>
+        <el-button v-if="!readOnly" class="guard-open" size="small" :title="tr('Подобрать юнитов на заданную силу и добычу на заданную стоимость')" @click="guardVisible = true">
+          ⚔ {{ tr("Собрать по бюджету…") }}
+        </el-button>
+        <GuardBuilderDialog v-model="guardVisible" :current-leader="stackLeaderUnit" :carried="stackInventory.length" :on-water="stackOnWater" @apply="applyGuard" />
         <GarrisonEditor
           :key="obj.id"
           :garrison="stackGarrison"
@@ -1582,6 +1621,10 @@ function close(): void {
 }
 .item-act:hover {
   opacity: 1;
+}
+.guard-open {
+  width: 100%;
+  margin: 0 0 8px;
 }
 .item-add {
   margin-top: 6px;

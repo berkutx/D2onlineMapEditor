@@ -2,7 +2,8 @@
  * unitStore — loads the offline-built unit catalog (public/assets/unitCatalog.json) and
  * exposes it for the garrison grid + mercenary-camp pickers. Each entry is a GLOBAL Gunit
  * template { id (G###UU####), name, level, cat (LunitC enum), catKey, race, subrace,
- * subraceId, hp, armor, leadership, leaderKey?, desc? }. RU labels for the category /
+ * subraceId, hp, armor, leadership, leaderKey?, desc?, and the fields a guard is composed by:
+ * xp, branch, melee?, area?, atk?, dyn?, water? }. RU labels for the category /
  * leader-subtype enums live here so the catalog stays pure game-sourced data.
  */
 import { defineStore } from "pinia";
@@ -27,6 +28,22 @@ export interface UnitEntry {
   /** true = a BIG 2-cell unit (Gunits SIZE_SMALL false): a dragon/giant/big hero that occupies
    *  both cells of its formation column. Emitted only when large (catalog stays compact). */
   large?: boolean;
+  // ---- what a guard is composed by (see @d2/map-edit guard.ts); absent in a catalogue built
+  // before these fields existed — the composer then finds nobody to take and says so.
+  /** XP_KILLED: the experience a victory over the unit gives — its strength */
+  xp?: number;
+  /** LunitB key: L_FIGHTER / L_ARCHER / L_MAGE / L_SPECIAL / L_HERO … */
+  branch?: string;
+  /** the main attack only reaches an adjacent enemy: a front-line unit */
+  melee?: boolean;
+  /** the main attack hits several targets at once */
+  area?: boolean;
+  /** class of the main attack (LattC key) */
+  atk?: string;
+  /** [DYN_UPG_LV, hp1, xp1, hp2, xp2] — growth per level up to that level, and after it */
+  dyn?: number[];
+  /** lives only on water */
+  water?: boolean;
 }
 
 export interface UnitGroup {
