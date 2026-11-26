@@ -22,6 +22,7 @@ import { useDecorStore } from "../stores/decorStore";
 import { useGenStore } from "../stores/genStore";
 import { LOC_FILTERS, type LocFilter } from "../services/scenarioRoles";
 import { EDIT_TOOLS } from "./tools";
+import { tr } from "../i18n";
 
 const view = useViewStore();
 const toolStore = useToolStore();
@@ -37,13 +38,13 @@ const {
 
 /** View-layer checklist shown in the eye popover (single source of truth = viewStore). */
 const layers = [
-  { label: "Рельеф", key: "T", on: terrainVisible, toggle: () => view.setLayerVisible("terrain", !terrainVisible.value) },
-  { label: "Объекты", key: "O", on: objectsVisible, toggle: () => view.setLayerVisible("objects", !objectsVisible.value) },
-  { label: "Сетка", key: "G", on: gridVisible, toggle: () => view.toggleGrid() },
-  { label: "Локации", key: "L", on: locationsVisible, toggle: () => view.toggleLocations() },
-  { label: "Анимация", key: "A", on: animate, toggle: () => view.toggleAnimate() },
-  { label: "Панель объектов", key: "P", on: objectPanelVisible, toggle: () => view.toggleObjectPanel() },
-  { label: "Отладка", key: "D", on: debugOverlay, toggle: () => view.toggleDebugOverlay() },
+  { label: tr("Рельеф"), key: "T", on: terrainVisible, toggle: () => view.setLayerVisible("terrain", !terrainVisible.value) },
+  { label: tr("Объекты"), key: "O", on: objectsVisible, toggle: () => view.setLayerVisible("objects", !objectsVisible.value) },
+  { label: tr("Сетка"), key: "G", on: gridVisible, toggle: () => view.toggleGrid() },
+  { label: tr("Локации"), key: "L", on: locationsVisible, toggle: () => view.toggleLocations() },
+  { label: tr("Анимация"), key: "A", on: animate, toggle: () => view.toggleAnimate() },
+  { label: tr("Панель объектов"), key: "P", on: objectPanelVisible, toggle: () => view.toggleObjectPanel() },
+  { label: tr("Отладка"), key: "D", on: debugOverlay, toggle: () => view.toggleDebugOverlay() },
 ];
 
 /** Tools that get a hover flyout; the rest keep the plain name tooltip. */
@@ -52,12 +53,12 @@ const FLY_WIDTH: Partial<Record<EditTool, number>> = { terrain: 236, locations: 
 
 /** Land swatches (same set/order as ToolOptionsBar's dropdown, as color chips). */
 const TERRAINS = [
-  { value: 5, label: "Нейтральная", color: "#9aa763" },
-  { value: 1, label: "Империя", color: "#6da45e" },
-  { value: 4, label: "Нежить", color: "#7f6f8f" },
-  { value: 3, label: "Легионы", color: "#a06a4e" },
-  { value: 6, label: "Эльфы", color: "#58b06f" },
-  { value: 2, label: "Горы (снег)", color: "#e8eef4" },
+  { value: 5, label: tr("Нейтральная"), color: "#9aa763" },
+  { value: 1, label: tr("Империя"), color: "#6da45e" },
+  { value: 4, label: tr("Нежить"), color: "#7f6f8f" },
+  { value: 3, label: tr("Легионы"), color: "#a06a4e" },
+  { value: 6, label: tr("Эльфы"), color: "#58b06f" },
+  { value: 2, label: tr("Горы (снег)"), color: "#e8eef4" },
 ];
 const sizeOptions = [
   { label: "1×1", value: 1 },
@@ -99,14 +100,14 @@ function decorSearch(): void {
 
 /** «Объекты»: interactive objects the tool places (kinds mirror ToolOptionsBar). */
 const OBJECT_KINDS: { value: PlaceObjectKind; label: string }[] = [
-  { value: "village", label: "🏘 Город" },
-  { value: "ruin", label: "🏚 Руина" },
-  { value: "treasure", label: "💰 Сундук" },
-  { value: "stack", label: "⚔ Отряд" },
-  { value: "merchant", label: "🛒 Торговец" },
-  { value: "mage", label: "🔮 Маг" },
-  { value: "trainer", label: "🎓 Тренер" },
-  { value: "mercenary", label: "🛡 Наёмники" },
+  { value: "village", label: tr("🏘 Город") },
+  { value: "ruin", label: tr("🏚 Руина") },
+  { value: "treasure", label: tr("💰 Сундук") },
+  { value: "stack", label: tr("⚔ Отряд") },
+  { value: "merchant", label: tr("🛒 Торговец") },
+  { value: "mage", label: tr("🔮 Маг") },
+  { value: "trainer", label: tr("🎓 Тренер") },
+  { value: "mercenary", label: tr("🛡 Наёмники") },
 ];
 
 /** «По рисунку»: draw a stroke → generation follows it (a road, a river or a ridge IS the
@@ -116,13 +117,13 @@ const OBJECT_KINDS: { value: PlaceObjectKind; label: string }[] = [
 interface DrawGen { id: string; label: string; stroke?: { mode: "line" | "brush"; size: number } }
 /** Shown while the server's list has not arrived (or is not available). */
 const DRAW_GEN_FALLBACK: DrawGen[] = [
-  { id: "road_path", label: "🛣 Дорога — линией" },
-  { id: "river", label: "🌊 Река — линией" },
+  { id: "road_path", label: tr("🛣 Дорога — линией") },
+  { id: "river", label: tr("🌊 Река — линией") },
   // (no rock or headstone emoji here: Windows 10 has no glyphs for them)
-  { id: "decor_rocks", label: "🗿 Камни — кистью" },
-  { id: "decor_bushes", label: "🌿 Кусты — кистью" },
-  { id: "decor_ruins", label: "🏚 Руины — кистью" },
-  { id: "decor_graves", label: "⚰ Могилы — кистью" },
+  { id: "decor_rocks", label: tr("🗿 Камни — кистью") },
+  { id: "decor_bushes", label: tr("🌿 Кусты — кистью") },
+  { id: "decor_ruins", label: tr("🏚 Руины — кистью") },
+  { id: "decor_graves", label: tr("⚰ Могилы — кистью") },
 ];
 const gen = useGenStore();
 void gen.loadCatalog().catch(() => undefined);
@@ -130,7 +131,9 @@ const drawGen = computed<DrawGen[]>(() =>
   gen.drawable.length
     ? gen.drawable.map((r) => ({
         id: r.id,
-        label: `${gen.iconOf(r.id)} ${r.title} — ${r.stroke === "line" ? "линией" : "кистью"}`,
+        label: r.stroke === "line"
+          ? tr("{icon} {title} — линией", { icon: gen.iconOf(r.id), title: tr(r.title) })
+          : tr("{icon} {title} — кистью", { icon: gen.iconOf(r.id), title: tr(r.title) }),
         stroke: { mode: r.stroke!, size: r.strokeWidth ?? 1 },
       }))
     : DRAW_GEN_FALLBACK,
@@ -150,11 +153,11 @@ function toggleDrawGen(): void {
   <div class="dock d2-rail d2-rail--left">
     <el-popover :width="210" placement="right-start" trigger="click" popper-class="dock-pop">
       <template #reference>
-        <button class="d2-tool-btn" title="Слои вида">
+        <button class="d2-tool-btn" :title="tr('Слои вида')">
           <el-icon><View /></el-icon>
         </button>
       </template>
-      <div class="pop-head">Слои вида</div>
+      <div class="pop-head">{{ tr("Слои вида") }}</div>
       <button v-for="l in layers" :key="l.label" class="pop-row" @click="l.toggle()">
         <el-icon class="pop-ck" :style="{ visibility: l.on.value ? 'visible' : 'hidden' }"><Check /></el-icon>
         <span class="pop-lbl">{{ l.label }}</span>
@@ -188,34 +191,34 @@ function toggleDrawGen(): void {
         <template v-if="t.value === 'terrain'">
           <div class="fly-row">
             <button
-              v-for="tr in TERRAINS"
-              :key="tr.value"
+              v-for="terr in TERRAINS"
+              :key="terr.value"
               type="button"
               class="fly-swatch"
-              :class="{ on: terrainId === tr.value && tool === 'terrain' }"
-              :style="{ background: tr.color }"
-              :title="tr.label"
-              @click="pickTerrain(tr.value)"
+              :class="{ on: terrainId === terr.value && tool === 'terrain' }"
+              :style="{ background: terr.color }"
+              :title="terr.label"
+              @click="pickTerrain(terr.value)"
             />
           </div>
           <div class="fly-row">
-            <span class="fly-lbl">Кисть</span>
+            <span class="fly-lbl">{{ tr("Кисть") }}</span>
             <el-segmented :model-value="size" :options="sizeOptions" size="small" @change="onFlySize('terrain', $event)" />
           </div>
         </template>
 
         <template v-else-if="t.value === 'water' || t.value === 'forest' || t.value === 'erase'">
           <div class="fly-row">
-            <span class="fly-lbl">Кисть</span>
+            <span class="fly-lbl">{{ tr("Кисть") }}</span>
             <el-segmented :model-value="size" :options="sizeOptions" size="small" @change="onFlySize(t.value, $event)" />
           </div>
         </template>
 
         <template v-else-if="t.value === 'decor'">
-          <button class="pop-row" @click="decorFamily('nature')"><span class="pop-lbl">🌿 Природа</span></button>
-          <button class="pop-row" @click="decorFamily('structures')"><span class="pop-lbl">🏛 Постройки</span></button>
-          <button class="pop-row" @click="decorFamily('terrain')"><span class="pop-lbl">⛰ Рельеф</span></button>
-          <button class="pop-row" @click="decorSearch()"><span class="pop-lbl">🔍 Поиск…</span></button>
+          <button class="pop-row" @click="decorFamily('nature')"><span class="pop-lbl">{{ tr("🌿 Природа") }}</span></button>
+          <button class="pop-row" @click="decorFamily('structures')"><span class="pop-lbl">{{ tr("🏛 Постройки") }}</span></button>
+          <button class="pop-row" @click="decorFamily('terrain')"><span class="pop-lbl">{{ tr("⛰ Рельеф") }}</span></button>
+          <button class="pop-row" @click="decorSearch()"><span class="pop-lbl">{{ tr("🔍 Поиск…") }}</span></button>
         </template>
 
         <template v-else-if="t.value === 'object'">
@@ -228,7 +231,7 @@ function toggleDrawGen(): void {
         <template v-else-if="t.value === 'move'">
           <button class="pop-row" @click="view.toggleAnchors()">
             <el-icon class="pop-ck" :style="{ visibility: anchorsVisible ? 'visible' : 'hidden' }"><Check /></el-icon>
-            <span class="pop-lbl">Якоря (связи зданий)</span>
+            <span class="pop-lbl">{{ tr("Якоря (связи зданий)") }}</span>
           </button>
         </template>
 
@@ -242,13 +245,13 @@ function toggleDrawGen(): void {
           </div>
           <button class="pop-row" @click="view.toggleRoles()">
             <el-icon class="pop-ck" :style="{ visibility: rolesVisible ? 'visible' : 'hidden' }"><Check /></el-icon>
-            <span class="pop-lbl">Роли на карте</span>
+            <span class="pop-lbl">{{ tr("Роли на карте") }}</span>
           </button>
         </template>
 
         <template v-else-if="t.value === 'zone'">
           <div class="fly-row">
-            <span class="fly-lbl">Рисовать</span>
+            <span class="fly-lbl">{{ tr("Рисовать") }}</span>
             <el-segmented :model-value="zoneMode" :options="ZONE_MODES" size="small" @change="onFlyZoneMode($event)" />
           </div>
         </template>
@@ -270,13 +273,13 @@ function toggleDrawGen(): void {
         <button
           class="d2-tool-btn has-fly"
           :class="{ 'is-active': !!drawGenRecipe }"
-          :title="drawGenRecipe ? 'По рисунку: ' + drawGenLabel(drawGenRecipe) : 'По рисунку — генерация вдоль штриха'"
+          :title="drawGenRecipe ? tr('По рисунку: {what}', { what: drawGenLabel(drawGenRecipe) }) : tr('По рисунку — генерация вдоль штриха')"
           @click="toggleDrawGen()"
         >
           <el-icon><EditPen /></el-icon>
         </button>
       </template>
-      <div class="pop-head">По рисунку — нарисуй штрих, генерация пойдёт по нему</div>
+      <div class="pop-head">{{ tr("По рисунку — нарисуй штрих, генерация пойдёт по нему") }}</div>
       <button v-for="d in drawGen" :key="d.id" class="pop-row" @click="pickDrawGen(d.id)">
         <el-icon class="pop-ck" :style="{ visibility: drawGenRecipe === d.id ? 'visible' : 'hidden' }"><Check /></el-icon>
         <span class="pop-lbl">{{ d.label }}</span>
@@ -286,10 +289,10 @@ function toggleDrawGen(): void {
     <div class="dock-spring" />
     <div class="dock-div" />
 
-    <el-tooltip content="Отменить (Ctrl+Z)" placement="right" :show-after="200">
+    <el-tooltip :content="tr('Отменить (Ctrl+Z)')" placement="right" :show-after="200">
       <button class="d2-tool-btn dock-glyph" :disabled="!undoable" @click="editStore.undoEdit()">↶</button>
     </el-tooltip>
-    <el-tooltip content="Вернуть (Ctrl+⇧Z)" placement="right" :show-after="200">
+    <el-tooltip :content="tr('Вернуть (Ctrl+⇧Z)')" placement="right" :show-after="200">
       <button class="d2-tool-btn dock-glyph" :disabled="!redoable" @click="editStore.redoEdit()">↷</button>
     </el-tooltip>
 

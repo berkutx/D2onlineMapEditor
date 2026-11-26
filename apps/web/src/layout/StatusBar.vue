@@ -11,6 +11,7 @@ import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
 import { useToolStore } from "../stores/toolStore";
 import { toolDef } from "./tools";
+import { tr } from "../i18n";
 
 const mapStore = useMapStore();
 const viewStore = useViewStore();
@@ -31,13 +32,13 @@ const zoomText = computed(() => `${Math.round(zoom.value * 100)}%`);
 /** Tools whose brush size matters (so we show "Рельеф · 3×3"). */
 const SIZED = new Set(["terrain", "water", "forest", "erase"]);
 const toolLabel = computed(() => {
-  if (tool.value === "region") return "Зона";
+  if (tool.value === "region") return tr("Зона");
   const d = toolDef(tool.value);
   if (!d) return "";
   return SIZED.has(tool.value) ? `${d.label} · ${size.value}×${size.value}` : d.label;
 });
 const hint = computed(() => {
-  if (tool.value === "region") return "обведи участок для генерации (или используй Copilot)";
+  if (tool.value === "region") return tr("обведи участок для генерации (или используй Copilot)");
   return toolDef(tool.value)?.hint ?? "";
 });
 </script>
@@ -50,15 +51,15 @@ const hint = computed(() => {
 
     <span class="spacer" />
 
-    <span class="status-item">{{ mapName || "Нет карты" }}</span>
+    <span class="status-item">{{ mapName || tr("Нет карты") }}</span>
     <el-divider direction="vertical" />
-    <span class="status-item">Клетка: <b class="d2-num">{{ cursorText }}</b></span>
+    <span class="status-item">{{ tr("Клетка:") }} <b class="d2-num">{{ cursorText }}</b></span>
     <el-divider direction="vertical" />
-    <span class="status-item">Размер: <b class="d2-num">{{ sizeText }}</b></span>
+    <span class="status-item">{{ tr("Размер:") }} <b class="d2-num">{{ sizeText }}</b></span>
     <el-divider direction="vertical" />
-    <span class="status-item">Объекты: <b class="d2-num">{{ totalObjects }}</b></span>
+    <span class="status-item">{{ tr("Объекты:") }} <b class="d2-num">{{ totalObjects }}</b></span>
     <el-divider direction="vertical" />
-    <span class="status-item">Масштаб: <b class="d2-num">{{ zoomText }}</b></span>
+    <span class="status-item">{{ tr("Масштаб:") }} <b class="d2-num">{{ zoomText }}</b></span>
   </div>
 </template>
 

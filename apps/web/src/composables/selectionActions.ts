@@ -7,6 +7,7 @@ import { ElMessage } from "element-plus";
 import { applyOps, deleteMountainOps, type EditOp } from "@d2/map-edit";
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
+import { tr } from "../i18n";
 
 /** Types the byte writer can delete (incl. cascades). Sites/crystals/capitals stay out. */
 const DELETABLE = new Set(["landmark", "stack", "mountains", "village", "treasure", "ruin"]);
@@ -28,7 +29,7 @@ export function useSelectionActions() {
       editStore.setAnchor(id, primary);
       n++;
     }
-    ElMessage.success(`Сгруппировано: ${n} → якорь к выбранному`);
+    ElMessage.success(tr("Сгруппировано: {n} → якорь к выбранному", { n }));
   }
 
   /** Снять якоря со всех выделенных (обратное действие). */
@@ -40,8 +41,8 @@ export function useSelectionActions() {
         n++;
       }
     }
-    if (n) ElMessage.success(`Якоря сняты: ${n}`);
-    else ElMessage.info("У выделенных объектов нет якорей");
+    if (n) ElMessage.success(tr("Якоря сняты: {n}", { n }));
+    else ElMessage.info(tr("У выделенных объектов нет якорей"));
   }
 
   /** 🗑 Удалить выделенное ОДНИМ страйком (один undo). Ops для гор считаются
@@ -71,7 +72,7 @@ export function useSelectionActions() {
         (o.type === "stack" && ((o as { inside?: string }).inside || (o as { garrisoned?: boolean }).garrisoned)) ||
         (o.type === "village" && (o as { stackRef?: string }).stackRef)
       ) {
-        skipped.push(`гость/город-с-гостем ${id}`);
+        skipped.push(tr("гость/город-с-гостем {id}", { id }));
       } else {
         ops = [{ kind: "deleteObject", id }];
       }
@@ -85,7 +86,7 @@ export function useSelectionActions() {
       toolStore.setSelectedId(null);
     }
     if (skipped.length) {
-      ElMessage.warning(`Пропущено (не удаляется): ${skipped.slice(0, 4).join(", ")}${skipped.length > 4 ? "…" : ""}`);
+      ElMessage.warning(tr("Пропущено (не удаляется): {list}", { list: `${skipped.slice(0, 4).join(", ")}${skipped.length > 4 ? "…" : ""}` }));
     }
   }
 

@@ -17,6 +17,7 @@ import { useEditStore } from "../stores/editStore";
 import { useEventStore } from "../stores/eventStore";
 import { useViewStore } from "../stores/viewStore";
 import { LOC_FILTERS, type LocFilter } from "../services/scenarioRoles";
+import { tr, trc, trn } from "../i18n";
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
@@ -25,12 +26,12 @@ const viewStore = useViewStore();
 const { tool, size, terrainId, locFilter, zoneMode, regionMask, region } = storeToRefs(toolStore);
 
 const terrains = [
-  { value: 5, label: "Нейтральная" },
-  { value: 1, label: "Империя" },
-  { value: 4, label: "Нежить" },
-  { value: 3, label: "Легионы" },
-  { value: 6, label: "Эльфы" },
-  { value: 2, label: "Горы (снег)" },
+  { value: 5, label: tr("Нейтральная") },
+  { value: 1, label: tr("Империя") },
+  { value: 4, label: tr("Нежить") },
+  { value: 3, label: tr("Легионы") },
+  { value: 6, label: tr("Эльфы") },
+  { value: 2, label: tr("Горы (снег)") },
 ];
 const sizeOptions = [
   { label: "1×1", value: 1 },
@@ -42,7 +43,7 @@ const sizeOptions = [
  *  Значения и подписи — единый источник LOC_FILTERS (services/scenarioRoles): триггеры
  *  разложены по смыслу (⚡ вход / 👣 отряд в зоне / 🎒 предмет), остальное по классу роли. */
 const locFilterOptions = LOC_FILTERS.map((f) => ({ label: f.label, icon: f.icon, value: f.value }));
-const LOC_FILTER_HINT = "Фильтр локаций: " + LOC_FILTERS.map((f) => `${f.icon} ${f.label} — ${f.hint}`).join(" · ");
+const LOC_FILTER_HINT = tr("Фильтр локаций: {list}", { list: LOC_FILTERS.map((f) => `${f.icon} ${f.label} — ${f.hint}`).join(" · ") });
 function onLocFilter(v: string | number | boolean): void {
   toolStore.setLocFilter(v as LocFilter);
 }
@@ -76,7 +77,7 @@ watch(regenZoneId, (zid) => {
   if (z) zoneName.value = z.name; // prefill; можно переименовать при перегенерации
 });
 function makeZone(): void {
-  const name = zoneName.value.trim() || "Зона";
+  const name = zoneName.value.trim() || trc("Зона");
   const regen = regenZoneId.value || undefined;
   const zid = editStore.createZone(name, zoneCells.value, regen);
   if (!zid) return;
@@ -84,8 +85,10 @@ function makeZone(): void {
   const resynced = regen ? eventStore.resyncZoneEventsAfterRegen(zid) : 0;
   ElMessage.success(
     regen
-      ? `«${name}»: перегенерировано — локаций ${zoneEstimate.value}${resynced ? `, событий-клонов пересобрано ${resynced}` : ""}`
-      : `«${name}»: зона создана (${zoneEstimate.value} лок. под капотом) — управляется как одно целое`,
+      ? resynced
+        ? tr("«{name}»: перегенерировано — локаций {n}, событий-клонов пересобрано {m}", { name, n: zoneEstimate.value, m: resynced })
+        : tr("«{name}»: перегенерировано — локаций {n}", { name, n: zoneEstimate.value })
+      : tr("«{name}»: зона создана ({n} лок. под капотом) — управляется как одно целое", { name, n: zoneEstimate.value }),
   );
   zoneName.value = "";
   regenZoneId.value = "";
@@ -99,15 +102,15 @@ function deleteZone(): void {
   const z = editStore.zones[zid];
   if (!z) return;
   void ElMessageBox.confirm(
-    `Удалить зону «${z.name}» вместе с её ${z.locIds.length} локациями? (события, повешенные на них, останутся и будут ссылаться в пустоту)`,
-    "Удалить зону",
-    { confirmButtonText: "Удалить", cancelButtonText: "Отмена", type: "warning" },
+    trn("Удалить зону «{name}» вместе с её {n} локацией? (события, повешенные на них, останутся и будут ссылаться в пустоту)|Удалить зону «{name}» вместе с её {n} локациями? (события, повешенные на них, останутся и будут ссылаться в пустоту)|Удалить зону «{name}» вместе с её {n} локациями? (события, повешенные на них, останутся и будут ссылаться в пустоту)", z.locIds.length, { name: z.name }),
+    tr("Удалить зону"),
+    { confirmButtonText: tr("Удалить"), cancelButtonText: tr("Отмена"), type: "warning" },
   )
     .then(() => {
       editStore.removeZone(zid, true);
       regenZoneId.value = "";
       zoneName.value = "";
-      ElMessage.success(`Зона «${z.name}» удалена`);
+      ElMessage.success(tr("Зона «{name}» удалена", { name: z.name }));
     })
     .catch(() => { /* отмена */ });
 }
@@ -117,14 +120,14 @@ function onZoneMode(v: string | number | boolean): void {
 
 /** «Объекты»: what the object tool places + the mandatory leader for a stack. */
 const OBJECT_KINDS: { value: PlaceObjectKind; label: string }[] = [
-  { value: "village", label: "🏘 Город" },
-  { value: "ruin", label: "🏚 Руина" },
-  { value: "treasure", label: "💰 Сундук" },
-  { value: "stack", label: "⚔ Отряд" },
-  { value: "merchant", label: "🛒 Торговец" },
-  { value: "mage", label: "🔮 Маг" },
-  { value: "trainer", label: "🎓 Тренер" },
-  { value: "mercenary", label: "🛡 Наёмники" },
+  { value: "village", label: tr("🏘 Город") },
+  { value: "ruin", label: tr("🏚 Руина") },
+  { value: "treasure", label: tr("💰 Сундук") },
+  { value: "stack", label: tr("⚔ Отряд") },
+  { value: "merchant", label: tr("🛒 Торговец") },
+  { value: "mage", label: tr("🔮 Маг") },
+  { value: "trainer", label: tr("🎓 Тренер") },
+  { value: "mercenary", label: tr("🛡 Наёмники") },
 ];
 const { objectKind, stackLeaderId } = storeToRefs(toolStore);
 
@@ -139,27 +142,27 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
 <template>
   <div v-if="visible" class="tool-opts d2-float">
     <template v-if="showZoneTool">
-      <el-tooltip content="Как рисовать: прямоугольник · кисть · линия · рамка" :show-after="300">
+      <el-tooltip :content="tr('Как рисовать: прямоугольник · кисть · линия · рамка')" :show-after="300">
         <el-segmented :model-value="zoneMode" :options="ZONE_MODES" size="small" @change="onZoneMode" />
       </el-tooltip>
       <el-segmented v-if="zoneMode === 'brush' || zoneMode === 'line'" v-model="size" :options="sizeOptions" size="small" />
-      <el-input v-model="zoneName" size="small" placeholder="имя зоны" style="width: 130px" @keyup.enter="makeZone()" />
+      <el-input v-model="zoneName" size="small" :placeholder="tr('имя зоны')" style="width: 130px" @keyup.enter="makeZone()" />
       <el-select
         v-if="zoneOptions.length"
         v-model="regenZoneId"
         size="small"
         clearable
-        placeholder="перегенерир.…"
-        title="Выбрать существующую зону: новая маска заменит её локации; 🗑 удаляет зону"
+        :placeholder="tr('перегенерир.…')"
+        :title="tr('Выбрать существующую зону: новая маска заменит её локации; 🗑 удаляет зону')"
         style="width: 132px"
       >
         <el-option v-for="z in zoneOptions" :key="z.value" :value="z.value" :label="z.label" />
       </el-select>
       <el-button size="small" type="primary" plain :disabled="!zoneCells.length" @click="makeZone()">
-        {{ regenZoneId ? "Перегенерировать" : "Нарезать" }} → {{ zoneEstimate }} лок.
+        {{ regenZoneId ? tr("Перегенерировать → {n} лок.", { n: zoneEstimate }) : tr("Нарезать → {n} лок.", { n: zoneEstimate }) }}
       </el-button>
-      <el-button v-if="regenZoneId" size="small" text title="Удалить зону вместе с её локациями" @click="deleteZone()">🗑</el-button>
-      <el-button v-if="zoneCells.length" size="small" text title="Сбросить нарисованное" @click="toolStore.clearZone()">✕</el-button>
+      <el-button v-if="regenZoneId" size="small" text :title="tr('Удалить зону вместе с её локациями')" @click="deleteZone()">🗑</el-button>
+      <el-button v-if="zoneCells.length" size="small" text :title="tr('Сбросить нарисованное')" @click="toolStore.clearZone()">✕</el-button>
     </template>
     <template v-else-if="showLocFilter">
       <el-tooltip :content="LOC_FILTER_HINT" placement="bottom" :show-after="300">
@@ -171,12 +174,12 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
       </el-tooltip>
     </template>
     <template v-else-if="showObjectTool">
-      <el-select v-model="objectKind" size="small" style="width: 132px" title="Что ставим">
+      <el-select v-model="objectKind" size="small" style="width: 132px" :title="tr('Что ставим')">
         <el-option v-for="k in OBJECT_KINDS" :key="k.value" :label="k.label" :value="k.value" />
       </el-select>
       <template v-if="objectKind === 'stack'">
-        <span class="obj-lbl">Лидер:</span>
-        <UnitPicker v-model="stackLeaderId" nullable roster="leaders" title="Лидер нового отряда" />
+        <span class="obj-lbl">{{ tr("Лидер:") }}</span>
+        <UnitPicker v-model="stackLeaderId" nullable roster="leaders" :title="tr('Лидер нового отряда')" />
       </template>
     </template>
     <template v-else>
@@ -184,7 +187,7 @@ const visible = computed(() => SIZED.has(tool.value) || showLocFilter.value || s
         v-if="showTerrain"
         v-model="terrainId"
         class="to-terrain"
-        placeholder="Тип земли"
+        :placeholder="tr('Тип земли')"
         size="small"
       >
         <el-option v-for="t in terrains" :key="t.value" :label="t.label" :value="t.value" />

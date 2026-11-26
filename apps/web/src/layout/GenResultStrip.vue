@@ -8,6 +8,7 @@
 import { computed } from "vue";
 import { ElMessage } from "element-plus";
 import { AMOUNT_STEPS, useGenStore } from "../stores/genStore";
+import { tr, trn } from "../i18n";
 
 const gen = useGenStore();
 const s = computed(() => gen.session);
@@ -20,7 +21,7 @@ const isLast = computed(() => !!s.value && s.value.index === s.value.seeds.lengt
 const where = computed(() => {
   const v = s.value;
   if (!v) return "";
-  return v.stroke && v.cells ? `${v.cells.length} кл.` : `${v.region.w}×${v.region.h}`;
+  return v.stroke && v.cells ? trn("{n} кл.", v.cells.length) : `${v.region.w}×${v.region.h}`;
 });
 
 /** Would another seed give another picture? Not for a fill, nor for a path that follows the
@@ -44,7 +45,7 @@ const amountIndex = computed(() => {
 
 /** The session ended under us (the user edited the map since): say so once, plainly. */
 function gone(ok: boolean): void {
-  if (!ok) ElMessage.info("После генерации были другие правки — вариант оставлен на карте как есть.");
+  if (!ok) ElMessage.info(tr("После генерации были другие правки — вариант оставлен на карте как есть."));
 }
 async function another(): Promise<void> { gone(await gen.another()); }
 async function step(delta: number): Promise<void> { gone(await gen.step(delta)); }
@@ -56,46 +57,46 @@ async function retune(i: number): Promise<void> {
 async function copySeed(): Promise<void> {
   try {
     await navigator.clipboard.writeText(String(seed.value));
-    ElMessage.success(`Зерно ${seed.value} скопировано`);
+    ElMessage.success(tr("Зерно {seed} скопировано", { seed: seed.value }));
   } catch {
-    ElMessage.info(`Зерно варианта: ${seed.value}`);
+    ElMessage.info(tr("Зерно варианта: {seed}", { seed: seed.value }));
   }
 }
 </script>
 
 <template>
-  <div v-if="s" class="gs-strip d2-float" role="group" aria-label="Варианты генерации">
+  <div v-if="s" class="gs-strip d2-float" role="group" :aria-label="tr('Варианты генерации')">
     <span class="gs-title">{{ gen.iconOf(s.recipeId) }} {{ gen.titleOf(s.recipeId) }}</span>
     <span class="gs-meta">{{ where }}</span>
-    <span v-if="!s.valid" class="gs-warn" title="Этот вариант не прошёл проверку карты и не применён">не применён</span>
+    <span v-if="!s.valid" class="gs-warn" :title="tr('Этот вариант не прошёл проверку карты и не применён')">{{ tr("не применён") }}</span>
     <!-- nothing came out because the mod has nothing of the kind (a typed «камни» on a mod without rocks) -->
-    <span v-else-if="s.opCount === 0 && info?.lacks" class="gs-warn" :title="`Ничего не поставлено: ${info.lacks}`">{{ info.lacks }}</span>
-    <span v-else-if="s.opCount === 0" class="gs-warn" title="Вариант ничего не изменил: место занято или защищено">ничего не изменил</span>
+    <span v-else-if="s.opCount === 0 && info?.lacks" class="gs-warn" :title="tr('Ничего не поставлено: {reason}', { reason: tr(info.lacks) })">{{ tr(info.lacks) }}</span>
+    <span v-else-if="s.opCount === 0" class="gs-warn" :title="tr('Вариант ничего не изменил: место занято или защищено')">{{ tr("ничего не изменил") }}</span>
 
     <span class="gs-spring" />
 
     <!-- more / less of it: the same variant (same seed), another amount -->
-    <span v-if="info?.amountLabel" class="gs-amount" :title="`Больше или меньше: ${info.amountLabel}`">
-      <button class="gs-btn" :disabled="gen.busy || amountIndex === 0" aria-label="Меньше" @click="retune(amountIndex - 1)">−</button>
+    <span v-if="info?.amountLabel" class="gs-amount" :title="tr('Больше или меньше: {what}', { what: tr(info.amountLabel) })">
+      <button class="gs-btn" :disabled="gen.busy || amountIndex === 0" :aria-label="tr('Меньше')" @click="retune(amountIndex - 1)">−</button>
       <span class="gs-bars" aria-hidden="true">
         <i v-for="(_, i) in AMOUNT_STEPS" :key="i" :class="{ on: i <= amountIndex }" :style="{ height: 4 + i * 2 + 'px' }" />
       </span>
-      <button class="gs-btn" :disabled="gen.busy || amountIndex === AMOUNT_STEPS.length - 1" aria-label="Больше" @click="retune(amountIndex + 1)">+</button>
-      <span class="gs-alabel">{{ info.amountLabel }}</span>
+      <button class="gs-btn" :disabled="gen.busy || amountIndex === AMOUNT_STEPS.length - 1" :aria-label="tr('Больше')" @click="retune(amountIndex + 1)">+</button>
+      <span class="gs-alabel">{{ tr(info.amountLabel) }}</span>
     </span>
 
     <!-- variants: back to an earlier one, forward again, or a new one -->
     <span v-if="varies || s.seeds.length > 1" class="gs-variants">
-      <button class="gs-btn" :disabled="gen.busy || s.index === 0" title="Предыдущий вариант" aria-label="Предыдущий вариант" @click="step(-1)">◀</button>
-      <button class="gs-seed" :title="`Вариант ${s.index + 1} из ${s.seeds.length} · зерно ${seed} (нажми — скопировать)`" @click="copySeed">
+      <button class="gs-btn" :disabled="gen.busy || s.index === 0" :title="tr('Предыдущий вариант')" :aria-label="tr('Предыдущий вариант')" @click="step(-1)">◀</button>
+      <button class="gs-seed" :title="tr('Вариант {i} из {total} · зерно {seed} (нажми — скопировать)', { i: s.index + 1, total: s.seeds.length, seed })" @click="copySeed">
         {{ s.index + 1 }}/{{ s.seeds.length }}
       </button>
-      <button v-if="!isLast" class="gs-btn" :disabled="gen.busy" title="Следующий вариант" aria-label="Следующий вариант" @click="step(1)">▶</button>
-      <button class="gs-btn gs-new" :disabled="gen.busy" title="Другой вариант (новое зерно)" @click="another()">↻ Другой</button>
+      <button v-if="!isLast" class="gs-btn" :disabled="gen.busy" :title="tr('Следующий вариант')" :aria-label="tr('Следующий вариант')" @click="step(1)">▶</button>
+      <button class="gs-btn gs-new" :disabled="gen.busy" :title="tr('Другой вариант (новое зерно)')" @click="another()">{{ tr("↻ Другой") }}</button>
     </span>
 
-    <button class="gs-btn gs-drop" :disabled="gen.busy" title="Убрать сгенерированное с карты" @click="gen.discard()">Убрать</button>
-    <button class="gs-btn gs-keep" :disabled="gen.busy" title="Оставить этот вариант" @click="gen.keep()">✓ Оставить</button>
+    <button class="gs-btn gs-drop" :disabled="gen.busy" :title="tr('Убрать сгенерированное с карты')" @click="gen.discard()">{{ tr("Убрать") }}</button>
+    <button class="gs-btn gs-keep" :disabled="gen.busy" :title="tr('Оставить этот вариант')" @click="gen.keep()">{{ tr("✓ Оставить") }}</button>
   </div>
 </template>
 

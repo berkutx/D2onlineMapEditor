@@ -6,6 +6,8 @@
  * (global sort state in the parent); clicking the active key flips direction. Trackpad-friendly
  * (real buttons, ~24px hit height, no hover-only affordance).
  */
+import { tr } from "../i18n";
+
 defineProps<{
   label: string;
   count: number;
@@ -19,14 +21,14 @@ const emit = defineEmits<{ sort: [key: string] }>();
 <template>
   <div class="pg-head">
     <span class="pg-label">{{ label }} <span class="pg-count">{{ count }}</span></span>
-    <span class="pg-sort" role="group" aria-label="Сортировка">
+    <span class="pg-sort" role="group" :aria-label="tr('Сортировка')">
       <button
         v-for="s in sortKeys"
         :key="s.key"
         type="button"
         class="pg-btn"
         :class="{ active: s.key === sortKey }"
-        :title="`Сортировать по: ${s.label}`"
+        :title="tr('Сортировать по: {key}', { key: s.label })"
         @click="emit('sort', s.key)"
       >
         {{ s.label }}<span v-if="s.key === sortKey" class="pg-arr">{{ sortDir === 1 ? "▲" : "▼" }}</span>

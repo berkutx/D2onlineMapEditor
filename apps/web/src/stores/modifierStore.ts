@@ -9,6 +9,7 @@
 import { defineStore } from "pinia";
 import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
+import { tr, trx } from "../i18n";
 
 export interface ModifierEntry {
   id: string;
@@ -33,20 +34,20 @@ export interface ModifierGroup {
 
 /** RU labels + display order for the coarse effect classes. */
 export const MODIFIER_CLASS_LABELS: Record<string, string> = {
-  hp: "Здоровье",
-  armor: "Броня",
-  accuracy: "Точность",
-  damage: "Урон",
-  initiative: "Инициатива",
-  ward: "Защиты (снимаются ударом)",
-  immunity: "Иммунитеты",
-  regen: "Регенерация",
-  drain: "Вытягивание жизни",
-  leader: "Навыки лидера",
-  leadership: "Лидерство",
-  move: "Передвижение",
-  scout: "Обзор",
-  misc: "Прочее",
+  hp: tr("Здоровье"),
+  armor: tr("Броня"),
+  accuracy: tr("Точность"),
+  damage: tr("Урон"),
+  initiative: tr("Инициатива"),
+  ward: tr("Защиты (снимаются ударом)"),
+  immunity: tr("Иммунитеты"),
+  regen: tr("Регенерация"),
+  drain: tr("Вытягивание жизни"),
+  leader: tr("Навыки лидера"),
+  leadership: tr("Лидерство"),
+  move: tr("Передвижение"),
+  scout: trx("stat", "Обзор"),
+  misc: tr("Прочее"),
 };
 const CLASS_ORDER = Object.keys(MODIFIER_CLASS_LABELS);
 
@@ -103,7 +104,7 @@ export const useModifierStore = defineStore("modifier", () => {
     const out: ModifierGroup[] = [];
     if (dialog.length) {
       dialog.sort((a, b) => a.id.localeCompare(b.id));
-      out.push({ key: "dialog", label: "Набор редактора игры", mods: dialog });
+      out.push({ key: "dialog", label: tr("Набор редактора игры"), mods: dialog });
     }
     for (const c of CLASS_ORDER) {
       const mods = byClass.get(c);

@@ -9,6 +9,7 @@
     "build:typed": "pnpm run build",
     "preview": "vite preview",
     "typecheck": "vue-tsc -b",
+    "i18n:check": "node scripts/i18n-check.mjs",
     "test": "vitest run"
   },
   "dependencies": {

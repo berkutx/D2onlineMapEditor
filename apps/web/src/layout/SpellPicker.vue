@@ -10,18 +10,19 @@ import { useSpellStore, type SpellEntry, type SpellGroup } from "../stores/spell
 import SpellIcon from "./SpellIcon.vue";
 import PickerSortHeader from "./PickerSortHeader.vue";
 import { sortBy, nextSort, type SortKey } from "./pickerSort";
+import { tr, trn } from "../i18n";
 
 /** Sort keys for the per-group sort control (shown in every subcategory header). */
 const SORT_KEYS: SortKey<SpellEntry>[] = [
-  { key: "name", label: "А-Я", get: (e) => e.name },
-  { key: "level", label: "ур.", get: (e) => e.level, desc: true },
-  { key: "damage", label: "урон", get: (e) => e.damage ?? 0, desc: true },
-  { key: "heal", label: "лечение", get: (e) => e.heal ?? 0, desc: true },
+  { key: "name", label: tr("А-Я"), get: (e) => e.name },
+  { key: "level", label: tr("ур."), get: (e) => e.level, desc: true },
+  { key: "damage", label: tr("урон"), get: (e) => e.damage ?? 0, desc: true },
+  { key: "heal", label: tr("лечение"), get: (e) => e.heal ?? 0, desc: true },
 ];
 
 const props = withDefaults(
   defineProps<{ title?: string; triggerLabel?: string }>(),
-  { title: "Выбор заклинания", triggerLabel: "+ Добавить заклинание" },
+  { title: tr("Выбор заклинания"), triggerLabel: tr("+ Добавить заклинание") },
 );
 const emit = defineEmits<{ pick: [string] }>();
 
@@ -33,9 +34,9 @@ type Mode = "cat" | "level" | "alpha";
 const mode = ref<Mode>("cat");
 const subFilter = ref<string>("all");
 const MODE_OPTIONS = [
-  { label: "Школа", value: "cat" },
-  { label: "Уровень", value: "level" },
-  { label: "А-Я", value: "alpha" },
+  { label: tr("Школа"), value: "cat" },
+  { label: tr("Уровень"), value: "level" },
+  { label: tr("А-Я"), value: "alpha" },
 ];
 
 const sortKey = ref<string>("level");
@@ -65,7 +66,7 @@ const baseGroups = computed<DisplayGroup[]>(() => {
   let g: SpellGroup[];
   if (mode.value === "level") g = spellStore.byLevel;
   else if (mode.value === "alpha")
-    return [{ key: "all", label: "Все заклинания", spells: [...spellStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
+    return [{ key: "all", label: tr("Все заклинания"), spells: [...spellStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
   else g = spellStore.byCat;
   return g.map((x) => ({ key: x.key, label: x.label, spells: x.spells }));
 });
@@ -102,18 +103,18 @@ function choose(id: string): void {
 
     <el-dialog v-model="open" :title="title" width="560px" align-center append-to-body class="sp-dialog">
       <div class="sp-controls">
-        <el-input v-model="query" placeholder="Поиск по названию или эффекту…" size="default" clearable :prefix-icon="Search" class="sp-search" />
-        <el-select v-model="subFilter" filterable size="default" class="sp-sub" placeholder="Все">
-          <el-option label="Все" value="all" />
+        <el-input v-model="query" :placeholder="tr('Поиск по названию или эффекту…')" size="default" clearable :prefix-icon="Search" class="sp-search" />
+        <el-select v-model="subFilter" filterable size="default" class="sp-sub" :placeholder="tr('Все')">
+          <el-option :label="tr('Все')" value="all" />
           <el-option v-for="o in subOptions" :key="o.value" :label="o.label" :value="o.value" />
         </el-select>
       </div>
       <el-segmented v-model="mode" :options="MODE_OPTIONS" size="small" class="sp-modes" />
 
-      <div v-if="spellStore.loading" class="sp-status">Загрузка каталога…</div>
-      <div v-else-if="spellStore.error" class="sp-status err">Ошибка: {{ spellStore.error }}</div>
+      <div v-if="spellStore.loading" class="sp-status">{{ tr("Загрузка каталога…") }}</div>
+      <div v-else-if="spellStore.error" class="sp-status err">{{ tr("Ошибка: {error}", { error: spellStore.error }) }}</div>
       <div v-else class="sp-list">
-        <div v-if="!resultCount" class="sp-status">Ничего не найдено</div>
+        <div v-if="!resultCount" class="sp-status">{{ tr("Ничего не найдено") }}</div>
         <template v-for="g in groups" :key="g.key">
           <PickerSortHeader
             :label="g.label"
@@ -136,15 +137,15 @@ function choose(id: string): void {
               <span class="sp-name">{{ s.name || s.id }}</span>
               <span v-if="s.desc" class="sp-desc">{{ s.desc }}</span>
             </span>
-            <span class="sp-lvl">ур.{{ s.level }}</span>
+            <span class="sp-lvl">{{ tr("ур.{n}", { n: s.level }) }}</span>
           </button>
         </template>
       </div>
 
       <template #footer>
         <span class="sp-foot">
-          <span class="sp-foot-info">{{ resultCount }} заклинаний</span>
-          <el-button size="small" @click="open = false">Закрыть</el-button>
+          <span class="sp-foot-info">{{ trn("{n} заклинание|{n} заклинания|{n} заклинаний", resultCount) }}</span>
+          <el-button size="small" @click="open = false">{{ tr("Закрыть") }}</el-button>
         </span>
       </template>
     </el-dialog>

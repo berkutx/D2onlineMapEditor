@@ -27,6 +27,7 @@ import type { EditorProject } from "@d2/map-edit";
 import type { AssetManifest } from "@d2/asset-manifest";
 
 import { getClientId } from "./clientId";
+import { tr } from "../i18n";
 
 // The base path the app is served under: '/' in dev, '/map/' in the production build (Vite
 // `base`, surfaced as import.meta.env.BASE_URL). Every same-origin URL the client builds is
@@ -52,11 +53,11 @@ async function getJson<T>(url: string, retries = 4): Promise<T> {
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
         throw new Error(
-          `GET ${url} failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`,
+          tr("Запрос {method} {url} не выполнен: {status}", { method: "GET", url, status: `${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}` }),
         );
       }
       const text = await res.text();
-      if (!text) throw new Error(`GET ${url}: empty response (backend restarting?)`);
+      if (!text) throw new Error(tr("Запрос {method} {url}: пустой ответ (сервер перезапускается?)", { method: "GET", url }));
       return JSON.parse(text) as T;
     } catch (e) {
       lastErr = e;
@@ -103,9 +104,9 @@ export async function fetchMods(retries = 4): Promise<ModList> {
     try {
       const res = await fetch(u(REST.mods), { headers: { accept: "application/json", ...idHeaders() } });
       if (res.status === 404) return LEGACY_MODS;
-      if (!res.ok) throw new Error(`GET ${REST.mods} failed: ${res.status}`);
+      if (!res.ok) throw new Error(tr("Запрос {method} {url} не выполнен: {status}", { method: "GET", url: REST.mods, status: res.status }));
       const text = await res.text();
-      if (!text) throw new Error(`GET ${REST.mods}: empty response (backend restarting?)`);
+      if (!text) throw new Error(tr("Запрос {method} {url}: пустой ответ (сервер перезапускается?)", { method: "GET", url: REST.mods }));
       return JSON.parse(text) as ModList;
     } catch (e) {
       // the same transient dev-proxy / restart blips getJson rides out
@@ -166,7 +167,7 @@ export async function exportProject(id: string, project: EditorProject): Promise
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`export failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(tr("Экспорт не удался: {status}", { status: `${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}` }));
   }
   const disp = res.headers.get("content-disposition") ?? "";
   const m = /filename="?([^"]+)"?/.exec(disp);
@@ -193,7 +194,7 @@ export async function createVoiceHandoff(id: string, project: EditorProject, ret
   });
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as Record<string, unknown>;
   if (res.status === 401 && typeof data.loginUrl === "string") return { loginRequired: true, loginUrl: data.loginUrl };
-  if (!res.ok) throw new Error(String(data.error || `handoff failed: ${res.status}`));
+  if (!res.ok) throw new Error(String(data.error || tr("Не удалось передать события в сервис озвучки: {status}", { status: res.status })));
   return data as unknown as VoiceHandoffResult;
 }
 
@@ -202,7 +203,7 @@ export async function previewVoiceReturn(id: string, token: string, project: Edi
     method: "POST", headers: { "content-type": "application/json", ...idHeaders() }, body: JSON.stringify({ project }),
   });
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-  if (!res.ok) throw new Error(data.error || `return preview failed: ${res.status}`);
+  if (!res.ok) throw new Error(data.error || tr("Не удалось получить предпросмотр возврата озвучки: {status}", { status: res.status }));
   return data as VoiceReturnPreview;
 }
 
@@ -222,8 +223,8 @@ export async function applyVoiceReturn(
     body: JSON.stringify({ project, resolutions, expectedEventHashes }),
   });
   const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-  if (res.status === 409 && data.preview) throw new VoiceReturnRefreshError(data.error || "События изменились", data.preview as VoiceReturnPreview);
-  if (!res.ok) throw new Error(data.error || `return apply failed: ${res.status}`);
+  if (res.status === 409 && data.preview) throw new VoiceReturnRefreshError(data.error || tr("События изменились"), data.preview as VoiceReturnPreview);
+  if (!res.ok) throw new Error(data.error || tr("Не удалось применить возврат озвучки: {status}", { status: res.status }));
   return data as VoiceReturnApplyResult;
 }
 
@@ -233,7 +234,7 @@ export async function acknowledgeVoiceReturn(id: string, token: string, project:
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(data.error || `return ack failed: ${res.status}`);
+    throw new Error(data.error || tr("Не удалось подтвердить возврат озвучки: {status}", { status: res.status }));
   }
 }
 
@@ -242,7 +243,7 @@ export type PackageExportResult =
   | { ok: false; missing: { kind: "audio" | "music"; name: string }[] };
 
 export class VoiceLoginRequiredError extends Error {
-  constructor(readonly loginUrl: string) { super("Требуется вход в сервис озвучки"); this.name = "VoiceLoginRequiredError"; }
+  constructor(readonly loginUrl: string) { super(tr("Требуется вход в сервис озвучки")); this.name = "VoiceLoginRequiredError"; }
 }
 
 /** Build the current .sg in the editor backend, then let the private voice backend append only
@@ -259,11 +260,11 @@ export async function exportProjectPackage(id: string, project: EditorProject, a
   if (res.status === 409) {
     const data = await res.json() as { missing?: { kind: "audio" | "music"; name: string }[]; error?: string };
     if (data.missing) return { ok: false, missing: data.missing };
-    throw new Error(data.error || "Не удалось собрать пакет");
+    throw new Error(data.error || tr("Не удалось собрать пакет"));
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(data.error || `package export failed: ${res.status}`);
+    throw new Error(data.error || tr("Не удалось собрать пакет: {status}", { status: res.status }));
   }
   const disp = res.headers.get("content-disposition") ?? "";
   const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disp);
@@ -284,7 +285,7 @@ export async function exportAt(id: string, channel: string | null, seq: number):
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`export-at failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(tr("Экспорт версии из истории не удался: {status}", { status: `${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}` }));
   }
   const disp = res.headers.get("content-disposition") ?? "";
   const m = /filename="?([^"]+)"?/.exec(disp);
@@ -325,7 +326,7 @@ export async function generateRegion(
 export async function fetchGenRecipes(modId?: string): Promise<GenRecipeInfo[]> {
   // with a mod, the list also says what that mod lacks for a recipe (`lacks`)
   const res = await fetch(u(REST.generateRecipes) + (modId ? `?mod=${encodeURIComponent(modId)}` : ""));
-  if (!res.ok) throw new Error(`recipes: ${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(tr("Не удалось загрузить рецепты генератора: {status}", { status: `${res.status} ${res.statusText}` }));
   return ((await res.json()) as GenRecipeList).recipes;
 }
 
@@ -358,15 +359,15 @@ export async function copilotLlm(
     });
   } catch (e) {
     if ((e as Error).name === "AbortError") {
-      throw new Error(`LLM не ответил за ${Math.round(timeoutMs / 1000)}с (агент не на связи?)`);
+      throw new Error(tr("LLM не ответил за {n}с (агент не на связи?)", { n: Math.round(timeoutMs / 1000) }));
     }
-    throw new Error(`copilot недоступен: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(tr("copilot недоступен: {error}", { error: e instanceof Error ? e.message : String(e) }));
   } finally {
     clearTimeout(timer);
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`copilot failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+    throw new Error(tr("Запрос к copilot не выполнен: {status}", { status: `${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}` }));
   }
   return (await res.json()) as CopilotResult;
 }
@@ -389,17 +390,17 @@ async function postJsonRetry<T>(url: string, body: unknown, retries = 3): Promis
       });
       if (res.status >= 500) {
         const detail = await res.text().catch(() => "");
-        throw new Error(`POST ${url}: ${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}`);
+        throw new Error(tr("Запрос {method} {url} не выполнен: {status}", { method: "POST", url, status: `${res.status}${detail ? ` — ${detail.slice(0, 200)}` : ""}` }));
       }
       if (!res.ok) {
         // 4xx is a real, non-transient rejection — surface it without retrying
         const detail = await res.text().catch(() => "");
         return Promise.reject(
-          new Error(`POST ${url} failed: ${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}`),
+          new Error(tr("Запрос {method} {url} не выполнен: {status}", { method: "POST", url, status: `${res.status} ${res.statusText}${detail ? ` — ${detail.slice(0, 200)}` : ""}` })),
         );
       }
       const text = await res.text();
-      if (!text) throw new Error(`POST ${url}: empty response (backend restarting?)`);
+      if (!text) throw new Error(tr("Запрос {method} {url}: пустой ответ (сервер перезапускается?)", { method: "POST", url }));
       return JSON.parse(text) as T;
     } catch (e) {
       lastErr = e;
@@ -462,7 +463,7 @@ export async function fetchProjectRemote(id: string): Promise<EditorProject | nu
   });
   // 204 = "no saved project yet" (normal first visit); 404 kept for older servers
   if (res.status === 204 || res.status === 404) return null;
-  if (!res.ok) throw new Error(`project fetch failed: ${res.status}`);
+  if (!res.ok) throw new Error(tr("Не удалось загрузить проект с сервера: {status}", { status: res.status }));
   return (await res.json()) as EditorProject;
 }
 

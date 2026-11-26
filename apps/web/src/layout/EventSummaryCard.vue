@@ -10,6 +10,7 @@ import type { EventTypeSpec, MapEvent } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEditStore } from "../stores/editStore";
 import { useRefNames } from "../services/refNames";
+import { tr } from "../i18n";
 
 const props = defineProps<{ event: MapEvent }>();
 
@@ -28,9 +29,10 @@ function lines(
     const spec = specs[p.kind as string];
     const refs = names.refsOf(p, spec);
     const refText = refs.map((r) => `${names.icon(r)} ${r.text}`).join(", ");
-    return refText ? `${spec?.label ?? p.kind}: ${refText}` : `${spec?.label ?? p.kind}`;
+    const label = spec ? tr(spec.label) : `${p.kind}`;
+    return refText ? `${label}: ${refText}` : label;
   });
-  if (parts.length > LIMIT) out.push(`… ещё ${parts.length - LIMIT}`);
+  if (parts.length > LIMIT) out.push(tr("… ещё {n}", { n: parts.length - LIMIT }));
   return out;
 }
 const condLines = computed(() => lines(props.event.conditions as Record<string, unknown>[], CONDITION_BY_KIND));
@@ -40,16 +42,16 @@ const effLines = computed(() => lines(props.event.effects as Record<string, unkn
 <template>
   <div class="ev-sum">
     <div class="es-title">
-      {{ event.name || "(без имени)" }} <code class="es-id">{{ event.id }}</code>
-      <span v-if="!event.enabled" class="es-off">выкл</span>
+      {{ event.name || tr("(без имени)") }} <code class="es-id">{{ event.id }}</code>
+      <span v-if="!event.enabled" class="es-off">{{ tr("выкл") }}</span>
     </div>
     <div v-if="desc" class="es-desc">{{ desc }}</div>
-    <div class="es-sec">условия ({{ event.conditions.length }})</div>
+    <div class="es-sec">{{ tr("условия ({n})", { n: event.conditions.length }) }}</div>
     <div v-for="(l, i) in condLines" :key="`c${i}`" class="es-line">⚡ {{ l }}</div>
-    <div v-if="!event.conditions.length" class="es-line es-muted">нет — сработает сразу (по расам события)</div>
-    <div class="es-sec">эффекты ({{ event.effects.length }})</div>
+    <div v-if="!event.conditions.length" class="es-line es-muted">{{ tr("нет — сработает сразу (по расам события)") }}</div>
+    <div class="es-sec">{{ tr("эффекты ({n})", { n: event.effects.length }) }}</div>
     <div v-for="(l, i) in effLines" :key="`e${i}`" class="es-line">★ {{ l }}</div>
-    <div v-if="!event.effects.length" class="es-line es-muted">нет</div>
+    <div v-if="!event.effects.length" class="es-line es-muted">{{ tr("нет") }}</div>
   </div>
 </template>
 

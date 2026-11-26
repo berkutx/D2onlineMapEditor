@@ -11,6 +11,7 @@ import type { MapEvent, ScenarioVariable } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
+import { tr, trn } from "../i18n";
 
 const store = useEventStore();
 const edit = useEditStore();
@@ -25,7 +26,7 @@ const varGroups = computed<VarGroup[]>(() => {
   const manual = store.variables.filter((v) => !marked.has(v.id));
   const generated = store.variables.filter((v) => marked.has(v.id));
   const groups: VarGroup[] = [
-    { key: "manual", auto: false, label: generated.length ? "Переменные сценария" : undefined, vars: manual },
+    { key: "manual", auto: false, label: generated.length ? tr("Переменные сценария") : undefined, vars: manual },
   ];
   if (generated.length) groups.push({ key: "auto", auto: true, vars: generated });
   return groups;
@@ -94,56 +95,56 @@ function jump(ev: MapEvent): void {
   <div class="var-editor">
     <!-- the tab itself is the title — no duplicated heading, just the count + action -->
     <div class="var-head">
-      <span class="var-count">{{ store.variables.length }} переменных</span>
-      <el-button size="small" type="primary" @click="store.addVariable()">+ Переменная</el-button>
+      <span class="var-count">{{ trn("{n} переменная|{n} переменные|{n} переменных", store.variables.length) }}</span>
+      <el-button size="small" type="primary" @click="store.addVariable()">{{ tr("+ Переменная") }}</el-button>
     </div>
     <el-scrollbar class="var-list">
       <template v-for="g in varGroups" :key="g.key">
         <button v-if="g.auto" type="button" class="var-group-toggle" @click="autoOpen = !autoOpen">
           <span class="var-group-tri">{{ autoOpen ? "▾" : "▸" }}</span>
-          ⚙ Автоматические (созданы редактором) — {{ g.vars.length }}
+          {{ tr("⚙ Автоматические (созданы редактором) — {n}", { n: g.vars.length }) }}
         </button>
         <div v-else-if="g.label" class="var-group-lbl">{{ g.label }}</div>
         <template v-if="!g.auto || autoOpen">
           <div v-for="v in g.vars" :key="v.id" class="var-card d2-card">
             <div class="var-row">
               <span class="var-id">#{{ v.id }}</span>
-              <CommitInput :model-value="v.name" size="small" placeholder="имя"
+              <CommitInput :model-value="v.name" size="small" :placeholder="tr('имя')"
                 @update:model-value="store.patchVariable(v.id, { name: $event })" />
               <el-input-number :model-value="v.value" size="small" controls-position="right" style="width: 110px"
                 @update:model-value="store.patchVariable(v.id, { value: ($event as number) ?? 0 })" />
-              <el-tooltip v-if="g.auto" content="Создана редактором при построении связи («после N раз»)" :show-after="300">
-                <el-tag size="small" effect="plain" class="auto-chip">⚙ авто</el-tag>
+              <el-tooltip v-if="g.auto" :content="tr('Создана редактором при построении связи («после N раз»)')" :show-after="300">
+                <el-tag size="small" effect="plain" class="auto-chip">{{ tr("⚙ авто") }}</el-tag>
               </el-tooltip>
               <el-button size="small" text class="icon-btn" @click="store.removeVariable(v.id)">🗑</el-button>
             </div>
-            <div v-if="unused(v.id)" class="var-usage var-unused">нигде не используется</div>
+            <div v-if="unused(v.id)" class="var-usage var-unused">{{ tr("нигде не используется") }}</div>
             <template v-else>
               <div v-if="useOf(v.id).readers.length" class="var-usage">
-                <span class="use-lbl">⚡ читают:</span>
-                <el-tooltip v-for="(u, i) in visibleUses(useOf(v.id).readers, v.id + ':r')" :key="'r' + i" :content="u.what" :show-after="300">
+                <span class="use-lbl">{{ tr("⚡ читают:") }}</span>
+                <el-tooltip v-for="(u, i) in visibleUses(useOf(v.id).readers, v.id + ':r')" :key="'r' + i" :content="tr(u.what)" :show-after="300">
                   <el-tag size="small" class="use-chip" @click="jump(u.ev)">{{ u.ev.name || u.ev.id }}</el-tag>
                 </el-tooltip>
                 <el-tag v-if="useOf(v.id).readers.length > CHIP_LIMIT" size="small" effect="plain" class="use-chip use-more" @click="toggleUse(v.id + ':r')">
-                  {{ expandedUse.has(v.id + ':r') ? 'свернуть' : `+${useOf(v.id).readers.length - CHIP_LIMIT} ещё` }}
+                  {{ expandedUse.has(v.id + ':r') ? tr("свернуть") : tr("+{n} ещё", { n: useOf(v.id).readers.length - CHIP_LIMIT }) }}
                 </el-tag>
               </div>
               <div v-if="useOf(v.id).writers.length" class="var-usage">
-                <span class="use-lbl">★ пишут:</span>
-                <el-tooltip v-for="(u, i) in visibleUses(useOf(v.id).writers, v.id + ':w')" :key="'w' + i" :content="u.what" :show-after="300">
+                <span class="use-lbl">{{ tr("★ пишут:") }}</span>
+                <el-tooltip v-for="(u, i) in visibleUses(useOf(v.id).writers, v.id + ':w')" :key="'w' + i" :content="tr(u.what)" :show-after="300">
                   <el-tag size="small" type="success" class="use-chip" @click="jump(u.ev)">{{ u.ev.name || u.ev.id }}</el-tag>
                 </el-tooltip>
                 <el-tag v-if="useOf(v.id).writers.length > CHIP_LIMIT" size="small" effect="plain" class="use-chip use-more" @click="toggleUse(v.id + ':w')">
-                  {{ expandedUse.has(v.id + ':w') ? 'свернуть' : `+${useOf(v.id).writers.length - CHIP_LIMIT} ещё` }}
+                  {{ expandedUse.has(v.id + ':w') ? tr("свернуть") : tr("+{n} ещё", { n: useOf(v.id).writers.length - CHIP_LIMIT }) }}
                 </el-tag>
               </div>
             </template>
           </div>
         </template>
       </template>
-      <el-empty v-if="!store.variables.length" description="Нет переменных" :image-size="60" />
+      <el-empty v-if="!store.variables.length" :description="tr('Нет переменных')" :image-size="60" />
     </el-scrollbar>
-    <p class="var-hint">Переменные — счётчики сценария. События их читают (условия «переменная в диапазоне» / «сравнение») и меняют (эффект «изменить переменную»), собирая цепочки и стейт-машины. Клик по событию — переход к нему.</p>
+    <p class="var-hint">{{ tr("Переменные — счётчики сценария. События их читают (условия «переменная в диапазоне» / «сравнение») и меняют (эффект «изменить переменную»), собирая цепочки и стейт-машины. Клик по событию — переход к нему.") }}</p>
   </div>
 </template>
 

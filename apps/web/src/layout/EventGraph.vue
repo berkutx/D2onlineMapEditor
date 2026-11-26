@@ -19,6 +19,7 @@ import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
 import { useToolStore } from "../stores/toolStore";
 import { useRefNames, type ResolvedRef } from "../services/refNames";
+import { tr } from "../i18n";
 
 const store = useEventStore();
 const toolStore = useToolStore();
@@ -85,7 +86,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
   const centerH = 46;
   const center: GNode = {
     x: COL.center, y: cy - centerH / 2, w: BW.center, h: centerH,
-    title: truncate(sel.name || "(без имени)", 22), sub: sel.id, icon: "⚑",
+    title: truncate(sel.name || tr("(без имени)"), 22), sub: sel.id, icon: "⚑",
     cls: "g-center", tip: `${sel.name} · ${sel.id}`,
   };
   nodes.push(center);
@@ -98,9 +99,9 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
     const y = condYs[i]!;
     nodes.push({
       x: COL.cond, y, w: BW.cond, h: NODE_H,
-      title: truncate(c.spec?.label ?? "условие", 26),
+      title: truncate(c.spec ? tr(c.spec.label) : tr("условие"), 26),
       sub: c.refs.length ? truncate(c.refs.map((r) => r.text).join(", "), 30) : undefined,
-      icon: "⚡", cls: "g-cond", tip: "к карточке условия →",
+      icon: "⚡", cls: "g-cond", tip: tr("к карточке условия →"),
       click: () => store.revealCard("cond", i),
     });
     condIdx.push(nodes.length - 1);
@@ -114,9 +115,9 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
     const y = effYs[i]!;
     nodes.push({
       x: COL.eff, y, w: BW.eff, h: NODE_H,
-      title: truncate(`${i + 1}. ${e.spec?.label ?? "эффект"}`, 27),
+      title: truncate(`${i + 1}. ${e.spec ? tr(e.spec.label) : tr("эффект")}`, 27),
       sub: e.refs.length ? truncate(e.refs.map((r) => r.text).join(", "), 30) : undefined,
-      icon: "★", cls: "g-eff", tip: "к карточке эффекта →",
+      icon: "★", cls: "g-eff", tip: tr("к карточке эффекта →"),
       click: () => store.revealCard("eff", i),
     });
     effIdx.push(nodes.length - 1);
@@ -126,8 +127,8 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
   if (!effs.length) {
     nodes.push({
       x: COL.eff, y: cy - NODE_H / 2, w: BW.eff, h: NODE_H,
-      title: "эффектов нет", sub: "событие ничего не делает — добавьте ★",
-      icon: "∅", cls: "g-empty", tip: "добавьте эффект в редакторе справа («+ эффект»)",
+      title: tr("эффектов нет"), sub: tr("событие ничего не делает — добавьте ★"),
+      icon: "∅", cls: "g-empty", tip: tr("добавьте эффект в редакторе справа («+ эффект»)"),
       click: () => store.revealCard("eff", 0),
     });
     edges.push({ x1: center.x + center.w, y1: cy, x2: COL.eff, y2: cy, cls: "e-empty", a: centerIdx, b: nodes.length - 1 });
@@ -141,7 +142,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
       const ev = s.evId;
       nodes.push({
         x: COL.satL, y, w: BW.sat, h: NODE_H,
-        title: truncate(names.eventName(ev), 24), sub: "включает это событие", icon: "⚑",
+        title: truncate(names.eventName(ev), 24), sub: tr("включает это событие"), icon: "⚑",
         cls: "g-evt", click: () => store.navigate({ tab: "events", eventId: ev, fromLink: true }), tip: ev,
       });
       edges.push({ x1: COL.satL + BW.sat, y1: y + NODE_H / 2, x2: center.x, y2: cy - 8, cls: "e-chain", a: nodes.length - 1, b: centerIdx });
@@ -149,7 +150,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
       const r = s.ref;
       nodes.push({
         x: COL.satL, y, w: BW.sat, h: NODE_H,
-        title: truncate(r.text, 24), sub: r.fieldLabel, icon: names.icon(r),
+        title: truncate(r.text, 24), sub: tr(r.fieldLabel), icon: names.icon(r),
         cls: "g-sat", click: satClick(r), tip: String(r.value),
       });
       const oy = condYs[s.owner as number]! + NODE_H / 2;
@@ -165,7 +166,7 @@ const graph = computed<{ nodes: GNode[]; edges: GEdge[]; h: number } | null>(() 
     const isEvt = r.kind === "event";
     nodes.push({
       x: COL.satR, y, w: BW.sat, h: NODE_H,
-      title: truncate(r.text, 24), sub: r.fieldLabel, icon: names.icon(r),
+      title: truncate(r.text, 24), sub: tr(r.fieldLabel), icon: names.icon(r),
       cls: isEvt ? "g-evt" : "g-sat", click: satClick(r), tip: String(r.value),
     });
     const oy = effYs[s.owner]! + NODE_H / 2;
@@ -224,12 +225,12 @@ function chainNext(): void {
 function gateAfterN(): void {
   const fromId = store.selectedId;
   if (!fromId) return;
-  void ElMessageBox.prompt("Через сколько срабатываний этого события создать продолжение?", "После N раз", {
-    confirmButtonText: "Создать",
-    cancelButtonText: "Отмена",
+  void ElMessageBox.prompt(tr("Через сколько срабатываний этого события создать продолжение?"), tr("После N раз"), {
+    confirmButtonText: tr("Создать"),
+    cancelButtonText: tr("Отмена"),
     inputValue: "3",
     inputPattern: /^[1-9]\d{0,2}$/,
-    inputErrorMessage: "Число от 1 до 999",
+    inputErrorMessage: tr("Число от 1 до 999"),
   })
     .then(({ value }) => {
       store.createCounterGate(fromId, Number(value));
@@ -248,12 +249,12 @@ function orBranch(): void {
 function timerAfter(): void {
   const fromId = store.selectedId;
   if (!fromId) return;
-  void ElMessageBox.prompt("Через сколько дней после этого события создать продолжение?", "Через N дней", {
-    confirmButtonText: "Создать",
-    cancelButtonText: "Отмена",
+  void ElMessageBox.prompt(tr("Через сколько дней после этого события создать продолжение?"), tr("Через N дней"), {
+    confirmButtonText: tr("Создать"),
+    cancelButtonText: tr("Отмена"),
     inputValue: "7",
     inputPattern: /^[1-9]\d{0,2}$/,
-    inputErrorMessage: "Число от 1 до 999",
+    inputErrorMessage: tr("Число от 1 до 999"),
   })
     .then(({ value }) => {
       store.createTimerAfter(fromId, Number(value));
@@ -265,12 +266,12 @@ function timerAfter(): void {
 function bindPhase(): void {
   const id = store.selectedId;
   if (!id) return;
-  void ElMessageBox.prompt("В какой фазе сценария должно работать это событие? (фаза — общий скрытый счётчик, старт = 0)", "Привязать к фазе", {
-    confirmButtonText: "Привязать",
-    cancelButtonText: "Отмена",
+  void ElMessageBox.prompt(tr("В какой фазе сценария должно работать это событие? (фаза — общий скрытый счётчик, старт = 0)"), tr("Привязать к фазе"), {
+    confirmButtonText: tr("Привязать"),
+    cancelButtonText: tr("Отмена"),
     inputValue: "1",
     inputPattern: /^\d{1,3}$/,
-    inputErrorMessage: "Число 0..999",
+    inputErrorMessage: tr("Число 0..999"),
   })
     .then(({ value }) => {
       store.bindEventToPhase(id, Number(value));
@@ -282,12 +283,12 @@ function bindPhase(): void {
 function gotoPhase(): void {
   const id = store.selectedId;
   if (!id) return;
-  void ElMessageBox.prompt("В какую фазу переводит сценарий это событие?", "Переход в фазу", {
-    confirmButtonText: "Добавить эффект",
-    cancelButtonText: "Отмена",
+  void ElMessageBox.prompt(tr("В какую фазу переводит сценарий это событие?"), tr("Переход в фазу"), {
+    confirmButtonText: tr("Добавить эффект"),
+    cancelButtonText: tr("Отмена"),
     inputValue: "1",
     inputPattern: /^\d{1,3}$/,
-    inputErrorMessage: "Число 0..999",
+    inputErrorMessage: tr("Число 0..999"),
   })
     .then(({ value }) => {
       store.addGotoPhaseEffect(id, Number(value));
@@ -449,43 +450,43 @@ function onNodeClick(n: GNode): void {
         </g>
       </svg>
       <div class="ev-nav d2-float">
-        <button type="button" class="ev-nav-btn" title="Приблизить" @click="zoomStep(1)">+</button>
-        <button type="button" class="ev-nav-btn" title="Отдалить" @click="zoomStep(-1)">−</button>
-        <button type="button" class="ev-nav-btn" title="Вписать граф" @click="fitToContent()">⤢</button>
+        <button type="button" class="ev-nav-btn" :title="tr('Приблизить')" @click="zoomStep(1)">+</button>
+        <button type="button" class="ev-nav-btn" :title="tr('Отдалить')" @click="zoomStep(-1)">−</button>
+        <button type="button" class="ev-nav-btn" :title="tr('Вписать граф')" @click="fitToContent()">⤢</button>
       </div>
       <!-- auto-wiring: hidden-variable constructions — one click each. The caption names
            the ANCHOR event so it is clear what the chips attach to. -->
       <div class="ev-actions">
         <span class="ev-actions-lbl">
-          Пристроить к «{{ (store.selected?.name || store.selected?.id || "").slice(0, 24) }}»:
+          {{ tr("Пристроить к «{name}»:", { name: (store.selected?.name || store.selected?.id || "").slice(0, 24) }) }}
         </span>
-        <el-tooltip content="Создать ПРОДОЛЖЕНИЕ: новое (выключенное) событие + эффект «Вкл/выкл событие» на него" :show-after="300">
-          <button type="button" class="ev-chain d2-float" @click="chainNext()">➜ цепочка</button>
+        <el-tooltip :content="tr('Создать ПРОДОЛЖЕНИЕ: новое (выключенное) событие + эффект «Вкл/выкл событие» на него')" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="chainNext()">{{ tr("➜ цепочка") }}</button>
         </el-tooltip>
-        <el-tooltip content="Счётчик: «+1» на этом событии, продолжение сработает ПОСЛЕ N срабатываний (переменная скрыта)" :show-after="300">
-          <button type="button" class="ev-chain d2-float" @click="gateAfterN()">⏱ после N раз…</button>
+        <el-tooltip :content="tr('Счётчик: «+1» на этом событии, продолжение сработает ПОСЛЕ N срабатываний (переменная скрыта)')" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="gateAfterN()">{{ tr("⏱ после N раз…") }}</button>
         </el-tooltip>
-        <el-tooltip content="ИЛИ-ветка: альтернативное событие — сработает только ОДНА из веток; повторный клик добавляет ещё ветку" :show-after="300">
-          <button type="button" class="ev-chain d2-float" @click="orBranch()">⊻ или-ветка</button>
+        <el-tooltip :content="tr('ИЛИ-ветка: альтернативное событие — сработает только ОДНА из веток; повторный клик добавляет ещё ветку')" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="orBranch()">{{ tr("⊻ или-ветка") }}</button>
         </el-tooltip>
-        <el-tooltip content="Таймер: продолжение сработает ЧЕРЕЗ N дней после этого события (скрытый дневной счётчик)" :show-after="300">
-          <button type="button" class="ev-chain d2-float" @click="timerAfter()">⏲ через N дней…</button>
+        <el-tooltip :content="tr('Таймер: продолжение сработает ЧЕРЕЗ N дней после этого события (скрытый дневной счётчик)')" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="timerAfter()">{{ tr("⏲ через N дней…") }}</button>
         </el-tooltip>
         <span class="ev-actions-div" />
-        <el-tooltip content="Событие будет работать ТОЛЬКО в фазе K сценария (общая скрытая переменная фазы)" :show-after="300">
-          <button type="button" class="ev-chain d2-float" @click="bindPhase()">⚑ только в фазе…</button>
+        <el-tooltip :content="tr('Событие будет работать ТОЛЬКО в фазе K сценария (общая скрытая переменная фазы)')" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="bindPhase()">{{ tr("⚑ только в фазе…") }}</button>
         </el-tooltip>
-        <el-tooltip content="Добавить эффект «перейти в фазу K» — это событие переключит сценарий в другую фазу" :show-after="300">
-          <button type="button" class="ev-chain d2-float" @click="gotoPhase()">⚑➜ переключить фазу…</button>
+        <el-tooltip :content="tr('Добавить эффект «перейти в фазу K» — это событие переключит сценарий в другую фазу')" :show-after="300">
+          <button type="button" class="ev-chain d2-float" @click="gotoPhase()">{{ tr("⚑➜ переключить фазу…") }}</button>
         </el-tooltip>
       </div>
       <div class="ev-legend">
-        <span><i class="lg lg-cond" />условия</span>
-        <span><i class="lg lg-eff" />эффекты</span>
-        <span><i class="lg lg-evt" />цепочки вкл/выкл</span>
+        <span><i class="lg lg-cond" />{{ tr("условия") }}</span>
+        <span><i class="lg lg-eff" />{{ tr("эффекты") }}</span>
+        <span><i class="lg lg-evt" />{{ tr("цепочки вкл/выкл") }}</span>
       </div>
     </template>
-    <el-empty v-else description="Выберите событие — здесь появится его карта связей" :image-size="70" />
+    <el-empty v-else :description="tr('Выберите событие — здесь появится его карта связей')" :image-size="70" />
   </div>
 </template>
 

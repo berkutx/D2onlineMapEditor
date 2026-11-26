@@ -23,6 +23,7 @@ import { useModStore } from "./modStore";
 import { reloadOnMap } from "./mapStore";
 import { summarize, summarizeBatch, detailOf, detailBatch, type OpContext } from "../services/historyPresentation";
 import { pendingJournalEntries } from "../services/journalSync";
+import { tr, trn } from "../i18n";
 
 const NAME_KEY = "d2.collab.name";
 
@@ -71,7 +72,7 @@ export interface HistoryEntry {
 
 function randomName(): string {
   const n = Math.floor(1000 + (Date.now() % 9000));
-  return `Гость-${n}`;
+  return tr("Гость-{n}", { n });
 }
 
 
@@ -128,7 +129,7 @@ export const useCollabStore = defineStore("collab", () => {
   const colorOf = (socketId: string): string =>
     socketId === me.value?.socketId ? (me.value?.color ?? "#888") : peers.get(socketId)?.color ?? "#888";
   const nameOf = (socketId: string): string =>
-    socketId === me.value?.socketId ? (me.value?.name ?? "я") : peers.get(socketId)?.name ?? "?";
+    socketId === me.value?.socketId ? (me.value?.name ?? tr("я")) : peers.get(socketId)?.name ?? "?";
 
   /** Humanizer context for history rows: resolve the op's target object + decor names.
    *  Best effort — a deleted object no longer resolves (falls back to «объект»). */
@@ -184,8 +185,8 @@ export const useCollabStore = defineStore("collab", () => {
       if (inverse?.length) agg.entry.inverse = [...inverse, ...(agg.entry.inverse ?? [])]; // newest-first
       for (const k of opKeys(op)) if (!agg.entry.keys!.includes(k)) agg.entry.keys!.push(k); // accumulate conflict keys as the stroke streams in
       entryKeysCache.delete(agg.entry); // keys grew — a cached Set would silently under-cover
-      agg.entry.summary = `✎ правок за операцию: ${agg.count}`;
-      agg.entry.detail = `${agg.count} правок за одну операцию`;
+      agg.entry.summary = tr("✎ правок за операцию: {n}", { n: agg.count });
+      agg.entry.detail = trn("{n} правка за одну операцию|{n} правки за одну операцию|{n} правок за одну операцию", agg.count);
       if (uid) rowByUid.set(uid, agg.entry);
       return;
     }
@@ -246,7 +247,7 @@ export const useCollabStore = defineStore("collab", () => {
         // the socket pipeline — surface it instead
         // eslint-disable-next-line no-console
         console.error("[collab] правка участника не применилась:", err, op);
-        ElMessage.warning("Правка участника конфликтует с вашим локальным черновиком и не применена");
+        ElMessage.warning(tr("Правка участника конфликтует с вашим локальным черновиком и не применена"));
       }
     });
 
@@ -265,7 +266,7 @@ export const useCollabStore = defineStore("collab", () => {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("[collab] пакет правок участника не применился:", err);
-        ElMessage.warning("Пакет правок участника конфликтует с вашим локальным черновиком");
+        ElMessage.warning(tr("Пакет правок участника конфликтует с вашим локальным черновиком"));
       }
     });
     socket.on("presence:update", (p) => {
@@ -288,7 +289,7 @@ export const useCollabStore = defineStore("collab", () => {
     socket.on("map:modChanged", ({ mapId: changed, modId }) => {
       const mods = useModStore();
       if (changed !== mapId.value || modId === mods.activeModId) return;
-      ElMessage.info(`Мод карты изменён на «${mods.nameOf(modId)}» — редактор откроет карту заново`);
+      ElMessage.info(tr("Мод карты изменён на «{name}» — редактор откроет карту заново", { name: mods.nameOf(modId) }));
       setTimeout(() => reloadOnMap(changed), 1500);
     });
     // a reconnect re-joins the same room and replays only the MISSED ops (not a snapshot —
@@ -525,7 +526,7 @@ export const useCollabStore = defineStore("collab", () => {
     try {
       after = applyOps(doc, inversesOf([entry]));
     } catch (err) {
-      return [`структурный конфликт: ${(err as Error).message}`]; // delete/re-add that cannot apply
+      return [tr("структурный конфликт: {error}", { error: (err as Error).message })]; // delete/re-add that cannot apply
     }
     return newStructuralIssues(doc, after);
   }
@@ -615,7 +616,7 @@ export const useCollabStore = defineStore("collab", () => {
               blocked: "dependents",
               dependents: (r.dependents ?? []).map((d) => ({
                 seq: d.seq,
-                byName: d.author === myClientId ? "вы" : "участник",
+                byName: d.author === myClientId ? tr("вы") : tr("участник"),
                 mine: d.author === myClientId,
                 summary: "",
               })),
@@ -778,7 +779,7 @@ export const useCollabStore = defineStore("collab", () => {
     }
     if (failed > 0) {
       ElMessage.warning(
-        `Правок из комнаты не применилось: ${failed} (конфликт с локальным черновиком) — подробности в консоли`,
+        tr("Правок из комнаты не применилось: {n} (конфликт с локальным черновиком) — подробности в консоли", { n: failed }),
       );
     }
   }
@@ -908,9 +909,9 @@ export const useCollabStore = defineStore("collab", () => {
       /* storage unavailable — offer anyway */
     }
     void ElMessageBox.confirm(
-      `У вас есть локальный черновик этой карты (правок: ${draft.length}), сделанный до входа в комнату — участники его не видят. Отправить черновик в комнату?`,
-      "Локальный черновик",
-      { confirmButtonText: "Отправить в комнату", cancelButtonText: "Оставить локально", type: "info" },
+      tr("У вас есть локальный черновик этой карты (правок: {n}), сделанный до входа в комнату — участники его не видят. Отправить черновик в комнату?", { n: draft.length }),
+      tr("Локальный черновик"),
+      { confirmButtonText: tr("Отправить в комнату"), cancelButtonText: tr("Оставить локально"), type: "info" },
     )
       .then(() => {
         // Route through the SAME chunked pusher as the own-room path (NOT sendOps): it goes through
@@ -919,9 +920,9 @@ export const useCollabStore = defineStore("collab", () => {
         // I already hold — seating revert rows on it is unnecessary, and an all-duplicate ack would
         // otherwise seat them on a phantom seq. Peers still receive the ops via the broadcast.
         if (pushJournalToLog(id, draft, draftUids, "sharing pre-join draft into room")) {
-          ElMessage.success(`Черновик отправлен: участники теперь видят ваши правки (${draft.length})`);
+          ElMessage.success(tr("Черновик отправлен: участники теперь видят ваши правки ({n})", { n: draft.length }));
         } else {
-          ElMessage.warning("Синхронизация занята — попробуйте отправить черновик ещё раз через несколько секунд.");
+          ElMessage.warning(tr("Синхронизация занята — попробуйте отправить черновик ещё раз через несколько секунд."));
         }
       })
       .catch(() => {

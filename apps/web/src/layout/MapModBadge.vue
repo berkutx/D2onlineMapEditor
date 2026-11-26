@@ -13,6 +13,7 @@ import type { MapModSource } from "@d2/socket-contract";
 import { useMapStore, reloadOnMap } from "../stores/mapStore";
 import { useModStore } from "../stores/modStore";
 import { setMapMod } from "../services/api";
+import { tr, trn } from "../i18n";
 
 const mapStore = useMapStore();
 const modStore = useModStore();
@@ -29,22 +30,22 @@ watch(visible, (open) => {
 });
 
 const SOURCE_TEXT: Record<MapModSource, string> = {
-  install: "карта лежит в папке сценариев этого мода",
-  choice: "мод выбран явно",
-  detected: "определён по содержимому карты",
-  default: "по содержимому карты мод определить нельзя — взят мод по умолчанию",
+  install: tr("карта лежит в папке сценариев этого мода"),
+  choice: tr("мод выбран явно"),
+  detected: tr("определён по содержимому карты"),
+  default: tr("по содержимому карты мод определить нельзя — взят мод по умолчанию"),
 };
 
 /** Globals table behind each id table code. */
 const TABLE_TEXT: Record<string, string> = {
-  UU: "Юниты",
-  IG: "Предметы",
-  SS: "Заклинания",
-  MG: "Объекты местности",
-  UM: "Модификаторы",
-  LR: "Лорды",
-  RR: "Расы",
-  BB: "Постройки",
+  UU: tr("Юниты"),
+  IG: tr("Предметы"),
+  SS: tr("Заклинания"),
+  MG: tr("Объекты местности"),
+  UM: tr("Модификаторы"),
+  LR: tr("Лорды"),
+  RR: tr("Расы"),
+  BB: tr("Постройки"),
 };
 
 const missing = computed(() => currentMod.value?.missing ?? 0);
@@ -79,39 +80,39 @@ async function apply(): Promise<void> {
     reloadOnMap(id);
   } catch (e) {
     busy.value = false;
-    ElMessage.error(`Мод не изменён: ${e instanceof Error ? e.message : String(e)}`);
+    ElMessage.error(tr("Мод не изменён: {error}", { error: e instanceof Error ? e.message : String(e) }));
   }
 }
 </script>
 
 <template>
   <template v-if="currentMod">
-    <el-tooltip :content="`Мод карты: ${SOURCE_TEXT[currentMod.source]}`" placement="bottom" :show-after="300">
+    <el-tooltip :content="tr('Мод карты: {how}', { how: SOURCE_TEXT[currentMod.source] })" placement="bottom" :show-after="300">
       <el-tag class="mod-tag" size="small" effect="plain" round @click="visible = true">
         {{ modStore.nameOf(currentMod.id) }}
       </el-tag>
     </el-tooltip>
     <el-tooltip
       v-if="missing > 0 || scriptMissing > 0"
-      content="Карта ссылается на данные, которых нет в этом моде"
+      :content="tr('Карта ссылается на данные, которых нет в этом моде')"
       placement="bottom"
       :show-after="200"
     >
       <el-tag class="mod-tag" size="small" :type="missing > 0 ? 'danger' : 'warning'" effect="dark" round @click="visible = true">
         <el-icon class="mod-ico"><WarningFilled /></el-icon>
-        нет в моде: {{ missing + scriptMissing }}
+        {{ tr("нет в моде: {count}", { count: missing + scriptMissing }) }}
       </el-tag>
     </el-tooltip>
 
-    <el-dialog v-model="visible" title="Мод карты" width="560px">
+    <el-dialog v-model="visible" :title="tr('Мод карты')" width="560px">
       <p class="mod-line">
         <b>{{ modStore.nameOf(currentMod.id) }}</b> — {{ SOURCE_TEXT[currentMod.source] }}.
       </p>
 
       <template v-if="missing > 0">
         <el-alert type="error" :closable="false" show-icon>
-          <template #title>В моде нет {{ missing }} объектов, на которые ссылается карта</template>
-          Игра и её редактор не загрузят такую карту с этим модом.
+          <template #title>{{ trn("В моде нет {n} объекта, на который ссылается карта|В моде нет {n} объектов, на которые ссылается карта|В моде нет {n} объектов, на которые ссылается карта", missing) }}</template>
+          {{ tr("Игра и её редактор не загрузят такую карту с этим модом.") }}
         </el-alert>
         <div v-for="r in missingRows" :key="r.code" class="mod-ids">
           <div class="mod-ids-head">{{ r.label }} — {{ r.ids.length }}</div>
@@ -120,8 +121,8 @@ async function apply(): Promise<void> {
       </template>
       <template v-if="scriptMissing > 0">
         <el-alert type="warning" :closable="false" show-icon>
-          <template #title>Скрипт карты упоминает {{ scriptMissing }} объектов, которых нет в моде</template>
-          Карта загрузится, но скрипт может не сработать.
+          <template #title>{{ trn("Скрипт карты упоминает {n} объект, которого нет в моде|Скрипт карты упоминает {n} объекта, которых нет в моде|Скрипт карты упоминает {n} объектов, которых нет в моде", scriptMissing) }}</template>
+          {{ tr("Карта загрузится, но скрипт может не сработать.") }}
         </el-alert>
         <div v-for="r in scriptRows" :key="r.code" class="mod-ids">
           <div class="mod-ids-head">{{ r.label }} — {{ r.ids.length }}</div>
@@ -129,40 +130,39 @@ async function apply(): Promise<void> {
         </div>
       </template>
       <p v-if="currentMod.missing === 0 && !scriptMissing" class="mod-ok">
-        Все объекты, на которые ссылается карта, в этом моде есть.
+        {{ tr("Все объекты, на которые ссылается карта, в этом моде есть.") }}
       </p>
 
       <template v-if="candidates.length > 1">
-        <div class="mod-sub">Как карта подходит к установленным модам</div>
+        <div class="mod-sub">{{ tr("Как карта подходит к установленным модам") }}</div>
         <el-table :data="candidates" size="small" :show-header="true">
-          <el-table-column label="Мод" min-width="200">
+          <el-table-column :label="tr('Мод')" min-width="200">
             <template #default="{ row }">
               {{ row.name }}
-              <el-tag v-if="row.current" size="small" type="success" effect="plain">текущий</el-tag>
-              <el-tag v-if="row.dataOnly" size="small" type="info" effect="plain">без графики</el-tag>
+              <el-tag v-if="row.current" size="small" type="success" effect="plain">{{ tr("текущий") }}</el-tag>
+              <el-tag v-if="row.dataOnly" size="small" type="info" effect="plain">{{ tr("без графики") }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="Нет в моде" width="110" prop="missing" />
-          <el-table-column label="В скрипте" width="100" prop="scriptMissing" />
+          <el-table-column :label="tr('Нет в моде')" width="110" prop="missing" />
+          <el-table-column :label="tr('В скрипте')" width="100" prop="scriptMissing" />
         </el-table>
       </template>
 
       <template v-if="modEditable">
-        <div class="mod-sub">Сменить мод</div>
+        <div class="mod-sub">{{ tr("Сменить мод") }}</div>
         <el-select v-model="picked" class="mod-select">
-          <el-option value="" label="Определять по содержимому карты" />
+          <el-option value="" :label="tr('Определять по содержимому карты')" />
           <el-option v-for="m in openableMods" :key="m.id" :value="m.id" :label="m.name" />
         </el-select>
         <div class="mod-hint">
-          Сама карта не меняется: мод решает, какие юниты, предметы и графику показывает редактор.
-          После смены страница перезагрузится.
+          {{ tr("Сама карта не меняется: мод решает, какие юниты, предметы и графику показывает редактор. После смены страница перезагрузится.") }}
         </div>
       </template>
 
       <template #footer>
-        <el-button @click="visible = false">Закрыть</el-button>
+        <el-button @click="visible = false">{{ tr("Закрыть") }}</el-button>
         <el-button v-if="modEditable" type="primary" :loading="busy" :disabled="!changed" @click="apply()">
-          Сменить мод
+          {{ tr("Сменить мод") }}
         </el-button>
       </template>
     </el-dialog>

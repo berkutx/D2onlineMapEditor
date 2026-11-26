@@ -19,6 +19,7 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef, watch } from "vue";
 import type { GenRecipeInfo, ValidationReport } from "@d2/socket-contract";
 import { fetchGenRecipes } from "../services/api";
+import { tr } from "../i18n";
 import { useEditStore } from "./editStore";
 import { useModStore } from "./modStore";
 
@@ -54,14 +55,14 @@ export const AMOUNT_STEPS: readonly number[] = [0.5, 0.75, 1, 1.5, 2.25];
 
 /** Group ids the server uses, in palette order, with the words and sign shown for each. */
 export const GEN_GROUPS: readonly { id: string; title: string; icon: string }[] = [
-  { id: "mountains", title: "Горы и холмы", icon: "⛰" },
-  { id: "water", title: "Вода", icon: "🌊" },
-  { id: "forest", title: "Лес", icon: "🌲" },
-  { id: "snow", title: "Снег", icon: "❄" },
-  { id: "ground", title: "Земля", icon: "🌱" },
-  { id: "structures", title: "Дорога и стены", icon: "🧱" },
+  { id: "mountains", title: tr("Горы и холмы"), icon: "⛰" },
+  { id: "water", title: tr("Вода"), icon: "🌊" },
+  { id: "forest", title: tr("Лес"), icon: "🌲" },
+  { id: "snow", title: tr("Снег"), icon: "❄" },
+  { id: "ground", title: tr("Земля"), icon: "🌱" },
+  { id: "structures", title: tr("Дорога и стены"), icon: "🧱" },
   // 🗿, not the rock emoji: Windows 10 has no glyph for that one (it shows an empty box)
-  { id: "decor", title: "Декор", icon: "🗿" },
+  { id: "decor", title: tr("Декор"), icon: "🗿" },
 ];
 const groupOf = (id: string): { id: string; title: string; icon: string } =>
   GEN_GROUPS.find((g) => g.id === id) ?? { id, title: id, icon: "✦" };
@@ -90,8 +91,12 @@ export const useGenStore = defineStore("gen", () => {
     return catalogP;
   }
   const infoOf = (id: string): GenRecipeInfo | undefined => catalog.value.find((r) => r.id === id);
-  /** The name a mapmaker knows a recipe by (the id, spaced, when the list is not loaded). */
-  const titleOf = (id: string): string => infoOf(id)?.title ?? id.replace(/_/g, " ");
+  /** The name a mapmaker knows a recipe by, in the interface language (the id, spaced, when
+   *  the list is not loaded). The server names recipes in Russian — the key of the message. */
+  const titleOf = (id: string): string => {
+    const title = infoOf(id)?.title;
+    return title !== undefined ? tr(title) : id.replace(/_/g, " ");
+  };
   const iconOf = (id: string): string => groupOf(infoOf(id)?.group ?? "").icon;
   /** The catalogue as the palette shows it: group by group, empty groups left out. */
   const groups = computed(() =>

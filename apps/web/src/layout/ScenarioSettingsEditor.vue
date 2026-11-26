@@ -7,6 +7,7 @@ import { computed } from "vue";
 import { ElInput, ElInputNumber, ElSelect, ElOption } from "element-plus";
 import CommitInput from "./CommitInput.vue";
 import { useEventStore } from "../stores/eventStore";
+import { tr } from "../i18n";
 
 const store = useEventStore();
 const h = computed(() => store.header);
@@ -19,58 +20,58 @@ function setLimit(key: "unit" | "spell" | "leader" | "city", v: number): void {
   set({ limits: { ...cur, [key]: v } });
 }
 const DIFF = [
-  { value: 0, label: "Легко" }, { value: 1, label: "Средне" },
-  { value: 2, label: "Сложно" }, { value: 3, label: "Очень сложно" },
+  { value: 0, label: tr("Легко") }, { value: 1, label: tr("Средне") },
+  { value: 2, label: tr("Сложно") }, { value: 3, label: tr("Очень сложно") },
 ];
 </script>
 
 <template>
   <div v-if="h" class="ss">
     <div class="ss-body">
-      <label class="ss-f"><span>Название</span>
+      <label class="ss-f"><span>{{ tr("Название") }}</span>
         <CommitInput :model-value="h.name" size="small" @update:model-value="set({ name: $event })" /></label>
-      <label class="ss-f"><span>Автор</span>
+      <label class="ss-f"><span>{{ tr("Автор") }}</span>
         <CommitInput :model-value="h.author" size="small" maxlength="21" @update:model-value="set({ author: $event })" /></label>
-      <label class="ss-f col"><span>Описание</span>
+      <label class="ss-f col"><span>{{ tr("Описание") }}</span>
         <CommitInput :model-value="h.description" type="textarea" :autosize="{ minRows: 2, maxRows: 4 }" size="small"
           @update:model-value="set({ description: $event })" /></label>
 
-      <label class="ss-f col"><span>Цель (кратко)</span>
+      <label class="ss-f col"><span>{{ tr("Цель (кратко)") }}</span>
         <CommitInput :model-value="h.objective ?? ''" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" size="small"
           @update:model-value="set({ objective: $event })" /></label>
-      <label class="ss-f col"><span>Вступление / сюжет</span>
+      <label class="ss-f col"><span>{{ tr("Вступление / сюжет") }}</span>
         <CommitInput :model-value="h.story ?? ''" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" size="small"
           @update:model-value="set({ story: $event })" /></label>
-      <label class="ss-f col"><span>Текст победы</span>
+      <label class="ss-f col"><span>{{ tr("Текст победы") }}</span>
         <CommitInput :model-value="h.winText ?? ''" type="textarea" :autosize="{ minRows: 2, maxRows: 6 }" size="small"
           @update:model-value="set({ winText: $event })" /></label>
-      <label class="ss-f col"><span>Текст поражения</span>
+      <label class="ss-f col"><span>{{ tr("Текст поражения") }}</span>
         <CommitInput :model-value="h.loseText ?? ''" type="textarea" :autosize="{ minRows: 2, maxRows: 5 }" size="small"
           @update:model-value="set({ loseText: $event })" /></label>
 
-      <div class="d2-sec">Сложность и уровни</div>
+      <div class="d2-sec">{{ tr("Сложность и уровни") }}</div>
       <div class="ss-grid">
-        <label class="ss-f"><span>Сложность сценария</span>
+        <label class="ss-f"><span>{{ tr("Сложность сценария") }}</span>
           <el-select :model-value="h.difficulty?.scenario ?? 3" size="small" style="width: 150px"
             @update:model-value="set({ difficulty: { scenario: $event, game: h.difficulty?.game ?? 1 } })">
             <el-option v-for="d in DIFF" :key="d.value" :value="d.value" :label="d.label" /></el-select></label>
-        <label class="ss-f"><span>Рекоменд. уровень</span>
+        <label class="ss-f"><span>{{ tr("Рекоменд. уровень") }}</span>
           <el-input-number :model-value="h.suggestedLevel ?? 1" :min="1" :max="99" size="small" controls-position="right"
             style="width: 110px" @update:model-value="set({ suggestedLevel: ($event as number) ?? 1 })" /></label>
       </div>
 
-      <div class="d2-sec">Лимиты</div>
+      <div class="d2-sec">{{ tr("Лимиты") }}</div>
       <div class="ss-grid">
-        <label class="ss-f"><span>Отрядов у игрока</span>
+        <label class="ss-f"><span>{{ tr("Отрядов у игрока") }}</span>
           <el-input-number :model-value="h.limits?.unit ?? 0" :min="0" :max="99" size="small" controls-position="right"
             style="width: 110px" @update:model-value="setLimit('unit', ($event as number) ?? 0)" /></label>
-        <label class="ss-f"><span>Заклинаний</span>
+        <label class="ss-f"><span>{{ tr("Заклинаний") }}</span>
           <el-input-number :model-value="h.limits?.spell ?? 0" :min="0" :max="99" size="small" controls-position="right"
             style="width: 110px" @update:model-value="setLimit('spell', ($event as number) ?? 0)" /></label>
-        <label class="ss-f"><span>Уровень героя</span>
+        <label class="ss-f"><span>{{ tr("Уровень героя") }}</span>
           <el-input-number :model-value="h.limits?.leader ?? 0" :min="0" :max="99" size="small" controls-position="right"
             style="width: 110px" @update:model-value="setLimit('leader', ($event as number) ?? 0)" /></label>
-        <label class="ss-f"><span>Уровень города</span>
+        <label class="ss-f"><span>{{ tr("Уровень города") }}</span>
           <el-input-number :model-value="h.limits?.city ?? 0" :min="1" :max="5" size="small" controls-position="right"
             style="width: 110px" @update:model-value="setLimit('city', ($event as number) ?? 1)" /></label>
       </div>

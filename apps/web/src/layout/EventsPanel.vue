@@ -19,6 +19,7 @@ import { useEditStore } from "../stores/editStore";
 import { useViewStore } from "../stores/viewStore";
 import { useUnitStore } from "../stores/unitStore";
 import { eventBadges } from "../services/scenarioRoles";
+import { tr, trn } from "../i18n";
 import CommitInput from "./CommitInput.vue";
 import EventFieldInput from "./EventFieldInput.vue";
 import EventGraph from "./EventGraph.vue";
@@ -91,8 +92,8 @@ watch(() => store.cardReveal, (r) => {
 });
 
 const RACES = [
-  { key: "human", label: "Имп" }, { key: "dwarf", label: "Кланы" }, { key: "undead", label: "Нежить" },
-  { key: "heretic", label: "Легионы" }, { key: "neutral", label: "Нейтр" }, { key: "elf", label: "Эльфы" },
+  { key: "human", label: tr("Имп") }, { key: "dwarf", label: tr("Кланы") }, { key: "undead", label: tr("Нежить") },
+  { key: "heretic", label: tr("Легионы") }, { key: "neutral", label: tr("Нейтр") }, { key: "elf", label: tr("Эльфы") },
 ] as const;
 
 function patch(partial: Partial<MapEvent>): void {
@@ -174,6 +175,15 @@ function toggleGroup(baseId: string): void {
   s.has(baseId) ? s.delete(baseId) : s.add(baseId);
   expandedGroups.value = s;
 }
+/** Tooltip of a base row's ⧉N badge. */
+function zoneBadgeTip(baseId: string): string {
+  const g = zoneGroups.value.groupOf.get(baseId)!;
+  return trn(
+    "Размножено на зону «{zone}»: +{n} клон (клик — раскрыть). Правки базы в клоны не тянутся.|Размножено на зону «{zone}»: +{n} клона (клик — раскрыть). Правки базы в клоны не тянутся.|Размножено на зону «{zone}»: +{n} клонов (клик — раскрыть). Правки базы в клоны не тянутся.",
+    g.cloneIds.length,
+    { zone: g.zoneName },
+  );
+}
 /** Filtered rows with zone clones folded behind their base (expanded groups inline). */
 const listRows = computed<MapEvent[]>(() => {
   const { cloneOf, groupOf } = zoneGroups.value;
@@ -208,9 +218,10 @@ function doCloneZone(): void {
   if (!sel.value || !cloneZoneId.value) return;
   const n = store.cloneEventForZone(sel.value.id, cloneZoneId.value, cloneOnce.value);
   if (n > 0) {
-    ElMessage.success(`Клонировано на зону: +${n} ${n === 1 ? "событие" : n < 5 ? "события" : "событий"}${cloneOnce.value ? " · сработает один раз" : ""}`);
+    const cloned = trn("Клонировано на зону: +{n} событие|Клонировано на зону: +{n} события|Клонировано на зону: +{n} событий", n);
+    ElMessage.success(cloneOnce.value ? `${cloned} · ${tr("сработает один раз")}` : cloned);
   } else {
-    ElMessage.warning("Не вышло: у зоны меньше двух живых локаций или в событии нет зонного условия");
+    ElMessage.warning(tr("Не вышло: у зоны меньше двух живых локаций или в событии нет зонного условия"));
   }
 }
 
@@ -224,7 +235,9 @@ function onZonePick(zid: string): void {
     const n = store.cloneEventForZone(ev.id, zid, ev.occurOnce);
     if (n > 0) {
       ElMessage.success(
-        `Событие развёрнуто на зону: +${n} скрытых клонов${ev.occurOnce ? " · сработает один раз на зону" : ""}. Правки этого события тянутся в клоны автоматически.`,
+        ev.occurOnce
+          ? trn("Событие развёрнуто на зону: +{n} скрытый клон · сработает один раз на зону. Правки этого события тянутся в клоны автоматически.|Событие развёрнуто на зону: +{n} скрытых клона · сработает один раз на зону. Правки этого события тянутся в клоны автоматически.|Событие развёрнуто на зону: +{n} скрытых клонов · сработает один раз на зону. Правки этого события тянутся в клоны автоматически.", n)
+          : trn("Событие развёрнуто на зону: +{n} скрытый клон. Правки этого события тянутся в клоны автоматически.|Событие развёрнуто на зону: +{n} скрытых клона. Правки этого события тянутся в клоны автоматически.|Событие развёрнуто на зону: +{n} скрытых клонов. Правки этого события тянутся в клоны автоматически.", n),
       );
     }
   });
@@ -238,8 +251,14 @@ const condFields = (c: EventCondition) =>
   (CONDITION_BY_KIND[c.kind]?.fields ?? []).filter((f) => fieldVisible(f, c as Record<string, unknown>));
 const effFields = (e: EventEffect) =>
   (EFFECT_BY_KIND[e.kind]?.fields ?? []).filter((f) => fieldVisible(f, e as Record<string, unknown>));
-const condLabel = (c: EventCondition) => CONDITION_BY_KIND[c.kind]?.label ?? c.kind;
-const effLabel = (e: EventEffect) => EFFECT_BY_KIND[e.kind]?.label ?? e.kind;
+const condLabel = (c: EventCondition) => {
+  const spec = CONDITION_BY_KIND[c.kind];
+  return spec ? tr(spec.label) : c.kind;
+};
+const effLabel = (e: EventEffect) => {
+  const spec = EFFECT_BY_KIND[e.kind];
+  return spec ? tr(spec.label) : e.kind;
+};
 /** Role-class icons for a list row (shared scenarioRoles model), capped at 4. */
 const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 </script>
@@ -257,34 +276,34 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
     append-to-body
   >
     <template #header>
-      <span class="sc-title">Сценарий</span>
+      <span class="sc-title">{{ tr("Сценарий") }}</span>
     </template>
 
     <el-tabs v-model="store.panelTab" class="ev-tabs">
-      <el-tab-pane label="События" name="events" />
-      <el-tab-pane label="Настройки" name="settings" />
-      <el-tab-pane label="Ограничения" name="restrictions" />
-      <el-tab-pane label="Игроки" name="players" />
-      <el-tab-pane label="Дипломатия" name="diplomacy" />
-      <el-tab-pane label="Переменные" name="vars" />
-      <el-tab-pane label="Шаблоны" name="templates" />
+      <el-tab-pane :label="tr('События')" name="events" />
+      <el-tab-pane :label="tr('Настройки')" name="settings" />
+      <el-tab-pane :label="tr('Ограничения')" name="restrictions" />
+      <el-tab-pane :label="tr('Игроки')" name="players" />
+      <el-tab-pane :label="tr('Дипломатия')" name="diplomacy" />
+      <el-tab-pane :label="tr('Переменные')" name="vars" />
+      <el-tab-pane :label="tr('Шаблоны')" name="templates" />
     </el-tabs>
 
     <!-- navigation bar: ALWAYS visible (disabled buttons teach that history exists) —
          back/forward + «+ событие» + breadcrumbs. Critical in deep event webs. -->
     <div class="sc-nav">
-      <el-tooltip content="Назад (Alt+←)" :show-after="300">
-        <el-button class="sc-navbtn" :disabled="!store.canGoBack" @click="store.goBack()">← Назад</el-button>
+      <el-tooltip :content="tr('Назад (Alt+←)')" :show-after="300">
+        <el-button class="sc-navbtn" :disabled="!store.canGoBack" @click="store.goBack()">{{ tr("← Назад") }}</el-button>
       </el-tooltip>
-      <el-tooltip content="Вперёд (Alt+→)" :show-after="300">
-        <el-button class="sc-navbtn" :disabled="!store.canGoForward" @click="store.goForward()">Вперёд →</el-button>
+      <el-tooltip :content="tr('Вперёд (Alt+→)')" :show-after="300">
+        <el-button class="sc-navbtn" :disabled="!store.canGoForward" @click="store.goForward()">{{ tr("Вперёд →") }}</el-button>
       </el-tooltip>
       <el-button
         v-if="store.panelTab === 'events'"
         class="sc-navbtn"
         type="primary"
         @click="store.create()"
-      >＋ Событие</el-button>
+      >{{ tr("＋ Событие") }}</el-button>
       <span
         v-for="(c, i) in store.breadcrumbs"
         :key="i"
@@ -307,40 +326,40 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
       <!-- События: list | (опц.) star graph | editor -->
       <div v-else class="ev-events">
         <div class="ev-toolbar">
-          <el-tooltip :content="view.eventGraphVisible ? 'Скрыть граф связей' : 'Показать граф связей события'" :show-after="300">
+          <el-tooltip :content="view.eventGraphVisible ? tr('Скрыть граф связей') : tr('Показать граф связей события')" :show-after="300">
             <el-button
               size="small"
               :type="view.eventGraphVisible ? 'primary' : 'default'"
               text
               class="ev-graph-toggle"
               @click="view.toggleEventGraph()"
-            >🕸 Граф связей</el-button>
+            >{{ tr("🕸 Граф связей") }}</el-button>
           </el-tooltip>
         </div>
         <div class="ev-grid" :style="{ gridTemplateColumns: gridColumns }">
         <button
           v-if="listCollapsed"
           class="ev-list-expand"
-          title="Показать список событий"
+          :title="tr('Показать список событий')"
           @click="listCollapsed = false"
-        >▸<span class="ev-list-expand-lbl">события</span></button>
+        >▸<span class="ev-list-expand-lbl">{{ tr("события") }}</span></button>
         <div v-else class="ev-col ev-col-list d2-rail--left">
           <div class="ev-subhead">
-            <el-tooltip content="Свернуть список (больше места редактору/графу)" :show-after="300">
+            <el-tooltip :content="tr('Свернуть список (больше места редактору/графу)')" :show-after="300">
               <el-button size="small" text class="icon-btn" @click="listCollapsed = true">◂</el-button>
             </el-tooltip>
-            <span class="ev-count">{{ store.events.length }} событий</span>
+            <span class="ev-count">{{ trn("{n} событие|{n} события|{n} событий", store.events.length) }}</span>
           </div>
           <el-input
             v-model="store.filter"
             size="small"
             clearable
-            placeholder="Поиск по имени / id…"
+            :placeholder="tr('Поиск по имени / id…')"
             class="ev-search"
           />
           <div v-if="store.objectFilter" class="ev-objfilter">
-            только для объекта <code>{{ store.objectFilter }}</code>
-            <el-button size="small" text @click="store.objectFilter = null">показать все</el-button>
+            {{ tr("только для объекта") }} <code>{{ store.objectFilter }}</code>
+            <el-button size="small" text @click="store.objectFilter = null">{{ tr("показать все") }}</el-button>
           </div>
           <el-scrollbar class="ev-list">
             <!-- hover-задержка = шпаргалка события (условия/эффекты именами + заметка автора) -->
@@ -367,30 +386,30 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
               @mouseleave="store.listHoverId = null"
             >
               <div class="ev-row-main">
-                <span class="ev-name">{{ e.name || "(без имени)" }}</span>
+                <span class="ev-name">{{ e.name || tr("(без имени)") }}</span>
                 <span class="ev-id">{{ e.id }}</span>
               </div>
               <div class="ev-badges">
                 <el-tooltip
                   v-if="zoneGroups.groupOf.has(e.id)"
-                  :content="`Размножено на зону «${zoneGroups.groupOf.get(e.id)!.zoneName}»: +${zoneGroups.groupOf.get(e.id)!.cloneIds.length} клонов (клик — раскрыть). Правки базы в клоны не тянутся.`"
+                  :content="zoneBadgeTip(e.id)"
                 >
                   <el-tag size="small" type="success" disable-transitions class="ev-zone-badge"
                     @click.stop="toggleGroup(e.id)">⧉{{ zoneGroups.groupOf.get(e.id)!.cloneIds.length }}</el-tag>
                 </el-tooltip>
-                <el-tag v-if="!e.enabled" size="small" type="info" disable-transitions>выкл</el-tag>
+                <el-tag v-if="!e.enabled" size="small" type="info" disable-transitions>{{ tr("выкл") }}</el-tag>
                 <el-tag v-if="!e.occurOnce" size="small" type="warning" disable-transitions>∞</el-tag>
                 <el-tag v-if="e.chance < 100" size="small" disable-transitions>{{ e.chance }}%</el-tag>
                 <span class="ev-icons">{{ badgeIcons(e) }}</span>
                 <span class="ev-ce" :class="{ 'ev-ce-inert': !e.effects.length }"
-                  :title="!e.effects.length ? 'у события нет эффектов — оно ничего не делает' : undefined"
+                  :title="!e.effects.length ? tr('у события нет эффектов — оно ничего не делает') : undefined"
                 >{{ e.conditions.length }}⚡ {{ e.effects.length }}★</span>
-                <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
-                <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
+                <el-tooltip :content="tr('Клонировать')"><el-button size="small" text class="icon-btn" @click.stop="store.clone(e)">⧉</el-button></el-tooltip>
+                <el-tooltip :content="tr('Удалить')"><el-button size="small" text class="icon-btn" @click.stop="store.remove(e.id)">🗑</el-button></el-tooltip>
               </div>
             </div>
             </el-tooltip>
-            <el-empty v-if="!listRows.length" description="Нет событий" :image-size="60" />
+            <el-empty v-if="!listRows.length" :description="tr('Нет событий')" :image-size="60" />
           </el-scrollbar>
         </div>
 
@@ -399,32 +418,32 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 
         <div ref="editorCol" class="ev-col ev-col-editor d2-rail--left">
           <el-scrollbar v-if="sel" class="ev-editor">
-            <CommitInput :model-value="sel.name" size="small" placeholder="Название события (игровое)"
+            <CommitInput :model-value="sel.name" size="small" :placeholder="tr('Название события (игровое)')"
               @update:model-value="patch({ name: $event })" />
             <!-- editor-only note: подробное описание рядом с игровым именем; в .sg НЕ пишется -->
             <CommitInput type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" size="small" class="ev-desc"
-              :model-value="editStore.eventDescs[sel.id] || ''" placeholder="Описание (только в редакторе)"
+              :model-value="editStore.eventDescs[sel.id] || ''" :placeholder="tr('Описание (только в редакторе)')"
               @update:model-value="editStore.setEventDesc(sel.id, $event)" />
 
             <div class="ev-props">
-              <label><el-switch :model-value="sel.enabled" @update:model-value="patch({ enabled: $event as boolean })" /> активно с начала</label>
-              <label><el-switch :model-value="!sel.occurOnce" @update:model-value="patch({ occurOnce: !($event as boolean) })" /> повторяемое</label>
-              <label>шанс
+              <label><el-switch :model-value="sel.enabled" @update:model-value="patch({ enabled: $event as boolean })" /> {{ tr("активно с начала") }}</label>
+              <label><el-switch :model-value="!sel.occurOnce" @update:model-value="patch({ occurOnce: !($event as boolean) })" /> {{ tr("повторяемое") }}</label>
+              <label>{{ tr("шанс") }}
                 <el-input-number :model-value="sel.chance" :min="0" :max="100" size="small" controls-position="right"
                   style="width: 96px" @update:model-value="patch({ chance: ($event as number) ?? 100 })" /> %</label>
-              <label>порядок
+              <label>{{ tr("порядок") }}
                 <el-input-number :model-value="sel.order" size="small" controls-position="right"
                   style="width: 96px" @update:model-value="patch({ order: ($event as number) ?? 0 })" /></label>
             </div>
 
             <div class="ev-races">
               <div class="ev-races-row">
-                <span class="ev-races-lbl">Действует на:</span>
+                <span class="ev-races-lbl">{{ tr("Действует на:") }}</span>
                 <el-checkbox v-for="r in RACES" :key="'a' + r.key" :model-value="sel.appliesTo[r.key]"
                   @update:model-value="patchRace('appliesTo', r.key, $event as boolean)">{{ r.label }}</el-checkbox>
               </div>
               <div class="ev-races-row">
-                <span class="ev-races-lbl">Может запускать:</span>
+                <span class="ev-races-lbl">{{ tr("Может запускать:") }}</span>
                 <el-checkbox v-for="r in RACES" :key="'t' + r.key" :model-value="sel.canTrigger[r.key]"
                   @update:model-value="patchRace('canTrigger', r.key, $event as boolean)">{{ r.label }}</el-checkbox>
               </div>
@@ -432,10 +451,10 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 
             <!-- conditions -->
             <div class="ev-sec-head">
-              <span class="d2-sec">Условия ({{ sel.conditions.length }})</span>
-              <el-select placeholder="+ условие" size="small" style="width: 190px" :model-value="''"
+              <span class="d2-sec">{{ tr("Условия ({n})", { n: sel.conditions.length }) }}</span>
+              <el-select :placeholder="tr('+ условие')" size="small" style="width: 190px" :model-value="''"
                 @update:model-value="addCondition($event)">
-                <el-option v-for="s in CONDITION_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
+                <el-option v-for="s in CONDITION_SPECS" :key="s.kind" :value="s.kind" :label="tr(s.label)" />
               </el-select>
             </div>
             <div v-for="(c, i) in sel.conditions" :key="'c' + i" class="ev-item d2-card"
@@ -445,7 +464,7 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 <el-button size="small" text class="icon-btn" @click="removeCondition(i)">🗑</el-button>
               </div>
               <div v-for="f in condFields(c)" :key="f.key" class="ev-field">
-                <label>{{ f.label }}</label>
+                <label>{{ tr(f.label) }}</label>
                 <EventFieldInput :field="f" :model-value="(c as Record<string, unknown>)[f.key]"
                   allow-zone
                   @update:model-value="setCondField(i, f.key, $event)"
@@ -455,22 +474,22 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
 
             <!-- zone clone: expand a zone-condition event into per-location clones -->
             <div v-if="canCloneToZone" class="ev-zone-clone">
-              <el-tooltip content="Игра допускает одно зонное условие на событие — событие «на зону» = клоны по локациям-примитивам зоны. «Один раз» = скрытая переменная-гейт: сработает только первый вход." :show-after="300">
-                <span class="ev-zone-lbl">⧉ на зону</span>
+              <el-tooltip :content="tr('Игра допускает одно зонное условие на событие — событие «на зону» = клоны по локациям-примитивам зоны. «Один раз» = скрытая переменная-гейт: сработает только первый вход.')" :show-after="300">
+                <span class="ev-zone-lbl">{{ tr("⧉ на зону") }}</span>
               </el-tooltip>
-              <el-select v-model="cloneZoneId" size="small" placeholder="зона" style="width: 130px">
-                <el-option v-for="z in zoneCloneTargets" :key="z.id" :value="z.id" :label="`${z.name} (${z.n} лок.)`" />
+              <el-select v-model="cloneZoneId" size="small" :placeholder="tr('зона')" style="width: 130px">
+                <el-option v-for="z in zoneCloneTargets" :key="z.id" :value="z.id" :label="tr('{name} ({n} лок.)', { name: z.name, n: z.n })" />
               </el-select>
-              <el-checkbox v-model="cloneOnce" size="small">один раз</el-checkbox>
-              <el-button size="small" plain :disabled="!cloneZoneId" @click="doCloneZone()">Клонировать</el-button>
+              <el-checkbox v-model="cloneOnce" size="small">{{ tr("один раз") }}</el-checkbox>
+              <el-button size="small" plain :disabled="!cloneZoneId" @click="doCloneZone()">{{ tr("Клонировать") }}</el-button>
             </div>
 
             <!-- effects -->
             <div class="ev-sec-head">
-              <span class="d2-sec">Эффекты ({{ sel.effects.length }})</span>
-              <el-select placeholder="+ эффект" size="small" style="width: 190px" :model-value="''"
+              <span class="d2-sec">{{ tr("Эффекты ({n})", { n: sel.effects.length }) }}</span>
+              <el-select :placeholder="tr('+ эффект')" size="small" style="width: 190px" :model-value="''"
                 @update:model-value="addEffect($event)">
-                <el-option v-for="s in EFFECT_SPECS" :key="s.kind" :value="s.kind" :label="s.label" />
+                <el-option v-for="s in EFFECT_SPECS" :key="s.kind" :value="s.kind" :label="tr(s.label)" />
               </el-select>
             </div>
             <div v-for="(e, i) in sel.effects" :key="'e' + i" class="ev-item d2-card"
@@ -484,13 +503,13 @@ const badgeIcons = (e: MapEvent): string => eventBadges(e).slice(0, 4).join("");
                 </span>
               </div>
               <div v-for="f in effFields(e)" :key="f.key" class="ev-field">
-                <label>{{ f.label }}</label>
+                <label>{{ tr(f.label) }}</label>
                 <EventFieldInput :field="f" :model-value="(e as Record<string, unknown>)[f.key]"
                   @update:model-value="setEffField(i, f.key, $event)" />
               </div>
             </div>
           </el-scrollbar>
-          <el-empty v-else description="Выберите или создайте событие" :image-size="60" />
+          <el-empty v-else :description="tr('Выберите или создайте событие')" :image-size="60" />
         </div>
         </div>
       </div>

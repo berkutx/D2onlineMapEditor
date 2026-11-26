@@ -21,6 +21,7 @@ import { Search } from "@element-plus/icons-vue";
 import { useModifierStore, type ModifierEntry, type ModifierGroup } from "../stores/modifierStore";
 import LuaView from "./LuaView.vue";
 import { assetUrl } from "../services/api";
+import { tr } from "../i18n";
 
 const props = withDefaults(
   defineProps<{
@@ -32,7 +33,7 @@ const props = withDefaults(
     /** Is this unit the stack leader? Gates SOURCE=1 (L_STACK) modifiers. */
     leader?: boolean;
   }>(),
-  { title: "Модификаторы юнита", compact: false, leader: false },
+  { title: tr("Модификаторы юнита"), compact: false, leader: false },
 );
 const emit = defineEmits<{ "update:modelValue": [string[]] }>();
 
@@ -45,9 +46,9 @@ const query = ref("");
  *  правило эталона); all = вся база Gmodif (эффекты предметов/заклинаний). */
 const scope = ref<"dialog" | "um9" | "all">("um9");
 const SCOPES = [
-  { label: "★ Редактор", value: "dialog" },
-  { label: "Совместимые", value: "um9" },
-  { label: "Все", value: "all" },
+  { label: tr("★ Редактор"), value: "dialog" },
+  { label: tr("Совместимые"), value: "um9" },
+  { label: tr("Все"), value: "all" },
 ];
 /** Подгруппа (класс эффекта); "all" = все классы. */
 const classFilter = ref<string>("all");
@@ -73,7 +74,7 @@ const isOutside = (m: ModifierEntry | undefined): boolean => !!m && !UM9.test(m.
 
 /** Классы, доступные в текущем наборе (для селекта подгрупп), с количеством. */
 const classOptions = computed(() => {
-  const opts: { value: string; label: string }[] = [{ value: "all", label: "Все классы" }];
+  const opts: { value: string; label: string }[] = [{ value: "all", label: tr("Все классы") }];
   let total = 0;
   for (const g of store.groups) {
     const n = g.mods.filter(inScope).length;
@@ -81,7 +82,7 @@ const classOptions = computed(() => {
     total += n;
     opts.push({ value: g.key, label: `${g.label} (${n})` });
   }
-  opts[0] = { value: "all", label: `Все классы (${total})` };
+  opts[0] = { value: "all", label: tr("Все классы ({n})", { n: total }) };
   return opts;
 });
 
@@ -152,7 +153,7 @@ async function viewCode(m: ModifierEntry, ev?: Event): Promise<void> {
     codeCache.set(m.script, t);
     codeText.value = t;
   } catch (e) {
-    codeErr.value = `Не удалось загрузить ${m.script}: ${e instanceof Error ? e.message : String(e)}`;
+    codeErr.value = tr("Не удалось загрузить {file}: {error}", { file: m.script, error: e instanceof Error ? e.message : String(e) });
   } finally {
     codeLoading.value = false;
   }
@@ -164,16 +165,16 @@ const tip = (m: ModifierEntry | undefined): string =>
         m.id, // уникальный id — для сверки в базе (Gmodif.dbf)
         m.effects?.join(" · "),
         m.comment,
-        m.script ? `источник: ${m.script}` : m.scripted ? "(скрипт)" : "",
+        m.script ? tr("источник: {file}", { file: m.script }) : m.scripted ? tr("(скрипт)") : "",
       ]
         .filter(Boolean)
         .join("\n")
     : "";
 const markTip = (m: ModifierEntry | undefined): string =>
   isStandard(m)
-    ? "Стандартный набор редактора игры"
+    ? tr("Стандартный набор редактора игры")
     : isOutside(m)
-      ? "Вне набора редактора — модовый/скриптовый модификатор"
+      ? tr("Вне набора редактора — модовый/скриптовый модификатор")
       : "";
 </script>
 
@@ -183,35 +184,35 @@ const markTip = (m: ModifierEntry | undefined): string =>
       class="ml-trigger"
       size="small"
       :text="compact"
-      :title="modelValue.length ? `Модификаторы: ${modelValue.length}` : 'Модификаторы юнита'"
+      :title="modelValue.length ? tr('Модификаторы: {n}', { n: modelValue.length }) : tr('Модификаторы юнита')"
       @click="open = true"
     >
-      ⚙<template v-if="!compact">&nbsp;Модификаторы</template><template v-if="modelValue.length">&nbsp;{{ modelValue.length }}</template>
+      ⚙<template v-if="!compact">&nbsp;{{ tr("Модификаторы") }}</template><template v-if="modelValue.length">&nbsp;{{ modelValue.length }}</template>
     </el-button>
 
     <el-dialog v-model="open" :title="title" width="760px" align-center append-to-body class="ml-dialog">
       <div class="ml-controls">
-        <el-input v-model="query" class="ml-search" placeholder="Поиск по названию…" size="small" clearable :prefix-icon="Search" />
+        <el-input v-model="query" class="ml-search" :placeholder="tr('Поиск по названию…')" size="small" clearable :prefix-icon="Search" />
         <el-select v-model="classFilter" size="small" class="ml-class" filterable>
           <el-option v-for="o in classOptions" :key="o.value" :value="o.value" :label="o.label" />
         </el-select>
         <el-segmented v-model="scope" :options="SCOPES" size="small"
-          title="★ Редактор — набор диалога родного редактора · Совместимые — всё UM9-семейство · Все — вся база (эффекты предметов/заклинаний)" />
+          :title="tr('★ Редактор — набор диалога родного редактора · Совместимые — всё UM9-семейство · Все — вся база (эффекты предметов/заклинаний)')" />
       </div>
       <div class="ml-panes">
         <div class="ml-avail">
-          <div class="ml-pane-head">Доступно <span class="ml-count">({{ resultCount }})</span></div>
+          <div class="ml-pane-head">{{ tr("Доступно") }} <span class="ml-count">({{ resultCount }})</span></div>
           <div class="ml-list">
-            <div v-if="store.loading" class="ml-status">Загрузка каталога…</div>
-            <div v-else-if="store.error" class="ml-status err">Ошибка: {{ store.error }}</div>
-            <div v-else-if="!resultCount" class="ml-status">Ничего не найдено — смените набор или подгруппу</div>
+            <div v-if="store.loading" class="ml-status">{{ tr("Загрузка каталога…") }}</div>
+            <div v-else-if="store.error" class="ml-status err">{{ tr("Ошибка: {error}", { error: store.error }) }}</div>
+            <div v-else-if="!resultCount" class="ml-status">{{ tr("Ничего не найдено — смените набор или подгруппу") }}</div>
             <template v-for="g in groups" :key="g.key">
               <div class="ml-group">{{ g.label }} ({{ g.mods.length }})</div>
               <button v-for="m in g.mods" :key="m.id" type="button" class="ml-row"
                 :class="{ picked: countOf(m.id) > 0 }" :title="tip(m)" @click="addOne(m.id)">
                 <span class="ml-mark" :title="markTip(m)">{{ isStandard(m) ? "★" : isOutside(m) ? "🧪" : "" }}</span>
                 <span class="ml-name">{{ m.name }} <span class="ml-id">{{ m.id }}</span></span>
-                <span v-if="m.script" class="ml-code" title="Показать Lua-код модификатора" @click.stop="viewCode(m, $event)">📜</span>
+                <span v-if="m.script" class="ml-code" :title="tr('Показать Lua-код модификатора')" @click.stop="viewCode(m, $event)">📜</span>
                 <span v-if="countOf(m.id)" class="ml-x">×{{ countOf(m.id) }}</span>
                 <span class="ml-add">＋</span>
               </button>
@@ -220,27 +221,27 @@ const markTip = (m: ModifierEntry | undefined): string =>
         </div>
         <div class="ml-chosen">
           <div class="ml-pane-head">
-            Выбрано <span class="ml-count">({{ chosen.length }}<template v-if="totalPicked !== chosen.length"> · {{ totalPicked }} шт</template>)</span>
+            {{ tr("Выбрано") }} <span class="ml-count">({{ chosen.length }}<template v-if="totalPicked !== chosen.length"> · {{ tr("{n} шт", { n: totalPicked }) }}</template>)</span>
           </div>
           <div class="ml-list">
-            <div v-if="!chosen.length" class="ml-status">Пусто — кликните модификатор слева</div>
+            <div v-if="!chosen.length" class="ml-status">{{ tr("Пусто — кликните модификатор слева") }}</div>
             <div v-for="c in chosen" :key="c.id" class="ml-row chosen" :title="tip(store.get(c.id))">
               <span class="ml-mark" :title="markTip(store.get(c.id))">{{ isStandard(store.get(c.id)) ? "★" : isOutside(store.get(c.id)) ? "🧪" : "" }}</span>
               <span class="ml-name">{{ store.nameOf(c.id) }} <span class="ml-id">{{ c.id }}</span></span>
-              <span v-if="store.get(c.id)?.script" class="ml-code" title="Показать Lua-код модификатора" @click.stop="viewCode(store.get(c.id)!, $event)">📜</span>
+              <span v-if="store.get(c.id)?.script" class="ml-code" :title="tr('Показать Lua-код модификатора')" @click.stop="viewCode(store.get(c.id)!, $event)">📜</span>
               <span class="ml-step">
-                <button type="button" class="ml-stepbtn" title="Убрать одну" @click="removeOne(c.id)">−</button>
+                <button type="button" class="ml-stepbtn" :title="tr('Убрать одну')" @click="removeOne(c.id)">−</button>
                 <span class="ml-x">×{{ c.count }}</span>
-                <button type="button" class="ml-stepbtn" title="Добавить ещё одну" @click="addOne(c.id)">＋</button>
+                <button type="button" class="ml-stepbtn" :title="tr('Добавить ещё одну')" @click="addOne(c.id)">＋</button>
               </span>
-              <button type="button" class="ml-del" title="Убрать все" @click="removeAll(c.id)">✕</button>
+              <button type="button" class="ml-del" :title="tr('Убрать все')" @click="removeAll(c.id)">✕</button>
             </div>
           </div>
         </div>
       </div>
       <template #footer>
-        <span class="ml-legend">★ набор редактора игры · 🧪 вне редактора (мод/скрипт)</span>
-        <el-button size="small" type="primary" @click="open = false">Готово</el-button>
+        <span class="ml-legend">{{ tr("★ набор редактора игры · 🧪 вне редактора (мод/скрипт)") }}</span>
+        <el-button size="small" type="primary" @click="open = false">{{ tr("Готово") }}</el-button>
       </template>
     </el-dialog>
 
@@ -257,7 +258,7 @@ const markTip = (m: ModifierEntry | undefined): string =>
         <span class="ml-id">{{ codeMod.id }}</span>
         <span class="ml-code-path">{{ codeMod.script }}</span>
       </div>
-      <div v-if="codeLoading" class="ml-status">Загрузка кода…</div>
+      <div v-if="codeLoading" class="ml-status">{{ tr("Загрузка кода…") }}</div>
       <div v-else-if="codeErr" class="ml-status err">{{ codeErr }}</div>
       <LuaView v-else :code="codeText" />
     </el-dialog>

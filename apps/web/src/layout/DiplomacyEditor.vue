@@ -6,6 +6,7 @@ import { diplomacyRaceCategory, readDiplomacyRelation } from "@d2/map-edit";
 import { useEventStore } from "../stores/eventStore";
 import { useEditStore } from "../stores/editStore";
 import { useModStore } from "../stores/modStore";
+import { tr, trn } from "../i18n";
 
 const store = useEventStore();
 const edit = useEditStore();
@@ -24,12 +25,12 @@ const pairs = computed<Pair[]>(() => {
     const cats = mods.raceCategoryById;
     const race1 = diplomacyRaceCategory(a, cats), race2 = diplomacyRaceCategory(b, cats);
     const state = race1 === null || race2 === null ? null : readDiplomacyRelation(store.diplomacy, race1, race2);
-    out.push({ key: a.id + ':' + b.id, aName: a.name || `Игрок ${a.playerNo}`, bName: b.name || `Игрок ${b.playerNo}`,
+    out.push({ key: a.id + ':' + b.id, aName: a.name || tr("Игрок {n}", { n: a.playerNo }), bName: b.name || tr("Игрок {n}", { n: b.playerNo }),
       aColor: a.color, bColor: b.color, race1, race2, relation: state?.current ?? 0, alwaysWar: state?.alwaysWar ?? false });
   }
   return out;
 });
-const PRESETS = [{ value: 100, label: "Мир" }, { value: 49, label: "Нейтралитет" }, { value: 0, label: "Война" }];
+const PRESETS = [{ value: 100, label: tr("Мир") }, { value: 49, label: tr("Нейтралитет") }, { value: 0, label: tr("Война") }];
 function set(p: Pair, relation: unknown): void {
   if (p.alwaysWar || p.race1 === null || p.race2 === null || typeof relation !== 'number' || !Number.isInteger(relation) || relation < 0 || relation > 100) return;
   store.setDiplomacyRelation(p.race1, p.race2, relation);
@@ -38,9 +39,9 @@ function set(p: Pair, relation: unknown): void {
 
 <template>
   <div class="dp">
-    <div class="dp-head"><span class="dp-sub">{{ players.length }} игрок(ов)</span></div>
+    <div class="dp-head"><span class="dp-sub">{{ trn("{n} игрок|{n} игрока|{n} игроков", players.length) }}</span></div>
     <div class="dp-body">
-      <el-empty v-if="pairs.length === 0" description="Нужно ≥ 2 игроков" :image-size="60" />
+      <el-empty v-if="pairs.length === 0" :description="tr('Нужно ≥ 2 игроков')" :image-size="60" />
       <div v-for="p in pairs" :key="p.key" class="dp-entry">
         <div class="dp-row">
           <span class="dp-pair">
@@ -50,20 +51,20 @@ function set(p: Pair, relation: unknown): void {
           </span>
           <template v-if="p.race1 !== null && p.race2 !== null">
             <el-select :model-value="p.relation" :disabled="p.alwaysWar" size="small" style="width: 130px"
-              :aria-label="`Отношение: ${p.aName} — ${p.bName}`" @update:model-value="set(p, $event)">
+              :aria-label="tr('Отношение: {a} — {b}', { a: p.aName, b: p.bName })" @update:model-value="set(p, $event)">
               <el-option v-for="o in PRESETS" :key="o.value" :value="o.value" :label="o.label" />
               <el-option v-if="!PRESETS.some(x => x.value === p.relation)" :value="p.relation" :label="`${p.relation}`" />
             </el-select>
             <el-input-number v-if="p.relation <= 100" :model-value="p.relation" :disabled="p.alwaysWar" :min="0" :max="100" size="small" controls-position="right"
-              :aria-label="`Значение отношения: ${p.aName} — ${p.bName}`" style="width: 92px" @update:model-value="set(p, $event)" />
-            <span v-else class="dp-source-value" title="Исходное значение сохранено. Новое значение выбирается в диапазоне 0–100.">{{ p.relation }} (из файла)</span>
+              :aria-label="tr('Значение отношения: {a} — {b}', { a: p.aName, b: p.bName })" style="width: 92px" @update:model-value="set(p, $event)" />
+            <span v-else class="dp-source-value" :title="tr('Исходное значение сохранено. Новое значение выбирается в диапазоне 0–100.')">{{ tr("{value} (из файла)", { value: p.relation }) }}</span>
           </template>
         </div>
-        <p v-if="p.race1 === null || p.race2 === null" class="dp-lock">Раса не распознана: изменение отношений недоступно.</p>
-        <p v-else-if="p.alwaysWar" class="dp-lock">Вечная война: изменение отношения запрещено условиями карты.</p>
+        <p v-if="p.race1 === null || p.race2 === null" class="dp-lock">{{ tr("Раса не распознана: изменение отношений недоступно.") }}</p>
+        <p v-else-if="p.alwaysWar" class="dp-lock">{{ tr("Вечная война: изменение отношения запрещено условиями карты.") }}</p>
       </div>
     </div>
-    <p class="dp-hint">0 = война, 49 = нейтралитет, 100 = мир. Отношения хранятся по расам игроков.</p>
+    <p class="dp-hint">{{ tr("0 = война, 49 = нейтралитет, 100 = мир. Отношения хранятся по расам игроков.") }}</p>
   </div>
 </template>
 

@@ -9,27 +9,28 @@ import { computed } from "vue";
 import { Delete, Plus, Close } from "@element-plus/icons-vue";
 import { useToolStore } from "../stores/toolStore";
 import { useRoadActions } from "../composables/roadActions";
+import { tr, trn } from "../i18n";
 
 const toolStore = useToolStore();
 const { eraseSelected, expandSelection, clearSelection, canExpand } = useRoadActions();
 
-const LEVEL_LABEL = ["прямая", "нить", "вся сеть"] as const;
+const LEVEL_LABEL = [tr("прямая"), tr("нить"), tr("вся сеть")] as const;
 const levelLabel = computed(() => LEVEL_LABEL[toolStore.roadLevel] ?? "");
 </script>
 
 <template>
   <div v-if="toolStore.roadSel.length" class="road-actions d2-float">
     <div class="ra-info">
-      <div class="ra-name">Дорога: {{ toolStore.roadSel.length }} кл. · {{ levelLabel }}</div>
-      <div class="ra-hint">клик по той же клетке — расширить · Del — стереть · Esc — снять</div>
+      <div class="ra-name">{{ trn("Дорога: {n} кл. · {level}", toolStore.roadSel.length, { level: levelLabel }) }}</div>
+      <div class="ra-hint">{{ tr("клик по той же клетке — расширить · Del — стереть · Esc — снять") }}</div>
     </div>
-    <el-button size="small" :icon="Plus" :disabled="!canExpand" title="Расширить выделение (ещё клик по той же клетке)" @click="expandSelection()">
-      Больше
+    <el-button size="small" :icon="Plus" :disabled="!canExpand" :title="tr('Расширить выделение (ещё клик по той же клетке)')" @click="expandSelection()">
+      {{ tr("Больше") }}
     </el-button>
-    <el-button size="small" type="danger" plain :icon="Delete" title="Стереть выделенную дорогу (Del)" @click="eraseSelected()">
-      Стереть
+    <el-button size="small" type="danger" plain :icon="Delete" :title="tr('Стереть выделенную дорогу (Del)')" @click="eraseSelected()">
+      {{ tr("Стереть") }}
     </el-button>
-    <el-button size="small" :icon="Close" circle title="Снять выделение (Esc)" @click="clearSelection()" />
+    <el-button size="small" :icon="Close" circle :title="tr('Снять выделение (Esc)')" @click="clearSelection()" />
   </div>
 </template>
 

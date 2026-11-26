@@ -7,6 +7,7 @@
 import { Delete, Close, Link } from "@element-plus/icons-vue";
 import { useToolStore } from "../stores/toolStore";
 import { useSelectionActions } from "../composables/selectionActions";
+import { tr } from "../i18n";
 
 const toolStore = useToolStore();
 const { count, groupSelected, ungroupSelected, deleteSelected, clearSelection } = useSelectionActions();
@@ -15,17 +16,17 @@ const { count, groupSelected, ungroupSelected, deleteSelected, clearSelection } 
 <template>
   <div v-if="count > 1" class="sel-actions d2-float">
     <div class="sa-info">
-      <div class="sa-name">Выбрано: {{ count }}</div>
-      <div class="sa-hint">⇧+клик — добавить/убрать · ⇧+рамка — область · 2×клик — перенести группу</div>
+      <div class="sa-name">{{ tr("Выбрано: {n}", { n: count }) }}</div>
+      <div class="sa-hint">{{ tr("⇧+клик — добавить/убрать · ⇧+рамка — область · 2×клик — перенести группу") }}</div>
     </div>
-    <el-button size="small" :icon="Link" title="Заякорить все к ПОСЛЕДНЕМУ выбранному (⚓ группа переноса)" @click="groupSelected()">
-      Сгруппировать
+    <el-button size="small" :icon="Link" :title="tr('Заякорить все к ПОСЛЕДНЕМУ выбранному (⚓ группа переноса)')" @click="groupSelected()">
+      {{ tr("Сгруппировать") }}
     </el-button>
-    <el-button size="small" title="Снять якоря с выделенных" @click="ungroupSelected()">Разгруппировать</el-button>
-    <el-button size="small" type="danger" plain :icon="Delete" title="Удалить выделенные объекты (один undo)" @click="deleteSelected()">
-      Удалить
+    <el-button size="small" :title="tr('Снять якоря с выделенных')" @click="ungroupSelected()">{{ tr("Разгруппировать") }}</el-button>
+    <el-button size="small" type="danger" plain :icon="Delete" :title="tr('Удалить выделенные объекты (один undo)')" @click="deleteSelected()">
+      {{ tr("Удалить") }}
     </el-button>
-    <el-button size="small" :icon="Close" circle title="Снять выделение (Esc)" @click="clearSelection()" />
+    <el-button size="small" :icon="Close" circle :title="tr('Снять выделение (Esc)')" @click="clearSelection()" />
   </div>
 </template>
 

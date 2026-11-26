@@ -14,11 +14,12 @@ import { useItemStore, type ItemEntry } from "../stores/itemStore";
 import ItemIcon from "./ItemIcon.vue";
 import PickerSortHeader from "./PickerSortHeader.vue";
 import { sortBy, nextSort, type SortKey } from "./pickerSort";
+import { tr, trn } from "../i18n";
 
 /** Sort keys for the per-group sort control (shown in every subcategory header). */
 const SORT_KEYS: SortKey<ItemEntry>[] = [
-  { key: "name", label: "А-Я", get: (e) => e.name },
-  { key: "gold", label: "цена", get: (e) => e.gold, desc: true },
+  { key: "name", label: tr("А-Я"), get: (e) => e.name },
+  { key: "gold", label: tr("цена"), get: (e) => e.gold, desc: true },
 ];
 
 const props = withDefaults(
@@ -29,7 +30,7 @@ const props = withDefaults(
     triggerLabel?: string;
     allowCats?: number[]; // restrict to these ItemCat numbers (LmagItm category; equip slots); undefined = all
   }>(),
-  { modelValue: null, nullable: false, title: "Выбор предмета", triggerLabel: "", allowCats: undefined },
+  { modelValue: null, nullable: false, title: tr("Выбор предмета"), triggerLabel: "", allowCats: undefined },
 );
 const emit = defineEmits<{
   "update:modelValue": [string | null];
@@ -45,10 +46,10 @@ type Mode = "cat" | "bonus" | "cost" | "alpha";
 const mode = ref<Mode>("cat");
 const subFilter = ref<string>("all"); // narrow to one sub-group of the active mode
 const MODE_OPTIONS = [
-  { label: "Категория", value: "cat" },
-  { label: "Бонус", value: "bonus" },
-  { label: "Цена", value: "cost" },
-  { label: "А-Я", value: "alpha" },
+  { label: tr("Категория"), value: "cat" },
+  { label: tr("Бонус"), value: "bonus" },
+  { label: tr("Цена"), value: "cost" },
+  { label: tr("А-Я"), value: "alpha" },
 ];
 
 const sortKey = ref<string>("name");
@@ -73,7 +74,7 @@ watch(open, (v) => {
 watch(mode, () => { subFilter.value = "all"; }); // sub-groups change with the mode
 
 const COST_BUCKETS = [
-  { key: "c0", label: "Без стоимости", lo: 0, hi: 0 },
+  { key: "c0", label: tr("Без стоимости"), lo: 0, hi: 0 },
   { key: "c1", label: "1–499", lo: 1, hi: 499 },
   { key: "c2", label: "500–1499", lo: 500, hi: 1499 },
   { key: "c3", label: "1500–2999", lo: 1500, hi: 2999 },
@@ -87,7 +88,7 @@ const baseGroups = computed<DisplayGroup[]>(() => {
   const raw: DisplayGroup[] = (() => {
     if (mode.value === "bonus") return itemStore.bonusGroups;
     if (mode.value === "alpha") {
-      return [{ key: "all", label: "Все предметы", items: [...itemStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
+      return [{ key: "all", label: tr("Все предметы"), items: [...itemStore.all].sort((a, b) => a.name.localeCompare(b.name, "ru")) }];
     }
     if (mode.value === "cost") {
       return COST_BUCKETS.map((b) => ({
@@ -130,7 +131,7 @@ const resultCount = computed(() => groups.value.reduce((n, g) => n + g.items.len
 
 const triggerText = computed(() => {
   if (props.triggerLabel) return props.triggerLabel;
-  return itemStore.nameOf(props.modelValue) || "— нет —";
+  return itemStore.nameOf(props.modelValue) || tr("— нет —");
 });
 
 function choose(id: string): void {
@@ -164,7 +165,7 @@ function clear(): void {
       size="small"
       text
       :icon="CircleClose"
-      title="Убрать"
+      :title="tr('Убрать')"
       @click="clear()"
     />
 
@@ -179,23 +180,23 @@ function clear(): void {
       <div class="ip-controls">
         <el-input
           v-model="query"
-          placeholder="Поиск по названию или эффекту…"
+          :placeholder="tr('Поиск по названию или эффекту…')"
           size="default"
           clearable
           :prefix-icon="Search"
           class="ip-search"
         />
-        <el-select v-model="subFilter" filterable size="default" class="ip-sub" placeholder="Все">
-          <el-option label="Все" value="all" />
+        <el-select v-model="subFilter" filterable size="default" class="ip-sub" :placeholder="tr('Все')">
+          <el-option :label="tr('Все')" value="all" />
           <el-option v-for="o in subOptions" :key="o.value" :label="o.label" :value="o.value" />
         </el-select>
       </div>
       <el-segmented v-model="mode" :options="MODE_OPTIONS" size="small" class="ip-modes" />
 
-      <div v-if="itemStore.loading" class="ip-status">Загрузка каталога…</div>
-      <div v-else-if="itemStore.error" class="ip-status err">Ошибка: {{ itemStore.error }}</div>
+      <div v-if="itemStore.loading" class="ip-status">{{ tr("Загрузка каталога…") }}</div>
+      <div v-else-if="itemStore.error" class="ip-status err">{{ tr("Ошибка: {error}", { error: itemStore.error }) }}</div>
       <div v-else class="ip-list">
-        <div v-if="!resultCount" class="ip-status">Ничего не найдено</div>
+        <div v-if="!resultCount" class="ip-status">{{ tr("Ничего не найдено") }}</div>
         <template v-for="g in groups" :key="g.key">
           <PickerSortHeader
             :label="g.label"
@@ -226,9 +227,9 @@ function clear(): void {
 
       <template #footer>
         <span class="ip-foot">
-          <span class="ip-foot-info">{{ resultCount }} предметов</span>
-          <el-button v-if="nullable" size="small" @click="clear()">Убрать предмет</el-button>
-          <el-button size="small" @click="open = false">Закрыть</el-button>
+          <span class="ip-foot-info">{{ trn("{n} предмет|{n} предмета|{n} предметов", resultCount) }}</span>
+          <el-button v-if="nullable" size="small" @click="clear()">{{ tr("Убрать предмет") }}</el-button>
+          <el-button size="small" @click="open = false">{{ tr("Закрыть") }}</el-button>
         </span>
       </template>
     </el-dialog>

@@ -64,6 +64,7 @@ import { useUnitStore } from "../stores/unitStore";
 import { useCollabStore } from "../stores/collabStore";
 import { useEventStore } from "../stores/eventStore";
 import { getAssetStore, getScene, setScene, destroyScene } from "./sceneHolder";
+import { tr, trn, trc } from "../i18n";
 
 const mapStore = useMapStore();
 const assetStore = useAssetStore();
@@ -229,7 +230,7 @@ function focusPendingObject(): void {
   if (!scene || !doc) return;
   if (id.startsWith("ZN")) {
     const z = editStore.zones[id];
-    if (!z || !z.cells.length) { ElMessage.warning("Зона из ссылки не найдена на карте"); return; }
+    if (!z || !z.cells.length) { ElMessage.warning(tr("Зона из ссылки не найдена на карте")); return; }
     if (!viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
     toolStore.setSelectedZone(id);
     const pts = z.cells.map((k) => { const [x, y] = k.split(",").map(Number); return { x: x!, y: y! }; });
@@ -241,7 +242,7 @@ function focusPendingObject(): void {
     return;
   }
   const obj = doc.objects.find((o) => o.id === id);
-  if (!obj) { ElMessage.warning("Объект из ссылки не найден на карте"); return; }
+  if (!obj) { ElMessage.warning(tr("Объект из ссылки не найден на карте")); return; }
   if (obj.type === "location" && !viewStore.locationsVisible) viewStore.setLayerVisible("locations", true);
   toolStore.setSelectedId(obj.id);
   const { w, h } = objectFootprint(obj, landmarkFootprints);
@@ -415,7 +416,7 @@ function zoneVisuals(): ZoneVisual[] {
         for (const line of sums[id] ?? []) if (!uniq.includes(line)) uniq.push(line);
       if (uniq.length) {
         summary = uniq.slice(0, 2);
-        if (uniq.length > 2) summary.push(`… ещё ${uniq.length - 2}`);
+        if (uniq.length > 2) summary.push(tr("… ещё {n}", { n: uniq.length - 2 }));
       }
     }
     return {
@@ -644,9 +645,9 @@ const linkTipData = computed(() => {
   if (!tip || !id) return null;
   if (tip.hit.kind === "more") {
     return {
-      name: `ещё ${tip.hit.name.replace("+", "")} событий этого объекта`,
+      name: trn("ещё {n} событие этого объекта|ещё {n} события этого объекта|ещё {n} событий этого объекта", Number(tip.hit.name.replace("+", "")) || 0),
       roleLines: [] as string[],
-      counts: "клик — открыть их список в окне «Сценарий»",
+      counts: tr("клик — открыть их список в окне «Сценарий»"),
       isNode: false,
     };
   }
@@ -658,8 +659,10 @@ const linkTipData = computed(() => {
   for (const r of mine) {
     const line =
       r.cls === "trigger"
-        ? `${ROLE_META.trigger.icon} причина: ${r.what}`
-        : `${ROLE_META[r.cls].icon} следствие: ${r.what}${r.detail ? ` (${r.detail})` : ""}`;
+        ? tr("{icon} причина: {what}", { icon: ROLE_META.trigger.icon, what: r.what })
+        : r.detail
+          ? tr("{icon} следствие: {what} ({detail})", { icon: ROLE_META[r.cls].icon, what: r.what, detail: r.detail })
+          : tr("{icon} следствие: {what}", { icon: ROLE_META[r.cls].icon, what: r.what });
     if (!seen.has(line)) {
       seen.add(line);
       roleLines.push(line);
@@ -668,7 +671,7 @@ const linkTipData = computed(() => {
   return {
     name: ev.name || ev.id,
     roleLines: roleLines.slice(0, 3),
-    counts: `${ev.conditions.length} усл. · ${ev.effects.length} эфф.`,
+    counts: tr("{conditions} усл. · {effects} эфф.", { conditions: ev.conditions.length, effects: ev.effects.length }),
     isNode: tip.hit.kind === "node",
   };
 });
@@ -1103,7 +1106,7 @@ function buildPlaceOps(kind: PlaceObjectKind, x: number, y: number): EditOp[] {
   if (!doc) return [];
   const slot = collabStore.idSlot; // mint the new object's id in my disjoint band (M4)
   switch (kind) {
-    case "village": return placeVillageOps(doc, x, y, "Новая деревня", 1, slot);
+    case "village": return placeVillageOps(doc, x, y, trc("Новая деревня"), 1, slot);
     case "treasure": return placeChestOps(doc, x, y, 0, [], slot);
     case "ruin": return placeRuinOps(doc, x, y, 0, slot);
     case "merchant": case "mage": case "trainer": case "mercenary":
@@ -1129,17 +1132,17 @@ function placeObjectAt(kind: PlaceObjectKind, x: number, y: number): boolean {
   const ops = buildPlaceOps(kind, x, y);
   const obj = (ops[0] as Extract<EditOp, { kind: "addObject" }> | undefined)?.object;
   if (!obj) {
-    if (kind === "stack") ElMessage.warning("Каталог юнитов ещё загружается — попробуйте через секунду");
+    if (kind === "stack") ElMessage.warning(tr("Каталог юнитов ещё загружается — попробуйте через секунду"));
     return false;
   }
   const { w, h } = objectFootprint(obj, landmarkFootprints);
   if (!canPlaceFootprint(x, y, w, h)) {
-    ElMessage.warning(w > 1 ? `Не помещается: нужно ${w}×${h} свободных клеток` : "Клетка занята");
+    ElMessage.warning(w > 1 ? tr("Не помещается: нужно {w}×{h} свободных клеток", { w, h }) : tr("Клетка занята"));
     return false;
   }
   // города на воде нелегальны (подводные клады/затонувшие руины/лодки — легальны)
   if (obj.type === "village" && footprintCells(x, y, w, h).some((c) => isWaterCell(c.x, c.y))) {
-    ElMessage.warning("Город нельзя ставить на воду");
+    ElMessage.warning(tr("Город нельзя ставить на воду"));
     return false;
   }
   editStore.commit(ops);
@@ -1152,7 +1155,7 @@ function placeAction(kind: PlaceObjectKind): void {
   const at = ctxMenu.value?.cell;
   ctxMenu.value = null;
   if (!at) return;
-  if (placeObjectAt(kind, at.x, at.y)) ElMessage.success("Поставлено — свойства в инспекторе справа");
+  if (placeObjectAt(kind, at.x, at.y)) ElMessage.success(tr("Поставлено — свойства в инспекторе справа"));
 }
 
 function ctxAction(action: string): void {
@@ -1173,7 +1176,7 @@ function ctxAction(action: string): void {
       // one-click spawn trigger for a location (day-1 frequency + createStack pre-wired)
       eventStore.createSpawnAt(obj.id, (obj as { name?: string }).name);
       if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
-      ElMessage.success("Событие спавна создано — выберите шаблон отряда в редакторе");
+      ElMessage.success(tr("Событие спавна создано — выберите шаблон отряда в редакторе"));
       break;
     }
     case "newEvent": {
@@ -1183,23 +1186,23 @@ function ctxAction(action: string): void {
       eventStore.panelTab = "events";
       eventStore.select(ev.id);
       if (!viewStore.eventPanelVisible) viewStore.toggleEventPanel();
-      ElMessage.success("Событие создано и привязано к объекту");
+      ElMessage.success(tr("Событие создано и привязано к объекту"));
       break;
     }
     case "copyId":
       void navigator.clipboard.writeText(obj.id).then(
-        () => ElMessage.success(`id скопирован: ${obj.id}`),
+        () => ElMessage.success(tr("id скопирован: {id}", { id: obj.id })),
         () => ElMessage.info(obj.id),
       );
       break;
     case "anchor":
       anchorPickFor.value = obj.id; // next click picks the parent
       if (!viewStore.anchorsVisible) viewStore.toggleAnchors(); // show the links overlay
-      ElMessage.info("Кликните объект-родитель для якоря (Esc — отмена)");
+      ElMessage.info(tr("Кликните объект-родитель для якоря (Esc — отмена)"));
       break;
     case "unanchor":
       editStore.clearAnchor(obj.id);
-      ElMessage.success("Якорь снят");
+      ElMessage.success(tr("Якорь снят"));
       break;
     case "links":
       viewStore.toggleAnchors();
@@ -1211,8 +1214,8 @@ function ctxAction(action: string): void {
       const on = editStore.toggleRoadAnchor(obj.id);
       ElMessage.success(
         on
-          ? "Дорога следует за входом: при переносе города дорога перепроложится к новому входу"
-          : "Дорога больше не следует за городом",
+          ? tr("Дорога следует за входом: при переносе города дорога перепроложится к новому входу")
+          : tr("Дорога больше не следует за городом"),
       );
       break;
     }
@@ -1231,11 +1234,11 @@ function deleteObjectSafely(obj: MapObject): void {
     return;
   }
   if (obj.type === "stack" && ((obj as { inside?: string }).inside || (obj as { garrisoned?: boolean }).garrisoned)) {
-    ElMessage.warning("Это гость города — удалите/замените героя через свойства города");
+    ElMessage.warning(tr("Это гость города — удалите/замените героя через свойства города"));
     return;
   }
   if (obj.type === "village" && (obj as { stackRef?: string }).stackRef) {
-    ElMessage.warning("В городе герой-гость — сначала уберите его (свойства города)");
+    ElMessage.warning(tr("В городе герой-гость — сначала уберите его (свойства города)"));
     return;
   }
   editStore.commit([{ kind: "deleteObject", id: obj.id }]);
@@ -1247,9 +1250,9 @@ function finishAnchorPick(parent: MapObject): void {
   anchorPickFor.value = null;
   if (!child || child === parent.id) return;
   if (editStore.setAnchor(child, parent.id)) {
-    ElMessage.success("Заякорено — перенос родителя тянет всю связку");
+    ElMessage.success(tr("Заякорено — перенос родителя тянет всю связку"));
   } else {
-    ElMessage.warning("Нельзя: цикл якорей");
+    ElMessage.warning(tr("Нельзя: цикл якорей"));
   }
 }
 
@@ -1259,11 +1262,11 @@ function onKeyDown(e: KeyboardEvent): void {
   if (ctxMenu.value) ctxMenu.value = null;
   if (anchorPickFor.value) {
     anchorPickFor.value = null;
-    ElMessage.info("Якорение отменено");
+    ElMessage.info(tr("Якорение отменено"));
   }
   if (toolStore.objectPickTypes) {
     toolStore.finishObjectPick(null);
-    ElMessage.info("Выбор на карте отменён");
+    ElMessage.info(tr("Выбор на карте отменён"));
   }
   if (locResize) {
     locResize = null; // drop the radius drag without committing
@@ -1286,10 +1289,10 @@ function onPointerDown(e: PointerEvent): void {
       : null;
     if (hit) {
       toolStore.finishObjectPick(hit.id);
-      ElMessage.success("Выбрано");
+      ElMessage.success(tr("Выбрано"));
     } else {
       toolStore.finishObjectPick(null);
-      ElMessage.info("Выбор отменён (тут нет подходящего объекта)");
+      ElMessage.info(tr("Выбор отменён (тут нет подходящего объекта)"));
     }
     return;
   }
@@ -1298,7 +1301,7 @@ function onPointerDown(e: PointerEvent): void {
     const cell = cellFromEvent(e);
     const hit = cell ? pickAtCell(cell.x, cell.y, e.altKey) : null;
     if (hit) finishAnchorPick(hit);
-    else { anchorPickFor.value = null; ElMessage.info("Якорение отменено"); }
+    else { anchorPickFor.value = null; ElMessage.info(tr("Якорение отменено")); }
     return;
   }
   // клик по ◆-чипу события в нитях связей → открыть это событие в окне «Сценарий»;
@@ -1628,7 +1631,7 @@ function onPointerUp(e: PointerEvent): void {
         void genStore
           .run({ recipeId: genRecipe, region: genRegion, cells, stroke: true, protect: true })
           .then((rep) => {
-            if (rep && !rep.ok) ElMessage.warning("Генерация по рисунку не прошла проверку карты — не применена");
+            if (rep && !rep.ok) ElMessage.warning(tr("Генерация по рисунку не прошла проверку карты — не применена"));
           })
           .catch((err) => ElMessage.error("⚠ " + (err instanceof Error ? err.message : String(err))))
           .finally(() => toolStore.clearZone()); // the veil clears; ready for the next stroke
@@ -2199,36 +2202,36 @@ watch(
     >
       <template v-if="ctxMenu.obj">
         <div class="ctx-title">{{ ctxObjectTitle(ctxMenu.obj) }} <code>{{ ctxMenu.obj.id }}</code></div>
-        <button class="ctx-item" @click="ctxAction('props')">Свойства</button>
+        <button class="ctx-item" @click="ctxAction('props')">{{ tr("Свойства") }}</button>
         <div class="ctx-sep" />
-        <button class="ctx-item" @click="ctxAction('events')">📋 События объекта</button>
-        <button class="ctx-item" @click="ctxAction('newEvent')">＋ Событие с этим объектом</button>
-        <button v-if="ctxMenu.obj.type === 'location'" class="ctx-item" @click="ctxAction('spawnHere')">✨ Спавн отряда здесь</button>
+        <button class="ctx-item" @click="ctxAction('events')">{{ tr("📋 События объекта") }}</button>
+        <button class="ctx-item" @click="ctxAction('newEvent')">{{ tr("＋ Событие с этим объектом") }}</button>
+        <button v-if="ctxMenu.obj.type === 'location'" class="ctx-item" @click="ctxAction('spawnHere')">{{ tr("✨ Спавн отряда здесь") }}</button>
         <div class="ctx-sep" />
-        <button class="ctx-item" @click="ctxAction('anchor')">⚓ Заякорить к…</button>
+        <button class="ctx-item" @click="ctxAction('anchor')">{{ tr("⚓ Заякорить к…") }}</button>
         <button
           v-if="ctxMenu.obj.type === 'village' || ctxMenu.obj.type === 'capital'"
           class="ctx-item"
           @click="ctxAction('roadAnchor')"
         >
-          🛣 Дорога следует за входом {{ editStore.roadAnchors[ctxMenu.obj.id] ? "✓" : "" }}
+          {{ tr("🛣 Дорога следует за входом") }} {{ editStore.roadAnchors[ctxMenu.obj.id] ? "✓" : "" }}
         </button>
-        <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">Снять якорь</button>
-        <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? 'Скрыть связи' : 'Показать связи' }}</button>
+        <button v-if="editStore.anchors[ctxMenu.obj.id]" class="ctx-item" @click="ctxAction('unanchor')">{{ tr("Снять якорь") }}</button>
+        <button class="ctx-item" @click="ctxAction('links')">{{ viewStore.anchorsVisible ? tr("Скрыть связи") : tr("Показать связи") }}</button>
         <div class="ctx-sep" />
-        <button class="ctx-item" @click="ctxAction('copyId')">Скопировать id</button>
-        <button v-if="['landmark', 'stack', 'mountains', 'village', 'treasure', 'ruin', 'merchant', 'mage', 'trainer', 'mercenary'].includes(ctxMenu.obj.type)" class="ctx-item ctx-danger" @click="ctxAction('delete')">🗑 Удалить</button>
+        <button class="ctx-item" @click="ctxAction('copyId')">{{ tr("Скопировать id") }}</button>
+        <button v-if="['landmark', 'stack', 'mountains', 'village', 'treasure', 'ruin', 'merchant', 'mage', 'trainer', 'mercenary'].includes(ctxMenu.obj.type)" class="ctx-item ctx-danger" @click="ctxAction('delete')">{{ tr("🗑 Удалить") }}</button>
       </template>
       <template v-else>
-        <div class="ctx-title">Поставить здесь <code>{{ ctxMenu.cell.x }}, {{ ctxMenu.cell.y }}</code></div>
-        <button class="ctx-item" @click="placeAction('village')">🏘 Деревню (4×4)</button>
-        <button class="ctx-item" @click="placeAction('stack')">⚔️ Отряд (герой)</button>
-        <button class="ctx-item" @click="placeAction('treasure')">📦 Сундук</button>
-        <button class="ctx-item" @click="placeAction('ruin')">🏚 Руину (3×3)</button>
-        <button class="ctx-item" @click="placeAction('merchant')">🛒 Торговца (3×3)</button>
-        <button class="ctx-item" @click="placeAction('mage')">🔮 Мага (3×3)</button>
-        <button class="ctx-item" @click="placeAction('trainer')">🎓 Тренера (3×3)</button>
-        <button class="ctx-item" @click="placeAction('mercenary')">🛡 Наёмников (3×3)</button>
+        <div class="ctx-title">{{ tr("Поставить здесь") }} <code>{{ ctxMenu.cell.x }}, {{ ctxMenu.cell.y }}</code></div>
+        <button class="ctx-item" @click="placeAction('village')">{{ tr("🏘 Деревню (4×4)") }}</button>
+        <button class="ctx-item" @click="placeAction('stack')">{{ tr("⚔️ Отряд (герой)") }}</button>
+        <button class="ctx-item" @click="placeAction('treasure')">{{ tr("📦 Сундук") }}</button>
+        <button class="ctx-item" @click="placeAction('ruin')">{{ tr("🏚 Руину (3×3)") }}</button>
+        <button class="ctx-item" @click="placeAction('merchant')">{{ tr("🛒 Торговца (3×3)") }}</button>
+        <button class="ctx-item" @click="placeAction('mage')">{{ tr("🔮 Мага (3×3)") }}</button>
+        <button class="ctx-item" @click="placeAction('trainer')">{{ tr("🎓 Тренера (3×3)") }}</button>
+        <button class="ctx-item" @click="placeAction('mercenary')">{{ tr("🛡 Наёмников (3×3)") }}</button>
       </template>
     </div>
     <div v-if="debugOverlay && debugStats" class="debug-hud">
@@ -2253,7 +2256,7 @@ watch(
       <div class="hud-row"><span>buffer</span><b>{{ debugStats.drawingBuffer.w }}×{{ debugStats.drawingBuffer.h }} (dpr {{ debugStats.dpr }})</b></div>
       <div class="hud-sep" />
       <div class="hud-row"><span>tex vram</span><b>{{ debugStats.texMB.toFixed(0) }} MB / {{ debugStats.texCount }}</b></div>
-      <div class="hud-row"><span>atlas vram</span><b>{{ debugStats.atlasVramMB.toFixed(0) }} MB / {{ debugStats.sheets }} листов</b></div>
+      <div class="hud-row"><span>atlas vram</span><b>{{ trn("{mb} MB / {n} лист|{mb} MB / {n} листа|{mb} MB / {n} листов", debugStats.sheets, { mb: debugStats.atlasVramMB.toFixed(0) }) }}</b></div>
       <div class="hud-row">
         <span>js heap</span>
         <b v-if="debugStats.jsHeapMB != null">{{ debugStats.jsHeapMB.toFixed(0) }} / {{ debugStats.jsHeapLimitMB?.toFixed(0) }} MB</b>
@@ -2269,17 +2272,17 @@ watch(
     </div>
     <!-- легенда оверлея «Роли локаций» (тумблер в Вид) -->
     <div v-if="viewStore.rolesVisible && currentMap" class="roles-legend d2-float">
-      ⚡ вход-триггер&ensp;✨ спавн&ensp;➜ цель&ensp;☁ эффект&ensp;<span class="rl-dim">· точка — не используется</span>
+      {{ tr("⚡ вход-триггер") }}&ensp;{{ tr("✨ спавн") }}&ensp;{{ tr("➜ цель") }}&ensp;{{ tr("☁ эффект") }}&ensp;<span class="rl-dim">{{ tr("· точка — не используется") }}</span>
     </div>
     <!-- легенда нитей связей: цвет кольца бейджа = роль выбранного объекта в событии -->
     <div v-if="linkGroupCount && currentMap" class="links-legend d2-float">
-      <span class="ll-title">кружки = события объекта; цвет — его роль:</span>
-      <span class="ll-item"><i class="ll-dot" style="background:#e6a23c" />⚡ запускает</span>
-      <span class="ll-item"><i class="ll-dot" style="background:#f56c6c" />🎯 изменит его</span>
-      <span class="ll-item"><i class="ll-dot" style="background:#67c23a" />✨ спавн</span>
-      <span class="ll-item"><i class="ll-dot" style="background:#409eff" />➜ движение</span>
-      <span class="ll-item"><i class="ll-dot" style="background:#b07dd8" />☁ среда</span>
-      <span class="ll-hint">стрелки — к местам на карте: причина → ● → следствие · наведи — подсветка · клик — открыть</span>
+      <span class="ll-title">{{ tr("кружки = события объекта; цвет — его роль:") }}</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#e6a23c" />{{ tr("⚡ запускает") }}</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#f56c6c" />{{ tr("🎯 изменит его") }}</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#67c23a" />{{ tr("✨ спавн") }}</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#409eff" />{{ tr("➜ движение") }}</span>
+      <span class="ll-item"><i class="ll-dot" style="background:#b07dd8" />{{ tr("☁ среда") }}</span>
+      <span class="ll-hint">{{ tr("стрелки — к местам на карте: причина → ● → следствие · наведи — подсветка · клик — открыть") }}</span>
     </div>
     <!-- тултип наведения на нить/узел: имя события + роль выбранного объекта в нём -->
     <div
@@ -2289,9 +2292,9 @@ watch(
     >
       <div class="lt-title">● {{ linkTipData.name }}</div>
       <div v-for="line in linkTipData.roleLines" :key="line" class="lt-role">{{ line }}</div>
-      <div class="lt-foot">{{ linkTipData.counts }}<template v-if="linkTipData.isNode"> · клик — открыть событие</template></div>
+      <div class="lt-foot">{{ linkTipData.counts }}<template v-if="linkTipData.isNode"> · {{ tr("клик — открыть событие") }}</template></div>
     </div>
-    <div v-if="building" v-loading="true" class="canvas-overlay" element-loading-text="Building scene…" />
+    <div v-if="building" v-loading="true" class="canvas-overlay" :element-loading-text="tr('Строю сцену…')" />
     <el-alert
       v-if="buildError"
       class="canvas-error"

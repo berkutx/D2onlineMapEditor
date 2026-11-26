@@ -17,6 +17,7 @@ import type { MapMeta, ScenarioEntry } from "@d2/socket-contract";
 import { fetchScenarios, fetchMapDocument, fetchMapMeta } from "../services/api";
 import { useAssetStore } from "./assetStore";
 import { useModStore } from "./modStore";
+import { tr } from "../i18n";
 
 export type MapLoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -88,7 +89,7 @@ export const useMapStore = defineStore("map", () => {
       // a server that predates mods sends no meta.mod: its one implicit mod is the default
       const modId = meta.mod?.id ?? modList.defaultModId;
       if (!mods.activate(modId)) {
-        if (mods.activeModId === null) throw new Error(`Сервер не знает мод «${modId}» этой карты`);
+        if (mods.activeModId === null) throw new Error(tr("Сервер не знает мод «{mod}» этой карты", { mod: modId }));
         // Another mod's catalogs and textures are loaded in this page session, and they load
         // once and never unload. Open the map in a FRESH session instead of mixing two data
         // sets: the editor's state is persisted continuously, so a reload loses nothing.

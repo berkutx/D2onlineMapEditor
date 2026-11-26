@@ -40,6 +40,7 @@ import ImagePicker from "./ImagePicker.vue";
 import SpriteThumb from "./SpriteThumb.vue";
 import RegionPreview from "./RegionPreview.vue";
 import { useSpriteStore } from "../stores/spriteStore";
+import { tr, trx } from "../i18n";
 
 /** RuinObjectAccessor sprite key: "G000RU0000" + image(3) (base look; looted adds +100). */
 const ruinImageKey = (i: number): string => `G000RU0000${String(i).padStart(3, "0")}`;
@@ -75,10 +76,10 @@ const obj = computed(() =>
 );
 
 const TYPE_LABEL: Record<string, string> = {
-  treasure: "Сундук", ruin: "Руина", village: "Город", capital: "Столица",
-  mountains: "Горы", landmark: "Декор", stack: "Отряд", crystal: "Кристалл",
-  merchant: "Торговец", mage: "Маг", trainer: "Тренер", mercenary: "Наёмники",
-  rod: "Жезл", tomb: "Могила", unit: "Юнит", location: "Локация",
+  treasure: tr("Сундук"), ruin: tr("Руина"), village: tr("Город"), capital: tr("Столица"),
+  mountains: tr("Горы"), landmark: tr("Декор"), stack: tr("Отряд"), crystal: tr("Кристалл"),
+  merchant: tr("Торговец"), mage: tr("Маг"), trainer: tr("Тренер"), mercenary: tr("Наёмники"),
+  rod: tr("Жезл"), tomb: tr("Могила"), unit: tr("Юнит"), location: tr("Локация"),
 };
 const typeLabel = computed(() => (obj.value ? TYPE_LABEL[obj.value.type] ?? obj.value.type : ""));
 const editable = computed(
@@ -87,7 +88,7 @@ const editable = computed(
 );
 
 /** MidLocation radius is a size step r → a (2r+1)×(2r+1) cell square. */
-const locationSpan = (r: number): string => `${2 * r + 1}×${2 * r + 1} клеток`;
+const locationSpan = (r: number): string => tr("{w}×{h} клеток", { w: 2 * r + 1, h: 2 * r + 1 });
 
 /** Границы области выбранной локации для превью «Точка на карте». */
 const locPreviewBounds = computed(() => {
@@ -175,16 +176,19 @@ const siteImageKey = computed(() => {
 });
 
 /** Mana-crystal: RESOURCE int 0-5 (CrystalIdByResource order) -> RU label + sprite suffix. */
-const CRYSTAL_LABELS = ["Золото", "Инферно", "Жизнь", "Смерть", "Руны", "Природа"];
+const CRYSTAL_LABELS = [tr("Золото"), tr("Инферно"), tr("Жизнь"), tr("Смерть"), tr("Руны"), tr("Природа")];
 const CRYSTAL_SUFFIX = ["GL", "RD", "YE", "RG", "WH", "GR"];
 const crystalKey = (r: number): string => `G000CR0000${CRYSTAL_SUFFIX[r] ?? "GL"}`;
 
 /** Grace.dbf RACE_ID index → race name (base-game constant, read from Grace.dbf).
  *  A player IS its race (1:1, unique per scenario) — the owner must read as the race,
  *  not the author's free-form NAME_TXT lord name (which can be anything, e.g. "Разведчик"
- *  on an undead player). */
-const GRACE_RACE_NAMES: Record<number, string> = {
-  0: "Империя", 1: "Кланы Гор", 2: "Легионы Проклятых", 3: "Орды Нежити", 4: "Нейтрал", 5: "Эльфийский Союз",
+ *  on an undead player). `ru` is the game's own name — what a map calls the player by default,
+ *  so it is MATCHED against NAME_TXT below; `label` is what the interface shows. */
+const GRACE_RACE_NAMES: Record<number, { ru: string; label: string }> = {
+  0: { ru: "Империя", label: tr("Империя") }, 1: { ru: "Кланы Гор", label: tr("Кланы Гор") },
+  2: { ru: "Легионы Проклятых", label: tr("Легионы Проклятых") }, 3: { ru: "Орды Нежити", label: tr("Орды Нежити") },
+  4: { ru: "Нейтрал", label: tr("Нейтрал") }, 5: { ru: "Эльфийский Союз", label: tr("Эльфийский Союз") },
 };
 
 /** Players for the owner dropdown (id is the full compound uid = the stored OWNER value).
@@ -192,8 +196,9 @@ const GRACE_RACE_NAMES: Record<number, string> = {
 const NEUTRAL = "G000000000";
 const players = computed(() =>
   (editStore.liveDoc?.players ?? []).map((p) => {
-    const race = GRACE_RACE_NAMES[p.race] ?? `Раса ${p.race}`;
-    return { id: p.id, label: p.name && p.name !== race ? `${race} — ${p.name}` : race };
+    const known = GRACE_RACE_NAMES[p.race];
+    const race = known?.label ?? tr("Раса {n}", { n: p.race });
+    return { id: p.id, label: p.name && p.name !== race && p.name !== known?.ru ? `${race} — ${p.name}` : race };
   }),
 );
 
@@ -430,7 +435,7 @@ function mercSetUnique(i: number, v: boolean): void {
 
 /** ── Merchant BUY_* — which item categories the merchant buys back (omitted = all true). Index
  *  order is FROZEN (schema/parser/writer agree): armor/jewel/weapon/banner/potion/scroll/wand/value. */
-const BUY_LABELS = ["Броня", "Драгоценности", "Оружие", "Штандарты", "Зелья", "Свитки", "Жезлы", "Ценности"];
+const BUY_LABELS = [tr("Броня"), tr("Драгоценности"), tr("Оружие"), tr("Штандарты"), tr("Зелья"), tr("Свитки"), tr("Жезлы"), tr("Ценности")];
 const merchantBuy = computed<boolean[]>(() => {
   const o = obj.value;
   const buy = o?.type === "merchant" ? o.buy : undefined;
@@ -447,9 +452,9 @@ function setMerchantBuy(i: number, v: boolean): void {
  *  Editing the formation rewrites UNIT_/POS_ (new MidUnit instances) + LEADER_ID; we always send
  *  garrison + leaderCell + the recomputed leaderImage so the live doc + writer stay in sync. */
 const ORDER_OPTIONS = [
-  { value: 1, label: "Обычный" }, { value: 2, label: "Стоять" }, { value: 3, label: "Охранять" },
-  { value: 4, label: "Атаковать" }, { value: 7, label: "Бродить" }, { value: 8, label: "Идти" },
-  { value: 9, label: "Защищать" }, { value: 10, label: "Берсерк" },
+  { value: 1, label: tr("Обычный") }, { value: 2, label: tr("Стоять") }, { value: 3, label: tr("Охранять") },
+  { value: 4, label: tr("Атаковать") }, { value: 7, label: tr("Бродить") }, { value: 8, label: tr("Идти") },
+  { value: 9, label: tr("Защищать") }, { value: 10, label: tr("Берсерк") },
 ];
 // Leader equipment: which ItemCat (LmagItm category number) each slot accepts, per the game.
 //   0,2 армор/оружие → артефакты · 1 реликвия · 3 знамя · 13 сапоги
@@ -458,12 +463,12 @@ const ORDER_OPTIONS = [
 const ARTIFACT_CATS = [0, 2]; // армор + оружие
 const BATTLE_CATS = [4, 5, 6, 7, 11, 12]; // зелья (усил./лечение/воскр./постоянные) + сфера + талисман
 const EQUIP_SLOTS = [
-  { key: "tome", label: "Реликвия", cats: [1] }, // .sg TOME-поле = слот реликвии (L_JEWEL)
-  { key: "battle1", label: "Боевой 1", cats: BATTLE_CATS },
-  { key: "battle2", label: "Боевой 2", cats: BATTLE_CATS },
-  { key: "artifact1", label: "Артефакт 1", cats: ARTIFACT_CATS },
-  { key: "artifact2", label: "Артефакт 2", cats: ARTIFACT_CATS },
-  { key: "boots", label: "Сапоги", cats: [13] },
+  { key: "tome", label: tr("Реликвия"), cats: [1] }, // .sg TOME-поле = слот реликвии (L_JEWEL)
+  { key: "battle1", label: tr("Боевой 1"), cats: BATTLE_CATS },
+  { key: "battle2", label: tr("Боевой 2"), cats: BATTLE_CATS },
+  { key: "artifact1", label: tr("Артефакт 1"), cats: ARTIFACT_CATS },
+  { key: "artifact2", label: tr("Артефакт 2"), cats: ARTIFACT_CATS },
+  { key: "boots", label: tr("Сапоги"), cats: [13] },
 ];
 const EMPTY_REFS = new Set(["000000", "G000000000"]);
 /** Stack banner-item slot (the BANNER field; separate from the faction banner = subRace). */
@@ -510,7 +515,7 @@ function commitStackFormation(st: StackLike, g: (GarrUnit | null)[], leaderCell:
   }
   const leaderImage = lc >= 0 ? g[lc]?.unit : undefined;
   if (lc >= 0 && g[lc] && !unitStore.isLeaderCategory(g[lc]!.unit)) {
-    ElMessage.warning("В отряде нет героя/вора — игра требует юнита-лидера во главе");
+    ElMessage.warning(tr("В отряде нет героя/вора — игра требует юнита-лидера во главе"));
   }
   editStore.commit([{ kind: "patchObject", id: st.id, fields: { garrison: g, leaderCell: lc, leaderImage } }]);
 }
@@ -550,7 +555,7 @@ function stackSetLeader(st: StackLike, cell: number): void {
   const g = garr6(st);
   // the star button is already disabled for non-leaders — this is the belt to its braces
   if (!unitStore.isLeaderCategory(g[cell]?.unit)) {
-    ElMessage.warning("Вести отряд может только герой или вор (категория лидера)");
+    ElMessage.warning(tr("Вести отряд может только герой или вор (категория лидера)"));
     return;
   }
   commitStackFormation(st, g.map((c) => (c ? { ...c } : null)), cell);
@@ -596,7 +601,7 @@ function stackRemoveItem(i: number): void {
  *  Letter order = the resource enum (CrystalIdByResource): Gold, Demons(Inferno), Empire(Life),
  *  Undead(Death), Clans(Runic), Elves(Nature) — so E=Death, B=Nature (NOT the other way). */
 const REWARD_ORDER = ["G", "R", "Y", "E", "W", "B"] as const;
-const REWARD_LABELS: Record<string, string> = { G: "Золото", R: "Инферно", Y: "Жизнь", E: "Смерть", W: "Руны", B: "Природа" };
+const REWARD_LABELS: Record<string, string> = { G: tr("Золото"), R: tr("Инферно"), Y: tr("Жизнь"), E: tr("Смерть"), W: tr("Руны"), B: tr("Природа") };
 /** mana-school crystal sprite per reward letter (the game's coloured mana crystal). */
 const REWARD_CRYSTAL: Record<string, string> = {
   G: "G000CR0000GL", R: "G000CR0000RD", Y: "G000CR0000YE", E: "G000CR0000RG", W: "G000CR0000WH", B: "G000CR0000GR",
@@ -631,11 +636,11 @@ function setOwner(v: string): void {
 /** LSubRace enum → RU faction name (base-game order; the neutral player owns 5..13, real factions
  *  1..4/6). Falls back to the raw enum for unknown values. Used to label the banner picker. */
 const SUBRACE_NAMES: Record<number, string> = {
-  0: "Нейтралы", 1: "Империя", 2: "Нежить", 3: "Легионы", 4: "Кланы", 5: "Болотные",
-  6: "Эльфы", 7: "Мертвецы", 8: "Гоблины", 9: "Люди", 10: "Гномы", 11: "Драконы",
-  12: "Стражи", 13: "Прочие",
+  0: tr("Нейтралы"), 1: tr("Империя"), 2: tr("Нежить"), 3: tr("Легионы"), 4: tr("Кланы"), 5: tr("Болотные"),
+  6: tr("Эльфы"), 7: tr("Мертвецы"), 8: tr("Гоблины"), 9: tr("Люди"), 10: tr("Гномы"), 11: tr("Драконы"),
+  12: tr("Стражи"), 13: tr("Прочие"),
 };
-const subraceLabel = (n: number): string => SUBRACE_NAMES[n] ?? `Фракция ${n}`;
+const subraceLabel = (n: number): string => SUBRACE_NAMES[n] ?? tr("Фракция {n}", { n });
 
 /** Subraces owned by the selected object's OWNER — the faction/banner options for a fort/stack.
  *  A real faction player owns exactly ONE (so setOwner auto-sets it, picker hidden); the NEUTRAL
@@ -679,59 +684,59 @@ function close(): void {
       <span class="ins-id">{{ obj.id }}</span>
       <el-button class="ins-close" text :icon="Close" @click="close()" />
     </div>
-    <div class="ins-sub">Клетка {{ obj.pos.x }}, {{ obj.pos.y }}</div>
-    <div v-if="readOnly" class="ins-readonly">Только просмотр</div>
+    <div class="ins-sub">{{ tr("Клетка {x}, {y}", { x: obj.pos.x, y: obj.pos.y }) }}</div>
+    <div v-if="readOnly" class="ins-readonly">{{ tr("Только просмотр") }}</div>
 
     <el-form v-if="editable" class="ins-body" :disabled="readOnly" @submit.prevent>
       <!-- 🧰 CHEST -->
       <template v-if="obj.type === 'treasure'">
         <div class="row">
-          <label>Картинка</label>
+          <label>{{ tr("Картинка") }}</label>
           <ImagePicker :object-id="obj.id" :key-fn="chestImageKey" :count="8" />
         </div>
         <div class="row">
-          <label>Приоритет ИИ</label>
+          <label>{{ tr("Приоритет ИИ") }}</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div class="ro-block">
-          <div class="d2-sec">Предметы <span class="muted">({{ chestItems.length }})</span></div>
+          <div class="d2-sec">{{ tr("Предметы") }} <span class="muted">({{ chestItems.length }})</span></div>
           <div v-if="chestItems.length" class="items-list">
             <div v-for="(it, i) in chestItems" :key="it.key" class="item-line d2-row">
               <ItemIcon :id="it.template" :cat="itemStore.get(it.template)?.cat ?? -1" :size="24" />
               <span class="item-name" :title="it.name">{{ it.name }}</span>
               <span v-if="itemStore.get(it.template)?.gold" class="item-gold">{{ itemStore.get(it.template)?.gold }}</span>
               <span class="item-acts">
-                <el-button class="item-act" size="small" text :disabled="i === 0" title="Выше" @click="chestMoveItem(it.idx, -1)">↑</el-button>
-                <el-button class="item-act" size="small" text :disabled="i === chestItems.length - 1" title="Ниже" @click="chestMoveItem(it.idx, 1)">↓</el-button>
-                <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="chestRemoveItem(it.idx)" />
+                <el-button class="item-act" size="small" text :disabled="i === 0" :title="tr('Выше')" @click="chestMoveItem(it.idx, -1)">↑</el-button>
+                <el-button class="item-act" size="small" text :disabled="i === chestItems.length - 1" :title="tr('Ниже')" @click="chestMoveItem(it.idx, 1)">↓</el-button>
+                <el-button class="item-act" size="small" text :icon="Delete" :title="tr('Убрать')" @click="chestRemoveItem(it.idx)" />
               </span>
             </div>
           </div>
-          <div v-else class="muted sm">пусто</div>
-          <ItemPicker class="item-add" trigger-label="+ Добавить предмет" title="Добавить предмет в сундук" @pick="chestAddItem" />
+          <div v-else class="muted sm">{{ tr("пусто") }}</div>
+          <ItemPicker class="item-add" :trigger-label="tr('+ Добавить предмет')" :title="tr('Добавить предмет в сундук')" @pick="chestAddItem" />
         </div>
       </template>
 
       <!-- 🏚 RUIN -->
       <template v-else-if="obj.type === 'ruin'">
         <div class="col">
-          <label>Название</label>
-          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+          <label>{{ tr("Название") }}</label>
+          <el-input :model-value="obj.name" size="small" :placeholder="tr('без имени')" @change="(v: string) => patch({ name: v })" />
         </div>
         <div v-if="obj.desc !== undefined" class="col">
-          <label>Описание</label>
+          <label>{{ tr("Описание") }}</label>
           <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" @change="(v: string) => patch({ desc: v })" />
         </div>
         <div class="row">
-          <label>Картинка</label>
+          <label>{{ tr("Картинка") }}</label>
           <ImagePicker :object-id="obj.id" :key-fn="ruinImageKey" :count="40" />
         </div>
         <div class="row">
-          <label>Приоритет ИИ</label>
+          <label>{{ tr("Приоритет ИИ") }}</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div v-if="reward" class="ro-block">
-          <div class="d2-sec">Награда (золото и мана)</div>
+          <div class="d2-sec">{{ tr("Награда (золото и мана)") }}</div>
           <div class="reward-edit">
             <div v-for="r in reward" :key="r.k" class="rw-edit">
               <SpriteThumb :sprite-key="REWARD_CRYSTAL[r.k] ?? null" :size="20" :title="r.label" />
@@ -741,23 +746,23 @@ function close(): void {
           </div>
         </div>
         <div class="col">
-          <label>Артефакт</label>
+          <label>{{ tr("Артефакт") }}</label>
           <ItemPicker
             :model-value="obj.item ?? NEUTRAL"
             nullable
-            title="Артефакт руины"
+            :title="tr('Артефакт руины')"
             @update:model-value="(v: string | null) => patch({ item: v || NEUTRAL })"
           />
         </div>
         <div class="row">
-          <label>Разграблена</label>
+          <label>{{ tr("Разграблена") }}</label>
           <el-select :model-value="obj.looter ?? NEUTRAL" size="small" class="owner-sel" @change="setLooter">
-            <el-option label="Нет" :value="NEUTRAL" />
+            <el-option :label="tr('Нет')" :value="NEUTRAL" />
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
         <!-- Стражи руины — embedded GROUP_ID + UNIT_/POS_ (like a fort's defense); soldiers only. -->
-        <div class="d2-sec">Стражи <span class="muted">({{ defenseCount }}/6)</span></div>
+        <div class="d2-sec">{{ tr("Стражи") }} <span class="muted">({{ defenseCount }}/6)</span></div>
         <GarrisonEditor
           :key="obj.id"
           :garrison="defenseGarrison"
@@ -774,38 +779,38 @@ function close(): void {
       <!-- 🏘 CITY -->
       <template v-else-if="obj.type === 'village'">
         <div class="col">
-          <label>Название</label>
-          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+          <label>{{ tr("Название") }}</label>
+          <el-input :model-value="obj.name" size="small" :placeholder="tr('без имени')" @change="(v: string) => patch({ name: v })" />
         </div>
         <div v-if="obj.desc !== undefined" class="col">
-          <label>Описание</label>
+          <label>{{ tr("Описание") }}</label>
           <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" @change="(v: string) => patch({ desc: v })" />
         </div>
         <div class="row">
-          <label>Владелец</label>
+          <label>{{ tr("Владелец") }}</label>
           <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="setOwner">
-            <el-option label="Нейтрал" :value="NEUTRAL" />
+            <el-option :label="tr('Нейтрал')" :value="NEUTRAL" />
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
         <div class="row">
-          <label>Уровень</label>
+          <label>{{ tr("Уровень") }}</label>
           <el-input-number :model-value="obj.tier ?? 1" :min="1" :max="5" size="small" controls-position="right" @change="(v: number) => patch({ tier: v ?? 1 })" />
         </div>
         <div class="row">
-          <label>Приоритет ИИ</label>
+          <label>{{ tr("Приоритет ИИ") }}</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div v-if="obj.morale !== undefined" class="row">
-          <label>Мораль</label>
+          <label>{{ tr("Мораль") }}</label>
           <el-input-number :model-value="obj.morale" size="small" controls-position="right" @change="(v: number) => patch({ morale: v ?? 0 })" />
         </div>
         <div v-if="obj.regen !== undefined" class="row">
-          <label>Реген. гарнизона</label>
+          <label>{{ tr("Реген. гарнизона") }}</label>
           <el-input-number :model-value="obj.regen" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ regen: v ?? 0 })" />
         </div>
         <div v-if="obj.growth !== undefined" class="row">
-          <label>Прирост</label>
+          <label>{{ tr("Прирост") }}</label>
           <el-input-number :model-value="obj.growth" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ growth: v ?? 0 })" />
         </div>
       </template>
@@ -813,22 +818,22 @@ function close(): void {
       <!-- 🏰 CAPITAL (столица) -->
       <template v-else-if="obj.type === 'capital'">
         <div class="col">
-          <label>Название</label>
-          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+          <label>{{ tr("Название") }}</label>
+          <el-input :model-value="obj.name" size="small" :placeholder="tr('без имени')" @change="(v: string) => patch({ name: v })" />
         </div>
         <div v-if="obj.desc !== undefined" class="col">
-          <label>Описание</label>
+          <label>{{ tr("Описание") }}</label>
           <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" @change="(v: string) => patch({ desc: v })" />
         </div>
         <div class="row">
-          <label>Владелец</label>
+          <label>{{ tr("Владелец") }}</label>
           <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="setOwner">
-            <el-option label="Нейтрал" :value="NEUTRAL" />
+            <el-option :label="tr('Нейтрал')" :value="NEUTRAL" />
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
         <div class="row">
-          <label>Приоритет ИИ</label>
+          <label>{{ tr("Приоритет ИИ") }}</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
       </template>
@@ -836,25 +841,25 @@ function close(): void {
       <!-- 🏪 SITE (торговец / маг / тренер / наёмники) -->
       <template v-else-if="isSiteObject(obj)">
         <div class="col">
-          <label>Название</label>
-          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+          <label>{{ tr("Название") }}</label>
+          <el-input :model-value="obj.name" size="small" :placeholder="tr('без имени')" @change="(v: string) => patch({ name: v })" />
         </div>
         <div class="row">
-          <label>Картинка</label>
+          <label>{{ tr("Картинка") }}</label>
           <ImagePicker :object-id="obj.id" :key-fn="siteImageKey" :count="20" />
         </div>
         <div v-if="obj.desc !== undefined" class="col">
-          <label>Описание</label>
-          <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" placeholder="текст при посещении" @change="(v: string) => patch({ desc: v })" />
+          <label>{{ tr("Описание") }}</label>
+          <el-input :model-value="obj.desc" type="textarea" :rows="2" size="small" :placeholder="tr('текст при посещении')" @change="(v: string) => patch({ desc: v })" />
         </div>
         <div class="row">
-          <label>Приоритет ИИ</label>
+          <label>{{ tr("Приоритет ИИ") }}</label>
           <el-input-number :model-value="obj.aiPriority ?? 0" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ aiPriority: v ?? 0 })" />
         </div>
 
         <!-- Торговец: список товаров (предмет + количество) -->
         <div v-if="obj.type === 'merchant'" class="ro-block">
-          <div class="d2-sec">Товары <span class="muted">({{ merchantItems.length }})</span></div>
+          <div class="d2-sec">{{ tr("Товары") }} <span class="muted">({{ merchantItems.length }})</span></div>
           <div v-if="merchantItems.length" class="items-list">
             <div v-for="(it, i) in merchantItems" :key="`${it.id}#${i}`" class="item-line d2-row">
               <ItemIcon :id="it.id" :cat="itemStore.get(it.id)?.cat ?? -1" :size="24" />
@@ -868,16 +873,16 @@ function close(): void {
                 class="qty-input"
                 @change="(v: number) => merchantSetCount(i, v)"
               />
-              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="merchantRemove(i)" />
+              <el-button class="item-act" size="small" text :icon="Delete" :title="tr('Убрать')" @click="merchantRemove(i)" />
             </div>
           </div>
-          <div v-else class="muted sm">пусто</div>
-          <ItemPicker class="item-add" trigger-label="+ Добавить товар" title="Добавить товар торговцу" @pick="merchantAddItem" />
+          <div v-else class="muted sm">{{ tr("пусто") }}</div>
+          <ItemPicker class="item-add" :trigger-label="tr('+ Добавить товар')" :title="tr('Добавить товар торговцу')" @pick="merchantAddItem" />
         </div>
 
         <!-- Торговец: что скупает (BUY_*) + флаг задания (MISSION) -->
         <div v-if="obj.type === 'merchant'" class="ro-block">
-          <div class="d2-sec">Скупка <span class="muted">(категории, что торговец покупает)</span></div>
+          <div class="d2-sec">{{ tr("Скупка") }} <span class="muted">{{ tr("(категории, что торговец покупает)") }}</span></div>
           <div class="buy-grid">
             <el-checkbox
               v-for="(lbl, i) in BUY_LABELS" :key="lbl" :model-value="merchantBuy[i]" size="small"
@@ -885,14 +890,14 @@ function close(): void {
             >{{ lbl }}</el-checkbox>
           </div>
           <div class="row">
-            <label>Задание</label>
+            <label>{{ tr("Задание") }}</label>
             <el-switch :model-value="!!obj.mission" size="small" @change="(v: boolean) => patch({ mission: v })" />
           </div>
         </div>
 
         <!-- Маг: список заклинаний -->
         <div v-else-if="obj.type === 'mage'" class="ro-block">
-          <div class="d2-sec">Заклинания <span class="muted">({{ mageSpells.length }})</span></div>
+          <div class="d2-sec">{{ tr("Заклинания") }} <span class="muted">({{ mageSpells.length }})</span></div>
           <div v-if="mageSpells.length" class="items-list">
             <div v-for="(sid, i) in mageSpells" :key="`${sid}#${i}`" class="item-line d2-row">
               <SpellIcon :id="sid" :level="spellStore.get(sid)?.level" :cat="spellStore.get(sid)?.cat ?? -1" :size="26" />
@@ -900,17 +905,17 @@ function close(): void {
                 <span class="item-name" :title="spellStore.get(sid)?.desc || spellStore.nameOf(sid) || sid">{{ spellStore.nameOf(sid) || sid }}</span>
                 <span class="stk-sub">{{ spellStore.effectOf(sid) }}</span>
               </span>
-              <span v-if="spellStore.get(sid)?.level" class="item-gold">ур.{{ spellStore.get(sid)?.level }}</span>
-              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="mageRemove(i)" />
+              <span v-if="spellStore.get(sid)?.level" class="item-gold">{{ tr("ур.{level}", { level: spellStore.get(sid)?.level ?? 0 }) }}</span>
+              <el-button class="item-act" size="small" text :icon="Delete" :title="tr('Убрать')" @click="mageRemove(i)" />
             </div>
           </div>
-          <div v-else class="muted sm">пусто</div>
-          <SpellPicker class="item-add" trigger-label="+ Добавить заклинание" title="Добавить заклинание магу" @pick="mageAddSpell" />
+          <div v-else class="muted sm">{{ tr("пусто") }}</div>
+          <SpellPicker class="item-add" :trigger-label="tr('+ Добавить заклинание')" :title="tr('Добавить заклинание магу')" @pick="mageAddSpell" />
         </div>
 
         <!-- Наёмники: список юнитов (юнит + уровень + уникальность) -->
         <div v-else-if="obj.type === 'mercenary'" class="ro-block">
-          <div class="d2-sec">Наёмники <span class="muted">({{ mercUnits.length }})</span></div>
+          <div class="d2-sec">{{ tr("Наёмники") }} <span class="muted">({{ mercUnits.length }})</span></div>
           <div v-if="mercUnits.length" class="merc-list">
             <div v-for="(u, i) in mercUnits" :key="`${u.id}#${i}`" class="merc-line d2-row">
               <UnitIcon :id="u.id" :level="u.level" :subrace-id="unitStore.get(u.id)?.subraceId ?? -1" :size="26" />
@@ -922,60 +927,60 @@ function close(): void {
                 size="small"
                 controls-position="right"
                 class="qty-input"
-                title="Уровень"
+                :title="tr('Уровень')"
                 @change="(v: number) => mercSetLevel(i, v)"
               />
               <el-checkbox
                 :model-value="u.unique"
                 size="small"
-                title="Уникальный (нанимается один раз)"
+                :title="tr('Уникальный (нанимается один раз)')"
                 @change="(v: boolean) => mercSetUnique(i, v)"
               >★</el-checkbox>
-              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="mercRemove(i)" />
+              <el-button class="item-act" size="small" text :icon="Delete" :title="tr('Убрать')" @click="mercRemove(i)" />
             </div>
           </div>
-          <div v-else class="muted sm">пусто</div>
-          <UnitPicker class="item-add" trigger-label="+ Добавить наёмника" title="Добавить наёмника в лагерь" @pick="mercAddUnit" />
+          <div v-else class="muted sm">{{ tr("пусто") }}</div>
+          <UnitPicker class="item-add" :trigger-label="tr('+ Добавить наёмника')" :title="tr('Добавить наёмника в лагерь')" @pick="mercAddUnit" />
         </div>
       </template>
 
       <!-- ⚔ STACK (отряд) -->
       <template v-else-if="obj.type === 'stack'">
         <div class="row">
-          <label>Владелец</label>
-          <el-select :model-value="obj.owner" placeholder="Выберите владельца" size="small" class="owner-sel" @change="setOwner">
+          <label>{{ tr("Владелец") }}</label>
+          <el-select :model-value="obj.owner" :placeholder="tr('Выберите владельца')" size="small" class="owner-sel" @change="setOwner">
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
         <div class="row">
-          <label>Приказ</label>
+          <label>{{ tr("Приказ") }}</label>
           <el-select :model-value="obj.order ?? 1" size="small" class="owner-sel" @change="(v: number) => patch({ order: v })">
             <el-option v-for="o in ORDER_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
           </el-select>
         </div>
         <div v-if="obj.facing !== undefined" class="row">
-          <label>Направление</label>
+          <label>{{ tr("Направление") }}</label>
           <el-input-number :model-value="obj.facing" :min="0" :max="7" size="small" controls-position="right" @change="(v: number) => patch({ facing: v ?? 0 })" />
         </div>
         <div v-if="obj.morale !== undefined" class="row">
-          <label>Мораль</label>
+          <label>{{ tr("Мораль") }}</label>
           <el-input-number :model-value="obj.morale" size="small" controls-position="right" @change="(v: number) => patch({ morale: v ?? 0 })" />
         </div>
         <div v-if="obj.move !== undefined" class="row">
-          <label>Ход</label>
+          <label>{{ tr("Ход") }}</label>
           <el-input-number :model-value="obj.move" :min="0" size="small" controls-position="right" @change="(v: number) => patch({ move: v ?? 0 })" />
         </div>
         <div v-if="obj.priority !== undefined" class="row">
-          <label>Приоритет ИИ</label>
+          <label>{{ tr("Приоритет ИИ") }}</label>
           <el-input-number :model-value="obj.priority" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
         <div class="row">
-          <label>Флаги</label>
-          <el-checkbox :model-value="!!obj.invisible" size="small" title="Отряд скрыт от игроков на карте" @change="(v: boolean) => patch({ invisible: v })">Невидим</el-checkbox>
-          <el-checkbox :model-value="!!obj.aiIgnore" size="small" title="ИИ не реагирует на этот отряд" @change="(v: boolean) => patch({ aiIgnore: v })">ИИ игнорирует</el-checkbox>
+          <label>{{ tr("Флаги") }}</label>
+          <el-checkbox :model-value="!!obj.invisible" size="small" :title="tr('Отряд скрыт от игроков на карте')" @change="(v: boolean) => patch({ invisible: v })">{{ tr("Невидим") }}</el-checkbox>
+          <el-checkbox :model-value="!!obj.aiIgnore" size="small" :title="tr('ИИ не реагирует на этот отряд')" @change="(v: boolean) => patch({ aiIgnore: v })">{{ tr("ИИ игнорирует") }}</el-checkbox>
         </div>
 
-        <div class="d2-sec">Состав отряда <span class="muted">({{ stackCount }}/6)</span></div>
+        <div class="d2-sec">{{ tr("Состав отряда") }} <span class="muted">({{ stackCount }}/6)</span></div>
         <GarrisonEditor
           :key="obj.id"
           :garrison="stackGarrison"
@@ -989,11 +994,11 @@ function close(): void {
           @set-mods="stackActions.setMods"
         />
 
-        <div class="d2-sec">Экипировка лидера</div>
+        <div class="d2-sec">{{ tr("Экипировка лидера") }}</div>
         <div class="equip-grid">
           <div class="equip-row">
-            <label>Знамя</label>
-            <ItemPicker :model-value="bannerVal()" nullable title="Знамя" :allow-cats="[3]" @update:model-value="(v: string | null) => setStackBanner(v)" />
+            <label>{{ tr("Знамя") }}</label>
+            <ItemPicker :model-value="bannerVal()" nullable :title="tr('Знамя')" :allow-cats="[3]" @update:model-value="(v: string | null) => setStackBanner(v)" />
           </div>
           <div v-for="s in EQUIP_SLOTS" :key="s.key" class="equip-row">
             <label>{{ s.label }}</label>
@@ -1002,30 +1007,30 @@ function close(): void {
         </div>
 
         <div class="ro-block">
-          <div class="d2-sec">Инвентарь <span class="muted">({{ stackInventory.length }})</span></div>
+          <div class="d2-sec">{{ tr("Инвентарь") }} <span class="muted">({{ stackInventory.length }})</span></div>
           <div v-if="stackInventory.length" class="items-list">
             <div v-for="(it, i) in stackInventory" :key="`${it}#${i}`" class="item-line d2-row">
               <ItemIcon :id="it" :cat="itemStore.get(it)?.cat ?? -1" :size="24" />
               <span class="item-name" :title="itemStore.nameOf(it) || it">{{ itemStore.nameOf(it) || it }}</span>
               <span v-if="itemStore.get(it)?.gold" class="item-gold">{{ itemStore.get(it)?.gold }}</span>
-              <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="stackRemoveItem(i)" />
+              <el-button class="item-act" size="small" text :icon="Delete" :title="tr('Убрать')" @click="stackRemoveItem(i)" />
             </div>
           </div>
-          <div v-else class="muted sm">пусто</div>
-          <ItemPicker class="item-add" trigger-label="+ Добавить предмет" title="Добавить предмет в инвентарь" @pick="stackAddItem" />
+          <div v-else class="muted sm">{{ tr("пусто") }}</div>
+          <ItemPicker class="item-add" :trigger-label="tr('+ Добавить предмет')" :title="tr('Добавить предмет в инвентарь')" @pick="stackAddItem" />
         </div>
       </template>
 
       <!-- 💎 CRYSTAL (кристалл маны) -->
       <template v-else-if="obj.type === 'crystal'">
         <div class="row">
-          <label>Тип маны</label>
+          <label>{{ tr("Тип маны") }}</label>
           <el-select :model-value="obj.resource ?? 0" size="small" class="owner-sel" @change="(v: number) => patch({ resource: v })">
             <el-option v-for="(lbl, i) in CRYSTAL_LABELS" :key="i" :label="lbl" :value="i" />
           </el-select>
         </div>
         <div class="row">
-          <label>Приоритет ИИ</label>
+          <label>{{ tr("Приоритет ИИ") }}</label>
           <el-input-number :model-value="obj.priority ?? 3" :min="0" :max="6" size="small" controls-position="right" @change="(v: number) => patch({ priority: v ?? 0 })" />
         </div>
       </template>
@@ -1033,7 +1038,7 @@ function close(): void {
       <!-- 📍 LOCATION (именованная область) -->
       <template v-else-if="obj.type === 'location'">
         <div class="col">
-          <label>Точка на карте <span class="muted xs">(рельеф + объекты)</span></label>
+          <label>{{ tr("Точка на карте") }} <span class="muted xs">{{ tr("(рельеф + объекты)") }}</span></label>
           <RegionPreview
             :cell="obj.pos"
             :radius="Math.max(4, (obj.radius ?? 0) + 3)"
@@ -1044,27 +1049,27 @@ function close(): void {
           />
         </div>
         <div class="col">
-          <label>Название</label>
-          <el-input :model-value="obj.name" size="small" placeholder="без имени" @change="(v: string) => patch({ name: v })" />
+          <label>{{ tr("Название") }}</label>
+          <el-input :model-value="obj.name" size="small" :placeholder="tr('без имени')" @change="(v: string) => patch({ name: v })" />
         </div>
         <div class="row">
           <!-- max 3 (7×7) — the native ScenEdit dialog knows exactly 1×1/3×3/5×5/7×7;
                a bigger radius risks breaking the map in the game's own editor -->
-          <label>Радиус</label>
+          <label>{{ tr("Радиус") }}</label>
           <el-input-number :model-value="obj.radius ?? 0" :min="0" :max="3" size="small" controls-position="right" @change="(v: number) => patch({ radius: v ?? 0 })" />
         </div>
         <div class="ro-row">
-          <label>Размер области</label>
+          <label>{{ tr("Размер области") }}</label>
           <span class="ro-val">{{ locationSpan(obj.radius ?? 0) }}</span>
         </div>
         <div class="col">
-          <label>Подпись на карте <span class="muted xs">(своя, не в .sg)</span></label>
+          <label>{{ tr("Подпись на карте") }} <span class="muted xs">{{ tr("(своя, не в .sg)") }}</span></label>
           <!-- live @input (not @change): the label on the canvas updates as you type, and a
                mid-typing re-render can never wipe the draft -->
           <el-input
             :model-value="editStore.captions[obj.id] ?? ''"
             size="small"
-            placeholder="опционально"
+            :placeholder="tr('опционально')"
             @input="setLocationCaption"
           />
         </div>
@@ -1073,9 +1078,9 @@ function close(): void {
       <!-- 🪄 ROD (жезл власти) -->
       <template v-else-if="obj.type === 'rod'">
         <div class="row">
-          <label>Владелец</label>
+          <label>{{ tr("Владелец") }}</label>
           <el-select :model-value="obj.owner ?? NEUTRAL" size="small" class="owner-sel" @change="setOwner">
-            <el-option label="Нейтрал" :value="NEUTRAL" />
+            <el-option :label="tr('Нейтрал')" :value="NEUTRAL" />
             <el-option v-for="p in players" :key="p.id" :label="p.label" :value="p.id" />
           </el-select>
         </div>
@@ -1087,16 +1092,16 @@ function close(): void {
           <DecorThumb v-if="decorEntry" :thumb="decorEntry.thumb" :size="48" />
           <div class="decor-info">
             <div class="decor-name" :title="decorVariantId ?? undefined">{{ decorName }}</div>
-            <div v-if="decorEntry" class="muted xs">{{ decorEntry.cx }}×{{ decorEntry.cy }} клеток</div>
+            <div v-if="decorEntry" class="muted xs">{{ tr("{w}×{h} клеток", { w: decorEntry.cx, h: decorEntry.cy }) }}</div>
           </div>
         </div>
         <div v-if="obj.type === 'landmark'" class="col">
-          <label>Подпись <span class="muted xs">(имя декорации, DESC_TXT)</span></label>
-          <el-input :model-value="obj.desc ?? ''" size="small" placeholder="без имени" @change="(v: string) => patch({ desc: v })" />
+          <label>{{ tr("Подпись") }} <span class="muted xs">{{ tr("(имя декорации, DESC_TXT)") }}</span></label>
+          <el-input :model-value="obj.desc ?? ''" size="small" :placeholder="tr('без имени')" @change="(v: string) => patch({ desc: v })" />
         </div>
         <div v-if="decorVariantCount > 1" class="decor-variants-head">
-          <span class="d2-sec">Вид <span class="muted">— выберите ({{ decorVariantCount }})</span></span>
-          <el-button size="small" text title="Случайный вид" @click="rerollDecor()">⟳</el-button>
+          <span class="d2-sec">{{ trx("look", "Вид") }} <span class="muted">{{ tr("— выберите ({n})", { n: decorVariantCount }) }}</span></span>
+          <el-button size="small" text :title="tr('Случайный вид')" @click="rerollDecor()">⟳</el-button>
         </div>
         <div v-if="decorVariantCount > 1" class="decor-variants">
           <button
@@ -1124,7 +1129,7 @@ function close(): void {
         v-if="(obj.type === 'village' || obj.type === 'capital' || obj.type === 'stack') && subraceOptions.length > 1"
         class="row"
       >
-        <label>Знамя</label>
+        <label>{{ tr("Знамя") }}</label>
         <el-select :model-value="obj.subRace" size="small" class="owner-sel" @change="setSubRace">
           <el-option v-for="s in subraceOptions" :key="s.id" :label="s.label" :value="s.id" />
         </el-select>
@@ -1132,22 +1137,22 @@ function close(): void {
 
       <!-- 💰 CITY LOOT (stored ITEM_ID list) — shared by city + capital -->
       <div v-if="obj.type === 'village' || obj.type === 'capital'" class="ro-block">
-        <div class="d2-sec">Хранилище <span class="muted">({{ cityLoot.length }})</span></div>
+        <div class="d2-sec">{{ tr("Хранилище") }} <span class="muted">({{ cityLoot.length }})</span></div>
         <div v-if="cityLoot.length" class="items-list">
           <div v-for="(it, i) in cityLoot" :key="`${it}#${i}`" class="item-line d2-row">
             <ItemIcon :id="it" :cat="itemStore.get(it)?.cat ?? -1" :size="24" />
             <span class="item-name" :title="itemStore.nameOf(it) || it">{{ itemStore.nameOf(it) || it }}</span>
             <span v-if="itemStore.get(it)?.gold" class="item-gold">{{ itemStore.get(it)?.gold }}</span>
-            <el-button class="item-act" size="small" text :icon="Delete" title="Убрать" @click="cityRemoveItem(i)" />
+            <el-button class="item-act" size="small" text :icon="Delete" :title="tr('Убрать')" @click="cityRemoveItem(i)" />
           </div>
         </div>
-        <div v-else class="muted sm">пусто</div>
-        <ItemPicker class="item-add" trigger-label="+ Добавить предмет" title="Добавить предмет в хранилище города" @pick="cityAddItem" />
+        <div v-else class="muted sm">{{ tr("пусто") }}</div>
+        <ItemPicker class="item-add" :trigger-label="tr('+ Добавить предмет')" :title="tr('Добавить предмет в хранилище города')" @pick="cityAddItem" />
       </div>
 
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
       <template v-if="obj.type === 'village' || obj.type === 'capital'">
-        <div class="d2-sec">Оборона города <span class="muted">({{ defenseCount }}/6)</span></div>
+        <div class="d2-sec">{{ tr("Оборона города") }} <span class="muted">({{ defenseCount }}/6)</span></div>
         <!-- roster=soldiers: гарнизон города — без героев; герой в городе живёт ГОСТЕМ ниже -->
         <GarrisonEditor
           :key="obj.id"
@@ -1162,10 +1167,10 @@ function close(): void {
         />
         <div class="section-divider" />
         <div class="d2-sec">
-          Гость (герой)
-          <span class="muted">{{ visitorStack ? `(${visitorCount}/6)` : "— нет —" }}</span>
+          {{ tr("Гость (герой)") }}
+          <span class="muted">{{ visitorStack ? `(${visitorCount}/6)` : tr("— нет —") }}</span>
           <!-- Столица: гостя-лорда выбирает игрок в игре — не редактируется, только гарнизон -->
-          <el-button v-if="visitorStack && obj.type !== 'capital'" class="visitor-open" size="small" text @click="openVisitor">Свойства гостя →</el-button>
+          <el-button v-if="visitorStack && obj.type !== 'capital'" class="visitor-open" size="small" text @click="openVisitor">{{ tr("Свойства гостя →") }}</el-button>
         </div>
         <!-- Capital: гость только для просмотра (readonly); Village: полностью редактируемый -->
         <GarrisonEditor
@@ -1189,22 +1194,22 @@ function close(): void {
           @set-leader="visitorActions.setLeader"
           @set-mods="visitorActions.setMods"
         />
-        <p v-if="obj.type === 'capital'" class="muted sm">Гостя-лорда выбирает игрок в игре — редактируется только оборона.</p>
+        <p v-if="obj.type === 'capital'" class="muted sm">{{ tr("Гостя-лорда выбирает игрок в игре — редактируется только оборона.") }}</p>
         <template v-else-if="!visitorStack">
-          <p class="muted sm">В городе нет гостящего героя.</p>
-          <el-button class="item-add" size="small" @click="addVisitor">+ Добавить гостя</el-button>
+          <p class="muted sm">{{ tr("В городе нет гостящего героя.") }}</p>
+          <el-button class="item-add" size="small" @click="addVisitor">{{ tr("+ Добавить гостя") }}</el-button>
         </template>
       </template>
 
     </el-form>
 
     <div v-else class="ins-body">
-      <p class="muted sm">Свойства для «{{ typeLabel }}» пока не редактируются. Сейчас поддержаны сундуки, руины и города.</p>
+      <p class="muted sm">{{ tr("Свойства для «{type}» пока не редактируются. Сейчас поддержаны сундуки, руины и города.", { type: typeLabel }) }}</p>
     </div>
 
     <!-- 🎬 «Сценарий» — где этот объект участвует в событиях (для ЛЮБОГО типа с ролями) -->
     <div v-if="objectRoles.length" class="ins-body">
-      <div class="d2-sec">Сценарий <span class="muted">({{ objectRoles.length }})</span></div>
+      <div class="d2-sec">{{ tr("Сценарий") }} <span class="muted">({{ objectRoles.length }})</span></div>
       <div class="roles-list">
         <!-- hover = шпаргалка события (условия/эффекты именами); клик = перейти к событию -->
         <el-tooltip
@@ -1228,11 +1233,11 @@ function close(): void {
             <span class="role-icon" :title="ROLE_META[r.cls].label">{{ ROLE_META[r.cls].icon }}</span>
             <span class="stk-text">
               <span class="item-name">{{ r.ev.name || r.ev.id }}</span>
-              <span class="stk-sub">{{ r.cls === "trigger" ? "причина" : "следствие" }} · {{ r.what }}{{ r.detail ? `: ${r.detail}` : "" }}</span>
+              <span class="stk-sub">{{ r.cls === "trigger" ? tr("причина") : tr("следствие") }} · {{ tr(r.what) }}{{ r.detail ? `: ${tr(r.detail)}` : "" }}</span>
             </span>
             <!-- сложность: событие с условиями сработает не всегда — видно сразу -->
             <span v-if="r.ev.conditions.length > 1" class="role-cond muted">
-              {{ r.ev.conditions.length }} усл.
+              {{ tr("{n} усл.", { n: r.ev.conditions.length }) }}
             </span>
           </div>
         </el-tooltip>
@@ -1242,20 +1247,20 @@ function close(): void {
           size="small"
           text
           @click="rolesExpanded = !rolesExpanded"
-        >{{ rolesExpanded ? "свернуть" : `+${objectRoles.length - ROLE_LIMIT} ещё` }}</el-button>
+        >{{ rolesExpanded ? tr("свернуть") : tr("+{n} ещё", { n: objectRoles.length - ROLE_LIMIT }) }}</el-button>
       </div>
       <el-button v-if="canCreateEventFor && !readOnly" size="small" text type="primary" @click="newEventForObject()">
-        ＋ Событие с этим объектом
+        {{ tr("＋ Событие с этим объектом") }}
       </el-button>
     </div>
     <div v-else-if="obj.type === 'location'" class="ins-body">
-      <p class="muted sm">не используется в сценарии — ПКМ: „＋ Событие“ / „✨ Спавн“</p>
+      <p class="muted sm">{{ tr("не используется в сценарии — ПКМ: „＋ Событие“ / „✨ Спавн“") }}</p>
     </div>
     <div v-else-if="canCreateEventFor" class="ins-body">
-      <div class="d2-sec">Сценарий</div>
-      <p class="muted sm">событий с этим объектом нет</p>
+      <div class="d2-sec">{{ tr("Сценарий") }}</div>
+      <p class="muted sm">{{ tr("событий с этим объектом нет") }}</p>
       <el-button v-if="!readOnly" size="small" text type="primary" @click="newEventForObject()">
-        ＋ Событие с этим объектом
+        {{ tr("＋ Событие с этим объектом") }}
       </el-button>
     </div>
   </div>

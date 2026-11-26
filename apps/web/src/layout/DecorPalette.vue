@@ -21,6 +21,7 @@ import {
   type DecorThumb as DecorThumbRect,
 } from "../stores/decorStore";
 import { useToolStore } from "../stores/toolStore";
+import { tr } from "../i18n";
 import DecorThumb from "./DecorThumb.vue";
 import ThumbPreview from "./ThumbPreview.vue";
 
@@ -86,7 +87,7 @@ function hidePreview(): void {
   preview.value?.hide();
 }
 
-const FAMILY_CHIPS = [{ key: "all", label: "Все" }, ...DECOR_FAMILIES];
+const FAMILY_CHIPS = [{ key: "all", label: tr("Все") }, ...DECOR_FAMILIES];
 const variantIndex = computed(() => {
   const g = selectedGroup.value;
   if (!g) return 0;
@@ -97,7 +98,7 @@ const variantIndex = computed(() => {
 <template>
   <div class="decor-palette d2-rail">
     <div class="dp-head">
-      <span class="dp-title">Декорации</span>
+      <span class="dp-title">{{ tr("Декорации") }}</span>
       <el-tag size="small" type="info" effect="plain" round>{{ filtered.length }}</el-tag>
     </div>
 
@@ -106,7 +107,7 @@ const variantIndex = computed(() => {
       v-model="search"
       size="small"
       class="dp-search"
-      placeholder="Найти декорацию…"
+      :placeholder="tr('Найти декорацию…')"
       clearable
     >
       <template #prefix><span class="dp-search-icon">⌕</span></template>
@@ -126,10 +127,10 @@ const variantIndex = computed(() => {
     </div>
 
     <div class="dp-filters">
-      <el-select v-model="faction" size="small" clearable placeholder="Фракция" class="dp-filter">
+      <el-select v-model="faction" size="small" clearable :placeholder="tr('Фракция')" class="dp-filter">
         <el-option v-for="s in DECOR_STYLES" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
-      <el-select v-model="tone" size="small" clearable placeholder="Биом" class="dp-filter">
+      <el-select v-model="tone" size="small" clearable :placeholder="tr('Биом')" class="dp-filter">
         <el-option v-for="t in DECOR_TONES" :key="t.value" :label="t.label" :value="t.value" />
       </el-select>
     </div>
@@ -138,14 +139,14 @@ const variantIndex = computed(() => {
     <div v-if="selectedGroup" class="dp-variants d2-card">
       <div class="dp-variants-head">
         <span class="dp-vlabel">{{ selectedGroup.label }}</span>
-        <span class="dp-vcount">вид {{ variantIndex }}/{{ selectedGroup.variants.length }}</span>
+        <span class="dp-vcount">{{ tr("вид {i}/{total}", { i: variantIndex, total: selectedGroup.variants.length }) }}</span>
         <el-button
           v-if="selectedGroup.variants.length > 1"
           class="dp-roll"
           size="small"
           :icon="Refresh"
           circle
-          title="Случайный вид (R)"
+          :title="tr('Случайный вид (R)')"
           @click="rollRandom()"
         />
       </div>
@@ -170,8 +171,8 @@ const variantIndex = computed(() => {
 
     <!-- group grid -->
     <el-scrollbar class="dp-grid">
-      <div v-if="decorStore.loading" class="dp-empty">Загрузка каталога…</div>
-      <el-empty v-else-if="!filtered.length" description="Ничего не найдено" :image-size="60" />
+      <div v-if="decorStore.loading" class="dp-empty">{{ tr("Загрузка каталога…") }}</div>
+      <el-empty v-else-if="!filtered.length" :description="tr('Ничего не найдено')" :image-size="60" />
       <div v-else class="dp-cards">
         <button
           v-for="g in filtered"
@@ -194,7 +195,7 @@ const variantIndex = computed(() => {
 
       <!-- similar (same shape + footprint) -->
       <div v-if="similar.length" class="dp-similar">
-        <div class="d2-sec dp-similar-head">Похожие</div>
+        <div class="d2-sec dp-similar-head">{{ tr("Похожие") }}</div>
         <div class="dp-cards">
           <button
             v-for="g in similar"
@@ -221,7 +222,7 @@ const variantIndex = computed(() => {
       <div class="dp-sel-info">
         <div class="dp-sel-name">{{ selectedGroup.label }}</div>
         <div class="dp-sel-meta">{{ selectedGroup.cx }}×{{ selectedGroup.cy }} · {{ selectedGroup.shape }}</div>
-        <div class="dp-sel-hint">Клик — поставить · [ ] — вид · R — случайный · колесо — масштаб · Ctrl+тащить — карта</div>
+        <div class="dp-sel-hint">{{ tr("Клик — поставить · [ ] — вид · R — случайный · колесо — масштаб · Ctrl+тащить — карта") }}</div>
       </div>
     </div>
 

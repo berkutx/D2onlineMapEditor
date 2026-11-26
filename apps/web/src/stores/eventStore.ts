@@ -11,6 +11,15 @@ import type { ScenarioInfoPatch } from "@d2/socket-contract";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { setDiplomacyCurrent, type EditOp } from "@d2/map-edit";
 import { useEditStore } from "./editStore";
+import { tr, trc, trn } from "../i18n";
+
+/** Fill the `{placeholders}` of a default name that goes INTO the map with values that are
+ *  already map content (an event's own name, a number). Only the pattern passes through
+ *  trc(): as a trc() parameter the map's name would be reduced along with the pattern and
+ *  lose its «й» / «ё» (the reduction drops every combining mark, not only the Polish ones). */
+function fillName(pattern: string, values: Readonly<Record<string, string | number>>): string {
+  return pattern.replace(/\{(\w+)\}/g, (whole, key: string) => (key in values ? String(values[key]) : whole));
+}
 
 /** A blank value for a spec field (so a freshly added condition/effect is schema-valid). */
 function blankField(type: string): unknown {
@@ -86,8 +95,8 @@ export const useEventStore = defineStore("events", () => {
   interface NavEntry { tab: PanelTab; eventId: string | null }
   const navStack = ref<NavEntry[]>([]);
   const TAB_LABELS: Record<PanelTab, string> = {
-    events: "События", vars: "Переменные", templates: "Шаблоны",
-    settings: "Настройки", diplomacy: "Дипломатия", players: "Игроки", restrictions: "Ограничения",
+    events: tr("События"), vars: tr("Переменные"), templates: tr("Шаблоны"),
+    settings: tr("Настройки"), diplomacy: tr("Дипломатия"), players: tr("Игроки"), restrictions: tr("Ограничения"),
   };
   function navLabel(e: NavEntry): string {
     if (e.tab === "events" && e.eventId) {
@@ -191,7 +200,7 @@ export const useEventStore = defineStore("events", () => {
             event: {
               ...base,
               id: cloneId,
-              name: `${base.name || "Событие"} · ${k + 2}`,
+              name: `${base.name || trc("Событие")} · ${k + 2}`,
               conditions: base.conditions.map((c, i) =>
                 i === ci ? ({ ...c, locId } as EventCondition) : c),
             },
@@ -243,7 +252,7 @@ export const useEventStore = defineStore("events", () => {
   function clone(src: MapEvent): MapEvent {
     const copy: MapEvent = JSON.parse(JSON.stringify(src));
     copy.id = newId();
-    copy.name = `${src.name || "Событие"} (копия)`;
+    copy.name = fillName(trc("{name} (копия)"), { name: src.name || trc("Событие") });
     upsert(copy);
     return copy;
   }
@@ -266,7 +275,7 @@ export const useEventStore = defineStore("events", () => {
   function blankEvent(): MapEvent {
     return {
       id: newId(),
-      name: "Новое событие",
+      name: trc("Новое событие"),
       enabled: true,
       occurOnce: true,
       chance: 100,
@@ -284,7 +293,7 @@ export const useEventStore = defineStore("events", () => {
     const map = OBJ_CONDITION[objType];
     const ev: MapEvent = {
       ...blankEvent(),
-      ...(objName ? { name: `Событие: ${objName}` } : {}),
+      ...(objName ? { name: fillName(trc("Событие: {name}"), { name: objName }) } : {}),
       ...(map
         ? { conditions: [{ ...makeCondition(map.kind), [map.key]: objId } as EventCondition] }
         : {}),
@@ -299,7 +308,7 @@ export const useEventStore = defineStore("events", () => {
   function createSpawnAt(locId: string, locName?: string): MapEvent {
     const ev: MapEvent = {
       ...blankEvent(),
-      name: `Спавн: ${locName || locId}`,
+      name: fillName(trc("Спавн: {name}"), { name: locName || locId }),
       conditions: [{ ...makeCondition("frequency"), days: 1 } as EventCondition],
       effects: [{ ...makeEffect("createStack"), locId } as EventEffect],
     };
@@ -316,7 +325,7 @@ export const useEventStore = defineStore("events", () => {
     if (!from) return null;
     const next: MapEvent = {
       ...blankEvent(),
-      name: `${from.name || "Событие"} — продолжение`,
+      name: fillName(trc("{name} — продолжение"), { name: from.name || trc("Событие") }),
       enabled: false, // starts OFF; the chain switches it on
     };
     const eff = { ...makeEffect("enableEvent"), eventId: next.id, enable: true } as EventEffect;
@@ -350,7 +359,8 @@ export const useEventStore = defineStore("events", () => {
     (inc as { num: number }).num = from.effects.length;
     const gate: MapEvent = {
       ...blankEvent(),
-      name: `${from.name || "Событие"} — после ${threshold} раз`,
+      // trn() does not reduce to Windows-1251 the way trc() does: keep its translations plain Latin
+      name: trn("{name} — после {n} раза|{name} — после {n} раз|{name} — после {n} раз", threshold, { name: from.name || trc("Событие") }),
       enabled: true,
       conditions: [
         {
@@ -436,7 +446,7 @@ export const useEventStore = defineStore("events", () => {
     }
     const branch: MapEvent = {
       ...blankEvent(),
-      name: `${from.name || "Событие"} — или…`,
+      name: fillName(trc("{name} — или…"), { name: from.name || trc("Событие") }),
       conditions: [gateCondFor(gateId)],
       effects: [incEffFor(gateId, 0)],
     };
@@ -504,7 +514,7 @@ export const useEventStore = defineStore("events", () => {
     const ticker: MapEvent = {
       ...blankEvent(),
       id: tickerId,
-      name: `${from.name || "Событие"} — счёт дней`,
+      name: fillName(trc("{name} — счёт дней"), { name: from.name || trc("Событие") }),
       enabled: false, // X включает
       occurOnce: false, // тикает каждый день
       conditions: [{ ...makeCondition("frequency"), days: 1 } as EventCondition],
@@ -515,7 +525,7 @@ export const useEventStore = defineStore("events", () => {
     const gate: MapEvent = {
       ...blankEvent(),
       id: gateId,
-      name: `${from.name || "Событие"} — через ${days} дн.`,
+      name: fillName(trc("{name} — через {n} дн."), { name: from.name || trc("Событие"), n: days }),
       conditions: [
         { ...makeCondition("varInRange"), var1: counter.id, min1: days, max1: 9999, var2: 0, min2: 0, max2: 0, relation: 0 } as EventCondition,
       ],
@@ -629,7 +639,7 @@ export const useEventStore = defineStore("events", () => {
       const clone: MapEvent = withGate({
         ...from,
         id,
-        name: `${from.name || "Событие"} · ${k + 2}`,
+        name: `${from.name || trc("Событие")} · ${k + 2}`,
         conditions: from.conditions.map((c, i) =>
           i === ci ? ({ ...c, locId } as EventCondition) : c),
       });
@@ -726,7 +736,7 @@ export const useEventStore = defineStore("events", () => {
   }
   function createTemplate(): StackTemplate {
     const t: StackTemplate = {
-      id: newTemplateId(), name: "Новый шаблон", owner: "", leader: "", leaderLevel: 1,
+      id: newTemplateId(), name: trc("Новый шаблон"), owner: "", leader: "", leaderLevel: 1,
       orderTarget: "", subRace: "", order: 1,
       units: [null, null, null, null, null, null],
       useFacing: false, facing: 0, aiPriority: 0, modifiers: [],
@@ -737,7 +747,7 @@ export const useEventStore = defineStore("events", () => {
   function cloneTemplate(src: StackTemplate): StackTemplate {
     const copy: StackTemplate = JSON.parse(JSON.stringify(src));
     copy.id = newTemplateId();
-    copy.name = `${src.name || "Шаблон"} (копия)`;
+    copy.name = fillName(trc("{name} (копия)"), { name: src.name || trc("Шаблон") });
     upsertTemplate(copy);
     return copy;
   }

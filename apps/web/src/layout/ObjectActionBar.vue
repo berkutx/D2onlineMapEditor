@@ -14,6 +14,7 @@ import { useDecorStore } from "../stores/decorStore";
 import type { DecorThumb as DecorThumbRect } from "../stores/decorStore";
 import DecorThumb from "./DecorThumb.vue";
 import ThumbPreview from "./ThumbPreview.vue";
+import { tr } from "../i18n";
 
 const toolStore = useToolStore();
 const editStore = useEditStore();
@@ -52,9 +53,9 @@ function hidePreview(): void {
     <DecorThumb class="oa-thumb" :thumb="decorStore.get(curId)?.thumb ?? group!.rep.thumb" :size="40" />
     <div class="oa-info">
       <div class="oa-name">{{ group!.label }}</div>
-      <div class="oa-hint">Облик · R — случайный · [ ] — листать</div>
+      <div class="oa-hint">{{ tr("Облик · R — случайный · [ ] — листать") }}</div>
     </div>
-    <el-button class="oa-roll" size="small" :icon="Refresh" circle title="Случайный облик (R)" @click="random()" />
+    <el-button class="oa-roll" size="small" :icon="Refresh" circle :title="tr('Случайный облик (R)')" @click="random()" />
     <el-scrollbar class="oa-strip">
       <div class="oa-row">
         <button

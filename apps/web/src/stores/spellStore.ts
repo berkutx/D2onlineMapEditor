@@ -7,6 +7,7 @@
 import { defineStore } from "pinia";
 import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
+import { tr } from "../i18n";
 
 export interface SpellEntry {
   id: string;
@@ -29,17 +30,17 @@ export interface SpellGroup {
 
 /** RU labels for the authoritative Lspell spell-category enum. */
 export const SPELL_CAT_LABELS: Record<string, string> = {
-  L_ATTACK: "Атакующие",
-  L_BOOST: "Усиление",
-  L_LOWER: "Ослабление",
-  L_HEAL: "Лечение",
-  L_SUMMON: "Призыв",
-  L_FOG: "Затемнение",
-  L_UNFOG: "Развеять туман",
-  L_CHANGE_TERRAIN: "Изменение земли",
-  L_RESTORE_MOVE: "Восстановление хода",
-  L_INVISIBILITY: "Невидимость",
-  L_REMOVE_ROD: "Снятие жезла",
+  L_ATTACK: tr("Атакующие"),
+  L_BOOST: tr("Усиление"),
+  L_LOWER: tr("Ослабление"),
+  L_HEAL: tr("Лечение"),
+  L_SUMMON: tr("Призыв"),
+  L_FOG: tr("Затемнение"),
+  L_UNFOG: tr("Развеять туман"),
+  L_CHANGE_TERRAIN: tr("Изменение земли"),
+  L_RESTORE_MOVE: tr("Восстановление хода"),
+  L_INVISIBILITY: tr("Невидимость"),
+  L_REMOVE_ROD: tr("Снятие жезла"),
 };
 
 const NULL_ID = "G000000000"; // sentinel "no spell"
@@ -87,8 +88,8 @@ export const useSpellStore = defineStore("spell", () => {
     if (!s) return "";
     const school = SPELL_CAT_LABELS[s.catKey] ?? "";
     const bits: string[] = []; // magnitudes only — the school already names the kind of effect
-    if (s.damage) bits.push(`${s.damage} урона`);
-    if (s.heal) bits.push(`${s.heal} HP`);
+    if (s.damage) bits.push(tr("{n} урона", { n: s.damage }));
+    if (s.heal) bits.push(tr("{n} HP", { n: s.heal }));
     return bits.length ? `${school} · ${bits.join(", ")}` : school;
   }
 
@@ -104,7 +105,7 @@ export const useSpellStore = defineStore("spell", () => {
       const spells = by.get(cat)!;
       spells.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, "ru"));
       const catKey = spells[0]?.catKey ?? "";
-      out.push({ key: catKey || String(cat), label: SPELL_CAT_LABELS[catKey] ?? `Категория ${cat}`, spells });
+      out.push({ key: catKey || String(cat), label: SPELL_CAT_LABELS[catKey] ?? tr("Категория {id}", { id: cat }), spells });
     }
     return out;
   });
@@ -120,7 +121,7 @@ export const useSpellStore = defineStore("spell", () => {
     for (const lvl of [...by.keys()].sort((a, b) => a - b)) {
       const spells = by.get(lvl)!;
       spells.sort((a, b) => a.name.localeCompare(b.name, "ru"));
-      out.push({ key: `l${lvl}`, label: `Уровень ${lvl}`, spells });
+      out.push({ key: `l${lvl}`, label: tr("Уровень {n}", { n: lvl }), spells });
     }
     return out;
   });

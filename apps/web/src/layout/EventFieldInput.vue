@@ -22,6 +22,7 @@ import { useDecorStore } from "../stores/decorStore";
 import { useEventStore } from "../stores/eventStore";
 import { useRefNames } from "../services/refNames";
 import { locationRoleCounts, ROLE_META, type RoleClass, type RoleCounts } from "../services/scenarioRoles";
+import { tr, trc } from "../i18n";
 import CodeInput from "./CodeInput.vue";
 import CommitInput from "./CommitInput.vue";
 import DecorThumb from "./DecorThumb.vue";
@@ -102,13 +103,13 @@ const refOptions = computed<Opt[]>(() => {
   if (!doc) return [];
   const t = props.field.type;
   if (t === "ref-player") {
-    return doc.players.map((p) => ({ value: p.id, label: `${p.name || "Игрок"} (${p.id})` }));
+    return doc.players.map((p) => ({ value: p.id, label: `${p.name || tr("Игрок")} (${p.id})` }));
   }
   if (t === "ref-event") {
-    return (doc.events ?? []).map((e) => ({ value: e.id, label: `${e.name || "событие"} · ${e.id}` }));
+    return (doc.events ?? []).map((e) => ({ value: e.id, label: `${e.name || tr("событие")} · ${e.id}` }));
   }
   if (t === "template") {
-    return (doc.templates ?? []).map((tm) => ({ value: tm.id, label: `${tm.name || "шаблон"} · ${tm.id}` }));
+    return (doc.templates ?? []).map((tm) => ({ value: tm.id, label: `${tm.name || tr("шаблон")} · ${tm.id}` }));
   }
   const types = REF_TYPES[t];
   if (!types) return [];
@@ -127,17 +128,17 @@ const stackGroups = computed<{ label: string; options: Opt[] }[]>(() => {
     .filter((o) => o.type === "stack")
     .map((o) => {
       const inCity = (o as { garrisoned?: boolean }).garrisoned;
-      const where = inCity ? "в городе" : `${o.pos.x},${o.pos.y}`;
+      const where = inCity ? tr("в городе") : `${o.pos.x},${o.pos.y}`;
       return { value: o.id, label: `${names.objName(o.id)} · ${where}` };
     })
     .sort((a, b) => a.label.localeCompare(b.label, "ru"));
   const templates = (doc.templates ?? []).map((tm) => ({
     value: tm.id,
-    label: `${tm.name || "шаблон"} · ${tm.id}`,
+    label: `${tm.name || tr("шаблон")} · ${tm.id}`,
   }));
   const out: { label: string; options: Opt[] }[] = [];
-  if (stacks.length) out.push({ label: "Отряды на карте", options: stacks });
-  if (templates.length) out.push({ label: "Шаблоны (любой отряд из шаблона)", options: templates });
+  if (stacks.length) out.push({ label: tr("Отряды на карте"), options: stacks });
+  if (templates.length) out.push({ label: tr("Шаблоны (любой отряд из шаблона)"), options: templates });
   return out;
 });
 
@@ -190,11 +191,11 @@ const locGroups = computed<{ label: string; options: Opt[] }[]>(() => {
     // for condition fields: pick the WHOLE zone — the panel clones the event per primitive
     if (props.allowZone && list.length >= 2) {
       const zid = zidByName.get(zn);
-      if (zid) list.unshift({ value: `ZONE::${zid}`, label: `▦ Вся зона «${zn}» (${list.length} лок.)` });
+      if (zid) list.unshift({ value: `ZONE::${zid}`, label: tr("▦ Вся зона «{zone}» ({n} лок.)", { zone: zn, n: list.length }) });
     }
-    out.push({ label: `▦ Зона «${zn}» (${list.length})`, options: list });
+    out.push({ label: tr("▦ Зона «{zone}» ({n})", { zone: zn, n: list.length }), options: list });
   }
-  if (buckets.free!.length) out.push({ label: `Свободные — не в сценарии (${buckets.free!.length})`, options: buckets.free! });
+  if (buckets.free!.length) out.push({ label: tr("Свободные — не в сценарии ({n})", { n: buckets.free!.length }), options: buckets.free! });
   for (const k of ROLE_ORDER) {
     if (buckets[k]!.length)
       out.push({ label: `${ROLE_META[k].icon} ${ROLE_META[k].label} (${buckets[k]!.length})`, options: buckets[k]! });
@@ -215,9 +216,9 @@ const targetGroups = computed<{ label: string; options: Opt[] }[]>(() => {
   const stacks = mk(["stack"]);
   const cities = mk(["village", "capital"]);
   const locs = mk(["location"]);
-  if (stacks.length) out.push({ label: "Отряды (атаковать / защищать / помогать)", options: stacks });
-  if (cities.length) out.push({ label: "Города (удерживать / красть / защищать)", options: cities });
-  if (locs.length) out.push({ label: "Локации (идти / защищать)", options: locs });
+  if (stacks.length) out.push({ label: tr("Отряды (атаковать / защищать / помогать)"), options: stacks });
+  if (cities.length) out.push({ label: tr("Города (удерживать / красть / защищать)"), options: cities });
+  if (locs.length) out.push({ label: tr("Локации (идти / защищать)"), options: locs });
   return out;
 });
 
@@ -259,7 +260,7 @@ function onLocPick(v: unknown): void {
     const z = edit.zones[zid];
     const first = z?.locIds.find((id) => edit.liveDoc?.objects.some((o) => o.id === id));
     if (!z || !first) {
-      ElMessage.warning("У зоны нет живых локаций");
+      ElMessage.warning(tr("У зоны нет живых локаций"));
       return;
     }
     emit("update:modelValue", first);
@@ -310,22 +311,27 @@ function newLocation(): void {
   const clampC = (v: number): number => Math.max(0, Math.min(doc.size - 1, v));
   const cx = clampC(vc ? Math.round(vc.x + vc.w / 2) : Math.floor(doc.size / 2));
   const cy = clampC(vc ? Math.round(vc.y + vc.h / 2) : Math.floor(doc.size / 2));
-  const ops = placeLocationOps(doc, cx, cy, 2, "Новая локация", collabStore.idSlot);
+  const ops = placeLocationOps(doc, cx, cy, 2, trc("Новая локация"), collabStore.idSlot);
   const first = ops[0] as { object?: { id: string } } | undefined;
   if (!first?.object) return;
   edit.commit(ops);
   set(first.object.id);
   if (!viewStore.locationsVisible) viewStore.toggleLocations();
   toolStore.setSelectedId(first.object.id);
-  ElMessage.success("Локация создана в центре экрана — двигайте инструментом «Двигать», радиус в инспекторе");
+  ElMessage.success(tr("Локация создана в центре экрана — двигайте инструментом «Двигать», радиус в инспекторе"));
 }
 
 // --- 🎯 «выбрать кликом по карте» (any object-ref field) ----------------------------------
-/** Human hint per ref type for the pick toast. */
+/** The pick toast per ref type (a whole message each: the object's case and the word order
+ *  differ between languages). */
 const PICK_HINT: Record<string, string> = {
-  "ref-loc": "локацию", "ref-stack": "отряд", "ref-city": "город",
-  "ref-ruin": "руины", "ref-site": "постройку", "ref-lmark": "ориентир",
-  "ref-target": "цель приказа (отряд / город / локацию)",
+  "ref-loc": tr("Кликните по карте: локацию (Esc — отмена)"),
+  "ref-stack": tr("Кликните по карте: отряд (Esc — отмена)"),
+  "ref-city": tr("Кликните по карте: город (Esc — отмена)"),
+  "ref-ruin": tr("Кликните по карте: руины (Esc — отмена)"),
+  "ref-site": tr("Кликните по карте: постройку (Esc — отмена)"),
+  "ref-lmark": tr("Кликните по карте: ориентир (Esc — отмена)"),
+  "ref-target": tr("Кликните по карте: цель приказа (отряд / город / локацию) (Esc — отмена)"),
 };
 /** Nonce of the pick THIS field requested; only that pick's result is consumed here
  *  (several EventFieldInput instances watch the same store). */
@@ -336,7 +342,7 @@ function pickOnMap(): void {
   // nonce of the pick we are about to own = current counter + 1 (finishObjectPick increments)
   myPickNonce = (toolStore.objectPickResult?.nonce ?? 0) + 1;
   toolStore.startObjectPick(types);
-  ElMessage({ message: `Кликните по карте: ${PICK_HINT[props.field.type] ?? "объект"} (Esc — отмена)`, type: "info", duration: 4000 });
+  ElMessage({ message: PICK_HINT[props.field.type] ?? tr("Кликните по карте: объект (Esc — отмена)"), type: "info", duration: 4000 });
 }
 watch(
   () => toolStore.objectPickResult,
@@ -365,7 +371,7 @@ watch(
     style="width: 100%"
     @update:model-value="set($event)"
   >
-    <el-option v-for="o in field.options ?? []" :key="o.value" :value="o.value" :label="o.label" />
+    <el-option v-for="o in field.options ?? []" :key="o.value" :value="o.value" :label="tr(o.label)" />
   </el-select>
 
   <!-- scenario variable picker (stored as the variable's numeric id) -->
@@ -375,7 +381,7 @@ watch(
     size="small"
     filterable
     style="width: 100%"
-    placeholder="— переменная —"
+    :placeholder="tr('— переменная —')"
     @update:model-value="set($event)"
   >
     <el-option v-for="o in varOptions" :key="o.value" :value="o.value" :label="o.label" />
@@ -390,7 +396,7 @@ watch(
       style="width: 130px"
       @update:model-value="set($event)"
     >
-      <el-option v-for="o in field.options" :key="o.value" :value="o.value" :label="o.label" />
+      <el-option v-for="o in field.options" :key="o.value" :value="o.value" :label="tr(o.label)" />
     </el-select>
     <el-input-number
       :model-value="Number(modelValue) || 0"
@@ -411,7 +417,7 @@ watch(
         size="small"
         filterable
         clearable
-        placeholder="— локация —"
+        :placeholder="tr('— локация —')"
         class="ev-loc-sel"
         @update:model-value="onLocPick($event || '')"
       >
@@ -422,13 +428,13 @@ watch(
           <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
         </el-option-group>
       </el-select>
-      <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+      <el-tooltip :content="tr('Показать на карте (центрирует камеру)')" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
       </el-tooltip>
-      <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+      <el-tooltip :content="tr('Выбрать кликом по карте')" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
       </el-tooltip>
-      <el-tooltip content="Новая локация в центре экрана" :show-after="300">
+      <el-tooltip :content="tr('Новая локация в центре экрана')" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" @click="newLocation()">＋</el-button>
       </el-tooltip>
     </div>
@@ -455,7 +461,7 @@ watch(
       size="small"
       filterable
       clearable
-      placeholder="— отряд или шаблон —"
+      :placeholder="tr('— отряд или шаблон —')"
       class="ev-loc-sel"
       @update:model-value="set($event || '')"
     >
@@ -463,10 +469,10 @@ watch(
         <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
       </el-option-group>
     </el-select>
-    <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+    <el-tooltip :content="tr('Показать на карте (центрирует камеру)')" :show-after="300">
       <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
     </el-tooltip>
-    <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+    <el-tooltip :content="tr('Выбрать кликом по карте')" :show-after="300">
       <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
     </el-tooltip>
   </div>
@@ -478,7 +484,7 @@ watch(
       size="small"
       filterable
       clearable
-      placeholder="— цель приказа —"
+      :placeholder="tr('— цель приказа —')"
       class="ev-loc-sel"
       @update:model-value="set($event || '')"
     >
@@ -486,10 +492,10 @@ watch(
         <el-option v-for="o in g.options" :key="o.value" :value="o.value" :label="o.label" />
       </el-option-group>
     </el-select>
-    <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+    <el-tooltip :content="tr('Показать на карте (центрирует камеру)')" :show-after="300">
       <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
     </el-tooltip>
-    <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+    <el-tooltip :content="tr('Выбрать кликом по карте')" :show-after="300">
       <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
     </el-tooltip>
   </div>
@@ -501,24 +507,24 @@ watch(
       size="small"
       filterable
       clearable
-      placeholder="— не задано —"
+      :placeholder="tr('— не задано —')"
       class="ev-loc-sel"
       @update:model-value="set($event || '')"
     >
       <el-option v-for="o in refOptions" :key="o.value" :value="o.value" :label="o.label" />
     </el-select>
     <template v-if="isObjRef">
-      <el-tooltip content="Показать на карте (центрирует камеру)" :show-after="300">
+      <el-tooltip :content="tr('Показать на карте (центрирует камеру)')" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="showOnMap()">📍</el-button>
       </el-tooltip>
-      <el-tooltip content="Выбрать кликом по карте" :show-after="300">
+      <el-tooltip :content="tr('Выбрать кликом по карте')" :show-after="300">
         <el-button size="small" text class="ev-loc-btn" @click="pickOnMap()">🎯</el-button>
       </el-tooltip>
     </template>
-    <el-tooltip v-if="field.type === 'template'" content="Открыть во вкладке «Шаблоны»" :show-after="300">
+    <el-tooltip v-if="field.type === 'template'" :content="tr('Открыть во вкладке «Шаблоны»')" :show-after="300">
       <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="openTemplate()">✎</el-button>
     </el-tooltip>
-    <el-tooltip v-if="field.type === 'ref-event'" content="Перейти к этому событию" :show-after="300">
+    <el-tooltip v-if="field.type === 'ref-event'" :content="tr('Перейти к этому событию')" :show-after="300">
       <el-button size="small" text class="ev-loc-btn" :disabled="!modelValue" @click="openEvent()">➜</el-button>
     </el-tooltip>
   </div>
@@ -530,7 +536,7 @@ watch(
     size="small"
     filterable
     clearable
-    placeholder="— декорация —"
+    :placeholder="tr('— декорация —')"
     style="width: 100%"
     @update:model-value="set($event || '')"
   >
@@ -549,7 +555,7 @@ watch(
     size="small"
     filterable
     clearable
-    :placeholder="field.type === 'item' ? '— предмет —' : '— заклинание —'"
+    :placeholder="field.type === 'item' ? tr('— предмет —') : tr('— заклинание —')"
     style="width: 100%"
     @update:model-value="set($event || '')"
   >
@@ -565,10 +571,10 @@ watch(
     <CommitInput
       :model-value="(modelValue as string) ?? ''"
       size="small"
-      :placeholder="field.key === 'sound' ? 'имя из SoundsP, напр. abbey' : 'имя из MusicP, напр. trevoga'"
+      :placeholder="field.key === 'sound' ? tr('имя из SoundsP, напр. abbey') : tr('имя из MusicP, напр. trevoga')"
       @update:model-value="set($event)"
     />
-    <span class="ev-audio-hint">без расширения (.mp3/.wav срезается автоматически)</span>
+    <span class="ev-audio-hint">{{ tr("без расширения (.mp3/.wav срезается автоматически)") }}</span>
   </div>
 
   <!-- код (Lua-скрипт) — с подсветкой синтаксиса -->

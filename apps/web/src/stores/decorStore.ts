@@ -6,6 +6,7 @@
  */
 import { defineStore } from "pinia";
 import { modAssetUrl } from "./modStore";
+import { tr, trx } from "../i18n";
 import { ref, computed } from "vue";
 
 export interface DecorThumb {
@@ -56,62 +57,62 @@ export interface DecorGroup {
 export const DECOR_FAMILIES: { key: string; label: string; shapes: string[] }[] = [
   {
     key: "terrain",
-    label: "Рельеф",
+    label: tr("Рельеф"),
     shapes: ["mountain", "hill", "cliff", "waterfall", "rock", "boulder", "crater",
              "ground-patch", "lava-flow", "swamp", "water-feature", "ice"],
   },
   {
     key: "nature",
-    label: "Природа",
+    label: trx("decor", "Природа"),
     shapes: ["tree", "dead-tree", "vegetation", "stump", "bush", "mushroom"],
   },
   {
     key: "structures",
-    label: "Постройки",
+    label: trx("decor", "Постройки"),
     shapes: ["ruin-building", "tower", "wall", "fence", "gate", "well", "bridge", "camp"],
   },
   {
     key: "shrines",
-    label: "Камни и святыни",
+    label: tr("Камни и святыни"),
     shapes: ["standing-stone", "obelisk", "statue", "totem", "magic-node", "crystal", "portal"],
   },
   {
     key: "graves",
-    label: "Могилы и кости",
+    label: tr("Могилы и кости"),
     shapes: ["grave", "bones", "skull"],
   },
   {
     key: "misc",
-    label: "Прочее",
+    label: tr("Прочее"),
     shapes: ["debris", "misc"],
   },
 ];
 
 /** D2 faction styles, for the palette filter (RU labels). */
 export const DECOR_STYLES: { value: string; label: string }[] = [
-  { value: "neutral", label: "Нейтрально" },
-  { value: "empire", label: "Империя" },
-  { value: "clans", label: "Кланы" },
-  { value: "legions", label: "Легионы" },
-  { value: "undead", label: "Нежить" },
-  { value: "elves", label: "Эльфы" },
-  { value: "arcane", label: "Магия" },
+  { value: "neutral", label: tr("Нейтрально") },
+  { value: "empire", label: tr("Империя") },
+  { value: "clans", label: tr("Кланы") },
+  { value: "legions", label: tr("Легионы") },
+  { value: "undead", label: tr("Нежить") },
+  { value: "elves", label: tr("Эльфы") },
+  { value: "arcane", label: tr("Магия") },
 ];
 
 /** Biome/tone, for the palette filter (RU labels). */
 export const DECOR_TONES: { value: string; label: string }[] = [
-  { value: "snow", label: "Снег" },
-  { value: "ice", label: "Лёд" },
-  { value: "temperate", label: "Зелень" },
-  { value: "forest", label: "Лес" },
-  { value: "earth", label: "Земля" },
-  { value: "arid", label: "Сушь" },
-  { value: "swamp", label: "Болото" },
-  { value: "volcanic", label: "Вулкан" },
-  { value: "scorched", label: "Гарь" },
-  { value: "dark", label: "Тьма" },
-  { value: "magic", label: "Магия" },
-  { value: "neutral", label: "Обычный" },
+  { value: "snow", label: tr("Снег") },
+  { value: "ice", label: tr("Лёд") },
+  { value: "temperate", label: tr("Зелень") },
+  { value: "forest", label: tr("Лес") },
+  { value: "earth", label: trx("tone", "Земля") },
+  { value: "arid", label: tr("Сушь") },
+  { value: "swamp", label: tr("Болото") },
+  { value: "volcanic", label: tr("Вулкан") },
+  { value: "scorched", label: tr("Гарь") },
+  { value: "dark", label: tr("Тьма") },
+  { value: "magic", label: tr("Магия") },
+  { value: "neutral", label: trx("tone", "Обычный") },
 ];
 
 const SHAPE_TO_FAMILY: Record<string, string> = (() => {
@@ -175,7 +176,7 @@ export const useDecorStore = defineStore("decor", () => {
         const h = isMtn ? w : e.cy;
         g = {
           key: k,
-          label: isMtn ? `Гора ${w}×${h}` : (e.name_ru || e.desc_en),
+          label: isMtn ? tr("Гора {w}×{h}", { w, h }) : (e.name_ru || e.desc_en),
           family: familyOf(e.shape),
           shape: e.shape,
           cx: w,

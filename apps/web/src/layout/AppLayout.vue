@@ -17,6 +17,7 @@ import { useDecorStore } from "../stores/decorStore";
 import { useEditStore } from "../stores/editStore";
 import { useMapStore } from "../stores/mapStore";
 import { getScene } from "../canvas/sceneHolder";
+import { tr } from "../i18n";
 import TopMenuBar from "./TopMenuBar.vue";
 import ToolDock from "./ToolDock.vue";
 import ToolOptionsBar from "./ToolOptionsBar.vue";
@@ -49,11 +50,11 @@ const selActions = useSelectionActions();
 // Redo guard (collab): the store refuses a redo whose target a peer changed since the undo.
 watch(
   () => editStore.redoBlockedTick,
-  () => ElMessage.warning("Повтор правки отменён: затронутые данные изменил другой участник."),
+  () => ElMessage.warning(tr("Повтор правки отменён: затронутые данные изменил другой участник.")),
 );
 watch(
   () => editStore.undoBlockedTick,
-  () => ElMessage.warning("Нельзя отменить удаление фракции: состав игроков изменился или прежнее положение игрока нельзя безопасно восстановить. Карта не изменена."),
+  () => ElMessage.warning(tr("Нельзя отменить удаление фракции: состав игроков изменился или прежнее положение игрока нельзя безопасно восстановить. Карта не изменена.")),
 );
 
 /** Formation inspectors need room for two readable portrait cards and the selected unit.

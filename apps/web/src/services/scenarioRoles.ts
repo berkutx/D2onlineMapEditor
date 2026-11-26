@@ -9,6 +9,7 @@
  */
 import type { MapDocument, MapEvent } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND, STACK_ORDER_OPTIONS } from "@d2/map-schema";
+import { tr } from "../i18n";
 
 /** Role classes (drive overlay color/icon + inspector grouping). `target` = the event
  *  CHANGES this object (removes/re-owns/orders a stack, swaps a landmark) — distinct from
@@ -43,15 +44,15 @@ const EFFECT_FIELD_CLS: Record<string, Record<string, RoleClass>> = {
 /** Spawn markers for event-list badges. */
 const SPAWN_EFFECTS = new Set(["createStack"]);
 
-const ORDER_LABEL = new Map<number, string>(STACK_ORDER_OPTIONS.map((o) => [o.value, o.label]));
+const ORDER_LABEL = new Map<number, string>(STACK_ORDER_OPTIONS.map((o) => [o.value, tr(o.label)]));
 
 /** Per-class display metadata (shared by overlay legend + inspector). */
 export const ROLE_META: Record<RoleClass, { icon: string; label: string; color: number }> = {
-  trigger: { icon: "⚡", label: "триггер", color: 0xe6a23c },
-  target: { icon: "🎯", label: "событие меняет объект", color: 0xf56c6c },
-  spawn: { icon: "✨", label: "спавн", color: 0x67c23a },
-  destination: { icon: "➜", label: "цель движения", color: 0x409eff },
-  env: { icon: "☁", label: "эффект среды", color: 0xb07dd8 },
+  trigger: { icon: "⚡", label: tr("триггер"), color: 0xe6a23c },
+  target: { icon: "🎯", label: tr("событие меняет объект"), color: 0xf56c6c },
+  spawn: { icon: "✨", label: tr("спавн"), color: 0x67c23a },
+  destination: { icon: "➜", label: tr("цель движения"), color: 0x409eff },
+  env: { icon: "☁", label: tr("эффект среды"), color: 0xb07dd8 },
 };
 
 /** All scenario roles of every referenced object id. */
@@ -70,7 +71,7 @@ export function computeObjectRoles(doc: MapDocument): Map<string, ObjectRole[]> 
       const spec = CONDITION_BY_KIND[c.kind];
       for (const f of spec?.fields ?? []) {
         if (!f.type.startsWith("ref-") || f.type === "ref-player" || f.type === "ref-event") continue;
-        add((c as Record<string, unknown>)[f.key], { cls: "trigger", ev, what: spec!.label, kind: c.kind });
+        add((c as Record<string, unknown>)[f.key], { cls: "trigger", ev, what: tr(spec!.label), kind: c.kind });
       }
     }
     // effects: per-FIELD class (spawn / target / destination), defaulting to env
@@ -79,12 +80,12 @@ export function computeObjectRoles(doc: MapDocument): Map<string, ObjectRole[]> 
       // «Приказ отряду»: показываем СМЫСЛ (категорию приказа из LOrder), не код
       const detail =
         e.kind === "changeStackOrder"
-          ? ORDER_LABEL.get(Number((e as Record<string, unknown>).order)) ?? `код ${(e as Record<string, unknown>).order}`
+          ? ORDER_LABEL.get(Number((e as Record<string, unknown>).order)) ?? tr("код {code}", { code: String((e as Record<string, unknown>).order) })
           : undefined;
       for (const f of spec?.fields ?? []) {
         if (!f.type.startsWith("ref-") || f.type === "ref-player" || f.type === "ref-event") continue;
         const cls: RoleClass = EFFECT_FIELD_CLS[e.kind]?.[f.key] ?? "env";
-        add((e as Record<string, unknown>)[f.key], { cls, ev, what: spec!.label, kind: e.kind, ...(detail ? { detail } : {}) });
+        add((e as Record<string, unknown>)[f.key], { cls, ev, what: tr(spec!.label), kind: e.kind, ...(detail ? { detail } : {}) });
       }
     }
   }
@@ -160,14 +161,14 @@ export type LocFilter =
   | "spawn" | "destination" | "env";
 
 export const LOC_FILTERS: { value: LocFilter; icon: string; label: string; hint: string }[] = [
-  { value: "all", icon: "☰", label: "все", hint: "показать все локации" },
-  { value: "free", icon: "∅", label: "пустые", hint: "свободные — не используются ни одним событием" },
-  { value: "enter", icon: "⚡", label: "вход", hint: "вход в зону (триггер)" },
-  { value: "stackIn", icon: "👣", label: "отряд", hint: "отряд в зоне (триггер)" },
-  { value: "itemTo", icon: "🎒", label: "предмет", hint: "предмет в зону (триггер)" },
-  { value: "spawn", icon: "✨", label: "спавн", hint: "спавны (создать отряд)" },
-  { value: "destination", icon: "➜", label: "движение", hint: "цели движения и приказов" },
-  { value: "env", icon: "☁", label: "среда", hint: "эффекты среды (заклинание / туман / рельеф)" },
+  { value: "all", icon: "☰", label: tr("все"), hint: tr("показать все локации") },
+  { value: "free", icon: "∅", label: tr("пустые"), hint: tr("свободные — не используются ни одним событием") },
+  { value: "enter", icon: "⚡", label: tr("вход"), hint: tr("вход в зону (триггер)") },
+  { value: "stackIn", icon: "👣", label: tr("отряд"), hint: tr("отряд в зоне (триггер)") },
+  { value: "itemTo", icon: "🎒", label: tr("предмет"), hint: tr("предмет в зону (триггер)") },
+  { value: "spawn", icon: "✨", label: tr("спавн"), hint: tr("спавны (создать отряд)") },
+  { value: "destination", icon: "➜", label: tr("движение"), hint: tr("цели движения и приказов") },
+  { value: "env", icon: "☁", label: tr("среда"), hint: tr("эффекты среды (заклинание / туман / рельеф)") },
 ];
 
 /** Does a role list pass the sub-filter? (`free` handled by the caller: no roles at all) */
@@ -196,20 +197,20 @@ export function locationSummaries(doc: MapDocument): Record<string, string[]> {
     for (const r of list) {
       const evName = r.ev.name || r.ev.id;
       let line: string;
-      if (r.kind === "enterZone") line = `⚡ вход → «${evName}»`;
-      else if (r.kind === "stackInLocation") line = `⚡ отряд в зоне → «${evName}»`;
-      else if (r.kind === "itemToLocation") line = `⚡ предмет → «${evName}»`;
-      else if (r.cls === "trigger") line = `⚡ ${r.what} → «${evName}»`;
-      else if (r.cls === "spawn") line = `✨ спавн — «${evName}»`;
-      else if (r.kind === "changeStackOrder") line = `➜ приказ: ${r.detail ?? r.what}`;
-      else if (r.cls === "destination") line = `➜ сюда придёт отряд («${evName}»)`;
+      if (r.kind === "enterZone") line = tr("⚡ вход → «{name}»", { name: evName });
+      else if (r.kind === "stackInLocation") line = tr("⚡ отряд в зоне → «{name}»", { name: evName });
+      else if (r.kind === "itemToLocation") line = tr("⚡ предмет → «{name}»", { name: evName });
+      else if (r.cls === "trigger") line = tr("⚡ {what} → «{name}»", { what: r.what, name: evName });
+      else if (r.cls === "spawn") line = tr("✨ спавн — «{name}»", { name: evName });
+      else if (r.kind === "changeStackOrder") line = tr("➜ приказ: {order}", { order: r.detail ?? r.what });
+      else if (r.cls === "destination") line = tr("➜ сюда придёт отряд («{name}»)", { name: evName });
       else line = `☁ ${r.what}`;
       if (!seen.has(line)) {
         seen.add(line);
         lines.push(line);
       }
     }
-    out[o.id] = lines.length > 2 ? [...lines.slice(0, 2), `… ещё ${lines.length - 2}`] : lines;
+    out[o.id] = lines.length > 2 ? [...lines.slice(0, 2), tr("… ещё {n}", { n: lines.length - 2 })] : lines;
   }
   return out;
 }

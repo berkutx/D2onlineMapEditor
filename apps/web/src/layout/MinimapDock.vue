@@ -10,6 +10,7 @@ import { ref } from "vue";
 import { useViewStore } from "../stores/viewStore";
 import { useFloatingDock } from "../composables/useFloatingDock";
 import MiniMap from "./MiniMap.vue";
+import { tr } from "../i18n";
 
 const view = useViewStore();
 const card = ref<HTMLElement | null>(null);
@@ -18,17 +19,17 @@ const { style, onHandlePointerDown } = useFloatingDock("minimap", card);
 
 <template>
   <div v-if="view.minimapVisible" ref="card" class="minimap-dock d2-float" :style="style">
-    <div class="mm-head" title="Перетащите за заголовок" @pointerdown="onHandlePointerDown">
+    <div class="mm-head" :title="tr('Перетащите за заголовок')" @pointerdown="onHandlePointerDown">
       <span class="mm-grip">⠿</span>
-      <span class="mm-title d2-sec">карта</span>
-      <button class="mm-close" title="Скрыть миникарту" @click="view.toggleMinimap()">✕</button>
+      <span class="mm-title d2-sec">{{ tr("карта") }}</span>
+      <button class="mm-close" :title="tr('Скрыть миникарту')" @click="view.toggleMinimap()">✕</button>
     </div>
     <MiniMap :size="220" show-objects />
   </div>
   <button
     v-else
     class="minimap-fab d2-float"
-    title="Миникарта"
+    :title="tr('Миникарта')"
     @click="view.toggleMinimap()"
   >🗺</button>
 </template>

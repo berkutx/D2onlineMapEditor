@@ -8,6 +8,7 @@
 import { defineStore } from "pinia";
 import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
+import { tr } from "../i18n";
 
 export interface UnitEntry {
   id: string;
@@ -36,34 +37,34 @@ export interface UnitGroup {
 
 /** RU labels for the authoritative LunitC unit-category enum (group headings, plural). */
 export const UNIT_CAT_LABELS: Record<string, string> = {
-  L_SOLDIER: "Воины",
-  L_LEADER: "Герои",
-  L_GUARDIAN: "Стражи",
-  L_SUMMON: "Призываемые",
-  L_NOBLE: "Дворяне",
-  L_ILLUSION: "Иллюзии",
+  L_SOLDIER: tr("Воины"),
+  L_LEADER: tr("Герои"),
+  L_GUARDIAN: tr("Стражи"),
+  L_SUMMON: tr("Призываемые"),
+  L_NOBLE: tr("Дворяне"),
+  L_ILLUSION: tr("Иллюзии"),
 };
 
 /** Singular role labels for a single unit row. The SAME creature often has several Gunit
  *  records differing only by role (e.g. Мизраэль exists as L_GUARDIAN and L_SOLDIER) — showing
  *  the role is what tells those otherwise-identical-looking rows apart. */
 export const UNIT_ROLE_LABELS: Record<string, string> = {
-  L_SOLDIER: "Воин",
-  L_LEADER: "Герой",
-  L_GUARDIAN: "Страж",
-  L_SUMMON: "Призыв",
-  L_NOBLE: "Дворянин",
-  L_ILLUSION: "Иллюзия",
+  L_SOLDIER: tr("Воин"),
+  L_LEADER: tr("Герой"),
+  L_GUARDIAN: tr("Страж"),
+  L_SUMMON: tr("Призыв"),
+  L_NOBLE: tr("Дворянин"),
+  L_ILLUSION: tr("Иллюзия"),
 };
 export const roleLabel = (catKey: string): string => UNIT_ROLE_LABELS[catKey] ?? "";
 
 /** RU labels for the LleadC leader-subtype enum (heroes only). */
 export const UNIT_LEADER_LABELS: Record<string, string> = {
-  L_FIGHTER: "Воин",
-  L_MAGE: "Маг",
-  L_EXPLORER: "Разведчик",
-  L_NOBLE: "Дворянин",
-  L_ROD: "Жезлоносец",
+  L_FIGHTER: tr("Воин"),
+  L_MAGE: tr("Маг"),
+  L_EXPLORER: tr("Разведчик"),
+  L_NOBLE: tr("Дворянин"),
+  L_ROD: tr("Жезлоносец"),
 };
 
 const NULL_ID = "G000000000"; // sentinel "no unit"
@@ -90,7 +91,7 @@ export const useUnitStore = defineStore("unit", () => {
       // with zero `large` is a stale/wrong build on the asset volume — fail LOUD (a missing sized
       // catalog is not normal operation), never silently fall back. See deploy/README §3b.
       if (!arr.some((u) => u.large)) {
-        throw new Error("unitCatalog.json несёт 0 размеров юнитов (нет `large`) — на asset-volume старый каталог; см. deploy/README §3b");
+        throw new Error(tr("unitCatalog.json несёт 0 размеров юнитов (нет `large`) — на asset-volume старый каталог; см. deploy/README §3b"));
       }
       const map: Record<string, UnitEntry> = {};
       for (const e of arr) map[e.id] = e;
@@ -153,7 +154,7 @@ export const useUnitStore = defineStore("unit", () => {
     for (const sid of [...by.keys()].sort((a, b) => a - b)) {
       const units = by.get(sid)!;
       units.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name, "ru"));
-      out.push({ key: `s${sid}`, label: units[0]?.subrace ?? `Раса ${sid}`, units });
+      out.push({ key: `s${sid}`, label: units[0]?.subrace ?? tr("Раса {id}", { id: sid }), units });
     }
     return out;
   });
@@ -170,7 +171,7 @@ export const useUnitStore = defineStore("unit", () => {
       const units = by.get(cat)!;
       units.sort((a, b) => a.subraceId - b.subraceId || a.level - b.level || a.name.localeCompare(b.name, "ru"));
       const catKey = units[0]?.catKey ?? "";
-      out.push({ key: catKey || String(cat), label: UNIT_CAT_LABELS[catKey] ?? `Категория ${cat}`, units });
+      out.push({ key: catKey || String(cat), label: UNIT_CAT_LABELS[catKey] ?? tr("Категория {id}", { id: cat }), units });
     }
     return out;
   });
@@ -186,7 +187,7 @@ export const useUnitStore = defineStore("unit", () => {
     for (const lvl of [...by.keys()].sort((a, b) => a - b)) {
       const units = by.get(lvl)!;
       units.sort((a, b) => a.subraceId - b.subraceId || a.name.localeCompare(b.name, "ru"));
-      out.push({ key: `l${lvl}`, label: `Уровень ${lvl}`, units });
+      out.push({ key: `l${lvl}`, label: tr("Уровень {n}", { n: lvl }), units });
     }
     return out;
   });

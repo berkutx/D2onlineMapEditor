@@ -20,6 +20,7 @@ import { useEditStore } from "../stores/editStore";
 import { useToolStore } from "../stores/toolStore";
 import { AMOUNT_STEPS, useGenStore } from "../stores/genStore";
 import { useFloatingDock } from "../composables/useFloatingDock";
+import { tr, trn } from "../i18n";
 import GenResultStrip from "./GenResultStrip.vue";
 
 interface Msg {
@@ -79,8 +80,8 @@ function setArea(m: Area, opts: { auto?: boolean } = {}): void {
   }
   if (opts.auto) {
     pulseArea(m);
-    if (m === "point") notify("📍 Точка — кликни клетку на карте, потом Enter", "info");
-    else if (m === "zone") notify("⛶ Зона — обведи область на карте, потом Enter", "info");
+    if (m === "point") notify(tr("📍 Точка — кликни клетку на карте, потом Enter"), "info");
+    else if (m === "zone") notify(tr("⛶ Зона — обведи область на карте, потом Enter"), "info");
   }
 }
 const input = ref("");
@@ -90,7 +91,7 @@ const scroller = ref<HTMLElement | null>(null);
 const log = ref<Msg[]>([
   {
     role: "assistant",
-    text: "Copilot (превью). Скоро: «залей водой», «добавь горы слева», «выдели участок и перегенерируй».",
+    text: tr("Copilot (превью). Скоро: «залей водой», «добавь горы слева», «выдели участок и перегенерируй»."),
   },
 ]);
 
@@ -125,16 +126,16 @@ const idleEffective = computed(() => idle.value && !inputFocused.value && !input
 /** Format the last generation's timing/debug for the chat (client round-trip + server detail). */
 function debugLine(clientMs: number): string {
   const d = editStore.genDebug;
-  if (!d) return `${clientMs}мс`;
-  let s = `${d.opCount} кл · сервер ${d.serverMs}мс / всего ${clientMs}мс`;
-  if (d.protect) s += ` · 🛡 ${d.protectedInRegion ?? 0} сохранено`;
+  if (!d) return tr("{ms}мс", { ms: clientMs });
+  let s = trn("{n} кл · сервер {server}мс / всего {total}мс", d.opCount, { server: d.serverMs, total: clientMs });
+  if (d.protect) s += " · " + tr("🛡 {n} сохранено", { n: d.protectedInRegion ?? 0 });
   if (!d.validation.ok) {
     const bad = [
       !d.validation.identity && "identity",
       !d.validation.semantic && "semantic",
       !d.validation.structural && "structural",
     ].filter(Boolean).join("/");
-    s += ` · ⚠ валидация: ${bad}`;
+    s += " · " + tr("⚠ валидация: {bad}", { bad });
   }
   return s;
 }
@@ -145,8 +146,8 @@ function validationReason(): string {
   const r = editStore.report;
   if (!r || r.ok) return "";
   const parts: string[] = [];
-  if (!r.identity) parts.push("identity: байтовый round-trip не сошёлся");
-  if (r.semantic && !r.semantic.ok) parts.push(`semantic: ${r.semantic.reason ?? "несоответствие после применения"}`);
+  if (!r.identity) parts.push(tr("identity: байтовый round-trip не сошёлся"));
+  if (r.semantic && !r.semantic.ok) parts.push(`semantic: ${r.semantic.reason ?? tr("несоответствие после применения")}`);
   if (r.structural && !r.structural.ok && r.structural.errors?.length) {
     const errs = r.structural.errors;
     parts.push(`structural: ${errs.slice(0, 3).join("; ")}${errs.length > 3 ? ` (+${errs.length - 3})` : ""}`);
@@ -156,8 +157,8 @@ function validationReason(): string {
 
 const placeholder = computed(() =>
   llmMode.value
-    ? "🧠 опиши, что сгенерировать: «озеро на севере и гряда гор по диагонали»  ( / )"
-    : "напр. «озеро», «река», «лабиринт», «озеро вокруг этой точки 20x20»  ( / )",
+    ? tr("🧠 опиши, что сгенерировать: «озеро на севере и гряда гор по диагонали»  ( / )")
+    : tr("напр. «озеро», «река», «лабиринт», «озеро вокруг этой точки 20x20»  ( / )"),
 );
 
 /** The last successful LLM composition, so "↻" can roll it back and ask again. (A recipe
@@ -204,7 +205,7 @@ function maybeHintArea(): void {
     return;
   }
   ElMessage({
-    message: "Область генерации — 👁 Экран: то, что видно на экране. Сменить: ⛶ Зона (обвести) · 📍 Точка (кликнуть).",
+    message: tr("Область генерации — 👁 Экран: то, что видно на экране. Сменить: ⛶ Зона (обвести) · 📍 Точка (кликнуть)."),
     type: "info", duration: 5000, showClose: true,
   });
   pulseArea("screen");
@@ -272,10 +273,10 @@ function acceptZone(): void {
 }
 const zoneHelp = computed(() => {
   switch (toolStore.zoneMode) {
-    case "brush": return "рисуй кистью по карте";
-    case "line": return "протяни полосу";
-    case "frame": return "растяни рамку (только контур)";
-    default: return "растяни прямоугольник, или кликни точку";
+    case "brush": return tr("рисуй кистью по карте");
+    case "line": return tr("протяни полосу");
+    case "frame": return tr("растяни рамку (только контур)");
+    default: return tr("растяни прямоугольник, или кликни точку");
   }
 });
 
@@ -296,62 +297,64 @@ const exPop = ref<InstanceType<typeof ElPopover> | null>(null);
 // «по всей карте» = вся карта, «в центре» = центр, «по краю» = кайма-маска, острова = СУША
 // среди воды. Обещания, которых движок не держит («у воды», «по диагонали», «через лес»),
 // из меню убраны — команда без пункта всё равно роутится по ключевым словам.
-const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: boolean; need?: "screen" | "zone" | "point" | "side" }[] }[] = [
-  { group: "🌊 Вода", items: [
-    { text: "озеро", mj: true },
-    { text: "озеро в центре", mj: true },
-    { text: "озеро вокруг этой точки 20x20", mj: true },
-    { text: "пруд 10x10", mj: true },
-    { text: "несколько озёр", mj: true },
-    { text: "острова 30x30", mj: true },
-    { text: "река", mj: true },
-    { text: "река по всей карте", mj: true },
+// `text` is the COMMAND put into the input: the router below reads Russian words, so it stays
+// Russian in every interface language. `label` is what the list shows for it.
+const EXAMPLES: { group: string; items: { text: string; label: string; llm?: boolean; mj?: boolean; need?: "screen" | "zone" | "point" | "side" }[] }[] = [
+  { group: tr("🌊 Вода"), items: [
+    { text: "озеро", label: tr("озеро"), mj: true },
+    { text: "озеро в центре", label: tr("озеро в центре"), mj: true },
+    { text: "озеро вокруг этой точки 20x20", label: tr("озеро вокруг этой точки 20x20"), mj: true },
+    { text: "пруд 10x10", label: tr("пруд 10x10"), mj: true },
+    { text: "несколько озёр", label: tr("несколько озёр"), mj: true },
+    { text: "острова 30x30", label: tr("острова 30x30"), mj: true },
+    { text: "река", label: tr("река"), mj: true },
+    { text: "река по всей карте", label: tr("река по всей карте"), mj: true },
   ] },
-  { group: "🌲 Лес", items: [
-    { text: "лес", mj: true },
-    { text: "густой лес", mj: true },
-    { text: "лес с полянами", mj: true },
-    { text: "редкий лес", mj: true },
-    { text: "роща вокруг этой точки 16x16", mj: true },
-    { text: "рощи по всей карте", mj: true },
+  { group: tr("🌲 Лес"), items: [
+    { text: "лес", label: tr("лес"), mj: true },
+    { text: "густой лес", label: tr("густой лес"), mj: true },
+    { text: "лес с полянами", label: tr("лес с полянами"), mj: true },
+    { text: "редкий лес", label: tr("редкий лес"), mj: true },
+    { text: "роща вокруг этой точки 16x16", label: tr("роща вокруг этой точки 16x16"), mj: true },
+    { text: "рощи по всей карте", label: tr("рощи по всей карте"), mj: true },
   ] },
-  { group: "⛰️ Горы и холмы", items: [
-    { text: "горы 20x20", mj: true },
-    { text: "горная гряда", mj: true },
-    { text: "разбросай холмы", mj: true },
-    { text: "горы по краю 30x30" },
-    { text: "горы вокруг этой точки 18x18", mj: true },
+  { group: tr("⛰️ Горы и холмы"), items: [
+    { text: "горы 20x20", label: tr("горы 20x20"), mj: true },
+    { text: "горная гряда", label: tr("горная гряда"), mj: true },
+    { text: "разбросай холмы", label: tr("разбросай холмы"), mj: true },
+    { text: "горы по краю 30x30", label: tr("горы по краю 30x30") },
+    { text: "горы вокруг этой точки 18x18", label: tr("горы вокруг этой точки 18x18"), mj: true },
   ] },
-  { group: "🧱 Лабиринт", items: [
-    { text: "лабиринт", mj: true },
-    { text: "лабиринт 28x28", mj: true },
+  { group: tr("🧱 Лабиринт"), items: [
+    { text: "лабиринт", label: tr("лабиринт"), mj: true },
+    { text: "лабиринт 28x28", label: tr("лабиринт 28x28"), mj: true },
   ] },
-  { group: "❄️ Снег и трава", items: [
-    { text: "снег на севере" },
-    { text: "снег пятнами", mj: true },
-    { text: "редкий снег", mj: true },
-    { text: "трава 20x20" },
-    { text: "трава по всей карте" },
+  { group: tr("❄️ Снег и трава"), items: [
+    { text: "снег на севере", label: tr("снег на севере") },
+    { text: "снег пятнами", label: tr("снег пятнами"), mj: true },
+    { text: "редкий снег", label: tr("редкий снег"), mj: true },
+    { text: "трава 20x20", label: tr("трава 20x20") },
+    { text: "трава по всей карте", label: tr("трава по всей карте") },
   ] },
-  { group: "🛣 Дорога и декор", items: [
-    { text: "извилистая дорога", mj: true },
-    { text: "разбросай камни", mj: true },
-    { text: "кусты", mj: true },
-    { text: "руины", mj: true },
-    { text: "кладбище 16x16", mj: true },
+  { group: tr("🛣 Дорога и декор"), items: [
+    { text: "извилистая дорога", label: tr("извилистая дорога"), mj: true },
+    { text: "разбросай камни", label: tr("разбросай камни"), mj: true },
+    { text: "кусты", label: tr("кусты"), mj: true },
+    { text: "руины", label: tr("руины"), mj: true },
+    { text: "кладбище 16x16", label: tr("кладбище 16x16"), mj: true },
   ] },
-  { group: "✎ По рисунку (режим ⛶ Зона — проведи кистью/полосой, потом команду)", items: [
-    { text: "дорога", need: "zone" },
-    { text: "река", need: "zone" },
-    { text: "камни", need: "zone" },
-    { text: "кусты", need: "zone" },
-    { text: "руины", need: "zone" },
+  { group: tr("✎ По рисунку (режим ⛶ Зона — проведи кистью/полосой, потом команду)"), items: [
+    { text: "дорога", label: tr("дорога"), need: "zone" },
+    { text: "река", label: tr("река"), need: "zone" },
+    { text: "камни", label: tr("камни"), need: "zone" },
+    { text: "кусты", label: tr("кусты"), need: "zone" },
+    { text: "руины", label: tr("руины"), need: "zone" },
   ] },
-  { group: "🗺️ Композиции — режим 🧠 LLM", items: [
-    { text: "озеро в центре, снег на севере, лес по южному краю", llm: true },
-    { text: "крепость: трава, водяной ров и стены вокруг центра", llm: true },
-    { text: "остров: вода по краям, горы и лес в центре", llm: true },
-    { text: "зимний север со снегом, лесистый юг, озёра в центре", llm: true },
+  { group: tr("🗺️ Композиции — режим 🧠 LLM"), items: [
+    { text: "озеро в центре, снег на севере, лес по южному краю", label: tr("озеро в центре, снег на севере, лес по южному краю"), llm: true },
+    { text: "крепость: трава, водяной ров и стены вокруг центра", label: tr("крепость: трава, водяной ров и стены вокруг центра"), llm: true },
+    { text: "остров: вода по краям, горы и лес в центре", label: tr("остров: вода по краям, горы и лес в центре"), llm: true },
+    { text: "зимний север со снегом, лесистый юг, озёра в центре", label: tr("зимний север со снегом, лесистый юг, озёра в центре"), llm: true },
   ] },
 ];
 
@@ -530,15 +533,15 @@ function resolveZoneBase(text: string, size: number): Zone | null {
 /** LLM-bridge send (Phase-4 POC): the server file-bridges the command to the agent. */
 async function sendLlm(text: string): Promise<void> {
   if (!editStore.liveDoc) {
-    pushAi("Карта не загружена.");
+    pushAi(tr("Карта не загружена."));
     return;
   }
   sending.value = true;
   const t0 = performance.now();
-  const thinking: Msg = { role: "assistant", text: "🧠 LLM думает… 0s" };
+  const thinking: Msg = { role: "assistant", text: tr("🧠 LLM думает… {s}s", { s: 0 }) };
   log.value.push(thinking);
   const timer = window.setInterval(() => {
-    thinking.text = `🧠 LLM думает… ${Math.round((performance.now() - t0) / 1000)}s`;
+    thinking.text = tr("🧠 LLM думает… {s}s", { s: Math.round((performance.now() - t0) / 1000) });
   }, 1000);
   void nextTick(() => {
     if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
@@ -547,14 +550,14 @@ async function sendLlm(text: string): Promise<void> {
     const zone = editStore.liveDoc ? resolveZone(text, editStore.liveDoc.size) : null;
     const res = await editStore.copilot(text, zone?.region ?? null, zone?.cells ?? null, protect.value);
     if (!res) {
-      thinking.text = "Карта не загружена.";
+      thinking.text = tr("Карта не загружена.");
       return;
     }
     const ms = Math.round(performance.now() - t0);
-    const head = res.reasoning?.trim() || "Готово.";
+    const head = res.reasoning?.trim() || tr("Готово.");
     thinking.text = res.report?.ok
       ? `${head} · ${debugLine(ms)}`
-      : `${head} — валидация не прошла, откатил. · ${debugLine(ms)}${validationReason()}`;
+      : tr("{head} — валидация не прошла, откатил. · {debug}", { head, debug: debugLine(ms) }) + validationReason();
     if (res.report?.ok) lastGen.value = { mode: "llm", text, cells: zone?.cells ?? null, protect: protect.value };
   } catch (e) {
     thinking.text = "⚠ " + (e instanceof Error ? e.message : String(e));
@@ -581,12 +584,12 @@ async function send(): Promise<void> {
 
   const recipeId = routeRecipe(text);
   if (!recipeId) {
-    notify("Не понял команду. Примеры: «лабиринт», «залей водой», «снег на севере», «лес», «трава».", "warning");
+    notify(tr("Не понял команду. Примеры: «лабиринт», «залей водой», «снег на севере», «лес», «трава»."), "warning");
     return;
   }
   const doc = editStore.liveDoc;
   if (!doc) {
-    notify("Карта не загружена.", "warning");
+    notify(tr("Карта не загружена."), "warning");
     return;
   }
   // Auto-select the area filter a TYPED command implies (point → 📍, direction → 👁 screen);
@@ -605,9 +608,9 @@ async function send(): Promise<void> {
 
 /** Mode-aware dead-end hint: there is no area to generate in yet. */
 function explainNoZone(): void {
-  if (area.value === "point") notify("📍 Точка — кликни клетку на карте, потом повтори.", "warning");
-  else if (area.value === "zone") notify("⛶ Зона — обведи область на карте, потом повтори.", "warning");
-  else notify("Не понял область. Наведи карту (👁 Экран) или выбери ⛶ Зона / 📍 Точка, либо укажи размер («25x25») / сторону («север»).", "warning");
+  if (area.value === "point") notify(tr("📍 Точка — кликни клетку на карте, потом повтори."), "warning");
+  else if (area.value === "zone") notify(tr("⛶ Зона — обведи область на карте, потом повтори."), "warning");
+  else notify(tr("Не понял область. Наведи карту (👁 Экран) или выбери ⛶ Зона / 📍 Точка, либо укажи размер («25x25») / сторону («север»)."), "warning");
 }
 
 /** Generate `recipeId` in `zone` as a new session of variants, and say what came of it. */
@@ -619,10 +622,10 @@ async function generateIn(recipeId: string, zone: Zone): Promise<void> {
     const rep = await gen.run({ recipeId, region, cells, stroke: !!zone.drawn, protect: protect.value });
     const ms = Math.round(performance.now() - t0);
     const what = `${gen.titleOf(recipeId)} ${region.w}×${region.h}`;
-    if (!rep) notify("Карта недоступна для правок.", "warning");
-    else if (!rep.ok) notify(`${what}: карта не прошла проверку — вариант не применён. · ${debugLine(ms)}${validationReason()}`, "warning");
-    else if ((editStore.genDebug?.opCount ?? 0) === 0) notify(`${what}: ничего не изменилось — место занято или защищено (🛡).`, "warning");
-    else notify(`Готово: ${what} · ${debugLine(ms)}`, "success");
+    if (!rep) notify(tr("Карта недоступна для правок."), "warning");
+    else if (!rep.ok) notify(tr("{what}: карта не прошла проверку — вариант не применён. · {debug}", { what, debug: debugLine(ms) }) + validationReason(), "warning");
+    else if ((editStore.genDebug?.opCount ?? 0) === 0) notify(tr("{what}: ничего не изменилось — место занято или защищено (🛡).", { what }), "warning");
+    else notify(tr("Готово: {what} · {debug}", { what, debug: debugLine(ms) }), "success");
   } catch (e) {
     notify("⚠ " + (e instanceof Error ? e.message : String(e)), "warning");
   } finally {
@@ -637,10 +640,10 @@ async function runTile(r: GenRecipeInfo): Promise<void> {
   (palPop.value as unknown as { hide?: () => void } | null)?.hide?.();
   const doc = editStore.liveDoc;
   if (!doc) {
-    notify("Карта не загружена.", "warning");
+    notify(tr("Карта не загружена."), "warning");
     return;
   }
-  log.value.push({ role: "user", text: r.title });
+  log.value.push({ role: "user", text: tr(r.title) });
   const zone = resolveZone("", doc.size);
   if (!zone) {
     explainNoZone();
@@ -657,19 +660,21 @@ function drawTile(r: GenRecipeInfo): void {
   area.value = "zone"; // the region tool is what draws the stroke
   toolStore.setEyeZone(false);
   toolStore.setDrawGen(r.id, { mode: r.stroke, size: r.strokeWidth ?? 1 });
-  notify(r.stroke === "line" ? `✎ ${r.title}: протяни линию на карте` : `✎ ${r.title}: проведи кистью по карте`, "info");
+  notify(r.stroke === "line" ? tr("✎ {title}: протяни линию на карте", { title: tr(r.title) }) : tr("✎ {title}: проведи кистью по карте", { title: tr(r.title) }), "info");
 }
 
 /** What the palette says about where a click will generate. */
 const areaLine = computed(() => {
   if (area.value === "point") {
-    return region.value ? `📍 вокруг клетки ${region.value.x}, ${region.value.y} — ${POINT_DEFAULT}×${POINT_DEFAULT}` : "📍 точка не выбрана — кликни клетку на карте";
+    return region.value ? tr("📍 вокруг клетки {x}, {y} — {n}×{n}", { x: region.value.x, y: region.value.y, n: POINT_DEFAULT }) : tr("📍 точка не выбрана — кликни клетку на карте");
   }
   if (area.value === "zone") {
-    if (!region.value) return "⛶ зона не обведена — обведи область на карте";
-    return `⛶ в обведённой зоне — ${regionMask.value?.length ? regionMask.value.length + " кл." : region.value.w + "×" + region.value.h}`;
+    if (!region.value) return tr("⛶ зона не обведена — обведи область на карте");
+    return regionMask.value?.length
+      ? trn("⛶ в обведённой зоне — {n} кл.", regionMask.value.length)
+      : tr("⛶ в обведённой зоне — {w}×{h}", { w: region.value.w, h: region.value.h });
   }
-  return `👁 на всём, что видно на экране${visibleMaskLen.value ? " — " + visibleMaskLen.value + " кл." : ""}`;
+  return visibleMaskLen.value ? trn("👁 на всём, что видно на экране — {n} кл.", visibleMaskLen.value) : tr("👁 на всём, что видно на экране");
 });
 
 /** The palette's «меньше … больше» control: the amount a NEW generation starts with. */
@@ -682,7 +687,7 @@ function onAmount(v: string | number | boolean): void {
 async function retry(): Promise<void> {
   if (sending.value) return;
   if (gen.session) {
-    if (!(await gen.another())) notify("После генерации были другие правки — вариант оставлен на карте как есть.", "info");
+    if (!(await gen.another())) notify(tr("После генерации были другие правки — вариант оставлен на карте как есть."), "info");
     return;
   }
   const g = lastGen.value;
@@ -692,7 +697,7 @@ async function retry(): Promise<void> {
   editStore.setRenderMuted(true);
   try {
     if (editStore.undoable) editStore.undoEdit(); // undo the previous generation commit
-    log.value.push({ role: "user", text: "↻ другой вариант: " + g.text });
+    log.value.push({ role: "user", text: tr("↻ другой вариант: {text}", { text: g.text }) });
     await sendLlm(g.text);
   } finally {
     editStore.setRenderMuted(false); // paints the final variant once (MapCanvasHost watcher)
@@ -735,7 +740,7 @@ watch(
     <transition name="cp-fade">
       <div v-if="expanded" ref="scroller" class="copilot-log d2-float" :class="{ idle: idleEffective }">
         <div v-for="(m, i) in log" :key="i" class="cp-msg" :class="m.role">
-          <span class="cp-who">{{ m.role === "user" ? "you" : "ai" }}</span>
+          <span class="cp-who">{{ m.role === "user" ? tr("вы") : tr("ии") }}</span>
           <span class="cp-text">{{ m.text }}</span>
         </div>
       </div>
@@ -744,7 +749,7 @@ watch(
     <div v-if="area !== 'screen'" class="cp-zonehint d2-float" :class="{ idle: idleEffective }">
       <template v-if="area === 'zone'">
         <div class="cp-zrow">
-          <span class="cp-zlabel">⛶ Зона:</span>
+          <span class="cp-zlabel">{{ tr("⛶ Зона:") }}</span>
           <el-segmented :model-value="zoneMode" :options="zoneModeOptions" size="small" @change="onZoneMode" />
           <el-segmented
             v-if="zoneMode === 'brush' || zoneMode === 'line'"
@@ -757,20 +762,20 @@ watch(
         <div class="cp-zrow">
           <span class="cp-zhelp">{{ zoneHelp }}</span>
           <template v-if="region">
-            <span class="cp-zsel">{{ regionMask?.length ? regionMask.length + " кл." : region.w + "×" + region.h }}</span>
-            <el-button size="small" text @click="toggleZoneHidden">{{ zoneHidden ? "Показать" : "Скрыть" }}</el-button>
-            <el-button size="small" text type="success" @click="acceptZone">Принять</el-button>
+            <span class="cp-zsel">{{ regionMask?.length ? trn("{n} кл.", regionMask.length) : region.w + "×" + region.h }}</span>
+            <el-button size="small" text @click="toggleZoneHidden">{{ zoneHidden ? tr("Показать") : tr("Скрыть") }}</el-button>
+            <el-button size="small" text type="success" @click="acceptZone">{{ tr("Принять") }}</el-button>
           </template>
         </div>
       </template>
       <template v-else>
         <div class="cp-zrow">
-          <span class="cp-zlabel">📍 Точка:</span>
-          <span class="cp-zhelp">кликни клетку на карте — сгенерирую {{ POINT_DEFAULT }}×{{ POINT_DEFAULT }} вокруг (или укажи размер в команде)</span>
+          <span class="cp-zlabel">{{ tr("📍 Точка:") }}</span>
+          <span class="cp-zhelp">{{ tr("кликни клетку на карте — сгенерирую {n}×{n} вокруг (или укажи размер в команде)", { n: POINT_DEFAULT }) }}</span>
         </div>
         <div v-if="region" class="cp-zrow">
-          <span class="cp-zsel">точка ({{ region.x }}, {{ region.y }})</span>
-          <el-button size="small" text type="success" @click="acceptZone">Сбросить</el-button>
+          <span class="cp-zsel">{{ tr("точка ({x}, {y})", { x: region.x, y: region.y }) }}</span>
+          <el-button size="small" text type="success" @click="acceptZone">{{ tr("Сбросить") }}</el-button>
         </div>
       </template>
     </div>
@@ -780,22 +785,22 @@ watch(
     </div>
 
     <div class="copilot-bar d2-float" :class="{ idle: idleEffective }">
-      <span class="cp-grip" title="Перетащите копайлот (позиция запомнится)" @pointerdown="onHandlePointerDown">⠿</span>
+      <span class="cp-grip" :title="tr('Перетащите копайлот (позиция запомнится)')" @pointerdown="onHandlePointerDown">⠿</span>
       <el-popover ref="palPop" :width="372" placement="top-start" trigger="click" popper-class="cp-ex-pop cp-pal-pop">
         <template #reference>
-          <el-button ref="palBtn" class="cp-ico cp-examples" :class="{ pulse: examplesPulse }" text :icon="Grid" title="Генератор — выбрать, что сгенерировать" />
+          <el-button ref="palBtn" class="cp-ico cp-examples" :class="{ pulse: examplesPulse }" text :icon="Grid" :title="tr('Генератор — выбрать, что сгенерировать')" />
         </template>
         <div class="cp-ex-head">
-          Генератор — нажми, что сделать
+          {{ tr("Генератор — нажми, что сделать") }}
           <div class="cp-pal-where">{{ areaLine }}</div>
           <div class="cp-pal-amount">
-            <span>Сколько:</span>
+            <span>{{ tr("Сколько:") }}</span>
             <el-segmented :model-value="gen.amount" :options="amountOptions" size="small" @change="onAmount" />
-            <span class="cp-pal-hint">для плиток с ±</span>
+            <span class="cp-pal-hint">{{ tr("для плиток с ±") }}</span>
           </div>
         </div>
         <div class="cp-ex-scroll">
-          <div v-if="!gen.groups.length" class="cp-pal-empty">Список рецептов не загрузился — команды текстом работают.</div>
+          <div v-if="!gen.groups.length" class="cp-pal-empty">{{ tr("Список рецептов не загрузился — команды текстом работают.") }}</div>
           <div v-for="g in gen.groups" :key="g.id" class="cp-ex-group">
             <div class="cp-ex-gtitle">{{ g.icon }} {{ g.title }}</div>
             <div class="cp-pal-grid">
@@ -805,18 +810,18 @@ watch(
                 <button
                   class="cp-pal-main"
                   :disabled="sending || gen.busy || !!r.lacks"
-                  :title="r.lacks ? `${r.title}: ${r.lacks}` : `Сгенерировать: ${r.title}`"
+                  :title="r.lacks ? `${tr(r.title)}: ${tr(r.lacks)}` : tr('Сгенерировать: {title}', { title: tr(r.title) })"
                   @click="runTile(r)"
                 >
-                  <span class="cp-pal-name">{{ r.title }}</span>
-                  <span v-if="r.lacks" class="cp-pal-tune" aria-hidden="true">нет в моде</span>
-                  <span v-else-if="r.amountLabel" class="cp-pal-tune" :title="`Количество настраивается: ${r.amountLabel}`">±</span>
+                  <span class="cp-pal-name">{{ tr(r.title) }}</span>
+                  <span v-if="r.lacks" class="cp-pal-tune" aria-hidden="true">{{ tr("нет в моде") }}</span>
+                  <span v-else-if="r.amountLabel" class="cp-pal-tune" :title="tr('Количество настраивается: {what}', { what: tr(r.amountLabel) })">±</span>
                 </button>
                 <button
                   v-if="r.stroke && !r.lacks"
                   class="cp-pal-draw"
-                  :title="r.stroke === 'line' ? `Нарисовать линией: ${r.title}` : `Нарисовать кистью: ${r.title}`"
-                  :aria-label="`Нарисовать: ${r.title}`"
+                  :title="r.stroke === 'line' ? tr('Нарисовать линией: {title}', { title: tr(r.title) }) : tr('Нарисовать кистью: {title}', { title: tr(r.title) })"
+                  :aria-label="tr('Нарисовать: {title}', { title: tr(r.title) })"
                   @click="drawTile(r)"
                 >✎</button>
               </div>
@@ -827,17 +832,17 @@ watch(
 
       <el-popover ref="exPop" :width="328" placement="top-start" trigger="click" popper-class="cp-ex-pop">
         <template #reference>
-          <el-button ref="exBtn" class="cp-ico" text :icon="Reading" title="Примеры команд текстом" />
+          <el-button ref="exBtn" class="cp-ico" text :icon="Reading" :title="tr('Примеры команд текстом')" />
         </template>
         <div class="cp-ex-head">
-          Примеры — кликни, затем Enter
-          <div class="cp-ex-legend"><b class="cp-ex-mj">MJ</b> марковская (↻ — новый вид) · <b class="cp-ex-llm">LLM</b> через агента · <b>✎</b> по рисунку</div>
+          {{ tr("Примеры — кликни, затем Enter") }}
+          <div class="cp-ex-legend"><b class="cp-ex-mj">MJ</b> {{ tr("марковская (↻ — новый вид)") }} · <b class="cp-ex-llm">LLM</b> {{ tr("через агента") }} · <b>✎</b> {{ tr("по рисунку") }}</div>
         </div>
         <div class="cp-ex-scroll">
           <div v-for="g in displayExamples" :key="g.group" class="cp-ex-group">
             <div class="cp-ex-gtitle">{{ g.group }}</div>
             <button v-for="it in g.items" :key="it.text" class="cp-ex-item" @click="applyExample(it)">
-              <span>{{ it.text }}</span>
+              <span>{{ it.label }}</span>
               <span v-if="it.llm" class="cp-ex-llm">LLM</span>
               <span v-else-if="it.mj" class="cp-ex-mj">MJ</span>
             </button>
@@ -846,7 +851,7 @@ watch(
       </el-popover>
 
       <el-tooltip
-        :content="LLM_AVAILABLE ? 'LLM-режим — генерация через агента (иначе офлайн-роутер)' : 'LLM-режим временно отключён'"
+        :content="LLM_AVAILABLE ? tr('LLM-режим — генерация через агента (иначе офлайн-роутер)') : tr('LLM-режим временно отключён')"
         placement="top"
         :show-after="300"
       >
@@ -855,17 +860,17 @@ watch(
           <el-button class="cp-ico" text :disabled="!LLM_AVAILABLE" :type="llmMode ? 'primary' : 'default'" @click="llmMode = !llmMode">🧠</el-button>
         </span>
       </el-tooltip>
-      <el-tooltip content="Беречь рельеф — не перетирать воду и горы" placement="top" :show-after="300">
+      <el-tooltip :content="tr('Беречь рельеф — не перетирать воду и горы')" placement="top" :show-after="300">
         <el-button class="cp-ico" text :type="protect ? 'primary' : 'default'" @click="protect = !protect">🛡</el-button>
       </el-tooltip>
       <!-- Область генерации (взаимоисключающий фильтр; по умолчанию 👁 Экран) -->
-      <el-tooltip content="👁 Экран — генерировать в видимую область (по умолчанию)" placement="top" :show-after="300">
+      <el-tooltip :content="tr('👁 Экран — генерировать в видимую область (по умолчанию)')" placement="top" :show-after="300">
         <el-button class="cp-ico cp-mode" :class="{ pulse: areaPulse === 'screen' }" text :type="area === 'screen' ? 'primary' : 'default'" @click="setArea('screen')">👁<span v-if="area === 'screen' && visibleMaskLen" class="cp-badge">{{ visibleMaskLen }}</span></el-button>
       </el-tooltip>
-      <el-tooltip content="⛶ Зона — обвести область на карте (прямоуг./кисть/полоса/рамка)" placement="top" :show-after="300">
+      <el-tooltip :content="tr('⛶ Зона — обвести область на карте (прямоуг./кисть/полоса/рамка)')" placement="top" :show-after="300">
         <el-button class="cp-ico cp-mode" :class="{ pulse: areaPulse === 'zone' }" text :type="area === 'zone' ? 'primary' : 'default'" @click="setArea('zone')">⛶<span v-if="area === 'zone' && region" class="cp-badge">{{ region.w }}×{{ region.h }}</span></el-button>
       </el-tooltip>
-      <el-tooltip content="📍 Точка — кликнуть клетку, генерировать вокруг неё" placement="top" :show-after="300">
+      <el-tooltip :content="tr('📍 Точка — кликнуть клетку, генерировать вокруг неё')" placement="top" :show-after="300">
         <el-button class="cp-ico cp-mode" :class="{ pulse: areaPulse === 'point' }" text :type="area === 'point' ? 'primary' : 'default'" @click="setArea('point')">📍<span v-if="area === 'point' && region" class="cp-badge">{{ region.x }},{{ region.y }}</span></el-button>
       </el-tooltip>
 
@@ -880,7 +885,7 @@ watch(
         @keyup.enter="send()"
       />
 
-      <el-tooltip :content="expanded ? 'Скрыть лог' : 'Показать лог команд'" placement="top" :show-after="300">
+      <el-tooltip :content="expanded ? tr('Скрыть лог') : tr('Показать лог команд')" placement="top" :show-after="300">
         <el-button
           class="cp-ico"
           text
@@ -894,7 +899,7 @@ watch(
         text
         :icon="RefreshRight"
         :disabled="(!gen.session && !lastGen) || sending || gen.busy"
-        title="Другой вариант (откатит текущий и сгенерит заново)"
+        :title="tr('Другой вариант (откатит текущий и сгенерит заново)')"
         @click="retry()"
       />
       <el-button
@@ -903,10 +908,10 @@ watch(
         :icon="Promotion"
         :disabled="!input.trim() || sending"
         :loading="sending"
-        title="Отправить (Enter)"
+        :title="tr('Отправить (Enter)')"
         @click="send()"
       />
-      <el-button class="cp-ico cp-close" text :icon="Close" title="Скрыть ( / вернёт )" @click="hide()" />
+      <el-button class="cp-ico cp-close" text :icon="Close" :title="tr('Скрыть ( / вернёт )')" @click="hide()" />
     </div>
   </div>
 </template>

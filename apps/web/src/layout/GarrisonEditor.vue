@@ -10,6 +10,7 @@ import UnitIcon from "./UnitIcon.vue";
 import ModifierListEditor from "./ModifierListEditor.vue";
 import { useUnitStore, roleLabel } from "../stores/unitStore";
 import { useModifierStore } from "../stores/modifierStore";
+import { tr } from "../i18n";
 
 type GarrUnit = { unit: string; level: number; hp: number; modifiers?: string[]; key?: string };
 const props = withDefaults(defineProps<{
@@ -56,9 +57,9 @@ const isLeader = (cell: number): boolean => props.leaderCell === cell ||
 const hasLeader = computed(() => unitStore.isLeaderCategory(props.garrison[props.leaderCell ?? -1]?.unit));
 const selectedIsLeader = computed(() => selectedCell.value !== null && isLeader(selectedCell.value));
 const canLead = computed(() => props.leaderCell !== undefined && unitStore.isLeaderCategory(selectedUnit.value?.unit));
-const lineName = (cell: number): string => cell % 2 === 0 ? "Фронт" : "Тыл";
-const positionLabel = computed(() => selectedSlot.value?.wide ? "Обе линии · 2 клетки" :
-  selectedCell.value !== null ? lineName(selectedCell.value) + " · ряд " + (Math.floor(selectedCell.value / 2) + 1) : "");
+const lineName = (cell: number): string => cell % 2 === 0 ? tr("Фронт") : tr("Тыл");
+const positionLabel = computed(() => selectedSlot.value?.wide ? tr("Обе линии · 2 клетки") :
+  selectedCell.value !== null ? lineName(selectedCell.value) + " · " + tr("ряд {row}", { row: Math.floor(selectedCell.value / 2) + 1 }) : "");
 
 // A replacement with a large unit merges the row. Follow that entity's primary cell.
 watch(slots, () => {
@@ -84,7 +85,7 @@ function bigBlockedReason(cell: number, unitId: string): string {
   const curKey = props.garrison[cell]?.key;
   if (curKey && curKey === props.garrison[partner]?.key) return "";
   return props.garrison[partner] && props.leaderCell === partner
-    ? "Соседняя клетка занята лидером — большой юнит занял бы обе клетки" : "";
+    ? tr("Соседняя клетка занята лидером — большой юнит занял бы обе клетки") : "";
 }
 async function selectCell(cell: number): Promise<void> {
   if (isReadOnly.value && !props.garrison[cell]) return;
@@ -114,94 +115,94 @@ function setLeader(): void {
 
 <template>
   <div class="formation" :class="{ 'is-readonly': isReadOnly }" @keydown.stop>
-    <div class="formation-cols" aria-hidden="true"><span>Тыл</span><span>Фронт</span></div>
-    <div class="formation-grid" role="group" :aria-label="`Формация, занято ${count} из 6 клеток`">
+    <div class="formation-cols" aria-hidden="true"><span>{{ tr("Тыл") }}</span><span>{{ tr("Фронт") }}</span></div>
+    <div class="formation-grid" role="group" :aria-label="tr('Формация, занято {count} из 6 клеток', { count })">
       <button
         v-for="{ cell, wide } in slots" :key="cell" type="button"
         class="formation-cell"
         :class="{ filled: !!garrison[cell], wide, selected: selectedCell === cell, leader: isLeader(cell) }"
         :disabled="isReadOnly && !garrison[cell]"
         :aria-pressed="selectedCell === cell"
-        :aria-label="`${wide ? 'Обе линии' : lineName(cell)}, ряд ${Math.floor(cell / 2) + 1}: ${garrison[cell] ? unitStore.nameOf(garrison[cell]!.unit) : isReadOnly ? 'пусто' : 'добавить юнита'}`"
-        :title="garrison[cell] ? `${unitStore.nameOf(garrison[cell]!.unit)}${isLeader(cell) ? ' · Лидер' : ''}` : undefined"
+        :aria-label="`${wide ? tr('Обе линии') : lineName(cell)}, ${tr('ряд {row}', { row: Math.floor(cell / 2) + 1 })}: ${garrison[cell] ? unitStore.nameOf(garrison[cell]!.unit) : isReadOnly ? tr('пусто') : tr('добавить юнита')}`"
+        :title="garrison[cell] ? `${unitStore.nameOf(garrison[cell]!.unit)}${isLeader(cell) ? ' · ' + tr('Лидер') : ''}` : undefined"
         @click="selectCell(cell)"
       >
         <template v-if="garrison[cell]">
           <span class="formation-portrait">
             <UnitIcon :id="garrison[cell]!.unit" :level="garrison[cell]!.level"
               :subrace-id="unitStore.get(garrison[cell]!.unit)?.subraceId ?? -1" :size="32" />
-            <span v-if="isLeader(cell)" class="formation-star" title="Лидер" aria-label="Лидер">★</span>
+            <span v-if="isLeader(cell)" class="formation-star" :title="tr('Лидер')" :aria-label="tr('Лидер')">★</span>
           </span>
           <span class="formation-summary">
             <span class="formation-name">{{ unitStore.nameOf(garrison[cell]!.unit) }}</span>
-            <span class="formation-stats">Ур. {{ garrison[cell]!.level }}<template v-if="!hideHp"> · {{ garrison[cell]!.hp }} HP</template></span>
-            <span v-if="wide" class="formation-size">2 клетки</span>
+            <span class="formation-stats">{{ tr("Ур. {level}", { level: garrison[cell]!.level }) }}<template v-if="!hideHp"> · {{ tr("{hp} HP", { hp: garrison[cell]!.hp }) }}</template></span>
+            <span v-if="wide" class="formation-size">{{ tr("2 клетки") }}</span>
           </span>
-          <span v-if="garrison[cell]!.modifiers?.length" class="formation-mod-count" :title="`Модификаторы: ${garrison[cell]!.modifiers!.length}`">✦</span>
+          <span v-if="garrison[cell]!.modifiers?.length" class="formation-mod-count" :title="tr('Модификаторы: {n}', { n: garrison[cell]!.modifiers!.length })">✦</span>
         </template>
         <template v-else>
           <span class="formation-empty-icon" aria-hidden="true">{{ isReadOnly ? '—' : '+' }}</span>
-          <span class="formation-empty-label">{{ isReadOnly ? 'Пусто' : 'Добавить' }}</span>
+          <span class="formation-empty-label">{{ isReadOnly ? tr('Пусто') : tr('Добавить') }}</span>
         </template>
       </button>
     </div>
     <p v-if="selectedCell === null" class="formation-hint">
-      {{ isReadOnly ? 'Выберите юнита, чтобы посмотреть свойства.' : 'Выберите юнита для настройки. + — добавить.' }}
+      {{ isReadOnly ? tr('Выберите юнита, чтобы посмотреть свойства.') : tr('Выберите юнита для настройки. + — добавить.') }}
     </p>
 
-    <section v-else class="formation-detail" aria-label="Свойства выбранного юнита" @keydown.stop>
+    <section v-else class="formation-detail" :aria-label="tr('Свойства выбранного юнита')" @keydown.stop>
       <div class="formation-detail-head">
         <span>{{ positionLabel }}</span>
-        <button type="button" class="formation-close" aria-label="Закрыть свойства юнита" @click="selectedCell = null">×</button>
+        <button type="button" class="formation-close" :aria-label="tr('Закрыть свойства юнита')" @click="selectedCell = null">×</button>
       </div>
       <template v-if="selectedUnit">
         <div class="formation-identity">
           <UnitIcon :id="selectedUnit.unit" :level="selectedUnit.level" :subrace-id="selectedEntry?.subraceId ?? -1" :size="40" />
           <div>
             <div class="formation-detail-name">{{ unitStore.nameOf(selectedUnit.unit) }}</div>
-            <div class="formation-meta"><span v-if="selectedIsLeader" class="formation-leader-label">★ Лидер · </span>{{ roleLabel(selectedEntry?.catKey ?? '') }}<template v-if="selectedEntry?.subrace"> · {{ selectedEntry.subrace }}</template></div>
+            <div class="formation-meta"><span v-if="selectedIsLeader" class="formation-leader-label">{{ tr("★ Лидер") }} · </span>{{ roleLabel(selectedEntry?.catKey ?? '') }}<template v-if="selectedEntry?.subrace"> · {{ selectedEntry.subrace }}</template></div>
           </div>
         </div>
         <div class="formation-fields">
           <label>
-            <span>Уровень</span>
+            <span>{{ tr("Уровень") }}</span>
             <strong v-if="isReadOnly">{{ selectedUnit.level }}</strong>
             <el-input-number v-else :key="`level-${selectedCell}`" :model-value="selectedUnit.level"
               :min="selectedEntry?.level ?? 1" :max="unitStore.levelCap" size="small" controls-position="right"
-              aria-label="Уровень выбранного юнита" @change="(v: number | undefined) => setStat('level', v)" />
+              :aria-label="tr('Уровень выбранного юнита')" @change="(v: number | undefined) => setStat('level', v)" />
           </label>
           <label v-if="!hideHp">
-            <span>Здоровье · HP</span>
+            <span>{{ tr("Здоровье · HP") }}</span>
             <strong v-if="isReadOnly">{{ selectedUnit.hp }}</strong>
             <el-input-number v-else :key="`hp-${selectedCell}`" :model-value="selectedUnit.hp"
               :min="0" :max="Math.max(selectedEntry?.hp || 9999, selectedUnit.hp)" size="small" controls-position="right"
-              aria-label="Здоровье выбранного юнита" @change="(v: number | undefined) => setStat('hp', v)" />
+              :aria-label="tr('Здоровье выбранного юнита')" @change="(v: number | undefined) => setStat('hp', v)" />
           </label>
         </div>
         <div v-if="isReadOnly" class="formation-modifiers">
-          <span class="formation-meta">Модификаторы{{ modifiers.length ? '' : ' — нет' }}</span>
+          <span class="formation-meta">{{ modifiers.length ? tr("Модификаторы") : tr("Модификаторы — нет") }}</span>
           <span v-for="m in modifiers" :key="m.id" class="formation-modifier" :title="m.entry?.effects?.join(' · ')">
             {{ m.entry?.name || m.id }}<b v-if="m.count > 1"> ×{{ m.count }}</b>
           </span>
         </div>
         <div v-else class="formation-settings">
           <ModifierListEditor :key="`mods-${selectedCell}`" :model-value="selectedUnit.modifiers ?? []"
-            :title="`${unitStore.nameOf(selectedUnit.unit)} — модификаторы`" :leader="selectedIsLeader"
+            :title="tr('{name} — модификаторы', { name: unitStore.nameOf(selectedUnit.unit) })" :leader="selectedIsLeader"
             @update:model-value="setMods" />
-          <el-button v-if="canLead && !selectedIsLeader" size="small" text @click="setLeader">★ Сделать лидером</el-button>
+          <el-button v-if="canLead && !selectedIsLeader" size="small" text @click="setLeader">{{ tr("★ Сделать лидером") }}</el-button>
         </div>
       </template>
-      <p v-else class="formation-hint">{{ rosterFor(selectedCell) === 'leaders' ? 'Сначала добавьте героя или вора — лидера отряда.' : 'Здесь можно разместить юнита.' }}</p>
+      <p v-else class="formation-hint">{{ rosterFor(selectedCell) === 'leaders' ? tr('Сначала добавьте героя или вора — лидера отряда.') : tr('Здесь можно разместить юнита.') }}</p>
       <div v-if="!isReadOnly" class="formation-actions">
         <UnitPicker ref="picker" :key="selectedCell" :model-value="selectedUnit?.unit ?? null"
           :roster="rosterFor(selectedCell)" :disabled-reason="(id) => bigBlockedReason(selectedCell!, id)"
-          :title="rosterFor(selectedCell) === 'leaders' ? 'Лидер отряда — герой или вор' : `Выбор юнита · ${positionLabel}`"
+          :title="rosterFor(selectedCell) === 'leaders' ? tr('Лидер отряда — герой или вор') : tr('Выбор юнита · {position}', { position: positionLabel })"
           @update:model-value="onPick">
           <template #trigger="{ show }">
-            <el-button size="small" @click="show()">{{ selectedUnit ? 'Заменить' : 'Выбрать юнита' }}</el-button>
+            <el-button size="small" @click="show()">{{ selectedUnit ? tr('Заменить') : tr('Выбрать юнита') }}</el-button>
           </template>
         </UnitPicker>
-        <el-button v-if="selectedUnit" size="small" text type="danger" :disabled="!canClear" @click="onPick(null)">Убрать</el-button>
+        <el-button v-if="selectedUnit" size="small" text type="danger" :disabled="!canClear" @click="onPick(null)">{{ tr("Убрать") }}</el-button>
       </div>
     </section>
   </div>

@@ -15,6 +15,7 @@ import { Clock, ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import { useCollabStore, type HistoryEntry } from "../stores/collabStore";
 import { useFloatingDock } from "../composables/useFloatingDock";
 import { exportAt } from "../services/api";
+import { tr } from "../i18n";
 
 const collab = useCollabStore();
 const { history, connected, peerList } = storeToRefs(collab);
@@ -82,66 +83,67 @@ const revertable = (e: HistoryEntry): boolean =>
  *  authoritative dependents+structure check runs SERVER-side on click anyway. */
 const dependents = (e: HistoryEntry) => collab.dependentsOf(e.rid);
 const formatDeps = (deps: { seq: number; byName: string; mine: boolean }[], max: number): string => {
-  const list = deps.slice(0, max).map((d) => `#${d.seq} (${d.mine ? "вы" : d.byName})`).join(", ");
-  return `${list}${deps.length > max ? ` и ещё ${deps.length - max}` : ""}`;
+  const list = deps.slice(0, max).map((d) => `#${d.seq} (${d.mine ? tr("вы") : d.byName})`).join(", ");
+  return deps.length > max ? tr("{list} и ещё {more}", { list, more: deps.length - max }) : list;
 };
 const revertOneTitle = (e: HistoryEntry): string => {
-  if (!revertable(e)) return "Нет обратной правки (часть мазка — откатывайте с последней записи мазка)";
+  if (!revertable(e)) return tr("Нет обратной правки (часть мазка — откатывайте с последней записи мазка)");
   const deps = dependents(e);
-  if (!deps.length) return "Откатить только эту запись (проверю структуру при клике)";
-  return `Нельзя вырвать из середины: тот же объект/клетки правились позже — ${formatDeps(deps, 3)}. Используйте «откатить моё отсюда».`;
+  if (!deps.length) return tr("Откатить только эту запись (проверю структуру при клике)");
+  return tr("Нельзя вырвать из середины: тот же объект/клетки правились позже — {deps}. Используйте «откатить моё отсюда».", { deps: formatDeps(deps, 3) });
 };
 
 async function revertOne(e: HistoryEntry): Promise<void> {
   const r = await collab.revertOne(e.rid);
   if (r.ok) {
-    ElMessage.success(`Откачено: ${e.summary}`);
+    ElMessage.success(tr("Откачено: {summary}", { summary: e.summary }));
     return;
   }
   if (r.blocked === "dependents" && r.dependents?.length) {
-    ElMessage.warning(`Нельзя откатить только эту запись — есть зависимые позже: ${formatDeps(r.dependents, 4)}`);
+    ElMessage.warning(tr("Нельзя откатить только эту запись — есть зависимые позже: {deps}", { deps: formatDeps(r.dependents, 4) }));
   } else if (r.blocked === "structure" && r.issues?.length) {
-    ElMessage.warning(`Нельзя откатить — сломает карту: ${r.issues.slice(0, 3).join("; ")}${r.issues.length > 3 ? "…" : ""}`);
+    ElMessage.warning(tr("Нельзя откатить — сломает карту: {issues}", { issues: `${r.issues.slice(0, 3).join("; ")}${r.issues.length > 3 ? "…" : ""}` }));
   } else if (r.blocked === "pending") {
-    ElMessage.warning("Запись ещё синхронизируется (⟳) — дождитесь подтверждения сервера и повторите");
+    ElMessage.warning(tr("Запись ещё синхронизируется (⟳) — дождитесь подтверждения сервера и повторите"));
   } else if (r.blocked === "offline") {
-    ElMessage.warning("Нет связи с комнатой — откат этой записи выполняет сервер. Проверьте историю после переподключения");
+    ElMessage.warning(tr("Нет связи с комнатой — откат этой записи выполняет сервер. Проверьте историю после переподключения"));
   } else {
-    ElMessage.warning(r.reason || "Не удалось откатить — запись конфликтует с более поздними правками");
+    ElMessage.warning(r.reason || tr("Не удалось откатить — запись конфликтует с более поздними правками"));
   }
 }
 function revertFrom(e: HistoryEntry): void {
   if (connected.value && e.rejected) {
-    ElMessage.warning("Эта правка отклонена сервером и существует только локально — откатите её через «только это»");
+    ElMessage.warning(tr("Эта правка отклонена сервером и существует только локально — откатите её через «только это»"));
     return;
   }
   if (connected.value && !e.acked) {
-    ElMessage.warning("Запись ещё не подтверждена сервером — дождитесь синхронизации (⟳)");
+    ElMessage.warning(tr("Запись ещё не подтверждена сервером — дождитесь синхронизации (⟳)"));
     return;
   }
   void ElMessageBox.confirm(
-    `Откатить ВАШИ правки с #${e.seq} и новее? Чужие правки останутся; откат остановится на первой клетке/объекте, которые изменил другой участник. Откат — обычная запись в истории: чтобы вернуть, откатите её саму.`,
-    "Откатить моё отсюда",
-    { confirmButtonText: "Откатить", cancelButtonText: "Отмена", type: "warning" },
+    tr("Откатить ВАШИ правки с #{seq} и новее? Чужие правки останутся; откат остановится на первой клетке/объекте, которые изменил другой участник. Откат — обычная запись в истории: чтобы вернуть, откатите её саму.", { seq: e.seq }),
+    tr("Откатить моё отсюда"),
+    { confirmButtonText: tr("Откатить"), cancelButtonText: tr("Отмена"), type: "warning" },
   )
     .then(async () => {
       const r = await collab.revertRangeServer(e.seq);
       if (!r.ok) {
         ElMessage.warning(r.offline
-          ? "Нет связи с комнатой — конфликт-осознанный откат выполняет сервер. Попробуйте после переподключения"
-          : "Не удалось откатить");
+          ? tr("Нет связи с комнатой — конфликт-осознанный откат выполняет сервер. Попробуйте после переподключения")
+          : tr("Не удалось откатить"));
         return;
       }
+      // each note is a sentence of its own, appended after a space
       const boundary = r.conflictAt
-        ? ` Дальше конфликт — изменил другой участник (${r.conflictAt.keys.slice(0, 4).join(", ")}${r.conflictAt.keys.length > 4 ? "…" : ""}).`
+        ? " " + tr("Дальше конфликт — изменил другой участник ({keys}).", { keys: `${r.conflictAt.keys.slice(0, 4).join(", ")}${r.conflictAt.keys.length > 4 ? "…" : ""}` })
         : "";
       const rejectedNote = r.rejectedLeft
-        ? " Отклонённые сервером (локальные) правки не тронуты — откатите их через «только это»."
+        ? " " + tr("Отклонённые сервером (локальные) правки не тронуты — откатите их через «только это».")
         : "";
       if (r.revertedCount === 0) {
-        ElMessage.warning(`Нечего откатывать${r.conflictAt ? " — сразу конфликт." + boundary : "."}${rejectedNote}`);
+        ElMessage.warning(`${r.conflictAt ? tr("Нечего откатывать — сразу конфликт.") + boundary : tr("Нечего откатывать.")}${rejectedNote}`);
       } else {
-        ElMessage.success(`Откачено ваших правок: ${r.revertedCount}.${boundary}${rejectedNote}`);
+        ElMessage.success(`${tr("Откачено ваших правок: {count}.", { count: r.revertedCount })}${boundary}${rejectedNote}`);
       }
     })
     .catch(() => { /* отмена */ });
@@ -154,7 +156,9 @@ async function download(e: HistoryEntry): Promise<void> {
   try {
     const r = await exportAt(id, collab.channel, e.seq);
     if (!r.ok) {
-      ElMessage.warning(`Не удалось выкачать точку #${e.seq}${!r.report.ok ? " — карта на этой точке невалидна" : ""}`);
+      ElMessage.warning(!r.report.ok
+        ? tr("Не удалось выкачать точку #{seq} — карта на этой точке невалидна", { seq: e.seq })
+        : tr("Не удалось выкачать точку #{seq}", { seq: e.seq }));
       return;
     }
     const url = URL.createObjectURL(r.blob);
@@ -165,30 +169,30 @@ async function download(e: HistoryEntry): Promise<void> {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    ElMessage.success(`Выкачано состояние на точке #${e.seq}`);
+    ElMessage.success(tr("Выкачано состояние на точке #{seq}", { seq: e.seq }));
   } catch (err) {
-    ElMessage.warning("Не удалось выкачать: " + (err as Error).message);
+    ElMessage.warning(tr("Не удалось выкачать: {error}", { error: (err as Error).message }));
   }
 }
 </script>
 
 <template>
   <div v-if="show" ref="card" class="history d2-float" :class="{ collapsed: !open }" :style="style">
-    <div class="hist-head" title="Перетащите за заголовок" @pointerdown="onHandlePointerDown" @click="open = !open">
+    <div class="hist-head" :title="tr('Перетащите за заголовок')" @pointerdown="onHandlePointerDown" @click="open = !open">
       <span class="hist-grip">⠿</span>
       <el-icon class="hist-ico"><Clock /></el-icon>
-      <span class="hist-title">История</span>
+      <span class="hist-title">{{ tr("История") }}</span>
       <span class="hist-count">{{ history.length }}</span>
       <el-button text size="small" class="hist-toggle" :icon="open ? ArrowDown : ArrowUp" />
     </div>
     <div v-show="open" class="hist-body" :style="{ height: bodyHeight + 'px' }">
-      <div v-if="!rows.length" class="hist-empty">Пока нет правок в этой сессии.</div>
+      <div v-if="!rows.length" class="hist-empty">{{ tr("Пока нет правок в этой сессии.") }}</div>
       <ul v-else class="hist-list">
         <li v-for="e in rows" :key="e.rid" class="hist-item">
           <div class="hist-row d2-row" :class="{ active: expanded.has(e.rid) }" @click="toggle(e.rid)">
             <span class="dot" :style="{ background: e.byColor }" />
-            <span class="seq" :title="e.acked ? '' : e.rejected ? 'Отклонена сервером — только локально' : 'Синхронизируется…'">#{{ e.seq }}{{ e.acked ? '' : e.rejected ? '✗' : '⟳' }}</span>
-            <span class="who" :class="{ mine: e.mine }">{{ e.mine ? 'вы' : e.byName }}</span>
+            <span class="seq" :title="e.acked ? '' : e.rejected ? tr('Отклонена сервером — только локально') : tr('Синхронизируется…')">#{{ e.seq }}{{ e.acked ? '' : e.rejected ? '✗' : '⟳' }}</span>
+            <span class="who" :class="{ mine: e.mine }">{{ e.mine ? tr('вы') : e.byName }}</span>
             <span class="what">{{ e.summary }}</span>
           </div>
           <template v-if="expanded.has(e.rid)">
@@ -200,19 +204,19 @@ async function download(e: HistoryEntry): Promise<void> {
                 :disabled="!revertable(e) || dependents(e).length > 0"
                 :title="revertOneTitle(e)"
                 @click.stop="revertOne(e)"
-              >⎌ только это</button>
+              >{{ tr("⎌ только это") }}</button>
               <button
                 type="button"
                 class="hist-act"
-                title="Откатить ВАШИ правки с этой записи и новее; чужие сохранятся, откат остановится на конфликте"
+                :title="tr('Откатить ВАШИ правки с этой записи и новее; чужие сохранятся, откат остановится на конфликте')"
                 @click.stop="revertFrom(e)"
-              >⎌ откатить моё отсюда</button>
+              >{{ tr("⎌ откатить моё отсюда") }}</button>
               <button
                 type="button"
                 class="hist-act"
-                title="Скачать .sg карты в состоянии на этой записи («выкачать промежуток»)"
+                :title="tr('Скачать .sg карты в состоянии на этой записи («выкачать промежуток»)')"
                 @click.stop="download(e)"
-              >⭳ выкачать</button>
+              >{{ tr("⭳ выкачать") }}</button>
             </div>
           </template>
         </li>
@@ -221,7 +225,7 @@ async function download(e: HistoryEntry): Promise<void> {
     <div
       v-show="open"
       class="hist-resize"
-      title="Потяните, чтобы изменить высоту"
+      :title="tr('Потяните, чтобы изменить высоту')"
       @pointerdown="startResize"
     ><span class="hist-resize-grip">⣒</span></div>
   </div>

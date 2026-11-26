@@ -10,6 +10,7 @@ import { ElInput, ElButton, ElMessage, ElMessageBox, ElTooltip } from "element-p
 import { useToolStore } from "../stores/toolStore";
 import { useEditStore } from "../stores/editStore";
 import { useEventStore } from "../stores/eventStore";
+import { tr, trn } from "../i18n";
 import RegionPreview from "./RegionPreview.vue";
 
 const toolStore = useToolStore();
@@ -61,7 +62,7 @@ function regenerate(): void {
   if (!zid.value) return;
   toolStore.regenZoneId = zid.value;
   toolStore.setTool("zone");
-  ElMessage.info("Нарисуйте новую форму — «Перегенерировать» заменит локации зоны");
+  ElMessage.info(tr("Нарисуйте новую форму — «Перегенерировать» заменит локации зоны"));
 }
 
 function remove(): void {
@@ -69,15 +70,15 @@ function remove(): void {
   const id = zid.value;
   if (!z || !id) return;
   void ElMessageBox.confirm(
-    `Удалить зону «${z.name}» вместе с её ${liveLocCount.value} локациями?` +
-      (eventCount.value ? ` На ней ${eventCount.value} событий — они останутся и будут ссылаться в пустоту.` : ""),
-    "Удалить зону",
-    { confirmButtonText: "Удалить", cancelButtonText: "Отмена", type: "warning" },
+    trn("Удалить зону «{name}» вместе с её {n} локацией?|Удалить зону «{name}» вместе с её {n} локациями?|Удалить зону «{name}» вместе с её {n} локациями?", liveLocCount.value, { name: z.name }) +
+      (eventCount.value ? " " + trn("На ней {n} событие — оно останется и будет ссылаться в пустоту.|На ней {n} события — они останутся и будут ссылаться в пустоту.|На ней {n} событий — они останутся и будут ссылаться в пустоту.", eventCount.value) : ""),
+    tr("Удалить зону"),
+    { confirmButtonText: tr("Удалить"), cancelButtonText: tr("Отмена"), type: "warning" },
   )
     .then(() => {
       editStore.removeZone(id, true);
       toolStore.setSelectedZone(null);
-      ElMessage.success(`Зона «${z.name}» удалена`);
+      ElMessage.success(tr("Зона «{name}» удалена", { name: z.name }));
     })
     .catch(() => { /* отмена */ });
 }
@@ -86,13 +87,13 @@ function remove(): void {
 <template>
   <div v-if="zone" class="zone-insp">
     <div class="zi-head">
-      <span class="zi-kind">Зона</span>
+      <span class="zi-kind">{{ tr("Зона") }}</span>
       <span class="zi-id">{{ zid }}</span>
       <el-button text size="small" class="zi-close" @click="toolStore.setSelectedZone(null)">✕</el-button>
     </div>
 
     <template v-if="zonePreview">
-      <label class="zi-label">Территория зоны <span class="zi-id">(рельеф + объекты)</span></label>
+      <label class="zi-label">{{ tr("Территория зоны") }} <span class="zi-id">{{ tr("(рельеф + объекты)") }}</span></label>
       <RegionPreview
         :cell="zonePreview.cell"
         :radius="zonePreview.radius"
@@ -101,25 +102,24 @@ function remove(): void {
       />
     </template>
 
-    <label class="zi-label">Название</label>
+    <label class="zi-label">{{ tr("Название") }}</label>
     <el-input v-model="name" size="small" @blur="commitName" @keyup.enter="commitName" />
 
     <div class="zi-stats">
-      <div><span class="zi-num">{{ zone.cells.length }}</span> клеток формы</div>
-      <el-tooltip content="Игровые локации-примитивы, которыми зона накрыта под капотом. Управляются зоной целиком — по одной их трогать не нужно." :show-after="300">
-        <div><span class="zi-num">{{ liveLocCount }}</span> локаций внутри</div>
+      <div><span class="zi-num">{{ zone.cells.length }}</span> {{ trn("клетка формы|клетки формы|клеток формы", zone.cells.length) }}</div>
+      <el-tooltip :content="tr('Игровые локации-примитивы, которыми зона накрыта под капотом. Управляются зоной целиком — по одной их трогать не нужно.')" :show-after="300">
+        <div><span class="zi-num">{{ liveLocCount }}</span> {{ trn("локация внутри|локации внутри|локаций внутри", liveLocCount) }}</div>
       </el-tooltip>
-      <div v-if="eventCount"><span class="zi-num">{{ eventCount }}</span> событий на зоне</div>
+      <div v-if="eventCount"><span class="zi-num">{{ eventCount }}</span> {{ trn("событие на зоне|события на зоне|событий на зоне", eventCount) }}</div>
     </div>
 
     <div class="zi-actions">
-      <el-button size="small" plain @click="regenerate()">✎ Перегенерировать форму</el-button>
-      <el-button size="small" plain type="danger" @click="remove()">🗑 Удалить зону</el-button>
+      <el-button size="small" plain @click="regenerate()">{{ tr("✎ Перегенерировать форму") }}</el-button>
+      <el-button size="small" plain type="danger" @click="remove()">{{ tr("🗑 Удалить зону") }}</el-button>
     </div>
 
     <p class="zi-hint">
-      Тащите зону на карте — она едет целиком. События вешаются на зону в редакторе
-      событий: условие «Вход в зону» → пункт «▦ Вся зона».
+      {{ tr("Тащите зону на карте — она едет целиком. События вешаются на зону в редакторе событий: условие «Вход в зону» → пункт «▦ Вся зона».") }}
     </p>
   </div>
 </template>

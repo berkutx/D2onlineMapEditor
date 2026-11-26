@@ -16,6 +16,7 @@ import type { ScenarioVariable } from "@d2/map-schema";
 import { CONDITION_BY_KIND, EFFECT_BY_KIND } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
 import { useModStore } from "../stores/modStore";
+import { tr } from "../i18n";
 
 const store = useEventStore();
 const mods = useModStore();
@@ -42,13 +43,13 @@ const groupIds = computed(() => new Set(groups.value.map((g) => g.group.id)));
 const singleDefs = computed(() => fixedDefs.value.filter((d) => !d.group || !groupIds.value.has(d.group)));
 
 const RACE_FALLBACK: Record<string, string> = {
-  empire: "Империя", clans: "Кланы Гор", legions: "Легионы Проклятых", undead: "Орды Нежити", elves: "Эльфийский Союз",
+  empire: tr("Империя"), clans: tr("Кланы Гор"), legions: tr("Легионы Проклятых"), undead: tr("Орды Нежити"), elves: tr("Эльфийский Союз"),
 };
 const RACE_SHORT: Record<string, string> = {
-  empire: "Империя", clans: "Кланы", legions: "Легионы", undead: "Нежить", elves: "Эльфы",
+  empire: tr("Империя"), clans: tr("Кланы"), legions: tr("Легионы"), undead: tr("Нежить"), elves: tr("Эльфы"),
 };
 const raceLabel = (race: string | null): string =>
-  race === null ? "Все расы" : mods.raceFactsByKey[race]?.name || RACE_FALLBACK[race] || race;
+  race === null ? tr("Все расы") : tr(mods.raceFactsByKey[race]?.name || RACE_FALLBACK[race] || race); // a mod names its races in Russian; the usual names are in the dictionary
 
 /** Races in the game's own order (the catalog lists them by key); unknown keys go last. */
 const RACE_ORDER = ["empire", "legions", "clans", "undead", "elves"];
@@ -90,8 +91,7 @@ function setValue(def: ScenVariableDef, name: string, value: number | null): voi
   const out = setRule(catalog.value, variables.value, def, name, value, usedByEvents.value);
   if (out.blocked) {
     ElMessage.warning(
-      `Переменную ${name} читает или меняет событие, а её отсутствие не заменить числом. ` +
-        "Задайте значение или сначала уберите её из событий.",
+      tr("Переменную {name} читает или меняет событие, а её отсутствие не заменить числом. Задайте значение или сначала уберите её из событий.", { name }),
     );
     return;
   }
@@ -116,18 +116,18 @@ function choicesOf(def: ScenVariableDef, form: ScenVariableForm): Choice[] {
   const out: Choice[] = [];
   for (const p of presets) {
     if (p.value !== null) {
-      out.push({ key: String(p.value), value: p.value, label: p.label });
+      out.push({ key: String(p.value), value: p.value, label: tr(p.label) });
     } else if (form.race === null) {
-      out.push({ key: ABSENT, value: null, label: p.label });
+      out.push({ key: ABSENT, value: null, label: tr(p.label) });
     } else {
-      out.push({ key: ABSENT, value: null, label: "Как у всех рас" });
+      out.push({ key: ABSENT, value: null, label: tr("Как у всех рас") });
       const dflt = def.absentValue;
       if (def.raceMode === "override" && dflt !== null && !presets.some((q) => q.value === dflt)) {
-        out.push({ key: String(dflt), value: dflt, label: p.label });
+        out.push({ key: String(dflt), value: dflt, label: tr(p.label) });
       }
     }
   }
-  out.push({ key: CUSTOM, value: null, label: "Своё значение" });
+  out.push({ key: CUSTOM, value: null, label: tr("Своё значение") });
   return out;
 }
 
@@ -171,7 +171,7 @@ function columnsOf(defs: ScenVariableDef[]): Column[] {
 /** The variable a cell edits, or null when the definition has no such form. */
 const cellName = (def: ScenVariableDef, col: Column): string | null =>
   col.race === null ? def.name : def.scope === "perRace" ? col.prefix + def.name : null;
-const columnLabel = (col: Column): string => (col.race === null ? "Все расы" : RACE_SHORT[col.race] || raceLabel(col.race));
+const columnLabel = (col: Column): string => (col.race === null ? tr("Все расы") : RACE_SHORT[col.race] || raceLabel(col.race));
 
 /** How many variables of a group the map sets. */
 function setCount(defs: ScenVariableDef[]): number {
@@ -203,15 +203,34 @@ function setPlain(name: string, value: number): void {
 const foreign = computed<UnsupportedVariable[]>(() =>
   catalog.value ? unsupportedVariables(catalog.value, variables.value) : [],
 );
-const foreignReader = (u: UnsupportedVariable): string =>
-  u.def.source === "mss32" ? "другая сборка mss32" : "скрипт другого мода";
+const foreignNote = (u: UnsupportedVariable): string => {
+  const title = (u.def.title && tr(u.def.title)) || tr("правило");
+  return u.def.source === "mss32"
+    ? tr("{title} — читает другая сборка mss32", { title })
+    : tr("{title} — читает скрипт другого мода", { title });
+};
 
 /** "3 из 5" — how many of a rule's state variables the map has. */
 const companionsPresent = (def: ScenVariableDef): number =>
   (def.companions ?? []).filter((c) => valueOf(c) !== null).length;
 
 const sourceLabel = (def: ScenVariableDef): string =>
-  def.source === "mss32" ? "читает mss32" : `читает скрипт мода${def.origin ? ` (${def.origin})` : ""}`;
+  def.source === "mss32"
+    ? tr("читает mss32")
+    : def.origin
+      ? tr("читает скрипт мода ({origin})", { origin: def.origin })
+      : tr("читает скрипт мода");
+
+/** A message with one inline link: the text before and after its {link} placeholder. */
+const splitAtLink = (text: string): [string, string] => {
+  const i = text.indexOf("{link}");
+  return i < 0 ? [text, ""] : [text.slice(0, i), text.slice(i + "{link}".length)];
+};
+const modName = computed(() => mods.activeMod?.name ?? mods.activeModId ?? "");
+const introVars = computed(() =>
+  splitAtLink(tr("Правила карты для мода «{mod}». Каждое хранится в карте как переменная сценария — их же видно на вкладке {link}.", { mod: modName.value })),
+);
+const introSettings = splitAtLink(tr("Потолки уровней юнитов, заклинаний, лидеров и городов — на вкладке {link}."));
 </script>
 
 <template>
@@ -219,37 +238,33 @@ const sourceLabel = (def: ScenVariableDef): string =>
     <el-scrollbar class="mr-list">
       <el-empty
         v-if="!catalog || (!fixedDefs.length && !prefixDefs.length && !foreign.length)"
-        description="Для мода этой карты не собран список ограничений"
+        :description="tr('Для мода этой карты не собран список ограничений')"
         :image-size="60"
       />
       <template v-else>
         <p class="mr-intro">
-          Правила карты для мода «{{ mods.activeMod?.name ?? mods.activeModId }}». Каждое хранится в карте как
-          переменная сценария — их же видно на вкладке
-          <el-button link type="primary" size="small" @click="store.navigate({ tab: 'vars' })">Переменные</el-button>.
-          Потолки уровней юнитов, заклинаний, лидеров и городов — на вкладке
-          <el-button link type="primary" size="small" @click="store.navigate({ tab: 'settings' })">Настройки</el-button>.
+          {{ introVars[0] }}<el-button link type="primary" size="small" @click="store.navigate({ tab: 'vars' })">{{ tr("Переменные") }}</el-button>{{ introVars[1] }}
+          {{ introSettings[0] }}<el-button link type="primary" size="small" @click="store.navigate({ tab: 'settings' })">{{ tr("Настройки") }}</el-button>{{ introSettings[1] }}
         </p>
 
         <div v-if="foreign.length" class="mr-card d2-card mr-warn" role="alert">
-          <div class="mr-title">Мод «{{ mods.activeMod?.name ?? mods.activeModId }}» не читает эти переменные карты</div>
+          <div class="mr-title">{{ tr("Мод «{mod}» не читает эти переменные карты", { mod: modName }) }}</div>
           <div class="mr-desc">
-            Они задают правила, которые в этом моде не подействуют: карта, скорее всего, сделана для другого мода
-            или другой сборки. Значения остаются в карте как есть.
+            {{ tr("Они задают правила, которые в этом моде не подействуют: карта, скорее всего, сделана для другого мода или другой сборки. Значения остаются в карте как есть.") }}
           </div>
           <div v-for="u in foreign" :key="u.name" class="mr-row">
             <span class="mr-var mr-var-wide">{{ u.name }} = {{ u.value }}</span>
-            <span class="mr-foreign">{{ u.def.title || "правило" }} — читает {{ foreignReader(u) }}</span>
+            <span class="mr-foreign">{{ foreignNote(u) }}</span>
           </div>
         </div>
 
         <!-- one rule per card -->
         <div v-for="def in singleDefs" :key="def.name" class="mr-card d2-card">
           <div class="mr-title">
-            {{ def.title || def.name }}
+            {{ (def.title && tr(def.title)) || def.name }}
             <el-tag size="small" effect="plain" class="mr-src">{{ sourceLabel(def) }}</el-tag>
           </div>
-          <div v-if="def.description" class="mr-desc">{{ def.description }}</div>
+          <div v-if="def.description" class="mr-desc">{{ tr(def.description) }}</div>
 
           <div v-for="form in formsOf(def)" :key="form.name" class="mr-row">
             <span class="mr-race">{{ raceLabel(form.race) }}</span>
@@ -304,7 +319,7 @@ const sourceLabel = (def: ScenVariableDef): string =>
           </div>
 
           <div v-if="def.companions?.length" class="mr-note">
-            Служебные переменные игры ({{ companionsPresent(def) }} из {{ def.companions.length }} на карте):
+            {{ tr("Служебные переменные игры ({present} из {total} на карте):", { present: companionsPresent(def), total: def.companions.length }) }}
             <span class="mr-mono">{{ def.companions.join(", ") }}</span>
           </div>
         </div>
@@ -313,12 +328,12 @@ const sourceLabel = (def: ScenVariableDef): string =>
         <div v-for="g in groups" :key="g.group.id" class="mr-card d2-card">
           <button type="button" class="mr-title mr-fold" :aria-expanded="isOpen(g.group.id, g.defs)" @click="toggle(g.group.id, g.defs)">
             <span class="mr-caret">{{ isOpen(g.group.id, g.defs) ? "▾" : "▸" }}</span>
-            {{ g.group.title }}
+            {{ tr(g.group.title) }}
             <el-tag size="small" effect="plain" class="mr-src">{{ sourceLabel(g.defs[0]!) }}</el-tag>
-            <span class="mr-count">{{ setCount(g.defs) ? `задано: ${setCount(g.defs)}` : "не задано" }}</span>
+            <span class="mr-count">{{ setCount(g.defs) ? tr("задано: {n}", { n: setCount(g.defs) }) : tr("не задано") }}</span>
           </button>
           <template v-if="isOpen(g.group.id, g.defs)">
-            <div v-if="g.group.description" class="mr-desc">{{ g.group.description }}</div>
+            <div v-if="g.group.description" class="mr-desc">{{ tr(g.group.description) }}</div>
             <table class="mr-table">
               <thead>
                 <tr>
@@ -328,7 +343,7 @@ const sourceLabel = (def: ScenVariableDef): string =>
               </thead>
               <tbody>
                 <tr v-for="def in g.defs" :key="def.name">
-                  <th scope="row" :title="def.name">{{ def.title || def.name }}</th>
+                  <th scope="row" :title="def.name">{{ (def.title && tr(def.title)) || def.name }}</th>
                   <td v-for="col in columnsOf(g.defs)" :key="col.race ?? ''">
                     <el-input-number
                       v-if="cellName(def, col)"
@@ -349,12 +364,12 @@ const sourceLabel = (def: ScenVariableDef): string =>
 
         <div v-for="def in prefixDefs" :key="def.name" class="mr-card d2-card">
           <div class="mr-title">
-            {{ def.title || def.name + "…" }}
+            {{ (def.title && tr(def.title)) || def.name + "…" }}
             <el-tag size="small" effect="plain" class="mr-src">{{ sourceLabel(def) }}</el-tag>
           </div>
           <div class="mr-desc">
-            {{ def.description || `Мод читает переменные, имя которых начинается с ${def.name}.` }}
-            Такие переменные добавляются на вкладке «Переменные».
+            {{ (def.description && tr(def.description)) || tr("Мод читает переменные, имя которых начинается с {name}.", { name: def.name }) }}
+            {{ tr("Такие переменные добавляются на вкладке «Переменные».") }}
           </div>
           <div v-for="v in prefixed(def)" :key="v.id" class="mr-row">
             <span class="mr-var mr-var-wide">{{ v.name }}</span>
@@ -366,7 +381,7 @@ const sourceLabel = (def: ScenVariableDef): string =>
               @change="setPlain(v.name, ($event as number | undefined) ?? 0)"
             />
           </div>
-          <div v-if="!prefixed(def).length" class="mr-none">на этой карте таких переменных нет</div>
+          <div v-if="!prefixed(def).length" class="mr-none">{{ tr("на этой карте таких переменных нет") }}</div>
         </div>
       </template>
     </el-scrollbar>

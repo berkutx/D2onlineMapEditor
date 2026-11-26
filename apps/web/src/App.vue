@@ -15,6 +15,7 @@ import { useAssetStore } from "./stores/assetStore";
 import { useCollabStore } from "./stores/collabStore";
 import { useToolStore } from "./stores/toolStore";
 import { cloneMap } from "./services/api";
+import { tr } from "./i18n";
 import AppLayout from "./layout/AppLayout.vue";
 
 const mapStore = useMapStore();
@@ -23,7 +24,7 @@ const collabStore = useCollabStore();
 const toolStore = useToolStore();
 
 const bootLoading = ref(true);
-const bootMessage = ref("Loading assets and map…");
+const bootMessage = ref(tr("Загружаю ресурсы и карту…"));
 /** Set when startup ultimately fails (after getJson's own retries) — shows a Retry button
  *  so a backend that was briefly down doesn't leave a permanent blank screen. */
 const bootError = ref<string | null>(null);
@@ -31,7 +32,7 @@ const bootError = ref<string | null>(null);
 async function boot(): Promise<void> {
   bootError.value = null;
   bootLoading.value = true;
-  bootMessage.value = "Loading assets and map…";
+  bootMessage.value = tr("Загружаю ресурсы и карту…");
   try {
     const list = await mapStore.loadScenarios();
     // a share link (?map=<id>[&room=<channel>]) opens that exact map — and joins the
@@ -45,7 +46,7 @@ async function boot(): Promise<void> {
     if (shared && room) collabStore.setPendingShare(shared, room);
     if (shared) {
       try {
-        bootMessage.value = "Загружаю карту по ссылке…";
+        bootMessage.value = tr("Загружаю карту по ссылке…");
         await mapStore.openMap(shared);
         if (focusObj) toolStore.focusObjectId = focusObj;
         bootLoading.value = false;
@@ -53,7 +54,11 @@ async function boot(): Promise<void> {
       } catch (error) {
         // A capability URL must never silently turn into some other editable map. This also
         // gives expired previews an honest terminal screen without exposing a `preview` switch.
-        throw new Error(`Карта из ссылки уже удалена или недоступна${error instanceof Error ? `: ${error.message}` : ""}`);
+        throw new Error(
+          error instanceof Error
+            ? tr("Карта из ссылки уже удалена или недоступна: {error}", { error: error.message })
+            : tr("Карта из ссылки уже удалена или недоступна"),
+        );
       }
     }
     // Returning visitor: open their most recent OWN map (the list is owner-filtered, so any
@@ -63,26 +68,26 @@ async function boot(): Promise<void> {
       .filter((m) => m.source === "upload")
       .sort((a, b) => b.mtime - a.mtime);
     if (mine.length > 0) {
-      bootMessage.value = `Открываю вашу карту «${mine[0]!.name}»…`;
+      bootMessage.value = tr("Открываю вашу карту «{name}»…", { name: mine[0]!.name });
       await mapStore.openMap(mine[0]!.id);
       bootLoading.value = false;
       return;
     }
     const target = mapStore.pickDefaultScenario(list);
     if (!target) {
-      bootMessage.value = "No scenarios available on the server.";
-      ElMessage.warning("No scenarios found. Use File ▸ Open map once any exist.");
+      bootMessage.value = tr("На сервере нет сценариев.");
+      ElMessage.warning(tr("Сценарии не найдены. Когда они появятся, откройте карту через Файл ▸ Открыть карту."));
       bootLoading.value = false;
       return;
     }
     try {
-      bootMessage.value = `Создаю вашу копию «${target.name}»…`;
+      bootMessage.value = tr("Создаю вашу копию «{name}»…", { name: target.name });
       const copyId = await cloneMap(target.id);
       await mapStore.loadScenarios(); // refresh so the copy shows in Файл ▸ Открыть
       await mapStore.openMap(copyId);
-      ElMessage.success(`Это ваша личная копия «${target.name}» — правьте смело.`);
+      ElMessage.success(tr("Это ваша личная копия «{name}» — правьте смело.", { name: target.name }));
     } catch {
-      bootMessage.value = `Loading "${target.name}"…`;
+      bootMessage.value = tr("Загружаю «{name}»…", { name: target.name });
       await mapStore.openMap(target.id);
     }
     bootLoading.value = false;
@@ -90,7 +95,7 @@ async function boot(): Promise<void> {
     const msg = e instanceof Error ? e.message : String(e);
     bootLoading.value = false;
     bootError.value = assetStore.error ? `${msg} (${assetStore.error})` : msg;
-    ElMessage.error(`Startup failed: ${msg}`);
+    ElMessage.error(tr("Не удалось запустить редактор: {error}", { error: msg }));
   }
 }
 
@@ -107,9 +112,9 @@ onMounted(boot);
       <AppLayout />
     </el-config-provider>
     <div v-if="bootError" class="boot-error">
-      <div class="boot-error-title">Не удалось загрузить карту</div>
+      <div class="boot-error-title">{{ tr("Не удалось загрузить карту") }}</div>
       <div class="boot-error-msg">{{ bootError }}</div>
-      <el-button type="primary" @click="boot()">Повторить</el-button>
+      <el-button type="primary" @click="boot()">{{ tr("Повторить") }}</el-button>
     </div>
   </div>
 </template>

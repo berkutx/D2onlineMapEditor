@@ -6,27 +6,32 @@
 import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import { useMapStore } from "../stores/mapStore";
+import { tr, trx } from "../i18n";
 
 const mapStore = useMapStore();
 const { objectCounts, totalObjects, currentMap } = storeToRefs(mapStore);
 
 /** Friendly labels for the discriminated-union object types. */
 const LABELS: Record<string, string> = {
-  stack: "Stacks",
-  fort: "Forts",
-  capital: "Capitals",
-  village: "Villages",
-  ruin: "Ruins",
-  merchant: "Merchants",
-  mage: "Mages",
-  trainer: "Trainers",
-  mercenary: "Mercenaries",
-  mountains: "Mountains",
-  crystal: "Crystals",
-  landmark: "Landmarks",
-  location: "Locations",
-  unit: "Units",
-  generic: "Other",
+  stack: tr("Отряды"),
+  fort: tr("Форты"),
+  capital: tr("Столицы"),
+  village: tr("Города"),
+  ruin: tr("Руины"),
+  merchant: tr("Торговцы"),
+  mage: tr("Башни магов"),
+  trainer: tr("Тренеры"),
+  mercenary: tr("Лагеря наёмников"),
+  resourceMarket: tr("Рынки ресурсов"),
+  treasure: tr("Сундуки"),
+  mountains: tr("Горы"),
+  crystal: tr("Кристаллы"),
+  landmark: tr("Декорации"),
+  location: tr("Локации"),
+  rod: trx("map", "Жезлы"),
+  tomb: tr("Могилы"),
+  unit: tr("Юниты"),
+  generic: tr("Прочее"),
 };
 
 const rows = computed(() =>
@@ -38,8 +43,8 @@ const rows = computed(() =>
 
 <template>
   <div class="object-panel d2-rail d2-rail--left">
-    <div class="panel-header">Objects</div>
-    <div v-if="!currentMap" class="panel-empty">No map loaded</div>
+    <div class="panel-header">{{ tr("Объекты") }}</div>
+    <div v-if="!currentMap" class="panel-empty">{{ tr("Карта не загружена") }}</div>
     <template v-else>
       <el-scrollbar class="panel-scroll">
         <ul class="count-list">
@@ -50,7 +55,7 @@ const rows = computed(() =>
         </ul>
       </el-scrollbar>
       <div class="panel-total">
-        <span>Total</span>
+        <span>{{ tr("Всего") }}</span>
         <b class="d2-num">{{ totalObjects }}</b>
       </div>
     </template>

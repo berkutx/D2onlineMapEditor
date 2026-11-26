@@ -11,6 +11,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { cellToWorld, HALF_W, HALF_H } from "@d2/pixi-render";
 import { getScene } from "../canvas/sceneHolder";
+import { tr } from "../i18n";
 
 interface Cell { x: number; y: number }
 interface Bounds { x0: number; y0: number; x1: number; y1: number }
@@ -129,10 +130,10 @@ const zoomSpan = computed(() => 2 * zoomRadius.value + 1);
 <template>
   <div class="region-preview">
     <div ref="box" class="rp-box" />
-    <p v-if="!ok" class="rp-empty">нет превью точки</p>
-    <button v-if="zoomable && ok" class="rp-zoom" title="Увеличить" type="button" @click="zoomOpen = true">🔍</button>
+    <p v-if="!ok" class="rp-empty">{{ tr("нет превью точки") }}</p>
+    <button v-if="zoomable && ok" class="rp-zoom" :title="tr('Увеличить')" type="button" @click="zoomOpen = true">🔍</button>
 
-    <el-dialog v-model="zoomOpen" width="700px" align-center append-to-body title="Точка на карте">
+    <el-dialog v-model="zoomOpen" width="700px" align-center append-to-body :title="tr('Точка на карте')">
       <RegionPreview
         :cell="cell"
         :radius="zoomRadius"
@@ -142,7 +143,7 @@ const zoomSpan = computed(() => 2 * zoomRadius.value + 1);
         :cells="cells"
       />
       <div class="rp-zoom-ctl">
-        <span class="rp-zoom-lbl">Охват: {{ zoomSpan }}×{{ zoomSpan }} клеток</span>
+        <span class="rp-zoom-lbl">{{ tr("Охват: {n}×{n} клеток", { n: zoomSpan }) }}</span>
         <el-slider v-model="zoomRadius" :min="2" :max="16" :step="1" style="flex:1" />
       </div>
     </el-dialog>

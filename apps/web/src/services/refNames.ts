@@ -11,6 +11,7 @@ import { useItemStore } from "../stores/itemStore";
 import { useSpellStore } from "../stores/spellStore";
 import { useUnitStore } from "../stores/unitStore";
 import { useDecorStore } from "../stores/decorStore";
+import { tr } from "../i18n";
 
 /** Entity category of a resolved ref (drives graph icon + click behavior). */
 export type RefKind = "object" | "player" | "event" | "var" | "spell" | "item" | "template";
@@ -62,7 +63,7 @@ export function useRefNames() {
       (o.leaderCell !== undefined ? o.garrison?.[o.leaderCell] : undefined) ??
       o.garrison?.find(Boolean);
     const lname = leader ? units.get(leader.unit)?.name : undefined;
-    return lname ? `Отряд: ${lname}` : `Отряд (${o.pos.x},${o.pos.y})`;
+    return lname ? tr("Отряд: {name}", { name: lname }) : tr("Отряд ({x},{y})", { x: o.pos.x, y: o.pos.y });
   }
   function objName(id: string): string {
     const o = objOf(id);
@@ -70,7 +71,7 @@ export function useRefNames() {
       // stack fields legitimately hold TEMPLATE ids (SRCTMPL_ID matching) — resolve the
       // template's name instead of surfacing a raw S143TM#### id
       const t = edit.liveDoc?.templates?.find((x) => x.id === id);
-      return t ? `Шаблон: ${t.name || id}` : id;
+      return t ? tr("Шаблон: {name}", { name: t.name || id }) : id;
     }
     const named = (o as { name?: string }).name;
     if (named) return named;
@@ -93,7 +94,7 @@ export function useRefNames() {
   }
   function varName(id: number): string {
     const v = edit.liveDoc?.variables?.find((x) => x.id === id);
-    return v ? v.name || `var #${id}` : `var #${id}`;
+    return v ? v.name || tr("переменная #{id}", { id }) : tr("переменная #{id}", { id });
   }
   function templateName(id: string): string {
     const t = edit.liveDoc?.templates?.find((x) => x.id === id);
@@ -103,7 +104,7 @@ export function useRefNames() {
   /** Resolve ONE field's value to a humanized ref, or null when it's not an entity ref
    *  (ints/bools/texts) or it's empty. */
   function resolveField(f: EventFieldSpec, v: unknown): ResolvedRef | null {
-    const base = { fieldKey: f.key, fieldLabel: f.label };
+    const base = { fieldKey: f.key, fieldLabel: tr(f.label) };
     if (f.type.startsWith("ref-")) {
       const id = (v as string) || "";
       if (!id) return null;

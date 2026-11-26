@@ -15,14 +15,15 @@ import { useUnitStore, roleLabel, type UnitEntry, type UnitGroup } from "../stor
 import UnitIcon from "./UnitIcon.vue";
 import PickerSortHeader from "./PickerSortHeader.vue";
 import { sortBy, nextSort, type SortKey } from "./pickerSort";
+import { tr, trn } from "../i18n";
 
 /** Sort keys for the per-group sort control (shown in every subcategory header). */
 const SORT_KEYS: SortKey<UnitEntry>[] = [
-  { key: "name", label: "А-Я", get: (u) => u.name },
-  { key: "level", label: "ур.", get: (u) => u.level, desc: true },
-  { key: "hp", label: "HP", get: (u) => u.hp, desc: true },
-  { key: "armor", label: "бр.", get: (u) => u.armor, desc: true },
-  { key: "leadership", label: "лид.", get: (u) => u.leadership, desc: true },
+  { key: "name", label: tr("А-Я"), get: (u) => u.name },
+  { key: "level", label: tr("ур."), get: (u) => u.level, desc: true },
+  { key: "hp", label: tr("HP"), get: (u) => u.hp, desc: true },
+  { key: "armor", label: tr("бр."), get: (u) => u.armor, desc: true },
+  { key: "leadership", label: tr("лид."), get: (u) => u.leadership, desc: true },
 ];
 
 const props = withDefaults(
@@ -47,7 +48,7 @@ const props = withDefaults(
      *  callers unaffected). */
     disabledReason?: (unitId: string) => string | null | undefined;
   }>(),
-  { modelValue: null, nullable: false, title: "Выбор юнита", triggerLabel: "", roster: "all", disabledReason: undefined },
+  { modelValue: null, nullable: false, title: tr("Выбор юнита"), triggerLabel: "", roster: "all", disabledReason: undefined },
 );
 const emit = defineEmits<{
   "update:modelValue": [string | null];
@@ -64,10 +65,10 @@ type Mode = "subrace" | "cat" | "level" | "alpha";
 const mode = ref<Mode>("subrace");
 const subFilter = ref<string>("all");
 const MODE_OPTIONS = [
-  { label: "Раса", value: "subrace" },
-  { label: "Тип", value: "cat" },
-  { label: "Уровень", value: "level" },
-  { label: "А-Я", value: "alpha" },
+  { label: tr("Раса"), value: "subrace" },
+  { label: tr("Тип"), value: "cat" },
+  { label: tr("Уровень"), value: "level" },
+  { label: tr("А-Я"), value: "alpha" },
 ];
 
 const sortKey = ref<string>("level");
@@ -108,7 +109,7 @@ const baseGroups = computed<DisplayGroup[]>(() => {
   else if (mode.value === "level") g = unitStore.byLevel;
   else if (mode.value === "alpha") {
     const units = unitStore.all.filter(inRoster).sort((a, b) => a.name.localeCompare(b.name, "ru"));
-    return [{ key: "all", label: "Все юниты", units }];
+    return [{ key: "all", label: tr("Все юниты"), units }];
   } else g = unitStore.bySubrace;
   return g
     .map((x) => ({ key: x.key, label: x.label, units: x.units.filter(inRoster) }))
@@ -137,7 +138,7 @@ const resultCount = computed(() => groups.value.reduce((n, g) => n + g.units.len
 
 const triggerText = computed(() => {
   if (props.triggerLabel) return props.triggerLabel;
-  return unitStore.nameOf(props.modelValue) || "— пусто —";
+  return unitStore.nameOf(props.modelValue) || tr("— пусто —");
 });
 
 /** Disable reason for a candidate row ("" ⇒ pickable). Kept a plain string so the template can
@@ -184,25 +185,25 @@ defineExpose({ show });
       size="small"
       text
       :icon="CircleClose"
-      title="Убрать"
+      :title="tr('Убрать')"
       @click="clear()"
     />
     </slot>
 
     <el-dialog v-model="open" :title="title" width="560px" align-center append-to-body class="up-dialog">
       <div class="up-controls">
-        <el-input v-model="query" placeholder="Поиск по имени или расе…" size="default" clearable :prefix-icon="Search" class="up-search" />
-        <el-select v-model="subFilter" filterable size="default" class="up-sub" placeholder="Все">
-          <el-option label="Все" value="all" />
+        <el-input v-model="query" :placeholder="tr('Поиск по имени или расе…')" size="default" clearable :prefix-icon="Search" class="up-search" />
+        <el-select v-model="subFilter" filterable size="default" class="up-sub" :placeholder="tr('Все')">
+          <el-option :label="tr('Все')" value="all" />
           <el-option v-for="o in subOptions" :key="o.value" :label="o.label" :value="o.value" />
         </el-select>
       </div>
       <el-segmented v-model="mode" :options="MODE_OPTIONS" size="small" class="up-modes" />
 
-      <div v-if="unitStore.loading" class="up-status">Загрузка каталога…</div>
-      <div v-else-if="unitStore.error" class="up-status err">Ошибка: {{ unitStore.error }}</div>
+      <div v-if="unitStore.loading" class="up-status">{{ tr("Загрузка каталога…") }}</div>
+      <div v-else-if="unitStore.error" class="up-status err">{{ tr("Ошибка: {error}", { error: unitStore.error }) }}</div>
       <div v-else class="up-list">
-        <div v-if="!resultCount" class="up-status">Ничего не найдено</div>
+        <div v-if="!resultCount" class="up-status">{{ tr("Ничего не найдено") }}</div>
         <template v-for="g in groups" :key="g.key">
           <PickerSortHeader
             :label="g.label"
@@ -227,19 +228,19 @@ defineExpose({ show });
               <span class="up-name">{{ u.name || u.id }}</span>
               <span class="up-meta">
                 {{ u.race }}<template v-if="roleLabel(u.catKey)"> · {{ roleLabel(u.catKey) }}</template>
-                · ур.{{ u.level }} · {{ u.hp }} HP · бр.{{ u.armor }}<template v-if="u.leadership"> · лид.{{ u.leadership }}</template>
+                · {{ tr("ур.{n}", { n: u.level }) }} · {{ tr("{n} HP", { n: u.hp }) }} · {{ tr("бр.{n}", { n: u.armor }) }}<template v-if="u.leadership"> · {{ tr("лид.{n}", { n: u.leadership }) }}</template>
               </span>
             </span>
-            <span v-if="u.large" class="up-big" title="Большой юнит — занимает обе линии формации (двойной)">⇔</span>
+            <span v-if="u.large" class="up-big" :title="tr('Большой юнит — занимает обе линии формации (двойной)')">⇔</span>
           </button>
         </template>
       </div>
 
       <template #footer>
         <span class="up-foot">
-          <span class="up-foot-info">{{ resultCount }} юнитов</span>
-          <el-button v-if="nullable" size="small" @click="clear()">Очистить клетку</el-button>
-          <el-button size="small" @click="open = false">Закрыть</el-button>
+          <span class="up-foot-info">{{ trn("{n} юнит|{n} юнита|{n} юнитов", resultCount) }}</span>
+          <el-button v-if="nullable" size="small" @click="clear()">{{ tr("Очистить клетку") }}</el-button>
+          <el-button size="small" @click="open = false">{{ tr("Закрыть") }}</el-button>
         </span>
       </template>
     </el-dialog>

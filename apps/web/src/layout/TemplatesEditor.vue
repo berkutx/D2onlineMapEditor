@@ -16,6 +16,7 @@ import { useEditStore } from "../stores/editStore";
 import { useUnitStore } from "../stores/unitStore";
 import CommitInput from "./CommitInput.vue";
 import GarrisonEditor from "./GarrisonEditor.vue";
+import { tr, trn } from "../i18n";
 
 const store = useEventStore();
 const edit = useEditStore();
@@ -40,8 +41,8 @@ const leaderName = (t: StackTemplate): string =>
   t.leader ? unitStore.nameOf(t.leader) : "";
 
 const ORDERS = [
-  { value: 1, label: "Обычный" }, { value: 2, label: "Стоять" }, { value: 3, label: "Охрана" },
-  { value: 4, label: "Атака" }, { value: 7, label: "Бродить" }, { value: 9, label: "Оборона" },
+  { value: 1, label: tr("Обычный") }, { value: 2, label: tr("Стоять") }, { value: 3, label: tr("Охрана") },
+  { value: 4, label: tr("Атака") }, { value: 7, label: tr("Бродить") }, { value: 9, label: tr("Оборона") },
 ];
 
 function patch(partial: Partial<StackTemplate>): void {
@@ -200,8 +201,8 @@ function setCellMods(i: number, mods: string[]): void {
   <div class="tpl-editor">
     <!-- the tab is the title; head keeps the count + action only -->
     <div class="tpl-head">
-      <span class="tpl-count">{{ store.templates.length }} шаблонов</span>
-      <el-button size="small" type="primary" @click="store.createTemplate()">+ Шаблон</el-button>
+      <span class="tpl-count">{{ trn("{n} шаблон|{n} шаблона|{n} шаблонов", store.templates.length) }}</span>
+      <el-button size="small" type="primary" @click="store.createTemplate()">{{ tr("+ Шаблон") }}</el-button>
     </div>
 
     <el-scrollbar class="tpl-list">
@@ -212,21 +213,21 @@ function setCellMods(i: number, mods: string[]): void {
         :class="{ active: t.id === store.selectedTemplateId }"
         @click="store.selectTemplate(t.id)"
       >
-        <span class="tpl-name">{{ t.name || "(без имени)" }}</span>
+        <span class="tpl-name">{{ t.name || tr("(без имени)") }}</span>
         <span class="tpl-meta" :title="t.id">{{ unitCount(t) }}⚔ {{ leaderName(t) || "—" }}</span>
         <span class="tpl-actions">
-          <el-tooltip content="Клонировать"><el-button size="small" text class="icon-btn" @click.stop="store.cloneTemplate(t)">⧉</el-button></el-tooltip>
-          <el-tooltip content="Удалить"><el-button size="small" text class="icon-btn" @click.stop="store.removeTemplate(t.id)">🗑</el-button></el-tooltip>
+          <el-tooltip :content="tr('Клонировать')"><el-button size="small" text class="icon-btn" @click.stop="store.cloneTemplate(t)">⧉</el-button></el-tooltip>
+          <el-tooltip :content="tr('Удалить')"><el-button size="small" text class="icon-btn" @click.stop="store.removeTemplate(t.id)">🗑</el-button></el-tooltip>
         </span>
       </div>
-      <el-empty v-if="!store.templates.length" description="Нет шаблонов" :image-size="60" />
+      <el-empty v-if="!store.templates.length" :description="tr('Нет шаблонов')" :image-size="60" />
     </el-scrollbar>
 
     <el-scrollbar v-if="sel" class="tpl-form">
-      <CommitInput :model-value="sel.name" size="small" placeholder="Название шаблона"
+      <CommitInput :model-value="sel.name" size="small" :placeholder="tr('Название шаблона')"
         @update:model-value="patch({ name: $event })" />
       <div class="tpl-props">
-        <label>приказ
+        <label>{{ tr("приказ") }}
           <el-select :model-value="sel.order" size="small" style="width: 130px"
             @update:model-value="patch({ order: $event })">
             <el-option v-for="o in ORDERS" :key="o.value" :value="o.value" :label="o.label" />
@@ -234,11 +235,11 @@ function setCellMods(i: number, mods: string[]): void {
         </label>
       </div>
       <div class="tpl-units">
-        <div class="tpl-units-lbl d2-sec">Состав <span class="tpl-count">({{ entityFill(sel.units) }}/6 клеток)</span></div>
+        <div class="tpl-units-lbl d2-sec">{{ tr("Состав") }} <span class="tpl-count">{{ tr("({n}/6 клеток)", { n: entityFill(sel.units) }) }}</span></div>
         <p v-if="!hasLeader" class="tpl-need-leader">
           {{ orphanLeader
-            ? "Лидер выбран, но не размещён в отряде — кликните ячейку, чтобы поставить его ★"
-            : "Отряд начинается с лидера: кликните любую ячейку — сперва выбирается герой или вор ★" }}
+            ? tr("Лидер выбран, но не размещён в отряде — кликните ячейку, чтобы поставить его ★")
+            : tr("Отряд начинается с лидера: кликните любую ячейку — сперва выбирается герой или вор ★") }}
         </p>
         <GarrisonEditor
           :key="sel.id"
@@ -254,7 +255,7 @@ function setCellMods(i: number, mods: string[]): void {
           @set-mods="(c, m) => setCellMods(c, m)"
         />
       </div>
-      <p class="tpl-hint">Событие «Создать отряд» размещает этот состав в выбранной локации. ★ — лидер; большой юнит занимает обе клетки ряда. Выберите юнита, чтобы настроить уровень и модификаторы. Здоровье и снаряжение в шаблоне не задаются.</p>
+      <p class="tpl-hint">{{ tr("Событие «Создать отряд» размещает этот состав в выбранной локации. ★ — лидер; большой юнит занимает обе клетки ряда. Выберите юнита, чтобы настроить уровень и модификаторы. Здоровье и снаряжение в шаблоне не задаются.") }}</p>
     </el-scrollbar>
   </div>
 </template>

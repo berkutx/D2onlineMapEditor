@@ -8,6 +8,7 @@
 import { defineStore } from "pinia";
 import { modAssetUrl } from "./modStore";
 import { ref, computed } from "vue";
+import { tr, trx } from "../i18n";
 
 export interface ItemEntry {
   id: string;
@@ -37,43 +38,43 @@ export interface ItemGroup {
 
 /** RU labels for the derived bonus tags. */
 export const ITEM_BONUS_LABELS: Record<string, string> = {
-  attack: "Атака / урон",
-  armor: "Броня",
-  hp: "Здоровье",
-  heal: "Лечение",
-  regen: "Регенерация",
-  immunity: "Иммунитет",
-  initiative: "Инициатива",
-  spell: "Заклинание",
-  summon: "Призыв",
-  move: "Ход",
-  scout: "Обзор",
-  leadership: "Лидерство",
-  morale: "Мораль",
-  ability: "Способности",
-  drain: "Вытягивание жизни",
-  retreat: "Отступление",
-  cost: "Стоимость",
+  attack: tr("Атака / урон"),
+  armor: tr("Броня"),
+  hp: tr("Здоровье"),
+  heal: tr("Лечение"),
+  regen: tr("Регенерация"),
+  immunity: tr("Иммунитет"),
+  initiative: tr("Инициатива"),
+  spell: tr("Заклинание"),
+  summon: tr("Призыв"),
+  move: tr("Ход"),
+  scout: trx("stat", "Обзор"),
+  leadership: tr("Лидерство"),
+  morale: tr("Мораль"),
+  ability: tr("Способности"),
+  drain: tr("Вытягивание жизни"),
+  retreat: tr("Отступление"),
+  cost: tr("Стоимость"),
 };
 const BONUS_ORDER = Object.keys(ITEM_BONUS_LABELS);
 
 /** RU labels for the authoritative LmagItm.dbf category enum. */
 export const ITEM_CAT_LABELS: Record<string, string> = {
-  L_ARMOR: "Доспехи",
-  L_JEWEL: "Реликвии",
-  L_WEAPON: "Оружие",
-  L_BANNER: "Знамёна",
-  L_POTION_BOOST: "Зелья усиления",
-  L_POTION_HEAL: "Зелья лечения",
-  L_POTION_REVIVE: "Зелья воскрешения",
-  L_POTION_PERMANENT: "Постоянные зелья",
-  L_SCROLL: "Свитки",
-  L_WAND: "Жезлы",
-  L_VALUABLE: "Ценности",
-  L_ORB: "Сферы маны",
-  L_TALISMAN: "Талисманы",
-  L_TRAVEL_ITEM: "Дорожные предметы",
-  L_SPECIAL: "Особые предметы",
+  L_ARMOR: tr("Доспехи"),
+  L_JEWEL: tr("Реликвии"),
+  L_WEAPON: tr("Оружие"),
+  L_BANNER: tr("Знамёна"),
+  L_POTION_BOOST: tr("Зелья усиления"),
+  L_POTION_HEAL: tr("Зелья лечения"),
+  L_POTION_REVIVE: tr("Зелья воскрешения"),
+  L_POTION_PERMANENT: tr("Постоянные зелья"),
+  L_SCROLL: tr("Свитки"),
+  L_WAND: tr("Жезлы"),
+  L_VALUABLE: tr("Ценности"),
+  L_ORB: tr("Сферы маны"),
+  L_TALISMAN: tr("Талисманы"),
+  L_TRAVEL_ITEM: tr("Дорожные предметы"),
+  L_SPECIAL: tr("Особые предметы"),
 };
 
 const NULL_ID = "G000000000"; // sentinel "no item"
@@ -128,7 +129,7 @@ export const useItemStore = defineStore("item", () => {
       const items = byCat.get(cat)!;
       items.sort((a, b) => a.name.localeCompare(b.name, "ru"));
       const catKey = items[0]?.catKey ?? "";
-      out.push({ cat, catKey, label: ITEM_CAT_LABELS[catKey] ?? `Категория ${cat}`, items });
+      out.push({ cat, catKey, label: ITEM_CAT_LABELS[catKey] ?? tr("Категория {id}", { id: cat }), items });
     }
     return out;
   });
@@ -158,7 +159,7 @@ export const useItemStore = defineStore("item", () => {
     }
     if (none.length) {
       none.sort((a, c) => a.name.localeCompare(c.name, "ru"));
-      out.push({ key: "none", label: "Без бонуса", items: none });
+      out.push({ key: "none", label: tr("Без бонуса"), items: none });
     }
     return out;
   });
