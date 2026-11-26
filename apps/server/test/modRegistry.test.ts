@@ -227,6 +227,38 @@ describe("ModRegistry over the asset store", () => {
     expect(blank!.detection).toMatchObject({ status: "undetermined", modId: null });
   });
 
+  it("keeps a hidden mod out of sight: not shown, not detected, not the default, not openable", async () => {
+    store();
+    const hidden: string[] = [];
+    const mods = new ModRegistry(dir, hidden);
+    expect(mods.visible().map((m) => m.id)).toEqual(["alpha", "alpha-2", "beta"]);
+    expect(mods.canOpen("beta")).toBe(true);
+
+    hidden.push("beta"); // read live
+    expect(mods.isHidden("beta")).toBe(true);
+    expect(mods.list().map((m) => m.id)).toEqual(["alpha", "alpha-2", "beta"]); // still installed
+    expect(mods.visible().map((m) => m.id)).toEqual(["alpha", "alpha-2"]);
+    expect(mods.get("beta").id).toBe("beta"); // its files are still served
+    expect(mods.default().id).toBe("alpha"); // the store's default is hidden: the first shown ready mod
+    expect(mods.canOpen("beta")).toBe(false);
+    expect(mods.canOpen("alpha")).toBe(true);
+    expect(mods.canOpen("alpha-2")).toBe(false); // data-only, as before
+    expect(mods.canOpen("gamma")).toBe(false);
+
+    // beta's own map is matched among the shown mods only
+    const own = await mods.analyze(mapBytes(...CORE, "G070UU0001"));
+    expect(own!.all.map((c) => c.modId).sort()).toEqual(["alpha", "alpha-2"]);
+    expect(own!.detection.modId).not.toBe("beta");
+  });
+
+  it("hides nothing when every installed mod is listed as hidden", () => {
+    store();
+    const mods = new ModRegistry(dir, ["alpha", "alpha-2", "beta"]);
+    expect(mods.isHidden("beta")).toBe(false);
+    expect(mods.visible().map((m) => m.id)).toEqual(["alpha", "alpha-2", "beta"]);
+    expect(mods.default().id).toBe("beta");
+  });
+
   it("picks up a rebuilt store and changes its revision", () => {
     store();
     const mods = new ModRegistry(dir);

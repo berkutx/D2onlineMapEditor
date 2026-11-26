@@ -101,6 +101,24 @@ describe("install sagas", () => {
     expect((maps.json() as ScenarioEntry[]).some((e) => e.id === mapId)).toBe(false);
   });
 
+  it("of a hidden mod are not listed, and still open by their id", async () => {
+    const [saga] = (await list()).filter((c) => c.source === "install");
+    const roots = config.MOD_SCENARIO_ROOTS as { path: string; modId: string }[];
+    const hidden = config.HIDDEN_MODS as string[];
+    roots.push({ path: join(dirname(config.UPLOAD_DIR), "install-scenarios"), modId: "closed-beta" });
+    hidden.push("closed-beta");
+    try {
+      expect((await list()).some((c) => c.id === saga!.id)).toBe(false);
+      const res = await app.inject({ method: "GET", url: REST.campaign(saga!.id) });
+      expect(res.statusCode).toBe(200);
+      expect((res.json() as CampaignEntry).mod).toBeUndefined(); // the hidden mod is not named
+    } finally {
+      roots.length = 0;
+      hidden.length = 0;
+    }
+    expect((await list()).some((c) => c.id === saga!.id)).toBe(true);
+  });
+
   it("report a mission the game could not play", async () => {
     const [saga] = (await list()).filter((c) => c.source === "install");
     const res = await app.inject({ method: "GET", url: REST.campaign(saga!.id) });

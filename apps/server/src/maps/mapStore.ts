@@ -234,16 +234,14 @@ export class MapStore {
     } catch {
       return undefined;
     }
-    const key = `${mtimeMs}:${this.mods.revision}:${rec.modId ?? ""}`;
+    const key = `${mtimeMs}:${this.mods.revision}:${this.mods.hiddenKey}:${rec.modId ?? ""}`;
     const cached = this.modCache.get(id);
     if (cached?.key === key) return cached.mod;
 
-    // a map can only be OPENED on a mod whose graphics are built; a known mod that is still
-    // data-only is treated as unknown, and the map is matched among the ready mods instead
-    const known =
-      this.mods.has(rec.modId) && this.mods.get(rec.modId).info.status === "ready"
-        ? rec.modId!
-        : undefined;
+    // a map can only be OPENED on a mod whose graphics are built and that visitors are shown;
+    // a known mod that is still data-only, or hidden, is treated as unknown, and the map is
+    // matched among the mods it can be opened on instead
+    const known = this.mods.canOpen(rec.modId) ? rec.modId : undefined;
     const analysis = await this.mods.analyze(await bytesOf(rec));
     let mod: MapMod;
     if (known) {
@@ -306,10 +304,24 @@ export class MapStore {
     return true;
   }
 
-  /** True when a map may be opened on this mod: it is installed and its graphics are built. */
+  /** True when a map may be opened on this mod: it is installed, its graphics are built and
+   *  it is not hidden. */
   canOpenOn(modId: string): boolean {
     this.mods.refresh();
-    return this.mods.has(modId) && this.mods.get(modId).info.status === "ready";
+    return this.mods.canOpen(modId);
+  }
+
+  /** True for an installed mod visitors are not shown (config HIDDEN_MODS). */
+  hidesMod(modId: string): boolean {
+    this.mods.refresh();
+    return this.mods.has(modId) && this.mods.isHidden(modId);
+  }
+
+  /** False for a map a hidden mod ships with (its own scenario folder): a listing leaves it
+   *  out. Opened by its id, it still opens — on one of the mods visitors are shown. */
+  isShown(entry: { id: string }): boolean {
+    const rec = this.registry.get(entry.id);
+    return !(rec?.source === "install" && this.mods.isHidden(rec.modId));
   }
 
   private modListeners = new Set<(id: string, modId: string) => void>();

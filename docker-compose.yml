@@ -23,6 +23,9 @@ services:
       SCENARIO_ROOTS: /app/deploy/scenarios
       # the mods' own maps, one folder per mod id (copied from the dev box, see deploy/README)
       MOD_SCENARIO_DIR: /app/var/mod-scenarios
+      # mods visitors are not shown (a closed beta): not in the mod list, their own maps and
+      # sagas not listed, no map opened on them; their files stay on the volumes (deploy/README)
+      HIDDEN_MODS: semga-2
       UPLOAD_DIR: /app/var/uploads
       PROJECTS_DIR: /app/var/projects
       # durable per-room collab op-logs — MUST be a volume, else every redeploy (image

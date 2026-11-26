@@ -226,6 +226,8 @@ What is there (2026-11-26):
 | `nazar-legacy` | 20 maps | `Exports/*.sg` |
 
 - The Сёмга family's maps are kept once, under its newest version `semga-2`.
+- `semga-2` is a closed beta and hidden (`HIDDEN_MODS`, see the toggles below): its 52 maps and
+  19 sagas stay in its folder but are not listed. «История демона» opens on `semga`.
 - A listing groups a map by its folders below the mod folder, `Campaign` left out
   («Возвращение Галлеана / Империя»).
 - New files in an existing mod folder show on the next listing; a new mod folder after
@@ -242,6 +244,11 @@ What is there (2026-11-26):
 - `SCENARIO_ROOTS=/app/deploy/scenarios` — the bundled map (`История демона.sg`); a first visit
   starts from a copy of it (`pickDefaultScenario` in `apps/web/src/stores/mapStore.ts`).
 - `MOD_SCENARIO_DIR=/app/var/mod-scenarios` — the mods' own maps (`d2editor_scenarios` volume).
+- `HIDDEN_MODS=semga-2` — mods visitors are not shown (a closed beta): left out of the mod list,
+  the maps and sagas of their own folders not listed, no map opened on them (a map of theirs
+  is matched among the other mods, the way a data-only mod is skipped). For the eye only:
+  nothing is deleted, and a mod's files and a map's id still answer. To show the mod again,
+  drop it from `docker-compose.yml` and deploy.
 - Atlases via the `d2editor_assets` volume; uploads via `d2editor_uploads`.
 - The shared `lastwar_nginx` must let uploads through: both `location /map/` blocks in
   `/opt/lastwar-deploy/nginx/nginx.conf` (the lastwar stack's file, not in this repo) carry

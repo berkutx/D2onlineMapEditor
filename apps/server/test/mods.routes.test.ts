@@ -53,6 +53,26 @@ const newMap = (payload: Record<string, unknown>, clientId = OWNER) =>
     payload: { size: 48, fill: "default", name: "mod-test", races: ["empire"], ...payload },
   });
 const infoOf = (id: string) => mods.mods.find((m) => m.id === id)!;
+/** POST a blank map as a read-only preview, `query` naming its mod or not. */
+const postPreview = (name: string, query: string) => {
+  const bytes = Buffer.from(createBlankMap({ size: 48, name, races: ["empire"] }));
+  const boundary = "----mod-preview";
+  const CRLF = String.fromCharCode(13, 10);
+  const head = [
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="file"; filename="m.sg"',
+    "Content-Type: application/octet-stream",
+    "",
+    "",
+  ].join(CRLF);
+  const body = Buffer.concat([Buffer.from(head), bytes, Buffer.from(`${CRLF}--${boundary}--${CRLF}`)]);
+  return app.inject({
+    method: "POST",
+    url: REST.previewUpload + query,
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}`, "x-preview-client-ip": "203.0.113.9" },
+    payload: body,
+  });
+};
 
 beforeAll(async () => {
   // alpha defines every id a blank empire map references; beta lacks the units
@@ -225,29 +245,10 @@ describe("the mod of a map", () => {
   });
 
   it("a preview is opened on the mod its sender names; an unknown one is refused", async () => {
-    const bytes = Buffer.from(createBlankMap({ size: 48, name: "preview-mod", races: ["empire"] }));
-    const post = (query: string) => {
-      const boundary = "----mod-preview";
-      const CRLF = String.fromCharCode(13, 10);
-      const head = [
-        `--${boundary}`,
-        'Content-Disposition: form-data; name="file"; filename="m.sg"',
-        "Content-Type: application/octet-stream",
-        "",
-        "",
-      ].join(CRLF);
-      const body = Buffer.concat([Buffer.from(head), bytes, Buffer.from(`${CRLF}--${boundary}--${CRLF}`)]);
-      return app.inject({
-        method: "POST",
-        url: REST.previewUpload + query,
-        headers: { "content-type": `multipart/form-data; boundary=${boundary}`, "x-preview-client-ip": "203.0.113.9" },
-        payload: body,
-      });
-    };
-    const refused = await post("?mod=gamma");
+    const refused = await postPreview("preview-mod", "?mod=gamma");
     expect(refused.statusCode).toBe(400);
     expect(refused.json()).toEqual({ error: "unknown_mod" });
-    const made = await post("?mod=beta");
+    const made = await postPreview("preview-mod", "?mod=beta");
     expect(made.statusCode).toBe(201);
     const id = (made.json() as { id: string }).id;
     // the bytes alone say alpha (see the detection test above): the sender's word wins
@@ -358,6 +359,61 @@ describe("the mod of a map", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true, identity: true });
+  });
+});
+
+describe("a hidden mod (config HIDDEN_MODS)", () => {
+  const hidden = config.HIDDEN_MODS as string[];
+  const putMod = (id: string, modId: string) =>
+    app.inject({ method: "PUT", url: REST.mapMod(id), headers: { "x-client-id": OWNER }, payload: { modId } });
+
+  it("is not listed or offered, and a map of it opens on a shown mod", async () => {
+    const made = ((await newMap({ modId: "alpha" })).json() as { id: string }).id; // before hiding
+    hidden.push("alpha");
+    try {
+      const list = (await get(REST.mods)).json() as ModList;
+      expect(list.mods.map((m) => m.id)).toEqual(["beta"]);
+      expect(list.defaultModId).toBe("beta");
+      // for the eye only: its passport and files still answer
+      expect((await get(REST.mod("alpha"))).statusCode).toBe(200);
+      expect((await get(`${infoOf("alpha").assetBase}/unitCatalog.json`)).statusCode).toBe(200);
+
+      // the fixture fits alpha best, the map made for alpha is recorded for it: both open on beta
+      const meta = await metaOf(fixtureId);
+      expect(meta.mod!.id).toBe("beta");
+      expect(meta.mod!.candidates!.map((c) => c.modId)).toEqual(["beta"]);
+      expect((await metaOf(made, OWNER)).mod!.id).toBe("beta");
+
+      // it cannot be chosen
+      expect((await newMap({ modId: "alpha" })).statusCode).toBe(400);
+      expect((await putMod(made, "alpha")).statusCode).toBe(400);
+      // a preview's sender may still name it: taken, and matched as without it while hidden
+      const preview = await postPreview("preview-hidden", "?mod=alpha");
+      expect(preview.statusCode).toBe(201);
+      expect((await metaOf((preview.json() as { id: string }).id)).mod!.id).toBe("beta");
+    } finally {
+      hidden.length = 0;
+    }
+    // shown again: as before
+    expect((await metaOf(fixtureId)).mod).toMatchObject({ id: "alpha", source: "detected" });
+    expect((await metaOf(made, OWNER)).mod).toMatchObject({ id: "alpha", source: "choice" });
+  });
+
+  it("the maps of its own scenario folder are not listed, and open by id on a shown mod", async () => {
+    const roots = config.MOD_SCENARIO_ROOTS as { path: string; modId: string }[];
+    roots.push({ path: join(dirname(config.UPLOAD_DIR), "install-scenarios"), modId: "alpha" });
+    hidden.push("alpha");
+    try {
+      const list = (await get(REST.scenarios)).json() as ScenarioEntry[];
+      expect(list.some((e) => e.id === fixtureId)).toBe(false);
+      expect((await get(REST.scenario(fixtureId))).statusCode).toBe(200);
+      expect((await metaOf(fixtureId)).mod!.id).toBe("beta");
+    } finally {
+      hidden.length = 0;
+      roots.length = 0;
+    }
+    const list = (await get(REST.scenarios)).json() as ScenarioEntry[];
+    expect(list.find((e) => e.id === fixtureId)!.mod).toBe("alpha");
   });
 });
 

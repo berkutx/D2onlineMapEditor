@@ -137,10 +137,11 @@ export async function registerPreviewRoute(
 
     // The caller may say which mod the map was made for (a generator knows; the bytes of a
     // small or empty map do not). Without it the mod is matched from the ids, as for any map.
+    // A hidden mod is taken too: while it stays hidden the map is matched as without it.
     const askedMod = (req.query as { mod?: unknown } | undefined)?.mod;
     let modId: string | undefined;
     if (askedMod !== undefined) {
-      if (typeof askedMod !== "string" || !store.canOpenOn(askedMod)) {
+      if (typeof askedMod !== "string" || !(store.canOpenOn(askedMod) || store.hidesMod(askedMod))) {
         return reply.code(400).send({ error: "unknown_mod" });
       }
       modId = askedMod;

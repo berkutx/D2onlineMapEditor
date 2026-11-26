@@ -15,6 +15,10 @@
  * A deployment whose ASSETS_DIR has no `mods/index.json` still has the flat layout the
  * pipeline used to write (catalogs and atlases side by side). It is served as ONE implicit
  * mod, `default`, so such a deployment keeps working unchanged until its assets are rebuilt.
+ *
+ * A mod named in HIDDEN_MODS (a closed beta) stays installed and its files are served, but
+ * visitors are not shown it: it is left out of the mod list and of detection, and no map is
+ * opened on it.
  */
 
 import { readFileSync, statSync } from "node:fs";
@@ -318,7 +322,11 @@ export class ModRegistry {
   private checkedAt = 0;
   private generation = 0;
 
-  constructor(private readonly assetsDir: string = config.ASSETS_DIR) {
+  constructor(
+    private readonly assetsDir: string = config.ASSETS_DIR,
+    /** Ids of the mods visitors are not shown; read on every use (see config.HIDDEN_MODS). */
+    private readonly hiddenIds: readonly string[] = config.HIDDEN_MODS,
+  ) {
     this.reload();
   }
 
@@ -387,13 +395,42 @@ export class ModRegistry {
     return this.generation;
   }
 
-  /** The mod used when nothing more specific is known. */
+  /** The mod used when nothing more specific is known: the store's default, unless that one
+   *  is hidden — then the first shown mod maps can be opened on. */
   default(): ModContext {
-    return this.mods.get(this.defaultId)!;
+    const named = this.mods.get(this.defaultId)!;
+    if (!this.isHidden(named.id)) return named;
+    const shown = this.visible();
+    return shown.find((m) => m.info.status === "ready") ?? shown[0] ?? named;
   }
 
   has(id: string | null | undefined): boolean {
     return !!id && this.mods.has(id);
+  }
+
+  /**
+   * True for a mod visitors are not shown (config HIDDEN_MODS), installed or not. When every
+   * installed mod is listed there, none is hidden: there would be nothing to open a map on.
+   */
+  isHidden(id: string | null | undefined): boolean {
+    if (!id || !this.hiddenIds.includes(id)) return false;
+    return [...this.mods.keys()].some((m) => !this.hiddenIds.includes(m));
+  }
+
+  /** Which mods are hidden — part of the key of anything decided among the mods. */
+  get hiddenKey(): string {
+    return this.hiddenIds.join(",");
+  }
+
+  /** The mods visitors are shown (GET /api/mods), in the index's order. */
+  visible(): ModContext[] {
+    return this.list().filter((m) => !this.isHidden(m.id));
+  }
+
+  /** True when a map may be opened on this mod: it is installed, its graphics are built,
+   *  and it is not hidden. */
+  canOpen(id: string | null | undefined): id is string {
+    return !!id && this.mods.get(id)?.info.status === "ready" && !this.isHidden(id);
   }
 
   /** A mod by id; an unknown or absent id resolves to the default mod. */
@@ -408,11 +445,13 @@ export class ModRegistry {
 
   /**
    * Match a map's bytes against the mods that have id tables. Returns null when none has
-   * (the flat layout): there is nothing to tell mods apart with.
+   * (the flat layout): there is nothing to tell mods apart with. A hidden mod is left out:
+   * it is neither chosen nor shown as a candidate.
    */
   async analyze(bytes: Uint8Array): Promise<MapAnalysis | null> {
     const candidates = [];
     for (const mod of this.mods.values()) {
+      if (this.isHidden(mod.id)) continue;
       const idSets = await mod.idIndex();
       if (!idSets) continue;
       const { family, familyOrder, status } = mod.info;

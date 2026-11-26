@@ -31,7 +31,8 @@ export async function registerModRoutes(app: FastifyInstance, mods: ModRegistry)
     mods.refresh();
     const list: ModList = {
       defaultModId: mods.default().id,
-      mods: mods.list().map((m) => m.info),
+      // a hidden mod (config HIDDEN_MODS) is not listed; its passport and files still answer
+      mods: mods.visible().map((m) => m.info),
     };
     return reply.header("cache-control", "no-cache").send(list);
   });

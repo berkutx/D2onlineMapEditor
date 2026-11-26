@@ -171,6 +171,15 @@ export const config = {
    *  listed in both is that mod's). */
   MOD_SCENARIO_ROOTS: modScenarioRoots(),
 
+  /**
+   * Mods visitors are not shown (a closed beta). GET /api/mods leaves them out, the maps and
+   * sagas of their own scenario folders are not listed, and no map is opened on them: a map
+   * of theirs is matched among the other mods. Nothing is deleted, and their files are still
+   * served to whoever has the URL — the hiding is for the eye only. Mod ids, ";" or ","
+   * between them. Read live, so a test may change it.
+   */
+  HIDDEN_MODS: envList("HIDDEN_MODS", []).flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean),
+
   /** Absolute path to the generated assets: the mod store (mods/ + blobs/), or the flat
    *  pre-multi-mod layout (atlases + manifest + catalogs side by side). */
   ASSETS_DIR:

@@ -31,9 +31,11 @@ export async function registerScenarioRoutes(
 ): Promise<void> {
   app.get(REST.scenarios, async (req) => {
     const clientId = clientIdOf(req);
-    const entries = await store.listScenarios((e) => visibleTo(e, clientId));
+    // a hidden mod's own maps are not listed (config HIDDEN_MODS); by id they still open
+    const shown = (e: ScenarioEntry): boolean => visibleTo(e, clientId) && store.isShown(e);
+    const entries = await store.listScenarios(shown);
     // never serialize the owner token back out — it is the caller's own secret
-    return entries.filter((e) => visibleTo(e, clientId)).map(({ owner: _o, ...pub }) => pub);
+    return entries.filter(shown).map(({ owner: _o, ...pub }) => pub);
   });
 
   app.get<{ Params: { id: string } }>(

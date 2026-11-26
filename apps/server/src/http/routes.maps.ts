@@ -311,9 +311,8 @@ export async function registerMapRoutes(
   /** The data set of the mod a map is opened against (catalogs for validation/generation). */
   const modFor = async (id: string): Promise<ModContext> => mods.get((await store.modOf(id))?.id);
 
-  /** A mod a map may be assigned to: known, and its graphics are built. */
-  const isOpenableMod = (modId: unknown): modId is string =>
-    typeof modId === "string" && mods.has(modId) && mods.get(modId).info.status === "ready";
+  /** A mod a map may be assigned to: known, its graphics are built, and it is not hidden. */
+  const isOpenableMod = (modId: unknown): modId is string => typeof modId === "string" && mods.canOpen(modId);
 
   app.get<{ Params: { id: string } }>(REST.map(":id"), async (req, reply) => {
     const { id } = req.params;

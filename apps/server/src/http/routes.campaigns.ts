@@ -119,7 +119,8 @@ export async function registerCampaignRoutes(
       source: "install",
       header: c.header,
       missions: detail ? await withIssues(missions, c.header.race) : missions,
-      ...(c.modId ? { mod: c.modId } : {}),
+      // a hidden mod is not named: its missions open on the mods visitors are shown
+      ...(c.modId && !mods.isHidden(c.modId) ? { mod: c.modId } : {}),
       fileName: c.fileName,
       editable: false,
     };
@@ -185,7 +186,9 @@ export async function registerCampaignRoutes(
 
   app.get(REST.campaigns, async (req) => {
     const viewer = clientIdOf(req);
-    const install = await store.installCampaigns();
+    // the sagas a hidden mod ships with are not listed (config HIDDEN_MODS); by id they open
+    mods.refresh();
+    const install = (await store.installCampaigns()).filter((c) => !mods.isHidden(c.modId));
     const own = viewer ? await listUserCampaigns(viewer) : [];
     return {
       campaigns: [
