@@ -46,6 +46,17 @@ import {
 
 const keyFor = (mapId: string): string => `d2.project.${mapId}`;
 
+/** The project this browser keeps for a map that is not open (its edits), or null. */
+export function savedProjectOf(mapId: string): EditorProject | null {
+  try {
+    const s = localStorage.getItem(keyFor(mapId));
+    const p = s ? deserializeProject(s) : null;
+    return p && p.baseScenarioId === mapId ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

@@ -39,6 +39,13 @@ async function main(): Promise<void> {
   void sweep();
   const sweeper = setInterval(() => void sweep(), 60 * 1000);
 
+  // Read the mods' sagas once now (the scan reads every .csg whole — seconds for a few dozen),
+  // so the first «Открыть кампанию» after a restart is answered from the cache.
+  void store.installCampaigns().catch((e) => {
+    // eslint-disable-next-line no-console
+    console.warn("[@d2/server] saga scan failed:", e);
+  });
+
   // eslint-disable-next-line no-console
   console.log(
     `[@d2/server] listening on http://localhost:${config.PORT} ` +

@@ -38,6 +38,9 @@ export interface ScenarioRecord {
   /** The mod this map is known to belong to: the mod whose scenario folder it lives in
    *  (install), or the one set explicitly for an upload. Absent = decided by detection. */
   modId?: string;
+  /** A mission of a saga: `realPath` is the saga (`.csg`) and the map is its mission at
+   *  `index`, named `name` there (see campaigns/campaignScanner). */
+  member?: { index: number; name: string };
 }
 
 /** A folder to scan; `modId` marks every map in it as that mod's. */

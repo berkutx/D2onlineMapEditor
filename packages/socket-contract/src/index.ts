@@ -1,5 +1,14 @@
 export { ScenarioEntry, MapMeta, ValidationReport, REST, Region, GenerateRequest, CopilotRequest } from "./rest.js";
 export { ModInfo, ModList, ModPassport, CompatReport, MapMod, MapModSource } from "./rest.js";
+export {
+  CampaignRaceKey,
+  CampaignHeaderInfo,
+  CampaignMissionIssue,
+  CampaignMissionInfo,
+  CampaignEntry,
+  CampaignList,
+  CampaignInput,
+} from "./rest.js";
 export type { GenerateResult, CopilotResult, GenDebug, GenRecipeInfo, GenRecipeList, GenRecipePreview, GenPreviewList } from "./rest.js";
 export { EditOp, OpAck, ScenarioInfoPatch } from "./ops.js";
 export { UserPresence } from "./presence.js";

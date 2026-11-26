@@ -23,6 +23,9 @@ import type {
   VoiceHandoffResult,
   VoiceReturnPreview,
   VoiceReturnApplyResult,
+  CampaignEntry,
+  CampaignInput,
+  CampaignList,
 } from "@d2/socket-contract";
 import type { MapDocument } from "@d2/map-schema";
 import type { EditorProject } from "@d2/map-edit";
@@ -466,6 +469,92 @@ export async function uploadMap(file: File): Promise<string> {
     throw new Error(msg);
   }
   return ((await res.json()) as { id: string }).id;
+}
+
+// --- campaigns (custom sagas) ---------------------------------------------------------
+
+/** Read a server error's message (its JSON `error`), else the status. */
+async function errorOf(res: Response): Promise<string> {
+  try {
+    const j = (await res.json()) as { error?: string };
+    if (j?.error) return j.error;
+  } catch {
+    /* non-JSON body */
+  }
+  return `HTTP ${res.status}`;
+}
+
+async function sendJson<T>(method: string, url: string, body?: unknown): Promise<T> {
+  // no content type without a body: Fastify refuses an empty application/json body (400)
+  const res = await fetch(url, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+      accept: "application/json",
+      ...idHeaders(),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await errorOf(res));
+  return (await res.json()) as T;
+}
+
+/** GET /api/campaigns — the sagas the mods ship with and this browser's own campaigns. */
+export async function fetchCampaigns(): Promise<CampaignEntry[]> {
+  return (await getJson<CampaignList>(u(REST.campaigns))).campaigns;
+}
+
+/** GET /api/campaigns/:id — one campaign, its missions checked for what breaks them in the game. */
+export function fetchCampaign(id: string): Promise<CampaignEntry> {
+  return getJson<CampaignEntry>(u(REST.campaign(id)));
+}
+
+export function createCampaign(input: CampaignInput): Promise<CampaignEntry> {
+  return sendJson<CampaignEntry>("POST", u(REST.campaigns), input);
+}
+
+export function updateCampaign(id: string, input: CampaignInput): Promise<CampaignEntry> {
+  return sendJson<CampaignEntry>("PUT", u(REST.campaign(id)), input);
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  await sendJson<{ ok: boolean }>("DELETE", u(REST.campaign(id)));
+}
+
+/** POST /api/campaigns/:id/copy — an own copy of a campaign (the same mission maps). */
+export function copyCampaign(id: string): Promise<CampaignEntry> {
+  return sendJson<CampaignEntry>("POST", u(REST.campaignCopy(id)), {});
+}
+
+/** POST /api/campaigns/upload — a `.csg` from disk becomes an own campaign of own maps. */
+export async function uploadCampaign(file: File): Promise<CampaignEntry> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await fetch(u(REST.campaignUpload), { method: "POST", headers: idHeaders(), body: form });
+  if (!res.ok) throw new Error(await errorOf(res));
+  return (await res.json()) as CampaignEntry;
+}
+
+export type CampaignExportResult =
+  | { ok: true; blob: Blob; filename: string }
+  | { ok: false; mission?: number; title?: string; report?: ValidationReport; error?: string };
+
+/** POST /api/campaigns/:id/export — the saga as a `.csg`, every mission with this browser's
+ *  edits (`projects` overrides the saved ones, e.g. the open map's latest). */
+export async function exportCampaign(
+  id: string,
+  projects: Record<string, EditorProject>,
+): Promise<CampaignExportResult> {
+  const res = await fetch(u(REST.campaignExport(id)), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...idHeaders() },
+    body: JSON.stringify({ projects }),
+  });
+  if (res.status === 422) return { ok: false, ...((await res.json()) as object) };
+  if (!res.ok) throw new Error(await errorOf(res));
+  const disp = res.headers.get("content-disposition") ?? "";
+  const m = /filename="?([^"]+)"?/.exec(disp);
+  return { ok: true, blob: await res.blob(), filename: m ? decodeURIComponent(m[1]!) : `${id}.csg` };
 }
 
 /** GET /api/maps/:id/project — this browser's server-saved EditorProject, or null. */

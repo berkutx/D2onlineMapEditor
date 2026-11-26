@@ -29,12 +29,16 @@ import MapPassportDialog from "./MapPassportDialog.vue";
 import { useEditStore } from "../stores/editStore";
 import { useCollabStore } from "../stores/collabStore";
 import { useModStore } from "../stores/modStore";
+import { useCampaignStore } from "../stores/campaignStore";
+import { useCampaignActions } from "../composables/campaignActions";
 import { getScene } from "../canvas/sceneHolder";
 import MapModBadge from "./MapModBadge.vue";
 import { tr, trn, trc, intlLocale, LOCALES, currentLocale, switchLocale, type Locale } from "../i18n";
 
 const mapStore = useMapStore();
 const modStore = useModStore();
+const campaignStore = useCampaignStore();
+const campaignActions = useCampaignActions();
 
 /** Why a map of the list is flagged: its report (attached only to maps that do not fit). */
 function misfitHint(compat: { issues: { severity: string; message: string }[] }): string {
@@ -476,6 +480,10 @@ function onSelect(index: string): void {
     case "file:export": return void (voiceEnabled.value ? doPackageExport() : doExport());
     case "file:exportSg": return void doExport();
     case "file:passport": return openPassport();
+    case "file:campaignOpen": return campaignStore.showOpen();
+    case "file:campaignNew": return campaignStore.showEditor("create");
+    case "file:campaignUpload": return void campaignActions.uploadCsg();
+    case "file:campaignExport": return void campaignActions.exportCsg();
     case "edit:undo": return editStore.undoEdit();
     case "edit:redo": return editStore.redoEdit();
     case "edit:validate": return void doValidate();
@@ -543,6 +551,12 @@ watch(
         <el-menu-item index="file:export">{{ voiceEnabled ? tr('Скачать карту с аудио (.zip)…') : tr('Экспорт .sg…') }}</el-menu-item>
         <el-menu-item v-if="voiceEnabled" index="file:exportSg">{{ tr("Экспорт только .sg…") }}</el-menu-item>
         <el-menu-item index="file:passport" :disabled="!currentScenarioId">{{ tr("Паспорт карты…") }}</el-menu-item>
+        <el-menu-item-group :title="tr('Кампания')">
+          <el-menu-item index="file:campaignOpen">{{ tr("Открыть кампанию…") }}</el-menu-item>
+          <el-menu-item index="file:campaignNew">{{ tr("Новая кампания…") }}</el-menu-item>
+          <el-menu-item index="file:campaignUpload">{{ tr("Загрузить кампанию (.csg)…") }}</el-menu-item>
+          <el-menu-item index="file:campaignExport" :disabled="!campaignStore.current">{{ tr("Экспорт кампании (.csg)…") }}</el-menu-item>
+        </el-menu-item-group>
       </el-sub-menu>
 
       <!-- Правка / Вид / Карта / Справка consolidated under ONE menu — the freed bar space

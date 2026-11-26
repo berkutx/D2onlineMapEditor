@@ -166,6 +166,81 @@ export const MapMeta = z.object({
 export type MapMeta = z.infer<typeof MapMeta>;
 
 /**
+ * Campaigns (v0.4, additive) — the game's custom sagas (`.csg`): a header (what the saga menu
+ * shows) and missions played in order, each a whole scenario. A mission opens in the editor as
+ * a map of its own (`mapId`); its edits are the visitor's project, as for any map, and are
+ * baked in when the campaign is exported as a `.csg`.
+ */
+export const CampaignRaceKey = z.enum(["empire", "clans", "legions", "undead", "neutral", "elves"]);
+export type CampaignRaceKey = z.infer<typeof CampaignRaceKey>;
+
+export const CampaignHeaderInfo = z.object({
+  /** At most 32 characters. */
+  name: z.string(),
+  /** At most 255 characters. */
+  description: z.string(),
+  /** At most 32 characters. */
+  author: z.string(),
+  /** The race the saga is played for: the human seat of every mission is the first player of
+   *  this race. null: a stored race outside the six (such a saga cannot be exported). */
+  race: CampaignRaceKey.nullable(),
+  /** The level the saga's hero starts at. */
+  heroLevel: z.number().int(),
+});
+export type CampaignHeaderInfo = z.infer<typeof CampaignHeaderInfo>;
+
+/**
+ * What would break a mission in the game:
+ *  - `no-seat`          no player of the saga's race — the mission has no place for the human;
+ *  - `no-capital-stack` a mission after the first whose human capital holds no stack: the game
+ *                       makes the hero carried over the leader of that stack and crashes;
+ *  - `unreadable`       the mission is not a scenario the editor reads (the older MidFile
+ *                       format, or missing from the saga).
+ */
+export const CampaignMissionIssue = z.enum(["no-seat", "no-capital-stack", "unreadable"]);
+export type CampaignMissionIssue = z.infer<typeof CampaignMissionIssue>;
+
+export const CampaignMissionInfo = z.object({
+  /** The map to open; absent when the editor cannot open the mission. */
+  mapId: z.string().optional(),
+  /** The mission's file name inside the saga (`Riders.sg`). */
+  fileName: z.string(),
+  /** The scenario's own name. */
+  title: z.string(),
+  mapSize: z.number().int().optional(),
+  /** Checked on the mission as stored (without the visitor's edits); only a single campaign
+   *  (GET REST.campaign) carries them. */
+  issues: z.array(CampaignMissionIssue).optional(),
+});
+export type CampaignMissionInfo = z.infer<typeof CampaignMissionInfo>;
+
+export const CampaignEntry = z.object({
+  id: z.string(),
+  /** `install`: a saga a mod ships with — it changes only as a copy (POST REST.campaignCopy);
+   *  `own`: one the visitor made or uploaded, listed only to them. */
+  source: z.enum(["install", "own"]),
+  header: CampaignHeaderInfo,
+  missions: z.array(CampaignMissionInfo),
+  /** The mod the saga is played in: an install saga's folder's, an own campaign's first mission's. */
+  mod: z.string().optional(),
+  /** The `.csg` file name of an install saga. */
+  fileName: z.string().optional(),
+  /** The caller may change it (PUT / DELETE REST.campaign). */
+  editable: z.boolean(),
+});
+export type CampaignEntry = z.infer<typeof CampaignEntry>;
+
+export const CampaignList = z.object({ campaigns: z.array(CampaignEntry) });
+export type CampaignList = z.infer<typeof CampaignList>;
+
+/** Create or change an own campaign: the header and the missions' map ids in play order. */
+export const CampaignInput = z.object({
+  header: CampaignHeaderInfo.extend({ race: CampaignRaceKey }),
+  missions: z.array(z.string()).min(1).max(64),
+});
+export type CampaignInput = z.infer<typeof CampaignInput>;
+
+/**
  * Result of running the writer + validator over an EditorProject on the server.
  * `ok` gates whether an exported `.sg` is allowed out. Tiers mirror the editor's
  * BlockComparator (identity), our model/byte consistency (semantic), and
@@ -350,5 +425,10 @@ export const REST = {
   voiceReturnApply: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/apply`,
   voiceReturnAck: (id: string, token: string) => `/api/maps/${id}/voice/returns/${token}/ack`,
   mapExportPackage: (id: string) => `/api/maps/${id}/export-package`,
+  campaigns: "/api/campaigns", // GET -> CampaignList (install sagas + the caller's own); POST CampaignInput -> CampaignEntry (own)
+  campaign: (id: string) => `/api/campaigns/${id}`, // GET -> CampaignEntry with mission issues; PUT CampaignInput (own) -> CampaignEntry; DELETE (own)
+  campaignCopy: (id: string) => `/api/campaigns/${id}/copy`, // POST -> CampaignEntry (an own copy, same missions)
+  campaignUpload: "/api/campaigns/upload", // POST .csg -> CampaignEntry (own; its missions become own maps)
+  campaignExport: (id: string) => `/api/campaigns/${id}/export`, // POST { projects?: { [mapId]: EditorProject } } -> .csg bytes | 422 { mission, title, report }
   health: "/api/health",
 } as const;

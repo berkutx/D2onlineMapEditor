@@ -15,6 +15,7 @@ import { useMapStore } from "./stores/mapStore";
 import { useAssetStore } from "./stores/assetStore";
 import { useCollabStore } from "./stores/collabStore";
 import { useToolStore } from "./stores/toolStore";
+import { useCampaignStore, campaignFromUrl } from "./stores/campaignStore";
 import { cloneMap } from "./services/api";
 import { tr } from "./i18n";
 import AppLayout from "./layout/AppLayout.vue";
@@ -23,6 +24,7 @@ const mapStore = useMapStore();
 const assetStore = useAssetStore();
 const collabStore = useCollabStore();
 const toolStore = useToolStore();
+const campaignStore = useCampaignStore();
 
 const bootLoading = ref(true);
 const bootMessage = ref(tr("Загружаю ресурсы и карту…"));
@@ -44,12 +46,17 @@ async function boot(): Promise<void> {
     const room = params.get("room");
     // deep link на объект (?obj=): после сборки сцены канвас центрирует, выделяет и мигает им
     const focusObj = params.get("obj");
+    // the campaign being worked on (?campaign=<id>&mission=<n>) — kept across a reload
+    const campaign = campaignFromUrl();
     if (shared && room) collabStore.setPendingShare(shared, room);
     if (shared) {
       try {
         bootMessage.value = tr("Загружаю карту по ссылке…");
         await mapStore.openMap(shared);
         if (focusObj) toolStore.focusObjectId = focusObj;
+        // the map of the address stays (a mission reloaded, or one opened into another mod);
+        // the campaign comes back around it
+        if (campaign) void campaignStore.restore(campaign.id, null);
         bootLoading.value = false;
         return;
       } catch (error) {
@@ -60,6 +67,17 @@ async function boot(): Promise<void> {
             ? tr("Карта из ссылки уже удалена или недоступна: {error}", { error: error.message })
             : tr("Карта из ссылки уже удалена или недоступна"),
         );
+      }
+    }
+    if (campaign) {
+      try {
+        bootMessage.value = tr("Открываю кампанию…");
+        if (await campaignStore.restore(campaign.id, campaign.mission ?? 0)) {
+          bootLoading.value = false;
+          return;
+        }
+      } catch {
+        /* the mission does not open: start as without the campaign (its bar stays) */
       }
     }
     // Returning visitor: open their most recent OWN map (the list is owner-filtered, so any

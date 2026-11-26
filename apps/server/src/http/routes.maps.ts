@@ -56,6 +56,10 @@ import type { ModContext, ModRegistry } from "../mods/modRegistry.js";
 const FILLS: readonly TerrainFill[] = TERRAIN_FILLS;
 const sanitize = (s: string): string => s.replace(/[^\w.-]+/g, "_").slice(0, 40) || "blank";
 
+/** Where a visitor's saved EditorProject of a map lives (GET/PUT REST.mapProject). */
+export const savedProjectPath = (mapId: string, clientId: string): string =>
+  join(config.PROJECTS_DIR, sanitize(mapId), `${sanitize(clientId)}.json`);
+
 /**
  * Apply an EditorProject's active ops to a base map and run all validator tiers.
  * Returns the produced bytes (when the build succeeded) alongside the report.
@@ -457,8 +461,7 @@ export async function registerMapRoutes(
   // GET/PUT /api/maps/:id/project — server-saved EditorProject (the diff journal), keyed by
   // (mapId, x-client-id). Durability beyond the browser's localStorage: a new browser (or a
   // cleared one) restores the user's edits. The project is per-visitor — no cross-user reads.
-  const projectPath = (mapId: string, clientId: string): string =>
-    join(config.PROJECTS_DIR, sanitize(mapId), `${sanitize(clientId)}.json`);
+  const projectPath = savedProjectPath;
 
   app.get<{ Params: { id: string } }>(REST.mapProject(":id"), async (req, reply) => {
     if (!(await requireWritable(req.params.id, reply))) return;

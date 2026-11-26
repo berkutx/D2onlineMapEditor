@@ -34,3 +34,4 @@ export * from "./diplomacy.js";
 export * from "./fog.js";
 export * from "./passport.js";
 export * from "./guard.js";
+export * from "./campaign.js";

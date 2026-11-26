@@ -11,7 +11,7 @@
 import { stat, readFile, writeFile, realpath, mkdir, rename, rm } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { parseScenario, type MapDocument } from "@d2/sg-parser";
+import { parseScenario, readCampaign, type MapDocument } from "@d2/sg-parser";
 import type { CompatReport, MapMeta, MapMod, ScenarioEntry } from "@d2/socket-contract";
 import { config } from "../config.js";
 import { idForPath } from "../ingest/idCodec.js";
@@ -21,6 +21,18 @@ import {
   type ScanResult,
 } from "../ingest/scenarioScanner.js";
 import { ModRegistry } from "../mods/modRegistry.js";
+import { scanCampaigns, type InstallCampaign } from "../campaigns/campaignScanner.js";
+
+/** The bytes of a map: its file, or — for a saga's mission — that mission read out of the saga. */
+async function bytesOf(rec: ScenarioRecord): Promise<Uint8Array> {
+  const file = new Uint8Array(await readFile(rec.realPath));
+  if (!rec.member) return file;
+  const m = readCampaign(file).missions[rec.member.index];
+  if (!m || m.name !== rec.member.name || m.format !== "sg") {
+    throw new Error(`mission ${rec.member.name} is no longer in its saga`);
+  }
+  return m.bytes.slice();
+}
 
 interface CacheEntry {
   mtimeMs: number;
@@ -159,16 +171,30 @@ export class MapStore {
     });
   }
 
-  /** Rescan the configured roots and refresh the id->path registry. */
-  async refresh(): Promise<ScanResult> {
+  /** The sagas found by the last saga scan, and their missions' records (kept in the registry
+   *  across ordinary rescans, so a mission's id resolves without reading every saga again). */
+  private sagaScan: { campaigns: InstallCampaign[]; records: ScenarioRecord[] } = {
+    campaigns: [],
+    records: [],
+  };
+
+  /** Rescan the configured roots and refresh the id->path registry. `sagas` also rescans
+   *  the sagas (`.csg`) — asked for by the campaign routes and by an id not yet known. */
+  async refresh(opts: { sagas?: boolean } = {}): Promise<ScanResult> {
     await this.loadUploads();
     // a mod's own scenario folders first: a map found there keeps that mod (see scanScenarios)
-    const result = await scanScenarios(
-      [...config.MOD_SCENARIO_ROOTS, ...config.SCENARIO_ROOTS],
-      this.uploads,
-    );
+    const roots = [...config.MOD_SCENARIO_ROOTS, ...config.SCENARIO_ROOTS];
+    const result = await scanScenarios(roots, this.uploads);
+    if (opts.sagas) this.sagaScan = await scanCampaigns(roots);
+    for (const r of this.sagaScan.records) if (!result.registry.has(r.id)) result.registry.set(r.id, r);
     this.registry = result.registry;
     return result;
+  }
+
+  /** The sagas the game installs and mod folders ship with (rescanned on every call). */
+  async installCampaigns(): Promise<InstallCampaign[]> {
+    await this.refresh({ sagas: true });
+    return this.sagaScan.campaigns;
   }
 
   /** Latest scenario listing (rescans on every call — cheap, header-only). Each entry the
@@ -218,7 +244,7 @@ export class MapStore {
       this.mods.has(rec.modId) && this.mods.get(rec.modId).info.status === "ready"
         ? rec.modId!
         : undefined;
-    const analysis = await this.mods.analyze(new Uint8Array(await readFile(rec.realPath)));
+    const analysis = await this.mods.analyze(await bytesOf(rec));
     let mod: MapMod;
     if (known) {
       mod = { id: known, source: rec.source === "install" ? "install" : "choice" };
@@ -407,7 +433,8 @@ export class MapStore {
   async resolve(id: string): Promise<ScenarioRecord | undefined> {
     let rec = this.registry.get(id);
     if (!rec) {
-      await this.refresh();
+      // an id not seen yet may be a saga's mission: look through the sagas too
+      await this.refresh({ sagas: true });
       rec = this.registry.get(id);
     }
     // Enforce the fixed deadline on every request, not only on the periodic sweep. This also
@@ -474,8 +501,7 @@ export class MapStore {
       return { doc: cached.doc, etag: cached.etag, mtimeMs: st.mtimeMs };
     }
 
-    const buf = new Uint8Array(await readFile(rec.realPath));
-    const doc = parseScenario(buf);
+    const doc = parseScenario(await bytesOf(rec));
     const etag = etagFor(id, st.mtimeMs);
     const entry: CacheEntry = { mtimeMs: st.mtimeMs, etag, doc };
     this.put(id, entry);
@@ -493,7 +519,7 @@ export class MapStore {
     if (!rec) return undefined;
     this.touchAccess(rec); // any use refreshes an ephemeral copy's TTL
     const st = await stat(rec.realPath);
-    const bytes = new Uint8Array(await readFile(rec.realPath));
+    const bytes = await bytesOf(rec);
     return { bytes, etag: etagFor(id, st.mtimeMs), mtimeMs: st.mtimeMs };
   }
 

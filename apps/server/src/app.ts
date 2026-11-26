@@ -21,6 +21,7 @@ import { registerModRoutes } from "./http/routes.mods.js";
 import { registerUploadRoute } from "./http/routes.upload.js";
 import { registerPreviewRoute } from "./http/routes.preview.js";
 import { registerVoiceRoutes } from "./http/routes.voice.js";
+import { registerCampaignRoutes } from "./http/routes.campaigns.js";
 
 /**
  * In production the app is served under config.BASE_PATH ("/map") behind lastwar_nginx,
@@ -84,6 +85,7 @@ export async function buildApp(): Promise<BuiltApp> {
   await registerUploadRoute(app, store);
   await registerPreviewRoute(app, store);
   await registerVoiceRoutes(app, store, mods);
+  await registerCampaignRoutes(app, store, mods);
   // SPA last: serves apps/web/dist + history fallback in production (no-op in dev).
   await registerSpa(app);
 

@@ -47,4 +47,5 @@ export { MapDocument };
 export { ByteBuffer } from "./bytebuffer.js";
 export * from "./framing.js";
 export * from "./globalIds.js";
+export * from "./campaign.js";
 export * from "./writer/index.js";

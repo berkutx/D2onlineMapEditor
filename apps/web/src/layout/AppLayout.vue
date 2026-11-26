@@ -39,6 +39,9 @@ import RoadActionBar from "./RoadActionBar.vue";
 import SelectionActionBar from "./SelectionActionBar.vue";
 import HistoryPanel from "./HistoryPanel.vue";
 import MinimapDock from "./MinimapDock.vue";
+import CampaignBar from "./CampaignBar.vue";
+import CampaignDialogs from "./CampaignDialogs.vue";
+import { useCampaignStore } from "../stores/campaignStore";
 import MapCanvasHost from "../canvas/MapCanvasHost.vue";
 
 const view = useViewStore();
@@ -47,6 +50,7 @@ const toolStore = useToolStore();
 const decorStore = useDecorStore();
 const editStore = useEditStore();
 const mapStore = useMapStore();
+const campaignStore = useCampaignStore();
 const { currentScenarioId, readOnly } = storeToRefs(mapStore);
 const roadActions = useRoadActions();
 const selActions = useSelectionActions();
@@ -194,6 +198,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
     <el-header class="app-header" height="40px">
       <TopMenuBar />
     </el-header>
+    <!-- the open campaign: its mission switcher (a strip, so it never covers the canvas tools) -->
+    <CampaignBar v-if="campaignStore.current && !readOnly" />
+    <CampaignDialogs v-if="!readOnly" />
     <el-container class="app-body">
       <ToolDock v-if="!readOnly" />
       <el-aside v-if="view.objectPanelVisible" class="app-aside" width="clamp(180px, 18vw, 220px)">
