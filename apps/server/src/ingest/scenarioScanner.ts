@@ -9,7 +9,7 @@
 
 import { readdir, stat, realpath, readFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
-import { join, basename, sep } from "node:path";
+import { join, basename, dirname, relative, sep } from "node:path";
 import { parseHeaderOnly } from "@d2/sg-parser";
 import type { ScenarioEntry } from "@d2/socket-contract";
 import { idForPath } from "./idCodec.js";
@@ -73,11 +73,40 @@ async function walk(dir: string, out: string[]): Promise<void> {
   }
 }
 
-/** Best-effort campaign label = the parent directory name. */
-function campaignOf(realPath: string): string | undefined {
-  const parts = realPath.split(sep);
-  // .../<campaign>/<file>.sg
-  return parts.length >= 2 ? parts[parts.length - 2] : undefined;
+/** What a listing shows of a file's header. */
+interface HeaderFacts {
+  name: string;
+  mapSize: number;
+  players: number;
+}
+
+/** Header facts per file, kept while its mtime and size stay the same: parsing even the
+ *  header needs the whole file read, and a listing runs on every start of the editor, so
+ *  only the files that changed since the last listing are read again. */
+const headerCache = new Map<string, { mtimeMs: number; size: number; facts: HeaderFacts }>();
+
+async function headerOf(real: string, st: { mtimeMs: number; size: number }): Promise<HeaderFacts> {
+  const hit = headerCache.get(real);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.facts;
+  const h = parseHeaderOnly(new Uint8Array(await readFile(real)));
+  const facts = { name: h.header.name || basename(real), mapSize: h.size, players: h.players.length };
+  headerCache.set(real, { mtimeMs: st.mtimeMs, size: st.size, facts });
+  return facts;
+}
+
+/**
+ * The group a listing shows a map under: the folders between the scan root and the file, a
+ * leading `Campaign` dropped — `Campaign/Возвращение Галлеана/Империя/1.sg` is «Возвращение
+ * Галлеана / Империя», so two sagas with a same-named folder stay apart. A file directly in
+ * the root is listed under the root folder's own name.
+ */
+function campaignOf(file: string, root: string): string | undefined {
+  const parts = relative(root, dirname(file))
+    .split(sep)
+    .filter((p) => p && p !== ".");
+  if (parts.length > 1 && parts[0]?.toLowerCase() === "campaign") parts.shift();
+  if (parts.length > 0) return parts.join(" / ");
+  return basename(root) || undefined;
 }
 
 export interface ScanResult {
@@ -96,19 +125,20 @@ export async function scanScenarios(
 ): Promise<ScanResult> {
   const registry = new Map<string, ScenarioRecord>();
   const entries: ScenarioEntry[] = [];
+  const seen = new Set<string>();
 
   // 1) installed scenarios from the game roots. Roots are scanned in order and a file is
   //    taken from the FIRST root that holds it, so a mod's own folder (listed first) keeps
   //    its mod even when a plain root covers the same directory.
-  const candidates: { path: string; modId?: string }[] = [];
+  const candidates: { path: string; root: string; modId?: string }[] = [];
   for (const root of roots) {
     const { path, modId } = typeof root === "string" ? { path: root, modId: undefined } : root;
     const found: string[] = [];
     await walk(path, found);
-    for (const f of found) candidates.push({ path: f, modId });
+    for (const f of found) candidates.push({ path: f, root: path, modId });
   }
 
-  for (const { path, modId } of candidates) {
+  for (const { path, root, modId } of candidates) {
     try {
       const real = await realpath(path);
       const st = await stat(real);
@@ -122,16 +152,16 @@ export async function scanScenarios(
         modId,
       });
 
-      const buf = new Uint8Array(await readFile(real));
-      const h = parseHeaderOnly(buf);
+      seen.add(real);
+      const h = await headerOf(real, st);
       entries.push({
         id,
-        name: h.header.name || basename(real),
+        name: h.name,
         source: "install",
-        campaign: campaignOf(real),
+        campaign: campaignOf(path, root),
         fileName: basename(real),
-        mapSize: h.size,
-        players: h.players.length,
+        mapSize: h.mapSize,
+        players: h.players,
         sizeBytes: st.size,
         mtime: Math.floor(st.mtimeMs),
       });
@@ -146,15 +176,15 @@ export async function scanScenarios(
     try {
       const st = await stat(rec.realPath);
       registry.set(rec.id, rec);
-      const buf = new Uint8Array(await readFile(rec.realPath));
-      const h = parseHeaderOnly(buf);
+      seen.add(rec.realPath);
+      const h = await headerOf(rec.realPath, st);
       entries.push({
         id: rec.id,
-        name: h.header.name || basename(rec.realPath),
+        name: h.name,
         source: "upload",
         fileName: basename(rec.realPath),
-        mapSize: h.size,
-        players: h.players.length,
+        mapSize: h.mapSize,
+        players: h.players,
         sizeBytes: st.size,
         mtime: Math.floor(st.mtimeMs),
         owner: rec.owner,
@@ -163,6 +193,9 @@ export async function scanScenarios(
       continue;
     }
   }
+
+  // files gone since the last listing take their cached header with them
+  for (const path of headerCache.keys()) if (!seen.has(path)) headerCache.delete(path);
 
   // stable order: campaign then name
   entries.sort(

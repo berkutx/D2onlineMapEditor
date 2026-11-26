@@ -122,10 +122,16 @@ tar czf - -C public/assets mods blobs | ssh <USER>@<HOST> \
   `/assets/mods/<id>/<rev>/<name>` (`rev` = hash of its `mod.json`) and sprite sheets as
   `/assets/blobs/<xx>/<sha>.png`; both are served `immutable`. A rebuilt mod has a new `rev`,
   so every client asks for new URLs by itself.
-- **Which maps belong to which mod**: a map in a mod's own scenario folder is that mod's;
-  list the folders in the `MOD_SCENARIO_ROOTS` env (`modId=path;modId=path;…`) or in a
-  `mods.local.json` at the repo root (`{ "scenarioRoots": { "<modId>": ["<dir>", …] } }`, see
-  `mods.local.json.example`). Uploaded maps are matched to a mod by the ids they reference.
+- **Which maps belong to which mod**: a map in a mod's own scenario folder is that mod's.
+  Uploaded maps are matched to a mod by the ids they reference. Where the folders come from:
+  - on the server, the `d2editor_scenarios` volume (`/mnt/data/d2editor/scenarios`, seen as
+    `MOD_SCENARIO_DIR=/app/var/mod-scenarios`): one folder per mod id, laid out like the
+    install — `semga-2/Campaign/<saga>/*.sg`, `nazar-legacy/Exports/*.sg`. Copy maps in from the
+    dev box (section 3d); a folder for a mod that had none is seen after `docker restart d2editor`,
+    new files in an existing folder on the next listing;
+  - elsewhere, the `MOD_SCENARIO_ROOTS` env (`modId=path;modId=path;…`) or a `mods.local.json`
+    at the repo root (`{ "scenarioRoots": { "<modId>": ["<dir>", …] } }`, see
+    `mods.local.json.example`).
 - **A volume without `mods/index.json` keeps working** exactly as before: its flat files are
   served as one implicit mod `default` (sections 3a–3c below describe that older layout).
   So the store can be uploaded before or after the code that reads it.
@@ -197,6 +203,33 @@ PoP holds the 404 until its TTL expires. Populate the volume **before** shipping
 real request for any file is a 200 — real users never see the 404. Rebuild source of the dir: the target
 mod's `Game/Scripts/modifiers` (see `build_modifier_catalog.py`, which stores the `.lua` *path*, not code).
 
+### 3d. The mods' own maps — `d2editor_scenarios`
+The maps and sagas a mod ships with live on the host in `/mnt/data/d2editor/scenarios/<mod-id>/`,
+laid out like the install; the container sees them read-only as `MOD_SCENARIO_DIR`. The deploy
+workflow creates the folder. Copy files in from a machine that has the install — through the
+host folder, not the named volume, so compose still creates the volume with its bind options:
+
+```sh
+# list.txt = the files to send, relative to the install root, one per line
+tar cf - -C "<install root>" -T list.txt | gzip -1 | ssh <USER>@<HOST> \
+  "docker run --rm -i -v /mnt/data/d2editor/scenarios:/dst alpine \
+   sh -c 'mkdir -p /dst/<mod-id> && cd /dst/<mod-id> && gzip -d | tar xf -'"
+```
+
+What is there (2026-11-26):
+
+| mod | files | taken from the install |
+|---|---|---|
+| `semga-2` | 52 maps, 19 sagas | `Campaign/<saga>/*.sg`, `Campaign/*.csg` — not the restart copies in `Campaign/На случай бага` and `Campaign/Восстание Эльфов (…)`, not `SaveGame` |
+| `smns3` | 15 sagas | `Campaign/*.csg` without the two «Новая сага…» test files |
+| `nazar-legacy` | 20 maps | `Exports/*.sg` |
+
+- The Сёмга family's maps are kept once, under its newest version `semga-2`.
+- A listing groups a map by its folders below the mod folder, `Campaign` left out
+  («Возвращение Галлеана / Империя»).
+- New files in an existing mod folder show on the next listing; a new mod folder after
+  `docker restart d2editor`.
+
 ## Deploy
 `git push origin main` → the **Deploy** workflow builds + restarts `d2editor`. Then open
 `http://151.115.56.12/map/` and verify `/map/api/health`.
@@ -205,8 +238,14 @@ mod's `Game/Scripts/modifiers` (see `build_modifier_catalog.py`, which stores th
 - `BASE_PATH=/map`, `VITE_BASE=/map/` — the base path.
 - `COPILOT_LLM=off`, `VITE_COPILOT_LLM=off` — LLM Copilot disabled (the offline MarkovJunior
   recipes/keywords still work).
-- `SCENARIO_ROOTS=/app/deploy/scenarios` — the single bundled map (`История демона.sg`).
+- `SCENARIO_ROOTS=/app/deploy/scenarios` — the bundled map (`История демона.sg`); a first visit
+  starts from a copy of it (`pickDefaultScenario` in `apps/web/src/stores/mapStore.ts`).
+- `MOD_SCENARIO_DIR=/app/var/mod-scenarios` — the mods' own maps (`d2editor_scenarios` volume).
 - Atlases via the `d2editor_assets` volume; uploads via `d2editor_uploads`.
+- The shared `lastwar_nginx` must let uploads through: both `location /map/` blocks in
+  `/opt/lastwar-deploy/nginx/nginx.conf` (the lastwar stack's file, not in this repo) carry
+  `client_max_body_size 32m;` (the app's own cap, `UPLOAD_MAX_BYTES`). Without it nginx answers
+  any body over 1 MB with its own 413 and «Загрузить .sg…» fails for most real maps.
 
 ## Local sanity check (no Docker)
 ```sh

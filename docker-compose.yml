@@ -21,6 +21,8 @@ services:
       WEB_DIST: /app/apps/web/dist
       ASSETS_DIR: /app/public/assets
       SCENARIO_ROOTS: /app/deploy/scenarios
+      # the mods' own maps, one folder per mod id (copied from the dev box, see deploy/README)
+      MOD_SCENARIO_DIR: /app/var/mod-scenarios
       UPLOAD_DIR: /app/var/uploads
       PROJECTS_DIR: /app/var/projects
       # durable per-room collab op-logs — MUST be a volume, else every redeploy (image
@@ -39,6 +41,7 @@ services:
     volumes:
       # atlases (253 MB) are NOT in git — populate this volume once from the dev box (see README)
       - d2editor_assets:/app/public/assets:ro
+      - d2editor_scenarios:/app/var/mod-scenarios:ro
       - d2editor_uploads:/app/var/uploads
       - d2editor_projects:/app/var/projects
       - d2editor_rooms:/app/var/rooms
@@ -61,6 +64,13 @@ volumes:
       type: none
       o: bind
       device: /mnt/data/d2editor/assets
+  d2editor_scenarios:
+    name: d2editor_scenarios
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/data/d2editor/scenarios
   d2editor_uploads:
     name: d2editor_uploads
     driver: local

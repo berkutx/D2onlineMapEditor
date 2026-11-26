@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * Root component. On startup it auto-loads a scenario so the app shows a
- * rendered map immediately: list scenarios -> pick "Riders" (else the first)
+ * rendered map immediately: list scenarios -> pick «История демона», else "Riders",
+ * else the first (mapStore.pickDefaultScenario)
  * -> open it. The asset manifest + spritesheets load lazily inside openMap and
  * are reused for every subsequent map.
  *

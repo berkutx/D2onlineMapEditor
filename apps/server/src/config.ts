@@ -5,7 +5,7 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,12 +53,28 @@ export interface ModScenarioRoot {
   modId: string;
 }
 
+/** The per-mod folders of a MOD_SCENARIO_DIR: every sub-folder is the mod its name says.
+ *  A missing folder means no mod has maps yet. */
+export function modScenarioDirRoots(dir: string): ModScenarioRoot[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .map((e) => ({ modId: e.name, path: join(dir, e.name) }))
+      .sort((a, b) => a.modId.localeCompare(b.modId));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Scenario folders per mod. A map found there IS that mod's map — its own Exports/Campaign
  * folder says so — which is more reliable than detecting the mod from the ids it references
  * (a vanilla map fits every mod). Sources, first one wins:
  *   1. MOD_SCENARIO_ROOTS env: `modId=path;modId=path;…`
- *   2. `mods.local.json` at the repo root (gitignored, see mods.local.json.example):
+ *   2. MOD_SCENARIO_DIR env: a folder holding one sub-folder per mod, named by the mod's id
+ *      (`<dir>/semga-2/Campaign/<saga>/*.sg`) — how a server keeps the mods' own maps: maps for
+ *      another mod are a copy into its folder (picked up on the next start), no config change.
+ *   3. `mods.local.json` at the repo root (gitignored, see mods.local.json.example):
  *      { "scenarioRoots": { "<modId>": ["<dir>", …] } }
  */
 function modScenarioRoots(): ModScenarioRoot[] {
@@ -74,6 +90,8 @@ function modScenarioRoots(): ModScenarioRoot[] {
     }
     return out;
   }
+  const dir = process.env.MOD_SCENARIO_DIR?.trim();
+  if (dir) return modScenarioDirRoots(dir);
   try {
     const json = JSON.parse(readFileSync(join(REPO_ROOT, "mods.local.json"), "utf8")) as {
       scenarioRoots?: Record<string, unknown>;

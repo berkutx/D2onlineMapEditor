@@ -21,6 +21,9 @@ import { tr } from "../i18n";
 
 export type MapLoadStatus = "idle" | "loading" | "ready" | "error";
 
+/** What a first visit starts from, best first (matched in a map's name or file name). */
+const DEFAULT_SCENARIO_HINTS = ["история демона", "riders"];
+
 /** Start a fresh page session on a map (`?map=<id>`), dropping link-only parameters. */
 export function reloadOnMap(id: string): void {
   const url = new URL(window.location.href);
@@ -110,12 +113,17 @@ export const useMapStore = defineStore("map", () => {
     }
   }
 
-  /** Pick the scenario to auto-load on startup: prefer "Riders", else the first. */
+  /** Pick the scenario a first-time visitor starts from: the editor's own showcase
+   *  («История демона», bundled with the deploy) where the server has it, else "Riders"
+   *  (a game install's classic), else the first. Order matters: a server that also lists a
+   *  mod's campaign has both. */
   function pickDefaultScenario(list: ScenarioEntry[]): ScenarioEntry | undefined {
-    const riders = list.find((s) =>
-      `${s.name} ${s.fileName}`.toLowerCase().includes("riders"),
-    );
-    return riders ?? list[0];
+    const text = (s: ScenarioEntry) => `${s.name} ${s.fileName}`.toLowerCase();
+    for (const hint of DEFAULT_SCENARIO_HINTS) {
+      const hit = list.find((s) => text(s).includes(hint));
+      if (hit) return hit;
+    }
+    return list[0];
   }
 
   return {

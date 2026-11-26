@@ -114,8 +114,9 @@ jobs:
             mountpoint -q /mnt/data || { echo "FATAL: /mnt/data is not mounted — refusing to deploy onto the root disk"; exit 1; }
             # Bind-backed volume device dirs MUST exist before `up` (type:none bind mounts fail on a
             # missing dir → the container won't start). Idempotent; created via docker so it works
-            # without host sudo (the daemon runs as root). `rooms` is the durable collab op-log.
-            docker run --rm -v /mnt/data/d2editor:/d alpine mkdir -p /d/rooms /d/uploads /d/projects || true
+            # without host sudo (the daemon runs as root). `rooms` is the durable collab op-log;
+            # `scenarios` holds the mods' own maps (one folder per mod id, copied from the dev box).
+            docker run --rm -v /mnt/data/d2editor:/d alpine mkdir -p /d/rooms /d/uploads /d/projects /d/scenarios || true
             # The image was compiled on the GitHub runner and loaded in the previous step. The OLD
             # container keeps serving until Compose recreates it from that complete local image.
             # Project name "d2editor" is separate from "d2mapeditor"; --remove-orphans is scoped to
