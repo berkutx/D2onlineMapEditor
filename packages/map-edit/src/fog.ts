@@ -116,3 +116,70 @@ export function fogSquare(cx: number, cy: number, radius: number): { x: number; 
   for (let y = cy - radius; y <= cy + radius; y++) for (let x = cx - radius; x <= cx + radius; x++) cells.push({ x, y });
   return cells;
 }
+
+/** How a fog stands in the file: nobody set it (every cell open), all hidden, or drawn. */
+export type FogState = "unset" | "hidden" | "drawn";
+
+export function fogState(fog: FogInfo, size: number): FogState {
+  const hidden = fogHiddenCount(fog, size);
+  return hidden === 0 ? "unset" : hidden === size * size ? "hidden" : "drawn";
+}
+
+/**
+ * Make a fog equal to `grid` (a `size`×`size` array, non-zero = hidden): ONE setFog op with
+ * the lines that differ, or an empty list when the fog already is that.
+ */
+export function fogGridOps(doc: MapDocument, fogId: string, grid: Uint8Array): EditOp[] {
+  const fog = doc.satellites?.fogs.find((f) => f.id === fogId);
+  if (!fog) return [];
+  const size = doc.size;
+  const rows: { y: number; mask: number[] }[] = [];
+  for (const row of fog.rows) {
+    if (row.y < 0 || row.y >= size) continue;
+    const mask = new Array<number>(row.mask.length).fill(0);
+    for (let x = 0; x < size && x >> 3 < mask.length; x++) if (grid[row.y * size + x]) mask[x >> 3]! |= 1 << (x & 7);
+    if (!sameMask(row.mask, mask)) rows.push({ y: row.y, mask });
+  }
+  if (rows.length === 0) return [];
+  rows.sort((a, b) => a.y - b.y);
+  return [{ kind: "setFog", id: fogId, rows }];
+}
+
+/** Give one player the fog of another (the same cells hidden). */
+export function fogCopyOps(doc: MapDocument, fromFogId: string, toFogId: string): EditOp[] {
+  const from = doc.satellites?.fogs.find((f) => f.id === fromFogId);
+  if (!from || fromFogId === toFogId) return [];
+  return fogGridOps(doc, toFogId, fogGrid(from, doc.size));
+}
+
+/** Footprint side of what a player can own on the map (a capital is 5×5, a city 4×4). */
+const OWNED_SIDE: Record<string, number> = { capital: 5, village: 4, stack: 1, rod: 1 };
+
+/**
+ * The fog a player would have if only the surroundings of what it owns were open: everything
+ * hidden, then a square with cut corners — the shape the game opens — `radius` cells around
+ * each of the player's capitals, cities and parties.
+ *
+ * This is the map maker's preset, not the game's own computation: the game opens each object
+ * by ITS scouting range (a leader's, a city's), which the editor does not know. On the
+ * installed maps a capital opens 6 cells around its walls.
+ */
+export function fogAroundOwnedOps(doc: MapDocument, playerId: string, radius: number): EditOp[] {
+  const fog = fogOfPlayer(doc, playerId);
+  if (!fog) return [];
+  const size = doc.size;
+  const grid = new Uint8Array(size * size).fill(1);
+  const r = Math.max(0, Math.floor(radius));
+  for (const o of doc.objects) {
+    const side = OWNED_SIDE[o.type];
+    if (!side || (o as { owner?: string }).owner !== playerId) continue;
+    const x0 = o.pos.x - r, y0 = o.pos.y - r, x1 = o.pos.x + side - 1 + r, y1 = o.pos.y + side - 1 + r;
+    for (let y = Math.max(0, y0); y <= Math.min(size - 1, y1); y++) {
+      for (let x = Math.max(0, x0); x <= Math.min(size - 1, x1); x++) {
+        const corner = r > 0 && (x === x0 || x === x1) && (y === y0 || y === y1);
+        if (!corner) grid[y * size + x] = 0;
+      }
+    }
+  }
+  return fogGridOps(doc, fog.id, grid);
+}

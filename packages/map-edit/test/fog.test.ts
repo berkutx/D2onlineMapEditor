@@ -9,7 +9,8 @@ import type { FogInfo } from "@d2/map-schema";
 // the sources, not the built package: a new op must not be tested against a stale build
 import {
   applyEditsToBytes, applyOp, applyOps, diffDocs, invertOps, materializeForExport, opKeys, roundTripSemantic,
-  fogFillOps, fogGrid, fogHiddenCount, fogOfPlayer, fogPaintOps, fogSquare, isFogged, type EditOp,
+  fogFillOps, fogGrid, fogHiddenCount, fogOfPlayer, fogPaintOps, fogSquare, isFogged, fogState, fogAroundOwnedOps,
+  fogCopyOps, fogGridOps, type EditOp,
 } from "../src/index";
 
 const SIZE = 48;
@@ -133,5 +134,61 @@ describe("a drawn fog in the exported file", () => {
 
   it("leaves a map nobody painted byte-identical", () => {
     expect(exported([])).toEqual(base);
+  });
+});
+
+describe("presets of a player's fog", () => {
+  it("tells an unset fog from a hidden and a drawn one", () => {
+    const fog = fogOfPlayer(doc, empire.id)!;
+    expect(fogState(fog, SIZE)).toBe("unset");
+    const hidden = applyOps(doc, fogFillOps(doc, fog.id, true));
+    expect(fogState(fogOfPlayer(hidden, empire.id)!, SIZE)).toBe("hidden");
+    const drawn = applyOps(hidden, fogPaintOps(hidden, fog.id, fogSquare(8, 8, 1), false));
+    expect(fogState(fogOfPlayer(drawn, empire.id)!, SIZE)).toBe("drawn");
+  });
+
+  it("opens only the surroundings of what the player owns, as squares with cut corners", () => {
+    const capital = doc.objects.find((o) => o.type === "capital" && (o as { owner?: string }).owner === empire.id)!;
+    const ops = fogAroundOwnedOps(doc, empire.id, 6);
+    expect(ops).toHaveLength(1);
+    const after = applyOps(doc, ops);
+    const fog = fogOfPlayer(after, empire.id)!;
+    const { x, y } = capital.pos;
+    expect(isFogged(fog, x + 2, y + 2)).toBe(false); // the capital itself
+    // 6 cells beyond the 5×5 walls are open where the map has them…
+    const edgeX = Math.min(SIZE - 1, x + 4 + 6);
+    expect(isFogged(fog, edgeX, y + 2)).toBe(false);
+    // …the far corner of that square is cut, and what lies beyond stays hidden
+    const cornerX = x + 4 + 6, cornerY = y + 4 + 6;
+    if (cornerX < SIZE && cornerY < SIZE) expect(isFogged(fog, cornerX, cornerY)).toBe(true);
+    if (x + 4 + 7 < SIZE) expect(isFogged(fog, x + 4 + 7, y + 2)).toBe(true);
+    // the other side's capital is not opened by this player's preset
+    const other = doc.objects.find((o) => o.type === "capital" && (o as { owner?: string }).owner !== empire.id)!;
+    expect(isFogged(fog, other.pos.x + 2, other.pos.y + 2)).toBe(true);
+    // applying the preset twice changes nothing
+    expect(fogAroundOwnedOps(after, empire.id, 6)).toEqual([]);
+    // and the other player's own fog is untouched
+    expect(fogHiddenCount(after.satellites!.fogs.find((f) => f.id === "S143FG0002")!, SIZE)).toBe(0);
+  });
+
+  it("copies one player's fog to another", () => {
+    const drawn = applyOps(doc, fogAroundOwnedOps(doc, empire.id, 3));
+    const copied = applyOps(drawn, fogCopyOps(drawn, "S143FG0001", "S143FG0002"));
+    expect(copied.satellites!.fogs.find((f) => f.id === "S143FG0002")!.rows)
+      .toEqual(copied.satellites!.fogs.find((f) => f.id === "S143FG0001")!.rows.map((r) => ({ ...r })));
+    expect(fogCopyOps(copied, "S143FG0001", "S143FG0002")).toEqual([]);
+    expect(fogCopyOps(copied, "S143FG0001", "S143FG0001")).toEqual([]);
+  });
+
+  it("makes a fog equal to a given grid", () => {
+    const grid = new Uint8Array(SIZE * SIZE);
+    grid[5 * SIZE + 9] = 1;
+    grid[47 * SIZE + 47] = 1;
+    const after = applyOps(doc, fogGridOps(doc, "S143FG0001", grid));
+    const fog = fogOfPlayer(after, empire.id)!;
+    expect(fogHiddenCount(fog, SIZE)).toBe(2);
+    expect(isFogged(fog, 9, 5)).toBe(true);
+    expect(isFogged(fog, 47, 47)).toBe(true);
+    expect(fogGridOps(after, "S143FG0001", grid)).toEqual([]);
   });
 });

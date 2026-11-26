@@ -100,6 +100,13 @@ export interface DebugStats {
 }
 
 /** Which logical layers can be toggled by the host. */
+/** Whole-map snapshot: the side of one render tile, and the world margins kept around the
+ *  map diamond (tall sprites — a capital's towers — stand well above the top row). */
+const SNAPSHOT_TILE = 2048;
+const SNAPSHOT_PAD_X = 48;
+const SNAPSHOT_PAD_TOP = 224;
+const SNAPSHOT_PAD_BOTTOM = 48;
+
 export type LayerName = "terrain" | "grid" | "objects" | "locations" | "overlay";
 
 export interface SceneInitOptions {
@@ -724,10 +731,33 @@ export class Scene {
     const c = cellToWorld(cell.x + 0.5, cell.y + 0.5); // +0.5 → cell CENTRE (top-vertex convention)
     const z = pxW / (2 * halfW);
     const rt = RenderTexture.create({ width: pxW, height: pxH, resolution: 1 });
+    try {
+      return this.withBareWorld((world, app) => {
+        world.scale.set(z);
+        world.position.set(pxW / 2 - z * c.x, pxH / 2 - z * c.y);
+        // Render the STAGE (already the render-group root), not `world` directly: Pixi's
+        // render(container) PROMOTES its target to a render-group root permanently, and a
+        // world-as-group breaks @pixi/tilemap's pipe (u_proj_trans = proj × groupWorld ×
+        // tilemap.worldTransform — the world transform applied twice). Symptom: after the
+        // first preview the terrain tiles "jump"/vanish in the main view when zoomed out.
+        app.renderer.render({ container: app.stage, target: rt, clear: true });
+        return app.renderer.extract.canvas(rt) as HTMLCanvasElement;
+      });
+    } finally {
+      rt.destroy(true);
+    }
+  }
 
-    // hide every overlay + loose graphic; FORCE terrain + objects visible — the preview's
-    // contract is "рельеф + объекты" regardless of the host's view-layer toggles (a hidden
-    // terrain layer otherwise yields objects floating on black).
+  /**
+   * Run `draw` over the BARE world — every overlay and loose graphic hidden, terrain and
+   * objects forced visible (the contract is "рельеф + объекты" whatever the host's layer
+   * toggles say: a hidden terrain layer would give objects floating on black) — then put the
+   * layer visibility and the live camera back and repaint the live canvas. `draw` may move
+   * and scale the world freely. null when the scene is not built.
+   */
+  private withBareWorld<T>(draw: (world: Container, app: Application) => T): T | null {
+    const app = this.app, world = this.world;
+    if (!app || !world) return null;
     const hidden: Array<{ v: { visible: boolean }; was: boolean }> = [];
     const setVis = (v: { visible: boolean } | null | undefined, on: boolean): void => {
       if (v) { hidden.push({ v, was: v.visible }); v.visible = on; }
@@ -740,28 +770,67 @@ export class Scene {
     hide(this.presence?.view); hide(this.overlay?.view);
     hide(this.locVeil); hide(this.ghost); hide(this.roadSel); hide(this.footprint); hide(this.selection);
 
-    // frame the crop via the world transform, saved + restored (live view untouched)
     const sx = world.position.x, sy = world.position.y, sc = world.scale.x;
-    world.scale.set(z);
-    world.position.set(pxW / 2 - z * c.x, pxH / 2 - z * c.y);
-
-    let canvas: HTMLCanvasElement | null = null;
     try {
-      // Render the STAGE (already the render-group root), not `world` directly: Pixi's
-      // render(container) PROMOTES its target to a render-group root permanently, and a
-      // world-as-group breaks @pixi/tilemap's pipe (u_proj_trans = proj × groupWorld ×
-      // tilemap.worldTransform — the world transform applied twice). Symptom: after the
-      // first preview the terrain tiles "jump"/vanish in the main view when zoomed out.
-      app.renderer.render({ container: app.stage, target: rt, clear: true });
-      canvas = app.renderer.extract.canvas(rt) as HTMLCanvasElement;
+      return draw(world, app);
     } finally {
       world.scale.set(sc);
       world.position.set(sx, sy);
       for (const h of hidden) h.v.visible = h.was;
-      rt.destroy(true);
       this.renderNow(); // repaint the live canvas with the restored camera
     }
-    return canvas;
+  }
+
+  /**
+   * The size a whole-map picture would have at `scale` (image px per world px; 1 = the game's
+   * own pixel size). Includes the margin kept for tall sprites that stand above the top edge.
+   */
+  mapSnapshotSize(scale = 1): { width: number; height: number } {
+    const b = mapWorldBounds(Math.max(1, this.mapSizeCur));
+    return {
+      width: Math.max(1, Math.round((b.width + 2 * SNAPSHOT_PAD_X) * scale)),
+      height: Math.max(1, Math.round((b.height + SNAPSHOT_PAD_TOP + SNAPSHOT_PAD_BOTTOM) * scale)),
+    };
+  }
+
+  /**
+   * The WHOLE map as one picture, overlay-free (terrain + objects, the current animation
+   * frame), on a transparent background — for the map passport. `scale` as in
+   * {@link mapSnapshotSize}.
+   *
+   * Drawn in tiles through one small RenderTexture and assembled on a 2D canvas: a 144×144
+   * map is 9216×4900 px at full size, more than a GPU texture can safely be, and tiling keeps
+   * the GPU cost at one tile whatever the map. The live view is untouched (see withBareWorld).
+   */
+  renderMapSnapshot(scale = 1): HTMLCanvasElement | null {
+    if (!this.app || !this.world) return null;
+    const b = mapWorldBounds(Math.max(1, this.mapSizeCur));
+    const { width, height } = this.mapSnapshotSize(scale);
+    const originX = b.minX - SNAPSHOT_PAD_X; // world point at the picture's top-left corner
+    const originY = b.minY - SNAPSHOT_PAD_TOP;
+    const out = document.createElement("canvas");
+    out.width = width;
+    out.height = height;
+    const ctx = out.getContext("2d");
+    if (!ctx) return null;
+    const rt = RenderTexture.create({ width: SNAPSHOT_TILE, height: SNAPSHOT_TILE, resolution: 1 });
+    try {
+      const done = this.withBareWorld((world, app) => {
+        world.scale.set(scale);
+        for (let ty = 0; ty < height; ty += SNAPSHOT_TILE) {
+          for (let tx = 0; tx < width; tx += SNAPSHOT_TILE) {
+            world.position.set(-originX * scale - tx, -originY * scale - ty);
+            app.renderer.render({ container: app.stage, target: rt, clear: true, clearColor: [0, 0, 0, 0] });
+            const tile = app.renderer.extract.canvas(rt) as HTMLCanvasElement;
+            ctx.drawImage(tile, tx, ty);
+          }
+        }
+        return true;
+      });
+      return done ? out : null;
+    } finally {
+      rt.destroy(true);
+    }
   }
 
   /** Hover spotlight for location overlays: the ids under the cursor render at full alpha
