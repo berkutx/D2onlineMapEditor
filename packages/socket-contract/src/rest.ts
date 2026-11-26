@@ -207,6 +207,9 @@ export const GenerateRequest = z.object({
   /** collab id slot (M4): landmark ids mint in this slot's disjoint band so a peer's
    *  concurrent generation never collides. Absent/0 = solo. */
   slot: z.number().int().optional(),
+  /** A wall recipe (a maze) only: false = build it for looks — lighter joints, no promise that
+   *  nothing squeezes through. Absent / true = an obstacle: every joint closed cell by cell. */
+  sealed: z.boolean().optional(),
   /** the current EditorProject (validated separately by @d2/map-edit). */
   project: z.unknown(),
 });
@@ -225,6 +228,11 @@ export interface GenDebug {
   amount?: number;
   /** number of plan steps executed (LLM /copilot path). */
   steps?: number;
+  /** A wall recipe: was it built as an obstacle (true) or for looks (false). */
+  sealed?: boolean;
+  /** A wall recipe: wall blocks that could not be built — something stands there already, or
+   *  the terrain is protected. Where even a sealed maze lets through. */
+  wallGaps?: number;
   /** whether the protect-terrain flag was on. */
   protect?: boolean;
   /** count of protected (water/mountain) cells found in the target region. */
@@ -249,6 +257,8 @@ export interface GenRecipeInfo {
   varies?: boolean;
   /** The same for a drawn stroke: true only when the recipe is sprinkled along it. */
   strokeVaries?: boolean;
+  /** It builds walls (a maze): the request's `sealed` chooses an obstacle or looks only. */
+  walls?: boolean;
   /**
    * Present when the list was asked for a mod (`?mod=`) that has nothing this recipe places:
    * what it lacks, in a mapmaker's words («в этом моде нет таких украшений»). The recipe would

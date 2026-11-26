@@ -86,6 +86,8 @@ export interface RecipeInfo {
   varies: boolean;
   /** The same for a drawn stroke (true only when the recipe is sprinkled along it). */
   strokeVaries: boolean;
+  /** It builds walls (a maze): they can be made an obstacle or for looks only (the request's `sealed`). */
+  walls?: boolean;
 }
 /** Every recipe as a palette lists it, group by group. */
 export declare function recipeCatalog(): RecipeInfo[];

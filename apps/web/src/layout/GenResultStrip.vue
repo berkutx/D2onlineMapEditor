@@ -54,6 +54,11 @@ async function retune(i: number): Promise<void> {
   gone(await gen.retune(AMOUNT_STEPS[i]!));
 }
 
+/** A maze: build its walls the other way (the same maze, the same seed). */
+async function rewall(value: boolean): Promise<void> {
+  if (s.value && value !== s.value.sealed) gone(await gen.rewall(value));
+}
+
 async function copySeed(): Promise<void> {
   try {
     await navigator.clipboard.writeText(String(seed.value));
@@ -72,8 +77,21 @@ async function copySeed(): Promise<void> {
     <!-- nothing came out because the mod has nothing of the kind (a typed «камни» on a mod without rocks) -->
     <span v-else-if="s.opCount === 0 && info?.lacks" class="gs-warn" :title="tr('Ничего не поставлено: {reason}', { reason: tr(info.lacks) })">{{ tr(info.lacks) }}</span>
     <span v-else-if="s.opCount === 0" class="gs-warn" :title="tr('Вариант ничего не изменил: место занято или защищено')">{{ tr("ничего не изменил") }}</span>
+    <!-- a maze that could not build some of its wall: even sealed, it lets through there -->
+    <span v-else-if="info?.walls && s.wallGaps > 0" class="gs-warn"
+      :title="tr('Там уже что-то стоит или местность защищена — в этих местах стены нет, и отряд пройдёт. Уберите помеху или сдвиньте зону.')">
+      {{ trn("{n} просвет в стене|{n} просвета в стене|{n} просветов в стене", s.wallGaps) }}
+    </span>
 
     <span class="gs-spring" />
+
+    <!-- a maze: an obstacle, or for looks only — the same maze built the other way -->
+    <span v-if="info?.walls" class="gs-walls" role="group" :aria-label="tr('Стены лабиринта')">
+      <button class="gs-btn" :class="{ on: s.sealed }" :disabled="gen.busy" :aria-pressed="s.sealed"
+        :title="tr('Стены — преграда: в каждом стыке закрыта каждая клетка, пройти можно только через входы')" @click="rewall(true)">{{ tr("🔒 Наглухо") }}</button>
+      <button class="gs-btn" :class="{ on: !s.sealed }" :disabled="gen.busy" :aria-pressed="!s.sealed"
+        :title="tr('Лабиринт для вида: стыки легче и чище, без подпорок у башен; что отряд нигде не просочится — не обещано')" @click="rewall(false)">{{ tr("👁 Только вид") }}</button>
+    </span>
 
     <!-- more / less of it: the same variant (same seed), another amount -->
     <span v-if="info?.amountLabel" class="gs-amount" :title="tr('Больше или меньше: {what}', { what: tr(info.amountLabel) })">
@@ -115,6 +133,10 @@ async function copySeed(): Promise<void> {
 .gs-warn { color: var(--el-color-warning); }
 .gs-spring { flex: 1; min-width: 4px; }
 .gs-amount, .gs-variants { display: inline-flex; align-items: center; gap: 4px; }
+.gs-walls { display: inline-flex; align-items: center; }
+.gs-walls .gs-btn:first-child { border-radius: 4px 0 0 4px; }
+.gs-walls .gs-btn:last-child { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.gs-btn.on { border-color: var(--el-color-primary); color: var(--el-color-primary); background: var(--el-color-primary-light-9); position: relative; }
 .gs-alabel { color: var(--el-text-color-secondary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
 .gs-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
 .gs-bars i { width: 3px; border-radius: 1px; background: var(--el-border-color); }

@@ -196,6 +196,29 @@ describe("POST /api/maps/:id/generate", () => {
     expect(r.report.ok).toBe(true);
   });
 
+  it("a maze is sealed unless asked for looks only, and says how it was built", async () => {
+    const ask = async (extra: Record<string, unknown>) => {
+      const res = await postJson(REST.mapGenerate(id), { project: project(), recipeId: "wall_maze", region: { x: 5, y: 5, w: 15, h: 15 }, seed: 4, ...extra });
+      expect(res.statusCode).toBe(200);
+      return res.json() as { ops: unknown[]; report: ValidationReport; debug: { sealed?: boolean; wallGaps?: number } };
+    };
+    const sealed = await ask({});
+    const light = await ask({ sealed: false });
+    expect(sealed.debug.sealed).toBe(true);
+    expect(light.debug.sealed).toBe(false);
+    expect(typeof sealed.debug.wallGaps).toBe("number");
+    expect(light.ops.length).toBeLessThan(sealed.ops.length); // no pieces spent on plugging joints
+    expect(sealed.report.ok && light.report.ok).toBe(true);
+    // a recipe that builds no walls says nothing about them
+    const lake = await postJson(REST.mapGenerate(id), { project: project(), recipeId: "water_lake", region: { x: 5, y: 5, w: 10, h: 10 }, seed: 4 });
+    expect((lake.json() as { debug: { sealed?: boolean; wallGaps?: number } }).debug).not.toHaveProperty("sealed");
+  });
+
+  it("the recipe list marks the recipes that build walls", async () => {
+    const { recipes } = (await app.inject({ method: "GET", url: REST.generateRecipes })).json() as GenRecipeList;
+    expect(recipes.filter((r) => r.walls).map((r) => r.id).sort()).toEqual(["wall_maze", "wall_maze_fence", "wall_maze_thin"]);
+  });
+
   it("snow_overlay (fill recipe) generates setCell ops that validate green", async () => {
     const res = await postJson(REST.mapGenerate(id), {
       project: project(),

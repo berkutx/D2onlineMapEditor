@@ -479,6 +479,8 @@ export interface RecipeInfo {
   /** The same question for a drawn stroke: only a recipe SPRINKLED along it varies; a path
    *  or a fill follows the stroke cell for cell whatever the seed. */
   strokeVaries: boolean;
+  /** It builds walls (a maze): they can be made an obstacle or for looks only (the request's `sealed`). */
+  walls?: boolean;
 }
 
 /** Every recipe as a palette lists it, grouped in {@link RECIPE_GROUPS} order. */
@@ -494,6 +496,7 @@ export function recipeCatalog(): RecipeInfo[] {
         varies: r.kind === "mj",
         strokeVaries: r.maskSymbol !== undefined ? (r.maskDensity ?? 1) < 1 : r.kind === "mj",
       };
+      if (r.sealMaze) info.walls = true;
       if (r.amountLabel !== undefined && isTunable(r)) info.amountLabel = r.amountLabel;
       if (r.stroke) {
         info.stroke = r.stroke;

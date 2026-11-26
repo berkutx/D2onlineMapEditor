@@ -51,6 +51,8 @@ export interface PlanStep {
   /** How much a registered recipe makes, relative to its stock amount (see tuneRecipe);
    *  1 or absent = as the library defines it. */
   amount?: number;
+  /** A wall recipe: false = for looks (see MazeBuild.sealed); absent / true = an obstacle. */
+  sealed?: boolean;
   /**
    * The mask is a shape the user DREW for this step (a brush stroke, a line, a frame), so a
    * recipe that can follow a drawing stamps its symbol along it. Absent/false: the mask only
@@ -317,6 +319,8 @@ export async function runGenerationSteps(
   /** Collab id slot (M4): landmark ids mint in this slot's disjoint band so two clients
    *  generating concurrently never collide. 0 = solo (the caller passes the socket's slot). */
   slot = 0,
+  /** Filled as the steps run: `wallGaps` = wall blocks a maze could not build (see MazeBuild.report). */
+  report?: { wallGaps: number },
 ): Promise<EditOp[]> {
   let work = liveDoc;
   const all: EditOp[] = [];
@@ -371,7 +375,10 @@ export async function runGenerationSteps(
     // occupancy rebuilt per step: a later step must respect the objects an earlier one placed
     const occupied = buildOccupiedSet(work, landmarkSizes);
     // the seed also picks the maze's dress: which stone, which buildings on the joints
-    const ops = decodeGrid(work, grid, table, genRegion, walls, mask, protect, decor, maskFill ? 1 : scale, occupied, slot, seed);
+    const built = { gaps: 0 };
+    const ops = decodeGrid(work, grid, table, genRegion, walls, mask, protect, decor, maskFill ? 1 : scale, occupied, slot,
+      { variant: seed, sealed: step.sealed !== false, report: built });
+    if (report) report.wallGaps += built.gaps;
     all.push(...ops);
     work = applyOps(work, ops);
   }

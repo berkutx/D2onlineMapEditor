@@ -68,8 +68,8 @@ function footprint(o: { type: string; pos: { x: number; y: number } } & Record<s
   return out;
 }
 
-async function run(recipeId: string, seed: number, region = REGION): Promise<{ ops: EditOp[]; after: MapDocument }> {
-  const ops = await runGenerationSteps(doc, [{ recipeId, region, seed }], walls, seed, undefined, false, decor, landmarkSizes);
+async function run(recipeId: string, seed: number, region = REGION, sealed?: boolean): Promise<{ ops: EditOp[]; after: MapDocument }> {
+  const ops = await runGenerationSteps(doc, [{ recipeId, region, seed, sealed }], walls, seed, undefined, false, decor, landmarkSizes);
   return { ops, after: applyOps(doc, ops) };
 }
 
@@ -118,14 +118,40 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
     }
   }
 
-  it("wall_maze leaves no way through a wall (straights = 2×2 pieces, joints = a tower and its side walls)", async () => {
-    // The maze is a scale-2 lattice: a straight block is one 2×2 piece; a joint block has a tower
-    // in its front cell and one-cell walls where an arm runs in. A cell of a joint that no arm
-    // touches (the outside of a corner, the tip of a wall) is left free — it leads nowhere. So
-    // the invariant is not "every touched block is full" but what that stood for: a walker,
-    // stepping in all eight directions, gets no further than if every touched block WERE full.
+  it("wall_maze, sealed: every touched 2×2 block is built whole", async () => {
+    // The maze is a scale-2 lattice. Sealed (the default), a straight block is one 2×2 piece and
+    // a joint block is a tower with a piece of wall in each of its other cells — or four towers
+    // in a mod with no one-cell walls. Either way a block that received anything has all four
+    // cells taken: an unfilled cell would be a place to slip through.
     for (const seed of SEEDS) {
       const { ops } = await run("wall_maze", seed);
+      const covered = new Set<string>();
+      for (const op of ops) {
+        if (op.kind !== "addObject" || op.object.type !== "landmark") continue;
+        const bt = String((op.object as { baseType?: string }).baseType ?? "").toUpperCase();
+        const [w, h] = landmarkSizes[bt] ?? [1, 1];
+        const { x, y } = op.object.pos as { x: number; y: number };
+        for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) covered.add(`${x + dx},${y + dy}`);
+      }
+      expect(covered.size, `seed=${seed}: placed no walls`).toBeGreaterThan(0);
+      for (const k of covered) {
+        const [x, y] = k.split(",").map(Number) as [number, number];
+        const bx = x - (x % 2), by = y - (y % 2);
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+          expect(covered.has(`${bx + dx},${by + dy}`), `seed=${seed}: GAP at ${bx + dx},${by + dy}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("wall_maze, for looks: lighter joints, and still no way through a wall", async () => {
+    // For looks a joint is towers alone, one inside each turn, and the rest of its block is open
+    // ground. So the invariant is not "every touched block is full" but what that stands for: a
+    // walker, stepping in all eight directions, gets no further than if every block WERE full.
+    for (const seed of SEEDS) {
+      const sealedCount = (await run("wall_maze", seed)).ops.length;
+      const { ops } = await run("wall_maze", seed, REGION, false);
+      expect(ops.length, `seed=${seed}: not lighter than the sealed one`).toBeLessThan(sealedCount);
       const placed = ops.filter(
         (o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject" && o.object.type === "landmark",
       );

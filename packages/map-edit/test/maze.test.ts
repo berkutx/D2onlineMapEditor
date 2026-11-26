@@ -66,9 +66,10 @@ const doc = parseScenario(createBlankMap({ size: 48 }));
 /** A wall plan: `B` = wall, `.` = passage. */
 const grid = (rows: string[]) => ({ width: rows[0]!.length, height: rows.length, rows: rows.map((r) => r.replace(/\./g, "W")) });
 type Placed = { id: string; x: number; y: number };
-function decode(recipeId: string, rows: string[], catalog: object[] = CATALOG, variant = 0, scale = recipeId === "wall_maze" ? 2 : 1): Placed[] {
+/** `sealed` as the generator takes it: an obstacle unless asked for looks only */
+function decode(recipeId: string, rows: string[], catalog: object[] = CATALOG, variant = 0, sealed = true, scale = recipeId === "wall_maze" ? 2 : 1): Placed[] {
   const ops = decodeGrid(doc, grid(rows), DECODE_TABLES[recipeId]!, { x: 10, y: 10, w: rows[0]!.length * scale, h: rows.length * scale },
-    buildWallSet(catalog as never), undefined, false, undefined, scale, undefined, 0, variant);
+    buildWallSet(catalog as never), undefined, false, undefined, scale, undefined, 0, { variant, sealed });
   return ops
     .filter((o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject")
     .map((o) => ({ id: String((o.object as { baseType?: string }).baseType), x: o.object.pos.x, y: o.object.pos.y }));
@@ -128,40 +129,40 @@ describe("the fortress maze (2×2 walls)", () => {
     }
   });
 
-  it("closes a joint with one-cell walls where an arm runs in — and only there", () => {
-    // 2 beside a corner or a wall tip, 3 in a tee: no stray block on the outside of a corner
-    expect(placed.filter((p) => THIN.has(p.id))).toHaveLength(2 + 3 + 2 + 3 + 3 + 3 + 2);
-    // the top-left corner block joins a wall to the east and one to the south: its far cell stays free
-    expect(covered(placed).has("10,10")).toBe(false);
-    expect(covered(placed).has("11,10")).toBe(true);
-    expect(covered(placed).has("10,11")).toBe(true);
-  });
-
-  it("leaves no way through a wall — not even diagonally", () => {
+  it("sealed: every cell of every wall block is built — a joint is its tower and three pieces of wall", () => {
+    expect(placed.filter((p) => THIN.has(p.id))).toHaveLength(JOINTS * 3);
     const blocked = covered(placed);
-    // the two rooms of the plan are 2×2 cells each, walled all round
-    for (const room of [[12, 12], [16, 12]] as [number, number][]) {
-      expect(reach(blocked, room, [6, 6, 24, 24]).size).toBe(4);
-    }
-    // every straight block is covered whole, and nothing is put on a passage
     PLAN.forEach((row, gy) => [...row].forEach((ch, gx) => {
       for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
-        if (ch !== "B") expect(blocked.has(`${10 + gx * 2 + dx},${10 + gy * 2 + dy}`), `passage ${gx},${gy}`).toBe(false);
+        // a wall block whole, a passage untouched
+        expect(blocked.has(`${10 + gx * 2 + dx},${10 + gy * 2 + dy}`), `block ${gx},${gy}`).toBe(ch === "B");
       }
     }));
+    // the two rooms of the plan are 2×2 cells each, walled all round
+    for (const room of [[12, 12], [16, 12]] as [number, number][]) expect(reach(blocked, room, [6, 6, 24, 24]).size).toBe(4);
   });
 
-  it("closes a joint with towers alone when the mod has no one-cell walls: one inside every turn", () => {
+  it("sealed, in a mod with no one-cell walls: the joint is four towers", () => {
     const only2x2 = CATALOG.filter((e) => !THIN.has(e.id) && !FENCE.has(e.id));
-    const bare = decode("wall_maze", PLAN, only2x2);
-    // a corner has one turn, a tee two, a tip none (it gets a single tower all the same)
-    expect(bare.filter((p) => p.id === TOWER)).toHaveLength(3 * 1 + 3 * 2 + 1);
-    expect(bare.every((p) => p.id === TOWER || FORTRESS.has(p.id))).toBe(true);
-    // the top-left corner turns from east to south: its tower stands in the cell between them
-    expect(bare.filter((p) => p.x < 12 && p.y < 12).map((p) => [p.x, p.y])).toEqual([[11, 11]]);
-    for (const room of [[12, 12], [16, 12]] as [number, number][]) expect(reach(covered(bare), room, [6, 6, 24, 24]).size).toBe(4);
+    const heavy = decode("wall_maze", PLAN, only2x2);
+    expect(heavy.filter((p) => p.id === TOWER)).toHaveLength(JOINTS * 4);
+    expect(covered(heavy).size).toBe(covered(placed).size); // every block whole all the same
+  });
+
+  it("for looks: towers alone, one inside every turn — no rubble, and still no way through", () => {
+    const only2x2 = CATALOG.filter((e) => !THIN.has(e.id) && !FENCE.has(e.id));
+    for (const catalog of [CATALOG, only2x2]) {
+      const light = decode("wall_maze", PLAN, catalog, 0, false);
+      // a corner has one turn, a tee two, a tip none (it gets a single tower all the same)
+      expect(light.filter((p) => p.id === TOWER)).toHaveLength(3 * 1 + 3 * 2 + 1);
+      expect(light.every((p) => p.id === TOWER || FORTRESS.has(p.id))).toBe(true);
+      // the top-left corner turns from east to south: its tower stands in the cell between them
+      expect(light.filter((p) => p.x < 12 && p.y < 12).map((p) => [p.x, p.y])).toEqual([[11, 11]]);
+      expect(covered(light).size).toBeLessThan(covered(placed).size); // lighter than the sealed one
+      for (const room of [[12, 12], [16, 12]] as [number, number][]) expect(reach(covered(light), room, [6, 6, 24, 24]).size).toBe(4);
+    }
     // a crossing closes all four of its turns
-    const cross = decode("wall_maze", ["BBBBB", "B.B.B", "BBBBB", "B.B.B", "BBBBB"], only2x2);
+    const cross = decode("wall_maze", ["BBBBB", "B.B.B", "BBBBB", "B.B.B", "BBBBB"], CATALOG, 0, false);
     expect(cross.filter((p) => p.id === TOWER && p.x >= 14 && p.x < 16 && p.y >= 14 && p.y < 16)).toHaveLength(4);
     for (const room of [[12, 12], [16, 12], [12, 16], [16, 16]] as [number, number][]) expect(reach(covered(cross), room, [6, 6, 24, 24]).size).toBe(4);
   });
@@ -301,6 +302,61 @@ describe("the palisade (one-cell)", () => {
     // the corner towers of a maze are of one kind, the gate posts of another
     expect(new Set([at(placed, 6, 0), at(placed, 0, 4), at(placed, 6, 4)]).size).toBe(1);
     expect(at(placed, 3, 0)).not.toBe(at(placed, 6, 4));
+  });
+});
+
+describe("sealed or for looks: the one-cell mazes are built the same, every wall cell taken", () => {
+  // a closed ring with tees, a crossing, a free tip, two lone posts — and a room with no door
+  const ROWS = [
+    "BBBBBBBBB",
+    "B...B...B",
+    "BBBBBBB.B",
+    "B...B...B",
+    "B.B.B.B.B",
+    "B.......B",
+    "BBBBBBBBB",
+  ];
+  const WALLS = ROWS.join("").split("B").length - 1;
+  for (const recipeId of ["wall_maze_fence", "wall_maze_thin"]) {
+    for (const catalog of [CATALOG, RICH]) {
+      it(`${recipeId}, ${catalog === RICH ? "the full" : "a bare"} catalogue`, () => {
+        const sealed = decode(recipeId, ROWS, catalog, 3, true);
+        const light = decode(recipeId, ROWS, catalog, 3, false);
+        expect(light).toEqual(sealed);
+        expect(sealed).toHaveLength(WALLS); // one piece on every wall cell: joints, tips, the lone post
+        const blocked = covered(sealed);
+        ROWS.forEach((row, gy) => [...row].forEach((ch, gx) => expect(blocked.has(`${10 + gx},${10 + gy}`), `${gx},${gy}`).toBe(ch === "B")));
+        // the room in the top left has no door: a walker inside stays inside, diagonals and all…
+        expect(reach(blocked, [11, 11], [6, 6, 22, 20]).size).toBe(3);
+        // … and one in the rest of the yard walks all of it, and never gets out of the ring
+        const open = ROWS.join("").split(".").length - 1;
+        expect(reach(blocked, [15, 11], [6, 6, 22, 20]).size).toBe(open - 3);
+      });
+    }
+  }
+});
+
+describe("what the decode reports", () => {
+  it("counts the wall blocks it could not build because something stands there", () => {
+    const report = { gaps: 0 };
+    const taken = new Set(["12,10", "13,10", "10,14"]); // inside two blocks of the fortress plan
+    const ops = decodeGrid(doc, grid(PLAN), DECODE_TABLES.wall_maze!, { x: 10, y: 10, w: 10, h: 10 },
+      buildWallSet(CATALOG as never), undefined, false, undefined, 2, taken, 0, { report });
+    expect(report.gaps).toBe(2);
+    const placed = ops.filter((o) => o.kind === "addObject").map((o) => (o as { object: { pos: { x: number; y: number } } }).object.pos);
+    expect(placed.some((p) => (p.x === 12 || p.x === 13) && (p.y === 10 || p.y === 11))).toBe(false); // nothing is built over it
+    // and with nothing in the way there is nothing to report
+    const clean = { gaps: 0 };
+    decodeGrid(doc, grid(PLAN), DECODE_TABLES.wall_maze_fence!, { x: 10, y: 10, w: 5, h: 5 }, buildWallSet(CATALOG as never),
+      undefined, false, undefined, 1, undefined, 0, { report: clean });
+    expect(clean.gaps).toBe(0);
+  });
+
+  it("does not count a wall that would stand off the map", () => {
+    const report = { gaps: 0 };
+    decodeGrid(doc, grid(["BBBB"]), DECODE_TABLES.wall_maze_fence!, { x: 46, y: 5, w: 4, h: 1 }, buildWallSet(CATALOG as never),
+      undefined, false, undefined, 1, undefined, 0, { report });
+    expect(report.gaps).toBe(0);
   });
 });
 

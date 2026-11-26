@@ -670,6 +670,8 @@ export async function registerMapRoutes(
         ? Math.max(AMOUNT_MIN, Math.min(AMOUNT_MAX, body.amount))
         : 1;
     const stroke = body.stroke === true && !!mask;
+    // a maze is an obstacle unless it is asked for looks only
+    const sealed = body.sealed !== false;
     // Collab id slot (M4): the client sends the slot the room assigned it, so landmark ids
     // this generation mints fall in that slot's disjoint band (no collision with a peer's
     // concurrent generation). nextTypedId clamps an out-of-range/absent slot to 0.
@@ -677,9 +679,11 @@ export async function registerMapRoutes(
     const t0 = Date.now();
     const mod = await modFor(id);
     let ops;
+    const built = { wallGaps: 0 };
+    const isMaze = recipeCatalog().some((r) => r.id === recipeId && r.walls);
     try {
       const { walls, decor, landmarkSizes } = await mod.catalogSets();
-      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed, amount, followMask: stroke }], walls, seed, mask, protect, decor, landmarkSizes, genSlot);
+      ops = await runGenerationSteps(liveDoc, [{ recipeId, region, seed, amount, followMask: stroke, sealed }], walls, seed, mask, protect, decor, landmarkSizes, genSlot, built);
     } catch (e) {
       return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
     }
@@ -693,6 +697,7 @@ export async function registerMapRoutes(
       recipe: recipeId,
       seed,
       amount,
+      ...(isMaze ? { sealed, wallGaps: built.wallGaps } : {}),
       protect,
       protectedInRegion: protect ? countProtected(liveDoc, region, mask) : undefined,
       validation: { ok: report.ok, identity: report.identity, semantic: report.semantic.ok, structural: report.structural.ok },

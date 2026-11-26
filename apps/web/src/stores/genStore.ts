@@ -40,6 +40,10 @@ export interface GenRequest {
 export interface GenSession extends GenRequest {
   /** How much the recipe makes, relative to its stock amount (1). */
   amount: number;
+  /** A maze: its walls are an obstacle (true) or for looks only (false). */
+  sealed: boolean;
+  /** A maze: wall blocks the variant on the map could not build (the place was taken). */
+  wallGaps: number;
   /** The seed of every variant tried, oldest first. */
   seeds: number[];
   /** Which of them is on the map now. */
@@ -68,6 +72,16 @@ const groupOf = (id: string): { id: string; title: string; icon: string } =>
   GEN_GROUPS.find((g) => g.id === id) ?? { id, title: id, icon: "✦" };
 
 const newSeed = (): number => Math.floor(Math.random() * 0x7fffffff);
+
+/** localStorage: "0" = mazes are built for looks only. */
+const SEALED_KEY = "d2.gen.sealed";
+function readSealed(): boolean {
+  try {
+    return window.localStorage.getItem(SEALED_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 export const useGenStore = defineStore("gen", () => {
   const edit = useEditStore();
@@ -115,6 +129,15 @@ export const useGenStore = defineStore("gen", () => {
   const busy = ref(false);
   /** The amount a NEW generation starts with (the palette's control; sticky). */
   const amount = ref(1);
+  /** How a NEW maze is built: its walls an obstacle (true), or for looks only. Remembered. */
+  const sealed = ref(readSealed());
+  watch(sealed, (v) => {
+    try {
+      window.localStorage.setItem(SEALED_KEY, v ? "1" : "0");
+    } catch {
+      /* storage blocked: the choice lasts for this page */
+    }
+  });
   /** editStore.historyTick right after OUR last commit/undo: while it is unchanged, the
    *  user's latest action is still the variant on the map. */
   let ownTick = -1;
@@ -139,9 +162,11 @@ export const useGenStore = defineStore("gen", () => {
     const report = await edit.generate(s.recipeId, s.region, seed, s.cells, s.protect, {
       amount: s.amount,
       stroke: s.stroke,
+      sealed: s.sealed,
     });
     s.valid = !!report?.ok;
     s.opCount = report?.ok ? (edit.genDebug?.opCount ?? 0) : 0;
+    s.wallGaps = report?.ok ? (edit.genDebug?.wallGaps ?? 0) : 0;
     ownTick = edit.historyTick;
     return report;
   }
@@ -166,6 +191,8 @@ export const useGenStore = defineStore("gen", () => {
       const s: GenSession = {
         ...req,
         amount: opts.amount ?? amount.value,
+        sealed: sealed.value,
+        wallGaps: 0,
         seeds: [seed],
         index: 0,
         opCount: 0,
@@ -226,6 +253,15 @@ export const useGenStore = defineStore("gen", () => {
     });
   }
 
+  /** The same maze (same seed) with its walls built the other way. Also the choice for the next one. */
+  function rewall(value: boolean): Promise<boolean> {
+    sealed.value = value;
+    return swap((s) => {
+      s.sealed = value;
+      return s.seeds[s.index]!;
+    });
+  }
+
   /** Remove the variant from the map and end the session. */
   function discard(): void {
     const s = session.value;
@@ -240,7 +276,7 @@ export const useGenStore = defineStore("gen", () => {
 
   return {
     catalog, groups, drawable, loadCatalog, infoOf, titleOf, iconOf,
-    session, busy, amount,
-    run, another, step, retune, discard, keep,
+    session, busy, amount, sealed,
+    run, another, step, retune, rewall, discard, keep,
   };
 });

@@ -1049,6 +1049,11 @@ const amountOptions = AMOUNT_STEPS.map((value, i) => ({ value, label: ["−−",
 function onAmount(v: string | number | boolean): void {
   gen.amount = Number(v);
 }
+/** The palette's choice for a NEW maze: its walls an obstacle, or for looks only. */
+const wallOptions = [{ value: true, label: tr("🔒 наглухо") }, { value: false, label: tr("👁 только вид") }];
+function onWalls(v: string | number | boolean): void {
+  gen.sealed = v === true;
+}
 
 /** ↻ in the bar: another variant of the generation being tried, or (LLM) ask again. */
 async function retry(): Promise<void> {
@@ -1206,6 +1211,11 @@ watch(
             <span>{{ tr("Сколько:") }}</span>
             <el-segmented :model-value="gen.amount" :options="amountOptions" size="small" @change="onAmount" />
             <span class="cp-pal-hint">{{ tr("для плиток с ±") }}</span>
+          </div>
+          <div class="cp-pal-amount">
+            <span>{{ tr("Лабиринт:") }}</span>
+            <el-segmented :model-value="gen.sealed" :options="wallOptions" size="small" @change="onWalls" />
+            <span class="cp-pal-hint" :title="tr('Наглухо — стены служат преградой: каждый стык закрыт целиком. Только вид — стыки легче и чище, но без гарантии, что отряд нигде не просочится.')">ⓘ</span>
           </div>
         </div>
         <div class="cp-ex-scroll">

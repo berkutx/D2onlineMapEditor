@@ -797,15 +797,16 @@ export const useEditStore = defineStore("edit", () => {
     seed?: number,
     cells?: [number, number][] | null,
     protect?: boolean,
-    /** how much the recipe makes (1 = stock) and whether `cells` is a drawn shape to follow */
-    opts: { amount?: number; stroke?: boolean } = {},
+    /** how much the recipe makes (1 = stock), whether `cells` is a drawn shape to follow, and —
+     *  for a maze — whether its walls are an obstacle (the default) or for looks only */
+    opts: { amount?: number; stroke?: boolean; sealed?: boolean } = {},
   ): Promise<ValidationReport | null> {
     if (!project.value || readOnly.value) return null;
     busy.value = true;
     try {
       const res = await generateRegion(
         project.value.baseScenarioId, project.value, recipeId, region, seed, cells, protect, collabSlot,
-        opts.amount, opts.stroke,
+        opts.amount, opts.stroke, opts.sealed,
       );
       report.value = res.report;
       genDebug.value = res.debug ?? null;

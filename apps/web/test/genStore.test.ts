@@ -171,13 +171,69 @@ for (const collab of [false, true]) {
   });
 }
 
+describe("a maze: an obstacle, or for looks only", () => {
+  const MAZE: GenRequest = { ...REQ, recipeId: "wall_maze" };
+  /** how the last request asked for the walls */
+  const asked = (): unknown => generateRegion.mock.calls.at(-1)![10];
+
+  it("is sealed unless told otherwise", async () => {
+    const { gen } = setup(false);
+    expect(gen.sealed).toBe(true);
+    await gen.run(MAZE);
+    expect(asked()).toBe(true);
+    expect(gen.session).toMatchObject({ sealed: true, wallGaps: 0 });
+  });
+
+  it("builds the same maze the other way, from the same seed, and keeps the choice for the next one", async () => {
+    const { gen, onMap } = setup(false);
+    await gen.run(MAZE);
+    const seed = gen.session!.seeds[0]!;
+    expect(await gen.rewall(false)).toBe(true);
+    expect(asked()).toBe(false);
+    expect(generateRegion.mock.calls.at(-1)![4]).toBe(seed);
+    expect(gen.session).toMatchObject({ sealed: false, seeds: [seed], index: 0 });
+    expect(onMap()).toBe(`v${seed}x1`); // one variant on the map, not two
+    expect(gen.sealed).toBe(false);
+    // another variant, and a new session, are built the way that was chosen
+    await gen.another();
+    expect(asked()).toBe(false);
+    gen.keep();
+    await gen.run(MAZE);
+    expect(asked()).toBe(false);
+    expect(gen.session!.sealed).toBe(false);
+  });
+
+  it("carries the gaps the server found in the wall", async () => {
+    generateRegion.mockImplementationOnce(async (_id, _project, _recipe, _region, seed) => ({
+      ops: [{ kind: "patchPlayer", id: "PL1", fields: { name: "gappy" } }],
+      report: OK,
+      debug: { serverMs: 1, opCount: 1, seed, sealed: true, wallGaps: 3, validation: { ok: true, identity: true, semantic: true, structural: true } },
+    }) as never);
+    const { gen } = setup(false);
+    await gen.run(MAZE);
+    expect(gen.session!.wallGaps).toBe(3);
+    await gen.another(); // the next variant found none
+    expect(gen.session!.wallGaps).toBe(0);
+  });
+
+  it("the session ends as any other when the user edits the map: nothing is rebuilt", async () => {
+    const { edit, gen } = setup(false);
+    await gen.run(MAZE);
+    edit.commit([{ kind: "patchPlayer", id: "PL2", fields: { name: "mine" } }]);
+    await nextTick();
+    const calls = generateRegion.mock.calls.length;
+    expect(await gen.rewall(false)).toBe(false);
+    expect(generateRegion.mock.calls.length).toBe(calls);
+  });
+});
+
 describe("what a generation request carries", () => {
   it("tells the server whether the mask was drawn, and to protect existing relief", async () => {
     const { gen } = setup(false);
     const cells: [number, number][] = [[1, 1], [2, 1]];
     await gen.run({ ...REQ, cells, stroke: true, protect: true }, { amount: 0.75, seed: 42 });
     const call = generateRegion.mock.calls.at(-1)!;
-    expect(call.slice(2)).toEqual(["relief_ridge", REQ.region, 42, cells, true, 0, 0.75, true]);
+    expect(call.slice(2)).toEqual(["relief_ridge", REQ.region, 42, cells, true, 0, 0.75, true, true]);
     expect(gen.session).toMatchObject({ seeds: [42], stroke: true, protect: true, amount: 0.75 });
   });
 

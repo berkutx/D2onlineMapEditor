@@ -388,6 +388,26 @@ function wallPiece(mask: number, pieces: WallPieces): string | undefined {
   return NE[0] ?? NW[0];
 }
 
+/** How a wall recipe (a maze) is built. */
+export interface MazeBuild {
+  /** Which of its looks it takes: the art set (stone or mossy stone) and the buildings on the
+   *  joints. The server passes the seed, so «another variant» is another maze in another
+   *  dress; 0 is the stock look. */
+  variant?: number;
+  /**
+   * true (the default): the walls are an OBSTACLE. Every cell of every wall block holds a
+   * piece — a joint of a fortress is its tower and three pieces of wall around it, never a
+   * free cell — so nothing passes anywhere but the entrances, whatever the game's rules for a
+   * diagonal step are. false: the maze is for LOOKS. A joint is as light as it can be and still
+   * read as closed (towers alone, inside each turn); no cell is spent on a block that only
+   * plugs a gap, and no promise is made that a party cannot squeeze through somewhere.
+   */
+  sealed?: boolean;
+  /** Filled by the decode: `gaps` = wall blocks it could NOT build, because something stands
+   *  there already or the terrain is protected — where even a sealed maze lets through. */
+  report?: { gaps: number };
+}
+
 /**
  * Decode `grid` into EditOps, offset by `region`. Terrain symbols become `setCell`;
  * wall symbols become landmark objects auto-oriented by their wall neighbours. Cells
@@ -417,11 +437,12 @@ export function decodeGrid(
   /** Collab id slot (M4): landmark ids are minted in this slot's disjoint band so two clients
    *  generating CONCURRENTLY never collide. 0 = solo / offline (the low band). */
   slot = 0,
-  /** Which of its looks a wall recipe takes: the art set (stone or mossy stone) and the
-   *  buildings on the joints. The server passes the seed, so «another variant» is another maze
-   *  in another dress; 0 is the stock look. */
-  variant = 0,
+  /** How a wall recipe is built — see {@link MazeBuild}. */
+  maze: MazeBuild = {},
 ): EditOp[] {
+  const variant = maze.variant ?? 0;
+  // sealed unless asked otherwise: a maze is an obstacle first
+  const sealed = maze.sealed !== false;
   const n = doc.size;
   const inb = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < n && y < n;
   const isProtected = (v: number): boolean => ((v >> 3) & 7) === 3 || v === 37;
@@ -482,6 +503,8 @@ export function decodeGrid(
       if (action.kind === "wall") {
         wallShape = action.shape;
         if (fits(ax, ay, scale, scale)) wallCells.add(`${ax},${ay}`);
+        // a block on the map that the wall cannot take (off the map nobody walks anyway)
+        else if (maze.report && inb(ax, ay) && inb(ax + scale - 1, ay + scale - 1)) maze.report.gaps++;
       } else if (action.kind === "mountain") {
         if (fits(ax, ay, 1, 1)) mountainCells.push({ x: ax, y: ay });
       } else if (action.kind === "road") {
@@ -583,31 +606,29 @@ export function decodeGrid(
           if (piece) place(x, y, piece);
           continue;
         }
-        // ONE tower per joint. It stands in the block's FRONT cell (drawn over the rest) and
-        // one-cell walls of the same stone close the cells an arm runs into, each turned
-        // along its arm — a lone tower would leave a walk-through gap between the arms. A
-        // cell no arm touches (the outside of a corner, the tip of a wall) stays empty: it
-        // leads nowhere, and a stray block of wall beside the tower only looked like litter.
-        // Without one-cell walls in the mod towers alone close the joint: one in every cell
-        // that lies BETWEEN two arms — the inside of a turn. The walls are two cells thick, so
-        // that cell touches both of them and no way is left, while the rest of the block
-        // stays open ground (four towers on every joint stood in bunches).
+        // SEALED: the whole block is built. ONE tower, in the block's FRONT cell (drawn over
+        // the rest), and one-cell walls of the same stone in the other three — a straight
+        // along the arm a cell touches, a corner block where it touches two or none. Without
+        // one-cell walls in the mod the block is four towers. Heavy, and beyond doubt.
+        // FOR LOOKS: towers alone, one in every cell that lies BETWEEN two arms — the inside
+        // of a turn. The walls are two cells thick, so that cell touches both of them and the
+        // joint reads as closed, while the rest of the block stays open ground: no rubble
+        // beside the tower, no bunch of four.
         const front = scale - 1;
-        if (scale === 2 && thin && wallComplete(thin)) {
+        if (sealed && scale === 2 && thin && wallComplete(thin)) {
           for (let dy = 0; dy < scale; dy++) {
             for (let dx = 0; dx < scale; dx++) {
               if (dx === front && dy === front) continue;
               const alongNS = dy === 0 ? !!(m & 1) : !!(m & 4); // the arm above / below this cell
               const alongEW = dx === 0 ? !!(m & 8) : !!(m & 2); // the arm to its left / right
-              if (!alongNS && !alongEW) continue;
               const piece = alongNS !== alongEW
                 ? wallPiece(alongNS ? 1 : 2, thin) // one arm: a straight along it
-                : thin.corner[(dx + dy) % thin.corner.length]; // both: a corner block
+                : thin.corner[(dx + dy) % thin.corner.length]; // both or none: a corner block
               if (piece) place(x + dx, y + dy, piece);
             }
           }
           place(x + front, y + front, tower);
-        } else if (scale === 2) {
+        } else if (!sealed && scale === 2) {
           const inside: [number, number][] = [];
           if (m & 1 && m & 2) inside.push([1, 0]); // north and east
           if (m & 2 && m & 4) inside.push([1, 1]); // east and south

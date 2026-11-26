@@ -312,6 +312,8 @@ export async function generateRegion(
   amount?: number,
   /** `cells` is a shape the user DREW (to be followed), not a mask that only clips. */
   stroke?: boolean,
+  /** A maze: false = build its walls for looks only; absent / true = an obstacle. */
+  sealed?: boolean,
 ): Promise<GenerateResult> {
   // pure computation (ops are only committed client-side afterwards) — retry-safe.
   // `slot` = my collab id band (M4): landmark ids mint in it so a peer's concurrent
@@ -321,6 +323,7 @@ export async function generateRegion(
     slot: slot || undefined,
     amount: amount !== undefined && amount !== 1 ? amount : undefined,
     stroke: stroke || undefined,
+    sealed: sealed === false ? false : undefined,
   });
 }
 
