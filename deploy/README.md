@@ -222,9 +222,12 @@ What is there (2026-11-26):
 | mod | files | taken from the install |
 |---|---|---|
 | `semga-2` | 52 maps, 19 sagas | `Campaign/<saga>/*.sg`, `Campaign/*.csg` — not the restart copies in `Campaign/На случай бага` and `Campaign/Восстание Эльфов (…)`, not `SaveGame` |
-| `smns3` | 15 sagas | `Campaign/*.csg` without the two «Новая сага…» test files |
+| `smns3` | none | — |
 | `nazar-legacy` | 20 maps | `Exports/*.sg` |
 
+- SMNS 3.0 is a PvP mod with no sagas of its own. The sagas in its install's `Campaign` folder
+  are fan sagas made for the base game and other mods; they were put on the site by mistake and
+  deleted the same day (2026-11-26). Its folder stays, empty, for the mod's own maps.
 - The Сёмга family's maps are kept once, under its newest version `semga-2`.
 - `semga-2` is a closed beta and hidden (`HIDDEN_MODS`, see the toggles below): its 52 maps and
   19 sagas stay in its folder but are not listed. «История демона» opens on `semga`.
