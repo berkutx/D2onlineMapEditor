@@ -19,6 +19,9 @@
  *
  * So a guard gets a leader, melee units in front, archers / mages / support behind, and — when
  * there is more than one unit and the roles allow — somebody in each line.
+ *
+ * The guards of a ruin and the defense of a city are the same six cells with NO leader in them
+ * (nobody walks, so nobody needs a figure): `leaderless` composes those out of soldiers alone.
  */
 
 /** What the composer needs of a unit: a subset of the mod's unit catalogue entry. */
@@ -118,6 +121,9 @@ export interface GuardOptions {
   leader?: string;
   /** unit ids never to take (the mapmaker struck them out) */
   exclude?: readonly string[];
+  /** a garrison — the guards of a ruin, the defense of a city: soldiers only, nobody leads,
+   *  all six cells are free (`leaderCell` of the result is −1) */
+  leaderless?: boolean;
 }
 
 export interface GuardMember {
@@ -133,6 +139,7 @@ export interface GuardMember {
 export interface GuardResult {
   /** six formation cells; a big unit is the SAME member in both cells of its row */
   cells: (GuardMember | null)[];
+  /** the cell of the leader (the front one for a big leader); −1 for a leaderless garrison */
   leaderCell: number;
   /** the stack's strength: Σ xp of its units (≤ the budget whenever any stack fits it) */
   strength: number;
@@ -142,7 +149,8 @@ export interface GuardResult {
   count: number;
   /** subraces met in the stack, ascending */
   subraces: number[];
-  /** true when even the cheapest leader alone is above the budget (so `strength` is too) */
+  /** true when even the cheapest leader alone (the cheapest soldier, for a garrison) is above
+   *  the budget (so `strength` is too) */
   overBudget: boolean;
 }
 
@@ -217,7 +225,7 @@ const ROW_ORDER = [1, 0, 2]; // the middle row first: that is where a leader usu
 const ATTEMPTS = 80;
 
 interface Draft {
-  leader: Cand;
+  leader: Cand | null;
   others: Cand[];
   total: number;
 }
@@ -237,7 +245,8 @@ const inBack = (m: Cand): boolean => m.big || !m.front;
 
 /**
  * Compose a guard. Returns null only when the mod has no unit that may lead one under the
- * given options (no leader of the chosen subrace and roles).
+ * given options (no leader of the chosen subrace and roles) — for a leaderless garrison, no
+ * soldier to take.
  */
 export function composeGuard(units: readonly GuardUnitInfo[], opts: GuardOptions): GuardResult | null {
   const budget = Math.max(1, Math.floor(opts.budget));
@@ -265,18 +274,24 @@ export function composeGuard(units: readonly GuardUnitInfo[], opts: GuardOptions
     if (!roles.has(c.role)) continue;
     (kind === "leader" ? leaders : soldiers).push(c);
   }
-  if (kept) leaders = [kept];
-  if (!leaders.length) return null;
+  const leaderless = !!opts.leaderless;
+  if (kept && !leaderless) leaders = [kept];
+  if (leaderless ? !soldiers.length : !leaders.length) return null;
   // a stable order, so the result depends on the seed and not on how the catalogue was sorted
   const byId = (a: Cand, b: Cand): number => (a.u.id < b.u.id ? -1 : a.u.id > b.u.id ? 1 : 0);
   leaders.sort(byId);
   soldiers.sort(byId);
 
   const rand = rng(opts.seed);
-  const cheapestLeader = leaders.reduce((a, b) => (b.xp < a.xp ? b : a));
-  const overBudget = cheapestLeader.xp > budget;
+  // whoever a guard starts with: its leader, or — in a garrison — any soldier
+  const starters = leaderless ? soldiers : leaders;
+  const cheapestStarter = starters.reduce((a, b) => (b.xp < a.xp ? b : a));
+  const overBudget = cheapestStarter.xp > budget;
+  const alone: Draft = leaderless
+    ? { leader: null, others: [cheapestStarter], total: cheapestStarter.xp }
+    : { leader: cheapestStarter, others: [], total: cheapestStarter.xp };
 
-  const subracesWithLeader = [...new Set(leaders.filter((l) => l.xp <= budget).map((l) => l.u.subraceId))].sort((a, b) => a - b);
+  const subracesAble = [...new Set(starters.filter((c) => c.xp <= budget).map((c) => c.u.subraceId))].sort((a, b) => a - b);
 
   let best: Draft | null = null;
   let bestScore = Infinity;
@@ -284,26 +299,38 @@ export function composeGuard(units: readonly GuardUnitInfo[], opts: GuardOptions
     // ---- whose guard it is
     let pool = soldiers;
     let heads = leaders;
-    if (subrace === "one" && subracesWithLeader.length) {
-      const sid = subracesWithLeader[Math.floor(rand() * subracesWithLeader.length)] as number;
+    if (subrace === "one" && subracesAble.length) {
+      const sid = subracesAble[Math.floor(rand() * subracesAble.length)] as number;
       heads = leaders.filter((l) => l.u.subraceId === sid);
       pool = soldiers.filter((s) => s.u.subraceId === sid);
     }
-    const affordable = heads.filter((l) => l.xp <= budget);
-    if (!affordable.length) {
-      if (!best) { best = { leader: cheapestLeader, others: [], total: cheapestLeader.xp }; bestScore = 1e9; }
+    // ---- how many units
+    const wanted = Number(pickWeighted([1, 2, 3, 4, 5, 6].filter((n) => n <= maxUnits), (n) => COUNT_WEIGHTS[n] ?? 1, rand) ?? 1);
+    const members: Cand[] = [];
+    let leader: Cand | null = null;
+    let slotCap = 6;
+    let left = budget;
+    if (!leaderless) {
+      // ---- the leader: a share of the budget a little above an even one
+      const affordable = heads.filter((l) => l.xp <= budget);
+      if (!affordable.length) {
+        if (!best) { best = alone; bestScore = 1e9; }
+        continue;
+      }
+      leader = pickWeighted(affordable, (l) => closeness(l.xp, (budget / wanted) * 1.3), rand) as Cand;
+      slotCap = Math.max(leader.u.leadership && leader.u.leadership > 0 ? leader.u.leadership : 6, leader.slots);
+      members.push(leader);
+      left -= leader.xp;
+    } else if (!pool.some((c) => c.xp <= budget)) {
+      if (!best) { best = alone; bestScore = 1e9; }
       continue;
     }
-    // ---- how many units, and the leader: a share of the budget a little above an even one
-    const wanted = Number(pickWeighted([1, 2, 3, 4, 5, 6].filter((n) => n <= maxUnits), (n) => COUNT_WEIGHTS[n] ?? 1, rand) ?? 1);
-    const leader = pickWeighted(affordable, (l) => closeness(l.xp, (budget / wanted) * 1.3), rand) as Cand;
-    const slotCap = Math.max(leader.u.leadership && leader.u.leadership > 0 ? leader.u.leadership : 6, leader.slots);
-    const members: Cand[] = [leader];
-    let left = budget - leader.xp;
+    /** the first member that is not the leader */
+    const first = members.length;
 
     // ---- the rest, one by one: each about an even share of what is left
     const cheapest = pool.length ? pool.reduce((a, b) => (b.xp < a.xp ? b : a)).xp : Infinity;
-    for (let i = 1; i < wanted && left >= cheapest; i++) {
+    for (let i = first; i < wanted && left >= cheapest; i++) {
       const still = wanted - i; // units yet to take, this one included
       const share = left / still;
       const needFront = !members.some(inFront);
@@ -321,7 +348,7 @@ export function composeGuard(units: readonly GuardUnitInfo[], opts: GuardOptions
 
     // ---- spend what is left: swap a unit for a stronger one of the same line and size
     for (let pass = 0; pass < 12 && left > 0; pass++) {
-      const idx = 1 + Math.floor(rand() * Math.max(1, members.length - 1));
+      const idx = first + Math.floor(rand() * Math.max(1, members.length - first));
       const cur = members[idx];
       if (!cur) break;
       const rest = members.filter((_, k) => k !== idx);
@@ -342,10 +369,10 @@ export function composeGuard(units: readonly GuardUnitInfo[], opts: GuardOptions
 
     // ---- how good this one is: budget left unspent, a line left empty, a lonely leader
     const total = budget - left;
-    const others = members.slice(1);
+    const others = members.slice(first);
     let score = left / budget;
-    const canFront = inFront(leader) || pool.some(inFront);
-    const canBack = inBack(leader) || pool.some(inBack);
+    const canFront = (!!leader && inFront(leader)) || pool.some(inFront);
+    const canBack = (!!leader && inBack(leader)) || pool.some(inBack);
     if (members.length > 1 && canFront && canBack && !(members.some(inFront) && members.some(inBack))) score += 1;
     if (members.length === 1 && maxUnits > 1 && cheapest <= left) score += 0.5;
     if (score < bestScore) { best = { leader, others, total }; bestScore = score; }
@@ -355,6 +382,7 @@ export function composeGuard(units: readonly GuardUnitInfo[], opts: GuardOptions
   if (!best) return null;
 
   // ---- formation: the leader in the middle row, big units next, then the rest by strength
+  // (with no leader the strongest take the middle)
   const cells: (GuardMember | null)[] = [null, null, null, null, null, null];
   const member = (c: Cand): GuardMember => ({ unit: c.u.id, level: c.level, hp: c.hp, xp: c.xp, role: c.role, big: c.big });
   const place = (c: Cand): number => {
@@ -369,7 +397,7 @@ export function composeGuard(units: readonly GuardUnitInfo[], opts: GuardOptions
     }
     return -1;
   };
-  const leaderCell = place(best.leader);
+  const leaderCell = best.leader ? place(best.leader) : -1;
   const rest = [...best.others].sort((a, b) => Number(b.big) - Number(a.big) || b.xp - a.xp || byId(a, b));
   for (const c of rest) place(c);
 
@@ -396,8 +424,9 @@ export function guardBudgetRange(units: readonly GuardUnitInfo[], opts: Omit<Gua
     if (!kind || (u.water && !opts.onWater)) continue;
     if (typeof opts.subrace === "number" && u.subraceId !== opts.subrace) continue;
     if (!roles.has(guardRole(u))) continue;
+    if (opts.leaderless && kind === "leader") continue; // a garrison is soldiers only
     const xp = unitAtLevel(u, opts.level).xp;
-    if (kind === "leader") min = Math.min(min, xp);
+    if (kind === (opts.leaderless ? "soldier" : "leader")) min = Math.min(min, xp);
     tops.push(xp);
   }
   if (!Number.isFinite(min)) return null;
@@ -478,4 +507,31 @@ export function composeLoot(items: readonly LootItemInfo[], opts: LootOptions): 
   }
   best.sort((a, b) => b.gold - a.gold || (a.id < b.id ? -1 : 1));
   return { items: best.map((it) => it.id), value: best.reduce((s, it) => s + it.gold, 0) };
+}
+
+export interface RuinReward {
+  /** the artifact of the ruin (an item template id), or null when nothing fits */
+  item: string | null;
+  /** gold for the rest of the value */
+  gold: number;
+  /** gold of the item + `gold` */
+  value: number;
+}
+
+/** The CASH field of a ruin holds four digits of gold. */
+const RUIN_GOLD_CAP = 9999;
+
+/**
+ * A ruin gives ONE item and cash. Split the wanted value between them: an item for a share of it
+ * (from two fifths to all of it — the share comes with the variant), the rest in gold, so the two
+ * together come to the value asked (as far as four digits of gold allow).
+ */
+export function composeRuinReward(items: readonly LootItemInfo[], opts: Omit<LootOptions, "maxItems">): RuinReward {
+  const budget = Math.max(0, Math.floor(opts.budget));
+  const rand = rng(opts.seed ^ 0x2f6e2b1);
+  const share = 0.4 + 0.6 * rand();
+  const loot = composeLoot(items, { ...opts, budget: Math.round(budget * share), maxItems: 1 });
+  const item = loot.items[0] ?? null;
+  const gold = Math.min(RUIN_GOLD_CAP, budget - loot.value);
+  return { item, gold, value: loot.value + gold };
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   composeGuard,
   composeLoot,
+  composeRuinReward,
   guardBudgetRange,
   guardRole,
   unitAtLevel,
@@ -352,5 +353,132 @@ describe("composeLoot", () => {
   });
   it("respects the number of items asked for", () => {
     for (const seed of SEEDS) expect(composeLoot(items, { budget: 3000, seed, maxItems: 2 }).items.length).toBeLessThanOrEqual(2);
+  });
+
+  describe("composeRuinReward", () => {
+    it("one item and gold for the rest: together exactly the value asked", () => {
+      for (const budget of [300, 750, 1200, 3000]) {
+        for (const seed of SEEDS) {
+          const r = composeRuinReward(items, { budget, seed });
+          expect(r.value).toBe(budget);
+          expect(r.gold).toBeGreaterThanOrEqual(0);
+          expect(r.item).not.toBeNull();
+          expect(r.value).toBe((gold.get(r.item!) ?? 0) + r.gold);
+          expect(["QUEST", "FREE"]).not.toContain(r.item);
+        }
+      }
+    });
+    it("varies with the seed: other items, other shares of gold", () => {
+      const seen = new Set(SEEDS.map((seed) => composeRuinReward(items, { budget: 1200, seed }).item));
+      expect(seen.size).toBeGreaterThan(2);
+      expect(composeRuinReward(items, { budget: 1200, seed: 9 })).toEqual(composeRuinReward(items, { budget: 1200, seed: 9 }));
+    });
+    it("gold alone when no item is that cheap, and never more than four digits of it", () => {
+      expect(composeRuinReward(items, { budget: 40, seed: 1 })).toEqual({ item: null, gold: 40, value: 40 });
+      const rich = composeRuinReward([{ id: "TRINKET", catKey: "L_VALUABLE", gold: 100 }], { budget: 50000, seed: 1 });
+      expect(rich).toEqual({ item: "TRINKET", gold: 9999, value: 10099 });
+    });
+    it("takes the item from the categories asked", () => {
+      let taken = 0;
+      for (const seed of SEEDS) {
+        const item = composeRuinReward(items, { budget: 2000, seed, cats: ["L_ARMOR", "L_WEAPON"] }).item;
+        if (item === null) continue; // the share of this variant was below the cheapest of them
+        taken++;
+        expect(item.startsWith("ART")).toBe(true);
+      }
+      expect(taken).toBeGreaterThan(SEEDS.length / 2);
+    });
+  });
+});
+
+describe("composeGuard for a garrison (nobody leads)", () => {
+  const garrison = (opts: Omit<Parameters<typeof composeGuard>[1], "leaderless">): GuardResult => compose({ ...opts, leaderless: true });
+
+  it("is soldiers only, with no leader cell", () => {
+    for (const budget of BUDGETS) {
+      for (const seed of SEEDS) {
+        const g = garrison({ budget, seed, subrace: "mixed" });
+        expect(g.leaderCell).toBe(-1);
+        expect(g.count).toBeGreaterThan(0);
+        for (const m of members(g)) {
+          expect(info(m).catKey).toBe("L_SOLDIER");
+          expect(m.unit.startsWith("X-")).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("stays within the budget, spends most of it and varies with the seed", () => {
+    for (const budget of [120, 250, 400, 700]) {
+      const spent: number[] = [];
+      for (const seed of SEEDS) {
+        const g = garrison({ budget, seed });
+        expect(g.overBudget).toBe(false);
+        expect(g.strength).toBeLessThanOrEqual(budget);
+        spent.push(g.strength / budget);
+      }
+      spent.sort((x, y) => x - y);
+      expect(spent[0]).toBeGreaterThan(0.8);
+      expect(spent[Math.floor(spent.length / 2)]).toBeGreaterThan(0.93);
+    }
+    expect(garrison({ budget: 400, seed: 5 })).toEqual(garrison({ budget: 400, seed: 5 }));
+    expect(new Set(SEEDS.map((seed) => JSON.stringify(garrison({ budget: 400, seed }).cells.map((c) => c?.unit ?? null)))).size).toBeGreaterThan(20);
+  });
+
+  it("keeps the lines: melee in front, the rest behind, somebody in each, a big unit across", () => {
+    let pairs = 0;
+    for (const budget of BUDGETS) {
+      for (const seed of SEEDS) {
+        const g = garrison({ budget, seed });
+        g.cells.forEach((m, cell) => {
+          if (!m) return;
+          if (m.big) expect(g.cells[cell ^ 1]).toBe(m);
+          else expect(cell % 2 === 0).toBe(!!info(m).melee);
+        });
+        if (g.count < 2) continue;
+        pairs++;
+        expect(g.cells.some((m, cell) => m && cell % 2 === 0)).toBe(true);
+        expect(g.cells.some((m, cell) => m && cell % 2 === 1)).toBe(true);
+      }
+    }
+    expect(pairs).toBeGreaterThan(200);
+  });
+
+  it("may fill all six cells — no leadership holds it back — and no more than asked", () => {
+    expect(SEEDS.some((seed) => garrison({ budget: 300, seed, subrace: 3 }).count > 3)).toBe(true); // a leader of race 3 leads three
+    for (const seed of SEEDS) {
+      const slots = members(garrison({ budget: 900, seed, subrace: "mixed" })).reduce((s, m) => s + (m.big ? 2 : 1), 0);
+      expect(slots).toBeLessThanOrEqual(6);
+      expect(garrison({ budget: 900, seed, maxUnits: 2 }).count).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("honours the level, the roles, the subrace and the struck-out units like a led guard", () => {
+    for (const seed of SEEDS.slice(0, 20)) {
+      for (const m of members(garrison({ budget: 500, seed, level: 4 }))) expect(m.level).toBe(Math.max(4, info(m).level));
+      for (const m of members(garrison({ budget: 500, seed, roles: ["archer", "mage"] }))) expect(["archer", "mage"]).toContain(m.role);
+      expect(garrison({ budget: 300, seed, subrace: 2 }).subraces).toEqual([2]);
+      expect(garrison({ budget: 300, seed }).subraces).toHaveLength(1);
+      for (const m of members(garrison({ budget: 300, seed, exclude: ["S1F0", "S2F0", "S3F0"] }))) expect(["S1F0", "S2F0", "S3F0"]).not.toContain(m.unit);
+    }
+  });
+
+  it("ignores a kept leader, and a budget below the cheapest soldier gives that soldier, flagged", () => {
+    const g = garrison({ budget: 300, seed: 4, leader: "S1L1" });
+    expect(g.leaderCell).toBe(-1);
+    expect(members(g).some((m) => m.unit === "S1L1")).toBe(false);
+    const poor = garrison({ budget: 5, seed: 1 });
+    expect(poor.overBudget).toBe(true);
+    expect(poor.count).toBe(1);
+    expect(poor.strength).toBe(16); // S1M0 / S2M0: the cheapest soldiers of the roster
+  });
+
+  it("returns null when there is no soldier to take", () => {
+    expect(composeGuard(units.filter((u) => u.catKey !== "L_SOLDIER"), { budget: 400, seed: 1, leaderless: true })).toBeNull();
+    expect(composeGuard(units, { budget: 400, seed: 1, leaderless: true, subrace: 77 })).toBeNull();
+  });
+
+  it("guardBudgetRange starts at the cheapest soldier", () => {
+    expect(guardBudgetRange(units, { leaderless: true })).toEqual({ min: 16, max: 220 + 220 + 180 + 180 + 178 + 178 });
   });
 });

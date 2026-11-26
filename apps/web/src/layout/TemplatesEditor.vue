@@ -8,7 +8,7 @@
  *  the leaders roster), and the leader cell keeps LEADER/LEADER_LVL in sync. Modifiers /
  *  facing are preserved on round-trip (equipment does not exist in the template format).
  *  Edits commit as upsertTemplate/deleteTemplate ops (undoable + collab). */
-import { computed, nextTick, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { ElButton, ElScrollbar, ElEmpty, ElSelect, ElOption } from "element-plus";
 import type { StackTemplate, TemplateUnit } from "@d2/map-schema";
 import { useEventStore } from "../stores/eventStore";
@@ -16,6 +16,8 @@ import { useEditStore } from "../stores/editStore";
 import { useUnitStore } from "../stores/unitStore";
 import CommitInput from "./CommitInput.vue";
 import GarrisonEditor from "./GarrisonEditor.vue";
+import GuardBuilderDialog from "./GuardBuilderDialog.vue";
+import type { GuardApply } from "../services/guardSettings";
 import { tr, trn } from "../i18n";
 
 const store = useEventStore();
@@ -169,6 +171,20 @@ function setCell(i: number, unit: string | null): void {
     : {};
   patch({ units: uu, ...leaderFields, ...modsPatch });
 }
+/** «Охрана по бюджету» for the selected template: the composed party replaces its units, its
+ *  leader and the modifiers of the cells (they belonged to the units that are gone). A template
+ *  stores levels only — no hit points, nothing to carry. */
+const guardVisible = ref(false);
+function applyGuard(p: GuardApply): void {
+  if (!sel.value) return;
+  const units: (TemplateUnit | null)[] = [null, null, null, null, null, null];
+  p.cells.forEach((m, i) => {
+    if (m && i < 6) units[i] = m.big ? { unit: m.unit, level: m.level, big: true } : { unit: m.unit, level: m.level };
+  });
+  const leader = p.cells[p.leaderCell] ?? null;
+  patch({ units: withSizedBig(units), leader: leader?.unit ?? "", leaderLevel: leader?.level ?? 1, modifiers: [] });
+}
+
 function setCellLevel(i: number, level: number): void {
   if (!sel.value) return;
   const units = sel.value.units.slice();
@@ -241,6 +257,10 @@ function setCellMods(i: number, mods: string[]): void {
             ? tr("Лидер выбран, но не размещён в отряде — кликните ячейку, чтобы поставить его ★")
             : tr("Отряд начинается с лидера: кликните любую ячейку — сперва выбирается герой или вор ★") }}
         </p>
+        <el-button class="tpl-guard" size="small" :title="tr('Подобрать юнитов на заданную силу и добычу на заданную стоимость')" @click="guardVisible = true">
+          ⚔ {{ tr("Собрать по бюджету…") }}
+        </el-button>
+        <GuardBuilderDialog v-model="guardVisible" kind="template" :current-leader="sel.leader || null" @apply="applyGuard" />
         <GarrisonEditor
           :key="sel.id"
           :garrison="garrisonView"
@@ -261,6 +281,9 @@ function setCellMods(i: number, mods: string[]): void {
 </template>
 
 <style scoped>
+.tpl-guard {
+  margin: 0 0 8px;
+}
 /* the WIDE dialog gets two columns (list | form) instead of the old narrow-rail stack */
 .tpl-editor {
   display: grid;

@@ -3,7 +3,11 @@
  * «Охрана по бюджету»: a stack composed out of the mod's units for a wanted strength, and loot
  * out of its items for a wanted value. The window only PROPOSES — the settings on the left, the
  * variant it gives on the right, another variant at a click; nothing touches the map until
- * «Применить к отряду».
+ * «Применить».
+ *
+ * It serves four things (`kind`): a party on the map, the defense of a city and the guards of a
+ * ruin (both with nobody leading: soldiers only), and a party template of the scenario (levels
+ * only, nothing to carry). A ruin's loot is its reward: one item and gold.
  *
  * A variant is a number: the same number with the same settings is the same guard, so ◀ goes
  * back to the one just seen. The window opens on a random number, or a mapmaker with unchanged
@@ -15,6 +19,7 @@ import { Close } from "@element-plus/icons-vue";
 import {
   composeGuard,
   composeLoot,
+  composeRuinReward,
   guardBudgetRange,
   GUARD_ROLES,
   LOOT_SPECIAL_CATS,
@@ -24,20 +29,26 @@ import {
 import { useUnitStore } from "../stores/unitStore";
 import { useItemStore } from "../stores/itemStore";
 import { useSpriteStore } from "../stores/spriteStore";
-import { GUARD_PRESETS, loadGuardSettings, saveGuardSettings, type GuardApply } from "../services/guardSettings";
+import {
+  GUARD_PRESETS, GUARD_SCALE_MAX, GUARD_SCALE_MIN, loadGuardSettings, saveGuardSettings, scaledPreset,
+  type GuardApply, type GuardKind,
+} from "../services/guardSettings";
 import UnitIcon from "./UnitIcon.vue";
 import ItemIcon from "./ItemIcon.vue";
 import { tr, trn, intlLocale } from "../i18n";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: boolean;
+  /** what is being composed (see GuardKind) */
+  kind?: GuardKind;
   /** the unit leading the stack now (it may be kept), if the stack has one */
   currentLeader?: string | null;
-  /** how many items the stack carries now (they are replaced when loot is asked for) */
+  /** how many things are there now and will be replaced when loot is asked for: the items a
+   *  party or a city holds; for a ruin — 1 when it has a reward */
   carried?: number;
   /** the stack stands on water */
   onWater?: boolean;
-}>();
+}>(), { kind: "stack", currentLeader: null, carried: 0, onWater: false });
 const emit = defineEmits<{ "update:modelValue": [value: boolean]; apply: [payload: GuardApply] }>();
 
 const unitStore = useUnitStore();
@@ -51,6 +62,12 @@ const visible = computed({
 
 const s = reactive(loadGuardSettings());
 watch(s, () => saveGuardSettings({ ...s, roles: [...s.roles], lootCats: [...s.lootCats] }), { deep: true });
+
+/** nobody leads: the defense of a city, the guards of a ruin */
+const leaderless = computed(() => props.kind === "garrison" || props.kind === "ruin");
+/** a template stores neither hit points nor things to carry */
+const isTemplate = computed(() => props.kind === "template");
+const isRuin = computed(() => props.kind === "ruin");
 
 const variant = ref(1);
 const lootVariant = ref(1);
@@ -114,18 +131,30 @@ const ROLE_HINTS: Record<GuardRole, string> = {
   support: tr("Лечат, усиливают или призывают — стоят сзади."),
 };
 const PRESET_LABELS = [tr("Слабый"), tr("Средний"), tr("Сильный"), tr("Грозный")];
+/** the ready-made strengths with the mapmaker's coefficient applied */
+/** the coefficient as a number to multiply by (the field is empty while it is being retyped) */
+const scale = computed(() => (Number.isFinite(s.scale) && s.scale > 0 ? s.scale : 1));
+const presets = computed(() => GUARD_PRESETS.map((p) => scaledPreset(p, scale.value)));
+// a strength that was one of the ready-made ones stays that one when the coefficient changes
+watch(
+  scale,
+  (now, was) => {
+    const i = GUARD_PRESETS.findIndex((p) => scaledPreset(p, was) === s.budget);
+    if (i >= 0) s.budget = scaledPreset(GUARD_PRESETS[i] as number, now);
+  },
+);
 
 /** A catalogue built before the strength fields existed has nobody the composer can take. */
 const hasStrength = computed(() => unitStore.all.some((u) => (u.xp ?? 0) > 0));
 
-const keptLeader = computed(() => (props.currentLeader && unitStore.isLeaderCategory(props.currentLeader) ? props.currentLeader : null));
+const keptLeader = computed(() => (!leaderless.value && props.currentLeader && unitStore.isLeaderCategory(props.currentLeader) ? props.currentLeader : null));
 const keeping = computed(() => (s.keepLeader && keptLeader.value ? keptLeader.value : undefined));
 
 /** Subraces that can field a guard at all (have somebody to lead one). */
 const subraceOptions = computed(() =>
   unitStore.bySubrace
     .map((g) => ({ id: g.units[0]?.subraceId ?? -1, label: g.label }))
-    .filter((o) => o.id >= 0 && guardBudgetRange(unitStore.all, { subrace: o.id, onWater: props.onWater }) !== null),
+    .filter((o) => o.id >= 0 && guardBudgetRange(unitStore.all, { subrace: o.id, onWater: props.onWater, leaderless: leaderless.value }) !== null),
 );
 /** the stored subrace may belong to another mod: fall back to "one per stack" */
 const subrace = computed<"one" | "mixed" | number>(() =>
@@ -143,7 +172,8 @@ const guardOptions = computed(() => ({
   maxUnits: s.maxUnits,
   level: s.levelOn ? Math.min(s.level, levelCap.value) : undefined,
   leader: keeping.value,
-  exclude: [...struck.value, ...figureless.value],
+  exclude: leaderless.value ? struck.value : [...struck.value, ...figureless.value],
+  leaderless: leaderless.value,
 }));
 const guard = computed(() =>
   props.modelValue && unitStore.loaded && hasStrength.value
@@ -178,11 +208,48 @@ function unstrike(id: string): void {
 // ───────── the loot
 
 const lootCatOptions = computed(() => itemStore.groups.map((g) => ({ key: g.catKey || String(g.cat), label: g.label })));
+const lootWanted = computed(() => props.modelValue && s.lootOn && !isTemplate.value && itemStore.loaded);
 const loot = computed(() =>
-  props.modelValue && s.lootOn && itemStore.loaded
+  lootWanted.value && !isRuin.value
     ? composeLoot(itemStore.all, { budget: s.lootBudget, seed: lootVariant.value, cats: s.lootCats, maxItems: s.lootMax })
     : null,
 );
+/** a ruin gives one item and gold: the value is split between them */
+const ruinReward = computed(() =>
+  lootWanted.value && isRuin.value
+    ? composeRuinReward(itemStore.all, { budget: s.lootBudget, seed: lootVariant.value, cats: s.lootCats })
+    : null,
+);
+
+/** the words that differ with what is being composed */
+const WORDS = computed(() => {
+  switch (props.kind) {
+    case "garrison":
+      return {
+        lead: tr("Соберу оборону города из солдат мода на заданную силу и добычу на заданную стоимость. Лидера в гарнизоне нет — он и не нужен."),
+        section: tr("Оборона города"),
+        apply: tr("Применить к обороне"),
+      };
+    case "ruin":
+      return {
+        lead: tr("Соберу стражей руины из солдат мода на заданную силу и награду — предмет и золото — на заданную стоимость. Лидера у стражей нет."),
+        section: tr("Стражи руины"),
+        apply: tr("Применить к руине"),
+      };
+    case "template":
+      return {
+        lead: tr("Соберу состав шаблона из юнитов мода на заданную силу. Здоровье и снаряжение в шаблоне не задаются — только юниты и их уровни."),
+        section: tr("Состав шаблона"),
+        apply: tr("Применить к шаблону"),
+      };
+    default:
+      return {
+        lead: tr("Соберу отряд из юнитов мода на заданную силу и добычу на заданную стоимость."),
+        section: tr("Отряд"),
+        apply: tr("Применить к отряду"),
+      };
+  }
+});
 const specialNote = computed(() => {
   const label = lootCatOptions.value.find((o) => LOOT_SPECIAL_CATS.includes(o.key))?.label;
   return label ? tr("Все виды, кроме «{special}»", { special: label }) : tr("Все виды предметов");
@@ -190,7 +257,13 @@ const specialNote = computed(() => {
 
 function apply(): void {
   if (!guard.value) return;
-  emit("apply", { cells: guard.value.cells, leaderCell: guard.value.leaderCell, loot: loot.value ? loot.value.items : null });
+  const r = ruinReward.value;
+  emit("apply", {
+    cells: guard.value.cells,
+    leaderCell: guard.value.leaderCell,
+    loot: r ? (r.item ? [r.item] : []) : loot.value ? loot.value.items : null,
+    gold: r ? r.gold : null,
+  });
   visible.value = false;
 }
 </script>
@@ -198,7 +271,8 @@ function apply(): void {
 <template>
   <el-dialog v-model="visible" :title="tr('Охрана по бюджету')" width="min(940px, 96vw)" top="5vh" class="guard-dialog" append-to-body>
     <p class="gb-lead">
-      {{ tr("Соберу отряд из юнитов мода на заданную силу и добычу на заданную стоимость. Сила — опыт, который даёт победа над отрядом: так игра сама меряет юнитов. Не тот вариант — листайте дальше.") }}
+      {{ WORDS.lead }}
+      {{ tr("Сила — опыт, который даёт победа над отрядом: так игра сама меряет юнитов. Не тот вариант — листайте дальше.") }}
     </p>
     <el-alert v-if="unitStore.loaded && !hasStrength" type="warning" :closable="false" show-icon
       :title="tr('В каталоге юнитов этого мода нет силы юнитов')"
@@ -207,15 +281,21 @@ function apply(): void {
     <div v-else class="gb-body">
       <!-- settings -->
       <div class="gb-settings">
-        <div class="gb-h">{{ tr("Отряд") }}</div>
+        <div class="gb-h">{{ WORDS.section }}</div>
         <div class="gb-row">
           <label>{{ tr("Сила") }}</label>
           <div class="gb-field">
             <el-input-number v-model="s.budget" :min="1" :max="99999" :step="50" size="small" controls-position="right" :aria-label="tr('Сила отряда')" />
             <div class="gb-presets">
-              <button v-for="(p, i) in GUARD_PRESETS" :key="p" type="button" class="gb-chip" :class="{ on: s.budget === p }" @click="s.budget = p">
+              <button v-for="(p, i) in presets" :key="i" type="button" class="gb-chip" :class="{ on: s.budget === p }" @click="s.budget = p">
                 {{ PRESET_LABELS[i] }} · {{ p }}
               </button>
+            </div>
+            <div class="gb-inline gb-scale" :title="tr('На коэффициент умножаются готовые значения силы. Он запоминается: поставьте 1,5 для карты потруднее — и «Средний» везде будет в полтора раза сильнее.')">
+              <span>{{ tr("Коэффициент") }} ×</span>
+              <el-input-number v-model="s.scale" :min="GUARD_SCALE_MIN" :max="GUARD_SCALE_MAX" :step="0.1" :precision="2" size="small" controls-position="right" class="gb-short"
+                :aria-label="tr('Коэффициент готовых значений силы')" />
+              <button v-if="s.scale !== 1" type="button" class="gb-chip" @click="s.scale = 1">{{ tr("сбросить") }}</button>
             </div>
             <div class="gb-note">{{ tr("В готовых картах примерно половина отрядов слабее 450, девять из десяти — слабее 1500.") }}</div>
           </div>
@@ -261,11 +341,12 @@ function apply(): void {
           </div>
         </div>
 
-        <div class="gb-h gb-h2">{{ tr("Добыча") }}</div>
+        <template v-if="!isTemplate">
+        <div class="gb-h gb-h2">{{ isRuin ? tr("Награда") : tr("Добыча") }}</div>
         <div class="gb-row">
           <label>{{ tr("Стоимость") }}</label>
           <div class="gb-field gb-inline">
-            <el-checkbox v-model="s.lootOn" size="small">{{ tr("положить предметов на") }}</el-checkbox>
+            <el-checkbox v-model="s.lootOn" size="small">{{ isRuin ? tr("предмет и золото на") : tr("положить предметов на") }}</el-checkbox>
             <el-input-number v-model="s.lootBudget" :min="1" :max="999999" :step="100" :disabled="!s.lootOn" size="small" controls-position="right" :aria-label="tr('Стоимость добычи, золото')" />
             <span>{{ tr("золота") }}</span>
           </div>
@@ -279,7 +360,7 @@ function apply(): void {
               </el-select>
             </div>
           </div>
-          <div class="gb-row">
+          <div v-if="!isRuin" class="gb-row">
             <label>{{ tr("Предметов") }}</label>
             <div class="gb-field gb-inline">
               <span>{{ tr("не больше") }}</span>
@@ -287,8 +368,11 @@ function apply(): void {
             </div>
           </div>
           <div v-if="carried" class="gb-note gb-indent gb-warn">
-            {{ trn("Отряд уже несёт {n} предмет — он будет заменён.|Отряд уже несёт {n} предмета — они будут заменены.|Отряд уже несёт {n} предметов — они будут заменены.", carried) }}
+            <template v-if="isRuin">{{ tr("Нынешняя награда руины — предмет и золото — будет заменена; мана останется как есть.") }}</template>
+            <template v-else-if="kind === 'garrison'">{{ trn("В городе уже лежит {n} предмет — он будет заменён.|В городе уже лежит {n} предмета — они будут заменены.|В городе уже лежит {n} предметов — они будут заменены.", carried) }}</template>
+            <template v-else>{{ trn("Отряд уже несёт {n} предмет — он будет заменён.|Отряд уже несёт {n} предмета — они будут заменены.|Отряд уже несёт {n} предметов — они будут заменены.", carried) }}</template>
           </div>
+        </template>
         </template>
       </div>
 
@@ -312,7 +396,7 @@ function apply(): void {
                   </span>
                   <span class="gb-text">
                     <span class="gb-name" :title="unitStore.nameOf(slot.member.unit)">{{ unitStore.nameOf(slot.member.unit) }}</span>
-                    <span class="gb-stats">{{ tr("Ур. {level}", { level: slot.member.level }) }} · {{ tr("{hp} HP", { hp: slot.member.hp }) }} · {{ tr("сила {xp}", { xp: slot.member.xp }) }}</span>
+                    <span class="gb-stats">{{ tr("Ур. {level}", { level: slot.member.level }) }}<template v-if="!isTemplate"> · {{ tr("{hp} HP", { hp: slot.member.hp }) }}</template> · {{ tr("сила {xp}", { xp: slot.member.xp }) }}</span>
                     <span class="gb-tags">
                       <el-tag size="small" effect="plain" round :type="slot.member.role === 'fighter' ? 'danger' : slot.member.role === 'support' ? 'success' : slot.member.role === 'mage' ? 'primary' : 'warning'">{{ ROLE_ONE[slot.member.role] }}</el-tag>
                       <el-tag v-if="slot.wide" size="small" effect="plain" round type="info">{{ tr("2 клетки") }}</el-tag>
@@ -327,23 +411,27 @@ function apply(): void {
           </div>
           <div class="gb-total" :class="{ over: guard.overBudget }">
             <b>{{ tr("Сила {strength} из {budget}", { strength: num(guard.strength), budget: num(s.budget) }) }}</b>
-            · {{ tr("здоровье {hp}", { hp: num(guard.hp) }) }}
-            · {{ trn("{n} юнит|{n} юнита|{n} юнитов", guard.count) }}
+            <span v-if="!isTemplate"> · {{ tr("здоровье {hp}", { hp: num(guard.hp) }) }}</span>
+            <span> · {{ trn("{n} юнит|{n} юнита|{n} юнитов", guard.count) }}</span>
             <template v-if="subraceNames"> · {{ subraceNames }}</template>
           </div>
           <div v-if="guard.overBudget" class="gb-note gb-warn">
-            {{ tr("Дешевле не собрать: самый слабый подходящий лидер один стоит {min}.", { min: num(guard.strength) }) }}
+            {{ leaderless
+              ? tr("Дешевле не собрать: самый слабый подходящий солдат один стоит {min}.", { min: num(guard.strength) })
+              : tr("Дешевле не собрать: самый слабый подходящий лидер один стоит {min}.", { min: num(guard.strength) }) }}
           </div>
           <div v-else-if="range && s.budget > range.max" class="gb-note">
             {{ tr("Больше {max} при таких условиях не набрать.", { max: num(range.max) }) }}
           </div>
         </template>
         <div v-else-if="unitStore.loaded" class="gb-none">
-          {{ tr("Под такие условия в моде нет лидера: смените расу или верните кого-то в «Кого брать».") }}
+          {{ leaderless
+            ? tr("Под такие условия в моде нет солдат: смените расу или верните кого-то в «Кого брать».")
+            : tr("Под такие условия в моде нет лидера: смените расу или верните кого-то в «Кого брать».") }}
         </div>
         <div v-else class="gb-none">{{ tr("Загружаю каталог юнитов…") }}</div>
 
-        <div v-if="figureless.length" class="gb-note" :title="figureless.map((id) => unitStore.nameOf(id)).join(', ')">
+        <div v-if="figureless.length && !leaderless" class="gb-note" :title="figureless.map((id) => unitStore.nameOf(id)).join(', ')">
           {{ trn("{n} лидер мода не имеет фигуры на карте — он не берётся.|{n} лидера мода не имеют фигуры на карте — они не берутся.|{n} лидеров мода не имеют фигуры на карте — они не берутся.", figureless.length) }}
         </div>
         <div v-if="struck.length" class="gb-struck">
@@ -351,13 +439,31 @@ function apply(): void {
           <el-tag v-for="id in struck" :key="id" size="small" closable type="info" @close="unstrike(id)">{{ unitStore.nameOf(id) }}</el-tag>
         </div>
 
-        <template v-if="s.lootOn">
+        <template v-if="s.lootOn && !isTemplate">
           <div class="gb-bar gb-bar2">
-            <span class="gb-variant">{{ tr("Добыча") }}</span>
-            <el-button size="small" :disabled="lootVariant <= 1" :title="tr('Предыдущая добыча')" :aria-label="tr('Предыдущая добыча')" @click="lootVariant--">◀</el-button>
-            <el-button size="small" @click="lootVariant++">{{ tr("Другая добыча") }} ▶</el-button>
+            <span class="gb-variant">{{ isRuin ? tr("Награда") : tr("Добыча") }}</span>
+            <el-button size="small" :disabled="lootVariant <= 1" :title="isRuin ? tr('Предыдущая награда') : tr('Предыдущая добыча')" :aria-label="isRuin ? tr('Предыдущая награда') : tr('Предыдущая добыча')" @click="lootVariant--">◀</el-button>
+            <el-button size="small" @click="lootVariant++">{{ isRuin ? tr("Другая награда") : tr("Другая добыча") }} ▶</el-button>
           </div>
-          <template v-if="loot && loot.items.length">
+          <template v-if="ruinReward">
+            <div class="gb-loot">
+              <div v-if="ruinReward.item" class="gb-item">
+                <ItemIcon :id="ruinReward.item" :cat="itemStore.get(ruinReward.item)?.cat ?? -1" :size="24" />
+                <span class="gb-item-name" :title="itemStore.nameOf(ruinReward.item)">{{ itemStore.nameOf(ruinReward.item) }}</span>
+                <span class="gb-gold">{{ num(itemStore.get(ruinReward.item)?.gold ?? 0) }}</span>
+              </div>
+              <div v-else class="gb-note">{{ tr("Предмета за такую долю стоимости нет — вся награда золотом.") }}</div>
+              <div class="gb-item">
+                <span class="gb-coin" aria-hidden="true">●</span>
+                <span class="gb-item-name">{{ tr("Золото") }}</span>
+                <span class="gb-gold">{{ num(ruinReward.gold) }}</span>
+              </div>
+            </div>
+            <div class="gb-total">
+              <b>{{ tr("{value} из {budget} золота", { value: num(ruinReward.value), budget: num(s.lootBudget) }) }}</b>
+            </div>
+          </template>
+          <template v-else-if="loot && loot.items.length">
             <div class="gb-loot">
               <div v-for="(id, i) in loot.items" :key="`${id}#${i}`" class="gb-item">
                 <ItemIcon :id="id" :cat="itemStore.get(id)?.cat ?? -1" :size="24" />
@@ -376,7 +482,7 @@ function apply(): void {
 
     <template #footer>
       <el-button @click="visible = false">{{ tr("Отмена") }}</el-button>
-      <el-button type="primary" :disabled="!guard" @click="apply">{{ tr("Применить к отряду") }}</el-button>
+      <el-button type="primary" :disabled="!guard" @click="apply">{{ WORDS.apply }}</el-button>
     </template>
   </el-dialog>
 </template>
@@ -437,6 +543,11 @@ function apply(): void {
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 6px;
+}
+.gb-scale {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
 }
 .gb-chip {
   padding: 2px 8px;
@@ -610,6 +721,11 @@ function apply(): void {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.gb-coin {
+  width: 24px;
+  text-align: center;
+  color: var(--el-color-warning);
 }
 .gb-gold {
   flex: none;

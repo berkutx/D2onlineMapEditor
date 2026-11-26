@@ -36,7 +36,7 @@ import SpellPicker from "./SpellPicker.vue";
 import SpellIcon from "./SpellIcon.vue";
 import GarrisonEditor from "./GarrisonEditor.vue";
 import GuardBuilderDialog from "./GuardBuilderDialog.vue";
-import type { GuardApply } from "../services/guardSettings";
+import type { GuardApply, GuardKind } from "../services/guardSettings";
 import EventSummaryCard from "./EventSummaryCard.vue";
 import ImagePicker from "./ImagePicker.vue";
 import SpriteThumb from "./SpriteThumb.vue";
@@ -588,9 +588,24 @@ function setStackEquip(slot: string, id: string | null): void {
   }
   editStore.commit([{ kind: "patchObject", id: obj.value.id, fields: { equip } }]);
 }
-/** «Охрана по бюджету» for the selected stack: the window proposes a formation (and loot), and
- *  one click puts it in as ONE step of the history — the units, the leader and the loot together. */
+/** «Охрана по бюджету» for the selected stack, for the defense of a village or for the guards of
+ *  a ruin: the window proposes a formation (and loot), and one click puts it in as ONE step of
+ *  the history — the units, the leader and the loot together. A capital is left out: its
+ *  defense is its guardian. */
 const guardVisible = ref(false);
+const guardKind = ref<GuardKind>("stack");
+function openGuard(kind: GuardKind): void {
+  guardKind.value = kind;
+  guardVisible.value = true;
+}
+/** how much the window would replace if loot is asked for (see GuardBuilderDialog `carried`) */
+const guardCarried = computed(() => {
+  const o = obj.value;
+  if (o?.type === "stack") return (o.inventory ?? []).length;
+  if (o?.type === "village") return (o.items ?? []).length;
+  if (o?.type === "ruin") return (o.item && o.item !== NEUTRAL) || (reward.value ?? []).some((r) => r.k === "G" && r.v > 0) ? 1 : 0;
+  return 0;
+});
 const stackLeaderUnit = computed(() => stackGarrison.value[stackLeaderCell.value]?.unit ?? null);
 const stackOnWater = computed(() => {
   const doc = editStore.liveDoc;
@@ -600,8 +615,8 @@ const stackOnWater = computed(() => {
   return c ? ((c.value >> 3) & 7) === 3 : false; // ground bits: 3 = water
 });
 function applyGuard(p: GuardApply): void {
-  const st = obj.value?.type === "stack" ? obj.value : null;
-  if (!st || readOnly.value) return;
+  const o = obj.value;
+  if (!o || readOnly.value) return;
   const g: (GarrUnit | null)[] = [null, null, null, null, null, null];
   for (let row = 0; row < 3; row++) {
     const a = 2 * row, b = a + 1;
@@ -616,9 +631,19 @@ function applyGuard(p: GuardApply): void {
       if (back) g[b] = { unit: back.unit, level: back.level, hp: back.hp };
     }
   }
-  const fields: Record<string, unknown> = { garrison: g, leaderCell: p.leaderCell, leaderImage: g[p.leaderCell]?.unit };
-  if (p.loot) fields.inventory = p.loot;
-  editStore.commit([{ kind: "patchObject", id: st.id, fields }]);
+  const fields: Record<string, unknown> = { garrison: g };
+  if (o.type === "stack") {
+    fields.leaderCell = p.leaderCell;
+    fields.leaderImage = g[p.leaderCell]?.unit;
+    if (p.loot) fields.inventory = p.loot;
+  } else if (o.type === "village") {
+    if (p.loot) fields.items = p.loot;
+  } else if (o.type === "ruin") {
+    // a ruin's reward: one item and the gold of its CASH (the mana of it stays as it is)
+    if (p.loot) fields.item = p.loot[0] ?? NEUTRAL;
+    if (p.gold !== null) fields.reward = rewardWith("G", p.gold);
+  } else return;
+  editStore.commit([{ kind: "patchObject", id: o.id, fields }]);
 }
 
 /** Stack carried inventory — global GItem template ids (MidItem instances re-created on export). */
@@ -698,12 +723,15 @@ function setLooter(v: string): void {
   patch({ looter: v, looted: v !== NEUTRAL });
 }
 
-/** Rebuild the fixed-width 35-char CASH string with one resource changed, then patch it. */
-function setReward(k: string, v: number): void {
+/** The fixed-width 35-char CASH string of the selected ruin with one resource changed. */
+function rewardWith(k: string, v: number): string {
   const cur: Record<string, number> = {};
   for (const r of reward.value ?? []) cur[r.k] = r.v;
   cur[k] = Math.max(0, Math.min(9999, Math.round(v || 0))); // 4-digit field keeps CASH length constant
-  patch({ reward: REWARD_ORDER.map((o) => o + String(cur[o] ?? 0).padStart(4, "0")).join(":") });
+  return REWARD_ORDER.map((o) => o + String(cur[o] ?? 0).padStart(4, "0")).join(":");
+}
+function setReward(k: string, v: number): void {
+  patch({ reward: rewardWith(k, v) });
 }
 
 function close(): void {
@@ -721,6 +749,8 @@ function close(): void {
     </div>
     <div class="ins-sub">{{ tr("Клетка {x}, {y}", { x: obj.pos.x, y: obj.pos.y }) }}</div>
     <div v-if="readOnly" class="ins-readonly">{{ tr("Только просмотр") }}</div>
+    <GuardBuilderDialog v-model="guardVisible" :kind="guardKind" :current-leader="stackLeaderUnit" :carried="guardCarried"
+      :on-water="guardKind === 'stack' && stackOnWater" @apply="applyGuard" />
 
     <el-form v-if="editable" class="ins-body" :disabled="readOnly" @submit.prevent>
       <!-- 🧰 CHEST -->
@@ -798,6 +828,9 @@ function close(): void {
         </div>
         <!-- Стражи руины — embedded GROUP_ID + UNIT_/POS_ (like a fort's defense); soldiers only. -->
         <div class="d2-sec">{{ tr("Стражи") }} <span class="muted">({{ defenseCount }}/6)</span></div>
+        <el-button v-if="!readOnly" class="guard-open" size="small" :title="tr('Подобрать юнитов на заданную силу и добычу на заданную стоимость')" @click="openGuard('ruin')">
+          ⚔ {{ tr("Собрать по бюджету…") }}
+        </el-button>
         <GarrisonEditor
           :key="obj.id"
           :garrison="defenseGarrison"
@@ -1016,10 +1049,9 @@ function close(): void {
         </div>
 
         <div class="d2-sec">{{ tr("Состав отряда") }} <span class="muted">({{ stackCount }}/6)</span></div>
-        <el-button v-if="!readOnly" class="guard-open" size="small" :title="tr('Подобрать юнитов на заданную силу и добычу на заданную стоимость')" @click="guardVisible = true">
+        <el-button v-if="!readOnly" class="guard-open" size="small" :title="tr('Подобрать юнитов на заданную силу и добычу на заданную стоимость')" @click="openGuard('stack')">
           ⚔ {{ tr("Собрать по бюджету…") }}
         </el-button>
-        <GuardBuilderDialog v-model="guardVisible" :current-leader="stackLeaderUnit" :carried="stackInventory.length" :on-water="stackOnWater" @apply="applyGuard" />
         <GarrisonEditor
           :key="obj.id"
           :garrison="stackGarrison"
@@ -1192,6 +1224,9 @@ function close(): void {
       <!-- 🛡 DOUBLE GARRISON (city defense + visiting hero) — shared by city + capital -->
       <template v-if="obj.type === 'village' || obj.type === 'capital'">
         <div class="d2-sec">{{ tr("Оборона города") }} <span class="muted">({{ defenseCount }}/6)</span></div>
+        <el-button v-if="!readOnly && obj.type === 'village'" class="guard-open" size="small" :title="tr('Подобрать юнитов на заданную силу и добычу на заданную стоимость')" @click="openGuard('garrison')">
+          ⚔ {{ tr("Собрать по бюджету…") }}
+        </el-button>
         <!-- roster=soldiers: гарнизон города — без героев; герой в городе живёт ГОСТЕМ ниже -->
         <GarrisonEditor
           :key="obj.id"
