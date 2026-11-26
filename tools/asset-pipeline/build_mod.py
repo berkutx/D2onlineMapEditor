@@ -580,8 +580,12 @@ def same_volume(a, b):
 
 
 def is_inside(path, parent):
-    path, parent = os.path.abspath(path), os.path.abspath(parent)
-    return os.path.commonpath([path, parent]) == parent
+    """True when path is parent or under it (ignoring case where the OS does)."""
+    path, parent = (os.path.normcase(os.path.abspath(p)) for p in (path, parent))
+    try:
+        return os.path.commonpath([path, parent]) == parent
+    except ValueError:  # different drives
+        return False
 
 
 # ---- the store -----------------------------------------------------------------------
@@ -592,6 +596,32 @@ def load_index(store_root):
         with open(path, encoding="utf-8") as fp:
             return json.load(fp)
     return {"schemaVersion": SCHEMA_VERSION, "mods": []}
+
+
+#: Files of an install that must never become store blobs (see step 5 of main).
+GAME_DATA_EXTENSIONS = (".dbf", ".ff", ".opt", ".exe", ".dll")
+
+
+def load_mod(store_root, mod_id):
+    """A mod's mod.json from the store, or None."""
+    path = os.path.join(store_root, "mods", mod_id, "mod.json")
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def load_parent(store_root, mod_id):
+    """The parent of a derived mod: a mod of the store that is not derived itself."""
+    parent = load_mod(store_root, mod_id)
+    if parent is None:
+        raise BuildError("--parent %s: the store has no mods/%s/mod.json" % (mod_id, mod_id))
+    if parent.get("parent"):
+        # one level only: a derived mod's edits are made against an install, and a derived
+        # mod has none of its own
+        raise BuildError("--parent %s is itself derived from %s; derive from %s instead" % (
+            mod_id, parent["parent"]["modId"], parent["parent"]["modId"]))
+    return parent
 
 
 def write_atomic(path, data):
@@ -639,12 +669,25 @@ def main(argv=None):
                     help="the same value given by hand, unchecked (when no pack is at hand)")
     ap.add_argument("--source-url", default=None, metavar="URL",
                     help="where this data set can be downloaded from (for a catalog of ready builds)")
+    ap.add_argument("--parent", default=None, metavar="MOD_ID",
+                    help="a DERIVED mod: the store's mod it was derived from (recorded as parent; "
+                         "derive_mod.py gives it, with --game a folder made from that mod's install)")
     ap.add_argument("--dry-run", action="store_true",
                     help="build and report sizes, but leave the store untouched")
     args = ap.parse_args(argv)
 
     if not MOD_ID_RE.match(args.mod_id):
         ap.error("--mod-id must be a lowercase slug ([a-z0-9-], up to 40 chars)")
+    if args.parent:
+        if args.parent == args.mod_id:
+            ap.error("--parent names the mod itself")
+        clash = [flag for flag, on in (("--default", args.default), ("--engine-pack", args.engine_pack),
+                                       ("--engine-fingerprint", args.engine_fingerprint),
+                                       ("--source-url", args.source_url)) if on]
+        if clash:
+            # a derived mod is not the parent's install: no engine profile matches it, it is
+            # never the store's default, and it is not offered for download
+            ap.error("%s cannot go with --parent" % ", ".join(clash))
     if args.engine_fingerprint and not re.match(r"^[0-9a-f]{64}$", args.engine_fingerprint):
         ap.error("--engine-fingerprint must be 64 lowercase hex characters")
     if args.engine_pack and args.engine_fingerprint:
@@ -657,6 +700,7 @@ def main(argv=None):
         ap.error("no Globals directory under --game %s" % game)
     scripts_dir = find_dir(game, "Scripts")
     store_root = os.path.abspath(args.store)
+    parent = load_parent(store_root, args.parent) if args.parent else None
     store = BlobStore(store_root)
     stage = os.path.join(store_root, "mods", args.mod_id, ".stage")
     assert stage.endswith(".stage")
@@ -753,6 +797,10 @@ def main(argv=None):
                 rel = os.path.relpath(path, stage).replace("\\", "/")
                 if rel in atlas_names:
                     continue  # already in the store (step 1)
+                if rel.lower().endswith(GAME_DATA_EXTENSIONS):
+                    # the store is served to anyone: the game's own tables and archives never
+                    # go in, only what the builders made from them
+                    raise BuildError("a builder left a game data file in the output: %s" % rel)
                 staged_bytes += os.path.getsize(path)
                 if args.dry_run:
                     files[rel] = store.would_put(path)
@@ -782,6 +830,8 @@ def main(argv=None):
         "capabilities": [],
         "files": {k: files[k] for k in sorted(files)},
     }
+    if parent:
+        mod["parent"] = {"modId": parent["id"], "contentFingerprint": parent["contentFingerprint"]}
     engine_pack = None
     if args.engine_pack:
         engine_pack = engine_pack_fingerprint(os.path.abspath(args.engine_pack), game)
@@ -796,6 +846,9 @@ def main(argv=None):
     ids = new_files["ids.json"]["tables"]
     print("mod %s (%s, family %s #%d): %s" % (mod["id"], mod["name"], mod["family"], mod["familyOrder"], status))
     print("  fingerprint  %s" % content_fp)
+    if parent:
+        shared = sum(1 for k, v in mod["files"].items() if parent.get("files", {}).get(k) == v)
+        print("  derived from %s: %d of %d files are the parent's" % (parent["id"], shared, len(mod["files"])))
     if engine_pack:
         print("  engine pack  %s, fingerprint %s (%d tables and scripts checked against this install)" % (
             engine_pack[1] or "?", engine_pack[0], engine_pack[2]))

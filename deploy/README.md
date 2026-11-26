@@ -107,13 +107,22 @@ python tools/asset-pipeline/build_mod.py --game "<MOD>/Game" --mod-id semga --na
   --family semga --family-order 1 --store public/assets --graphics --default
 ```
 
-then ship **only the store** (`mods/` + `blobs/`) into the volume:
+then ship **only the store** into the volume — the mods and the blobs their manifests name,
+packed by `store_upload.py` (from a POSIX shell; PowerShell cannot pipe binary data, so there
+write `--tar store.tgz`, `scp` it and untar it from the copy):
 
 ```sh
-tar czf - -C public/assets mods blobs | ssh <USER>@<HOST> \
+py -3.7 tools/asset-pipeline/store_upload.py --store public/assets --tar - | ssh <USER>@<HOST> \
   'docker volume create d2editor_assets >/dev/null; \
    docker run --rm -i -v d2editor_assets:/dst alpine sh -c "cd /dst && tar xzf -"'
 ```
+
+`store_upload.py` leaves out **derived mods** (`tools/asset-pipeline/derive_mod.py`, a parent
+mod plus local edits) unless they are named (`--mods a,b --include-derived`), and the blobs no
+uploaded mod names (old atlas pages, earlier builds); its `mods/index.json` lists exactly the
+mods it packs. `--list` prints the member paths instead, e.g. to check the copy on the server
+with `sha256sum`. Do not tar `public/assets/mods` whole: its `index.json` also lists the local
+derived mods.
 
 - **Adding or rebuilding a mod is the same command again.** Blobs are immutable and named by
   their hash, so re-sending is idempotent and never disturbs files in use; `mod.json` and

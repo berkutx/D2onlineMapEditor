@@ -1,0 +1,34 @@
+{
+  "name": "@d2/mod-edit",
+  "version": "0.1.0",
+  "description": "Derived mods: an edit journal over a parent mod's tables and archives, folded, applied and diffed without losing a byte",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "zod": "^3.23.8",
+    "@d2/dbf": "workspace:*",
+    "@d2/ff": "workspace:*",
+    "@d2/mod-catalog": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5"
+  }
+}

@@ -151,6 +151,56 @@ All table reads go through `fflib/dbf.py`. The mods do not have the same columns
 is wider, added or missing), so a row answers a missing column with an empty value and the
 miss is listed in the build summary and in `dbfSchema.json` instead of failing the build.
 
+### Derived mods (`derive_mod.py`)
+
+A **derived mod** is a mod of the store (its parent) plus edits to the parent's tables and
+archives — the base of the mod editor. The edits are a journal in an **edit file**
+(`kind: d2-mod-edits`, `packages/mod-edit`): every row is named by its key (`UNIT_ID`,
+`TXT_ID`, a link table's pair, …), never by its number, and every changed cell keeps the value
+it replaced, so replaying the journal on a rebuilt parent finds its rows again and turns a
+cell that changed under it into a conflict instead of overwriting it. Edit files are local
+working files; keep them in `var/mod-edits/<mod-id>/edits.json` (git ignores `var/`), with
+the bytes of new archive records beside them in `payloads/<sha256>.bin`.
+
+```
+# a new, empty edit file (picks an id namespace 230-254 no parent id and no other edit file uses)
+node packages/mod-edit/dist/node/cli.js init --parent semga --parent-game "<semga>/Game" \
+    --mod-id semga-x --name "Сёмга X" --edits var/mod-edits/semga-x/edits.json --others var/mod-edits
+# or the edits that turn the parent's tables into a hand-edited copy of its Globals
+node packages/mod-edit/dist/node/cli.js diff --parent semga --parent-game "<semga>/Game" \
+    --child <folder of .dbf> --mod-id semga-x --name "Сёмга X" --edits var/mod-edits/semga-x/edits.json
+# does it still apply?
+node packages/mod-edit/dist/node/cli.js check --parent-game "<semga>/Game" --edits var/mod-edits/semga-x/edits.json
+
+# into the store
+py -3.7 tools/asset-pipeline/derive_mod.py --edits var/mod-edits/semga-x/edits.json --store public/assets [--dry-run]
+```
+
+`derive_mod.py` checks that the install is the one the store's parent was built from (same
+`contentFingerprint`), makes `var/mod-work/<mod-id>` from it — every file of Globals, Scripts,
+Imgs, Interf and the root `.exe`/`.dll` as a **hard link**, only the edited tables and archives
+written as new files, so no space is spent and nothing is written into the install — runs
+`build_mod.py --parent <parent>` over that folder with the parent's family, its familyOrder
+minus one (the parent wins a tie; the edit file's `familyOrder` overrides it) and
+`--graphics` when the parent has sheets, and removes the work folder. Whatever the edits do
+not touch comes out byte-identical to the parent's output, so it is the parent's blob: a
+one-name edit in `Tglobal` adds one new `unitCatalog.json` to the store and nothing else.
+
+- `build_mod.py --parent` records `parent: {modId, contentFingerprint}` in `mod.json` (it is in
+  Contract D already). It refuses a parent the store lacks or that is derived itself (one
+  level only), and `--default`, `--engine-pack`, `--engine-fingerprint`, `--source-url`.
+- Any build stops if a builder leaves a `.dbf`, `.ff`, `.opt`, `.exe` or `.dll` in its output:
+  the store is served to anyone; game files never become blobs.
+- Archives the store build does not read (`BatUnits.ff`, `Events.ff`, …) are not rebuilt: their
+  ops stay in the edit file and are reported as carried.
+- A parent listed in `closedMods` of `mods.local.json` (a closed beta) is refused without
+  `--allow-closed-parent`.
+- **Derived mods stay on this machine**: `store_upload.py` (deploy/README.md) leaves them out
+  unless they are named with `--mods … --include-derived`.
+- **New ids are untested in the game**: rows an edit adds get `G<namespace>UU0001`-style ids
+  (decimal counter, the table's own letter case). Before a derived mod with new rows is used
+  for real, run one such unit in the game and in ScenEdit.
+
 ## Test
 
 ```
@@ -177,6 +227,8 @@ fflib/
   dbf.py         the one Globals table reader (deleted rows skipped, missing columns tolerated + reported)
   blobstore.py   content-addressed store: blobs/<xx>/<sha256>.<ext>, hard link / copy / move
 build_mod.py     one mod -> the store (catalogs, icons, ids, profile, dictionaries, variables)
+derive_mod.py    a derived mod (parent install + edit file) -> the store, through build_mod
+store_upload.py  the store's non-derived mods + the blobs they name, as one .tgz for a server
 data/            curated descriptions (scenario variables)
 extract_ff.py    .ff -> named FFImage list
 decode_images.py color-key + trim -> Frame (keeps spriteSourceSize/sourceSize)

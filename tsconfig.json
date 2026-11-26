@@ -6,6 +6,7 @@
     { "path": "packages/mod-catalog" },
     { "path": "packages/dbf" },
     { "path": "packages/ff" },
+    { "path": "packages/mod-edit" },
     { "path": "packages/socket-contract" },
     { "path": "packages/sg-parser" },
     { "path": "packages/map-edit" },

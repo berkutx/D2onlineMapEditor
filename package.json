@@ -11,7 +11,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
-    "test:ci": "vitest run apps/web/test packages/map-edit/test/diplomacy.test.ts packages/map-edit/test/playerRosterOrder.test.ts packages/map-edit/test/projectUids.test.ts packages/map-edit/test/zones.test.ts packages/pixi-render/test packages/dbf/test/table.test.ts packages/ff/test/archive.test.ts",
+    "test:ci": "vitest run apps/web/test packages/map-edit/test/diplomacy.test.ts packages/map-edit/test/playerRosterOrder.test.ts packages/map-edit/test/projectUids.test.ts packages/map-edit/test/zones.test.ts packages/pixi-render/test packages/dbf/test/table.test.ts packages/ff/test/archive.test.ts packages/mod-edit/test/journal.test.ts packages/mod-edit/test/tables.test.ts packages/mod-edit/test/ids.test.ts packages/mod-edit/test/archives.test.ts packages/mod-edit/test/materialize.test.ts",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "gen": "turbo run gen",
