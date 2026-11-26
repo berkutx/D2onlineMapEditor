@@ -95,6 +95,14 @@ export const EditOp = z.discriminatedUnion("kind", [
   // remove a faction and everything it owns (capital + armies + subrace + satellites); the inverse
   // captures the full cluster so undo restores it verbatim. Refuses the last non-neutral player.
   z.object({ kind: z.literal("removePlayer"), id: z.string() }),
+  // a player's fog of war (v0.4, additive): `id` = the MidgardMapFog block (PlayerInfo.fogId);
+  // each row named here replaces that map line's mask whole (1 bit per cell, bit set = hidden,
+  // cell x = bit x&7 of byte x>>3). Rows not named keep their mask.
+  z.object({
+    kind: z.literal("setFog"),
+    id: z.string(),
+    rows: z.array(z.object({ y: z.number().int(), mask: z.array(z.number().int().min(0).max(255)) })),
+  }),
 ]);
 export type EditOp = z.infer<typeof EditOp>;
 

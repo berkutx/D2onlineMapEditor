@@ -63,6 +63,7 @@ import { useDecorStore, type DecorEntry } from "../stores/decorStore";
 import { useUnitStore } from "../stores/unitStore";
 import { useCollabStore } from "../stores/collabStore";
 import { useEventStore } from "../stores/eventStore";
+import { useFogStore } from "../stores/fogStore";
 import { getAssetStore, getScene, setScene, destroyScene } from "./sceneHolder";
 import { tr, trn, trc } from "../i18n";
 
@@ -71,6 +72,7 @@ const assetStore = useAssetStore();
 const viewStore = useViewStore();
 const toolStore = useToolStore();
 const editStore = useEditStore();
+const fogStore = useFogStore();
 const genStore = useGenStore();
 const decorStore = useDecorStore();
 const unitStore = useUnitStore();
@@ -1028,7 +1030,9 @@ function paintAt(cx: number, cy: number): void {
   const doc = editStore.liveDoc;
   if (!doc) return;
   let ops: EditOp[];
-  if (toolStore.tool === "road") {
+  if (toolStore.tool === "fog") {
+    ops = fogStore.paintOps(squareCells(cx, cy, toolStore.size)); // the picked player's fog: open or hide
+  } else if (toolStore.tool === "road") {
     ops = roadBrush(doc, cx, cy); // connectivity-based, ignores brush size; skips water
   } else if (toolStore.tool === "erase") {
     ops = eraseBrush(doc, cx, cy, toolStore.size, occupiedCells(doc)); // clears terrain + roads (+ neighbour recompute)
@@ -2152,6 +2156,13 @@ watch(
   () => {
     if (toolStore.tool === "decor" || toolStore.tool === "move" || toolStore.tool === "object") refreshGhost(lastCell);
   },
+);
+
+// «Туман»: the veil of the picked player's fog lies on the map only while the tool is active
+// (it follows the live document: a stroke, an undo and a peer's edit all redraw it).
+watch(
+  [() => fogStore.visual, () => toolStore.tool],
+  ([visual, tool]) => getScene()?.updateFog(tool === "fog" ? visual : null),
 );
 
 // Imperatively reflect layer/animation toggles onto the live Scene.

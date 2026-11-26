@@ -53,7 +53,7 @@ const SCENARIO_INFO_KEYS = [
 /**
  * The minimal ops to transform `a` into `b`, over every part of the document a room op can
  * touch: terrain cells, objects (add/delete/move/patch), events, templates, variables,
- * diplomacy, scenario info. `applyOps(a, diffDocs(a, b))` is structurally equal to `b`.
+ * diplomacy, fog of war, scenario info. `applyOps(a, diffDocs(a, b))` is structurally equal to `b`.
  */
 export function diffDocs(a: MapDocument, b: MapDocument): EditOp[] {
   const ops: EditOp[] = [];
@@ -123,6 +123,20 @@ export function diffDocs(a: MapDocument, b: MapDocument): EditOp[] {
     ops.push({ kind: "setDiplomacy", diplomacy: (b.diplomacy ?? []).slice() });
   }
 
+  // --- fog of war: per player's fog block, the map lines whose mask differs ---
+  // (a fog block itself comes and goes with its player, through the roster ops)
+  const aFog = new Map((a.satellites?.fogs ?? []).map((f) => [f.id, f]));
+  for (const fb of b.satellites?.fogs ?? []) {
+    const fa = aFog.get(fb.id);
+    if (!fa) continue;
+    const rows: { y: number; mask: number[] }[] = [];
+    for (const rb of fb.rows) {
+      const ra = fa.rows.find((r) => r.y === rb.y);
+      if (ra && !eq(ra.mask, rb.mask)) rows.push({ y: rb.y, mask: rb.mask.slice() });
+    }
+    if (rows.length) ops.push({ kind: "setFog", id: fb.id, rows });
+  }
+
   // --- scenario info (patchable header fields) ------------------------------
   const ha = (a.header ?? {}) as unknown as Record<string, unknown>;
   const hb = (b.header ?? {}) as unknown as Record<string, unknown>;
@@ -175,5 +189,7 @@ export function opKeys(op: EditOp): string[] {
       return ["SCENARIO"];
     case "setDiplomacy":
       return ["DIPLOMACY"];
+    case "setFog":
+      return op.rows.map((r) => `F:${op.id}:${r.y}`); // one map line of one player's fog
   }
 }

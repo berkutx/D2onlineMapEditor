@@ -6,7 +6,7 @@
 import type { Component } from "vue";
 import { Pointer, Brush, Scissor, Picture, Rank, Crop, OfficeBuilding } from "@element-plus/icons-vue";
 import type { EditTool } from "../stores/toolStore";
-import { WaterIcon, ForestIcon, RoadIcon, EraseIcon, LocationsIcon } from "./toolIcons";
+import { WaterIcon, ForestIcon, RoadIcon, EraseIcon, LocationsIcon, FogIcon } from "./toolIcons";
 import { tr } from "../i18n";
 
 export interface ToolDef {
@@ -33,6 +33,7 @@ export const EDIT_TOOLS: ToolDef[] = [
   { value: "move", label: tr("Двигать"), icon: Rank, hint: tr("клик — взять/поставить · ⇧+клик — слой ниже · R — облик · Ctrl+тащить — двигать карту · Esc — отмена") },
   { value: "locations", label: tr("Локации"), icon: LocationsIcon, hint: tr("клик — выбрать локацию · ещё клик — следующая · тащить — переместить · ◆-ручка у выбранной — радиус · Ctrl+тащить — карта") },
   { value: "zone", label: tr("Зона"), icon: Crop, hint: tr("нарисуй территорию (прямоуг/кисть/линия/рамка) — редактор нарежет её в локации-примитивы") },
+  { value: "fog", label: tr("Туман"), icon: FogIcon, hint: tr("рисуй туман войны выбранного игрока · открывать или скрывать — в панели опций · Ctrl+тащить — двигать карту") },
 ];
 
 const BY_VALUE = new Map(EDIT_TOOLS.map((t) => [t.value, t]));

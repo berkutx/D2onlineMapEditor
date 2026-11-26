@@ -54,3 +54,11 @@ export const LocationsIcon = icon("LocationsIcon", [
   },
   { d: "M512 372a140 140 0 1 0 0.1 0Z" },
 ]);
+
+/** Fog — a cloud over two strips of mist. */
+export const FogIcon = icon("FogIcon", [
+  {
+    d: "M360 420a150 150 0 1 0 0.1 0Z M540 250a190 190 0 1 0 0.1 0Z M710 450a135 135 0 1 0 0.1 0Z M360 560h350v160h-350Z",
+  },
+  { d: "M230 790h564v54h-564Z M330 888h364v54h-364Z" },
+]);

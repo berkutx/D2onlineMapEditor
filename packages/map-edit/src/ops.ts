@@ -243,6 +243,31 @@ export function applyOp(doc: MapDocument, op: EditOp): AppliedOp {
       const inverse: EditOp = { kind: "setDiplomacy", diplomacy: doc.diplomacy ?? [] };
       return { doc: { ...doc, diplomacy: op.diplomacy.slice() }, inverse };
     }
+
+    case "setFog": {
+      const sat = doc.satellites;
+      const fi = sat ? sat.fogs.findIndex((f) => f.id === op.id) : -1;
+      if (!sat || fi < 0) throw new Error(`applyOp setFog: the map has no fog block ${op.id}`);
+      const fog = sat.fogs[fi]!;
+      // rows keep their place in the block: the game reads masks by record order, POS_Y is
+      // only checked — so a line's mask is replaced where it stands, never re-sorted
+      const rows = fog.rows.slice();
+      const previous: { y: number; mask: number[] }[] = [];
+      for (const next of op.rows) {
+        const ri = rows.findIndex((r) => r.y === next.y);
+        if (ri < 0) throw new Error(`applyOp setFog: fog ${op.id} has no line ${next.y}`);
+        const before = rows[ri]!;
+        if (next.mask.length !== before.mask.length) {
+          throw new Error(`applyOp setFog: line ${next.y} takes ${before.mask.length} bytes, got ${next.mask.length}`);
+        }
+        previous.push({ y: before.y, mask: before.mask.slice() });
+        rows[ri] = { y: before.y, mask: next.mask.slice() };
+      }
+      const fogs = sat.fogs.slice();
+      fogs[fi] = { ...fog, rows };
+      const inverse: EditOp = { kind: "setFog", id: op.id, rows: previous };
+      return { doc: { ...doc, satellites: { ...sat, fogs } }, inverse };
+    }
   }
 }
 

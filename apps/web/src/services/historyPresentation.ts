@@ -114,6 +114,8 @@ export function summarize(op: EditOp, ctx?: OpContext): string {
       return tr("✎ сценарий — {fields}", { fields: fieldsRu(op.fields) || tr("настройки") });
     case "setDiplomacy":
       return tr("⚑ дипломатия ({count})", { count: op.diplomacy.length });
+    case "setFog":
+      return tr("🌫 туман войны");
   }
   return unhandledOperation(op);
 }
@@ -131,6 +133,7 @@ export function summarizeBatch(ops: readonly EditOp[], ctx?: OpContext): string 
     if (roads === 0) return trn("⛰ рельеф — {n} кл.", n);
     return trn("⛰ рельеф + 🛣 дороги — {n} кл.", n);
   }
+  if (ops.every((o) => o.kind === "setFog")) return tr("🌫 туман войны"); // one brush stroke
   const allSameAdd = ops.every((o) => o.kind === "addObject");
   if (allSameAdd) return tr("➕ объектов: {count}", { count: n });
   return tr("✎ правок за операцию: {count}", { count: n });
@@ -182,6 +185,8 @@ export function detailOf(op: EditOp, ctx?: OpContext): string {
       return `${tr("настройки сценария")}\n${fieldDetails(op.fields, ctx)}`;
     case "setDiplomacy":
       return op.diplomacy.map((entry) => tr("расы {race1} ↔ {race2}: {relation}", { race1: entry.race1, race2: entry.race2, relation: entry.relation })).join("\n") || tr("дипломатические отношения очищены");
+    case "setFog":
+      return tr("блок тумана {id}, изменено линий карты: {count}", { id: op.id, count: op.rows.length });
   }
   return unhandledOperation(op);
 }

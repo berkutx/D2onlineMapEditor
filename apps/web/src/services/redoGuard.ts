@@ -43,6 +43,11 @@ export function captureRedoState(doc: MapDocument, ops: readonly EditOp[]): Reco
       case "setVariables": capture("VARS", doc.variables ?? []); break;
       case "setDiplomacy": capture("DIPLOMACY", doc.diplomacy ?? []); break;
       case "setScenarioInfo": capture("SCENARIO", doc.header); break;
+      case "setFog": {
+        const fog = doc.satellites?.fogs.find(f => f.id === op.id);
+        for (const row of op.rows) capture(`F:${op.id}:${row.y}`, fog?.rows.find(r => r.y === row.y)?.mask);
+        break;
+      }
       default: {
         const unsupported: never = op;
         throw new Error(`Unsupported redo operation: ${JSON.stringify(unsupported)}`);

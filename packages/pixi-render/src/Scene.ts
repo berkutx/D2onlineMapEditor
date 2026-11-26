@@ -28,6 +28,8 @@ import { GridLayer } from "./GridLayer.js";
 import { ObjectLayer, collectSpriteKeys, type ObjectTables } from "./ObjectLayer.js";
 import { LocationLayer, type LocationOpts } from "./LocationLayer.js";
 import { ZoneLayer, type ZoneVisual } from "./ZoneLayer.js";
+import { FogLayer } from "./FogLayer.js";
+import type { FogVisual } from "./fogRuns.js";
 import { EventOverlayLayer } from "./EventOverlayLayer.js";
 import { AnchorLayer } from "./AnchorLayer.js";
 import { ScenarioRolesLayer, type RoleCounts, type ObjectRoleMarker } from "./ScenarioRolesLayer.js";
@@ -131,6 +133,9 @@ export class Scene {
   private zones?: ZoneLayer;
   /** zone visuals kept so a full rebuild restores the layer. */
   private zoneState: ReadonlyArray<ZoneVisual> = [];
+  private fog?: FogLayer;
+  /** the fog being shown (one player's), kept so a full rebuild restores the layer. */
+  private fogState: FogVisual | null = null;
   private eventOverlay?: EventOverlayLayer;
   /** The selected event to visualize; kept so a rebuild after an edit re-draws it. */
   private selectedEvent: import("@d2/map-schema").MapEvent | null = null;
@@ -301,6 +306,12 @@ export class Scene {
     this.objects.build(map, assets, this.anim, objectTypes, this.objectTables);
     this.world.addChild(this.objects.view);
 
+    // a player's fog of war (the «Туман» tool): a veil over terrain + objects, under the
+    // location / event overlays so those stay readable
+    this.fog = new FogLayer();
+    this.fog.build(this.fogState);
+    this.world.addChild(this.fog.view);
+
     // event-location highlights, drawn on top of everything (editor getZ ~1300)
     this.mapSizeCur = map.size;
     this.locations = new LocationLayer();
@@ -431,6 +442,14 @@ export class Scene {
     this.zoneState = zones;
     if (!this.zones) return;
     this.zones.build(zones);
+    this.renderNow();
+  }
+
+  /** Show one player's fog of war as a veil over the map, or remove it (null). */
+  updateFog(fog: FogVisual | null): void {
+    this.fogState = fog;
+    if (!this.fog) return;
+    this.fog.build(fog);
     this.renderNow();
   }
 
@@ -716,7 +735,7 @@ export class Scene {
     const hide = (v?: { visible: boolean } | null): void => setVis(v, false);
     setVis(this.terrain?.view, true);
     setVis(this.objects?.view, true);
-    hide(this.grid?.view); hide(this.locations?.view); hide(this.zones?.view);
+    hide(this.grid?.view); hide(this.locations?.view); hide(this.zones?.view); hide(this.fog?.view);
     hide(this.eventOverlay?.view); hide(this.anchorLayer?.view); hide(this.scenarioRoles?.view);
     hide(this.presence?.view); hide(this.overlay?.view);
     hide(this.locVeil); hide(this.ghost); hide(this.roadSel); hide(this.footprint); hide(this.selection);
@@ -1046,6 +1065,7 @@ export class Scene {
     this.scenarioRoles?.destroy();
     this.locations?.destroy();
     this.zones?.destroy();
+    this.fog?.destroy();
     this.grid?.destroy();
     this.terrain?.destroy();
     this.anim?.destroy();
@@ -1057,6 +1077,7 @@ export class Scene {
     this.scenarioRoles = undefined;
     this.locations = undefined;
     this.zones = undefined;
+    this.fog = undefined;
     this.grid = undefined;
     this.terrain = undefined;
     this.anim = undefined;

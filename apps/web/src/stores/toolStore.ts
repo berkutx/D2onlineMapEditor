@@ -10,10 +10,11 @@ import type { LocFilter } from "../services/scenarioRoles";
 /** select = pan/inspect (no painting); terrain/water/forest/road/erase paint cells;
  *  decor = place a decoration; move = pick+drop an object; roadsel = select a road segment;
  *  region = drag a rectangle for Copilot generation; locations = «режим локаций» (world
- *  dimmed under a veil, clicks pick/drag ONLY locations). */
+ *  dimmed under a veil, clicks pick/drag ONLY locations); fog = paint a player's fog of
+ *  war (which player and open/hide live in fogStore). */
 export type EditTool =
   | "select" | "terrain" | "water" | "forest" | "road" | "erase"
-  | "decor" | "object" | "move" | "roadsel" | "region" | "locations" | "zone";
+  | "decor" | "object" | "move" | "roadsel" | "region" | "locations" | "zone" | "fog";
 
 /** What the "object" tool places (interactive objects, unlike the decor tool's landmarks). */
 export type PlaceObjectKind =
@@ -27,7 +28,7 @@ export type ZoneMode = "rect" | "brush" | "line" | "frame";
 
 export const useToolStore = defineStore("tool", () => {
   const tool = ref<EditTool>("select");
-  /** Square brush side in cells (1, 3, 5). */
+  /** Square brush side in cells (1, 3, 5; the fog brush also offers 9). */
   const size = ref(1);
   /** Land terrain id painted by the "terrain" tool (1=HU,2=DW,3=HE,4=UN,5=NE,6=EL). */
   const terrainId = ref(5);

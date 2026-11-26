@@ -190,6 +190,8 @@ export function roundTripSemantic(
   if (templates) return { ok: false, reason: templates };
   const diplomacy = diffScalar(expected.diplomacy ?? [], reparsed.diplomacy ?? [], "дипломатия");
   if (diplomacy) return { ok: false, reason: diplomacy };
+  const fogs = diffById(expected.satellites?.fogs ?? [], reparsed.satellites?.fogs ?? [], "туман");
+  if (fogs) return { ok: false, reason: fogs };
   const players = diffScalar(expected.players, reparsed.players, "игроки");
   if (players) return { ok: false, reason: players };
   const header = diffScalar(expected.header, reparsed.header, "заголовок");

@@ -55,6 +55,7 @@ export {
   tombFrame,
   siteFrame,
   type SiteKind,
+  fogFrame,
   replaceBlock,
   deleteBlocks,
   addPlanEntries,

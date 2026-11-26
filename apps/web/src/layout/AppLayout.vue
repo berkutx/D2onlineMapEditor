@@ -21,6 +21,7 @@ import { tr } from "../i18n";
 import TopMenuBar from "./TopMenuBar.vue";
 import ToolDock from "./ToolDock.vue";
 import ToolOptionsBar from "./ToolOptionsBar.vue";
+import FogToolBar from "./FogToolBar.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import ObjectInspector from "./ObjectInspector.vue";
 import ZoneInspector from "./ZoneInspector.vue";
@@ -189,6 +190,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
       <el-main class="app-main">
         <MapCanvasHost />
         <ToolOptionsBar v-if="currentScenarioId && !readOnly" />
+        <FogToolBar v-if="currentScenarioId && !readOnly" />
         <ObjectActionBar v-if="!readOnly && toolStore.tool === 'move'" />
         <RoadActionBar v-if="!readOnly && toolStore.tool === 'roadsel'" />
         <SelectionActionBar v-if="!readOnly && toolStore.tool === 'select'" />

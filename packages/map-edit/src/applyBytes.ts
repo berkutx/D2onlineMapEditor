@@ -36,6 +36,8 @@ import {
   scenVariablesFrame,
   stackTemplateFrame,
   diplomacyFrame,
+  fogFrame,
+  parseScenario,
   splitMultiString,
   encodeCp1251,
   spliceVariableFields,
@@ -164,6 +166,8 @@ export function applyEditsToBytes(
   let scenInfoPatch: ScenarioInfoPatch | null = null;
   /** The FINAL diplomacy list (last setDiplomacy wins), or null if untouched. */
   let diplomacyFinal: DiplomacyEntry[] | null = null;
+  /** Fog edits: fog block id → map line → its FINAL mask (last setFog of a line wins). */
+  const fogOps = new Map<string, Map<number, readonly number[]>>();
   let nextTM = 0;
   for (const o of raw.objects) {
     const m = /TM([0-9a-fA-F]{4})$/.exec(o.id);
@@ -471,6 +475,12 @@ export function applyEditsToBytes(
       case "setDiplomacy":
         diplomacyFinal = op.diplomacy.slice();
         break;
+      case "setFog": {
+        let lines = fogOps.get(op.id);
+        if (!lines) fogOps.set(op.id, (lines = new Map()));
+        for (const r of op.rows) lines.set(r.y, r.mask);
+        break;
+      }
     }
   }
 
@@ -913,6 +923,18 @@ export function applyEditsToBytes(
       bytes = replaceBlock(bytes, dp.id, diplomacyFrame(raw.version, dp.id, diplomacyFinal));
     } else {
       bytes = appendBlocks(bytes, [diplomacyFrame(raw.version, `${raw.version}DP0000`, diplomacyFinal)]);
+    }
+  }
+
+  // Fog of war: rebuild each touched MidgardMapFog block in place, its lines in their
+  // on-disk order with the edited masks swapped in.
+  if (fogOps.size) {
+    const onDisk = parseScenario(bytes).satellites?.fogs ?? [];
+    for (const [id, lines] of fogOps) {
+      const fog = onDisk.find((f) => f.id === id);
+      if (!fog) throw new Error(`applyEditsToBytes setFog: the map has no fog block ${id}`);
+      const rows = fog.rows.map((r) => ({ y: r.y, mask: lines.get(r.y) ?? r.mask }));
+      bytes = replaceBlock(bytes, id, fogFrame(raw.version, parseInt(id.slice(-4), 16), rows));
     }
   }
 
