@@ -383,7 +383,8 @@ const SOLID = ["solid", "frame"] as const;
  */
 const RECIPES: readonly (Rule & { id: string })[] = [
   { id: "wall_maze_fence", need: ["fence"], also: ["maze"] }, // «частокол», «лабиринт из частокола»
-  { id: "wall_maze_thin", need: ["maze", "thin"] }, // «тонкий лабиринт», «тонкие стены»
+  { id: "wall_maze_thin", need: ["maze", "ruins"] }, // «лабиринт из руин», «руины лабиринта»
+  { id: "wall_maze_thin", need: ["maze", "thin"] }, // «тонкий лабиринт», «тонкие стены»: the old name of it
   { id: "wall_maze", need: [["maze", "fence"]] }, // …and the one maze there used to be
   { id: "relief_hills", need: ["hill"], also: [SPARSE] },
   { id: "relief_hills", need: ["mountain", SPARSE] }, // «редкие горы», «разбросай скалы»

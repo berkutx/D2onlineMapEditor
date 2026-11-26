@@ -46,6 +46,10 @@ export interface Recipe {
   seedsFrac?: number;
   /** maze: seal the perimeter and cut two entrances after the run. */
   sealMaze?: boolean;
+  /** maze only: how wide a corridor is, in grid cells (a wall stays one grid cell thick).
+   *  Default 1. A fine maze (one-cell walls) reads far better with 2: long walls, joints three
+   *  cells apart, instead of a wall on every other cell. */
+  corridor?: number;
   /** ribbon: the result must cross the zone with this symbol. */
   spanSymbol?: string;
   /** mj: run on a grid this much coarser; decode places scale-sized pieces (wall_maze=2). */

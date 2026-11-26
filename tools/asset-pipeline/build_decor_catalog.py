@@ -7,6 +7,12 @@ copilot agent. Each entry carries:
   - tone/biome  <- the name when explicit (lava/ice/swamp), else the sprite's colours
   - slope       <- sprite geometry (h/w);  size <- footprint
   - iso.orient  <- PCA on the opaque mass (walls/fences/gates: which diagonal it runs)
+  - iso.dx/base <- where a wall / fence / gate piece sits on its source canvas: dx — how far its
+                   opaque mass is off the canvas centre, -1 (all of it left) .. +1 (all right);
+                   base — its lowest opaque row, counted down from the canvas centre. That tells
+                   the four corners of a palisade apart (a corner opens to the side it leans to;
+                   of two symmetric ones the one with the higher base opens up) and a half wall
+                   from a whole one. Only with a manifest that keeps the trim (0.2).
   - thumb       <- {page,x,y,w,h} so the web palette CSS-crops from the atlas pages
 
 Run AFTER pipeline.py (atlases) — it reads the atlas pages + page jsons under --out.
@@ -240,6 +246,7 @@ def main(argv=None):
     # image as the manifest names it (what the browser fetches); `page_file` maps it to the
     # file in the build directory, which for a blob-addressed sheet is another path.
     floc = {}
+    ftrim = {}  # frame key -> (trimX, trimY, sourceW, sourceH): the sprite's place on its canvas
     page_cache = {}
     page_file = {}
     manifest_path = os.path.join(A, "manifest.json")
@@ -247,11 +254,14 @@ def main(argv=None):
     if manifest.get("frames"):
         # manifest 0.2 (build_sheets): one table for every frame, one sheet per source record
         sheets = manifest["spritesheets"]
-        for k, (si, x, y, w, h) in ((k, v[:5]) for k, v in manifest["frames"].items()):
+        for k, v in manifest["frames"].items():
+            si, x, y, w, h = v[:5]
             sheet = sheets[si]
             if sheet["id"].split("/")[0] not in ("iso-still", "iso-cmon", "iso-anim", "iso-terrn"):
                 continue
             floc[k] = {"page": sheet["image"], "x": x, "y": y, "w": w, "h": h}
+            if len(v) >= 9:
+                ftrim[k] = tuple(v[5:9])
             page_file[sheet["image"]] = os.path.join("sheets", *(sheet["id"] + ".png").split("/"))
     else:
         # manifest 0.1 (pipeline.py): atlas pages with a JSON each (first occurrence wins)
@@ -296,6 +306,22 @@ def main(argv=None):
             return "none"
         r = float(np.corrcoef(xs, ys)[0, 1])
         return "corner" if abs(r) < 0.25 else ("NW-SE" if r > 0 else "NE-SW")
+
+    def wall_lean(key):
+        """(dx, base) of a wall piece on its source canvas — see the module docstring; None
+        when the manifest keeps no trim or the sprite is all but empty."""
+        if key not in ftrim:
+            return None
+        tx, ty, sw, sh = ftrim[key]
+        t = floc[key]
+        a = page_img(t["page"])[t["y"]:t["y"] + t["h"], t["x"]:t["x"] + t["w"]]
+        ys, xs = np.nonzero(a[..., 3] > 40)
+        if len(xs) < 30:
+            return None
+        left, right = tx + int(xs.min()), tx + int(xs.max())
+        cx = sw / 2.0
+        dx = ((right - cx) - (cx - left)) / float(right - left + 1)
+        return round(dx, 2), int(round(ty + int(ys.max()) - sh / 2.0))
 
     # landmark rows from GLmark
     landmarks = []
@@ -342,10 +368,14 @@ def main(argv=None):
             conf = "low"
             desc_en, desc_ru = (b["name_ru"] or "object"), (b["name_ru"] or "объект")
         orient = wall_orient(b["id"]) if shape in ("wall", "fence", "gate") else "none"
+        iso = {"orient": orient, "slope": slope}
+        lean = wall_lean(b["id"]) if shape in ("wall", "fence", "gate") else None
+        if lean:
+            iso["dx"], iso["base"] = lean
         tags = sorted(set([shape, style] + ([tone] if tone != "neutral" else [])))
         emit({"id": b["id"], "name_ru": b["name_ru"], "cx": b["cx"], "cy": b["cy"],
               "isMountain": b["isMountain"], "shape": shape, "tone": tone, "style": style,
-              "size": size, "iso": {"orient": orient, "slope": slope}, "conf": conf,
+              "size": size, "iso": iso, "conf": conf,
               "desc_en": desc_en, "desc_ru": desc_ru, "tags": tags, "thumb": floc[b["id"]]})
 
     # MOMNE terrain mountains

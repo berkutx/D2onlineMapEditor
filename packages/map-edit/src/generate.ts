@@ -83,46 +83,85 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   grass_fill: { G: { kind: "terrain", terrain: 5 } }, // 5 = neutral land
 };
 
-/** Wall piece ids grouped by iso orientation (straights + corners). */
+/** Wall piece ids grouped by iso orientation (straights + corners). The straights of a
+ *  direction are sorted whole pieces first: a ruined set also has half walls, which serve as
+ *  the crumbled END of a run, not as its body. */
 export interface WallPieces {
   "NE-SW": string[];
   "NW-SE": string[];
   corner: string[];
 }
-/** One wall art set (a faction's stone/wood walls): its 1×1 pieces (s1) + 2×2 pieces (s2),
- *  plus an optional matching corner TOWER. The game faces castles with the 2×2 stone set in
- *  long lines + towers at the corners — that's what a maze uses. */
+/** One wall art set — a run of pieces the game's tables number one after another (the stone
+ *  wall 0046–0048, its mossy twin 8134–8136, the palisade 8296–8301): its 1×1 pieces (s1) or
+ *  its 2×2 pieces (s2). The game faces castles with a 2×2 stone set in long lines and towers
+ *  at the corners — that's what a maze uses. */
 export interface WallStyle {
   key: string;
   s1: WallPieces;
   s2: WallPieces;
-  /** a 1×1 stone turret of the faction — placed at scale-1 junctions (fills its single cell,
-   *  no gap). At scale 2 a 1×1 tower left ¾ of the block open, so the 2×2 wall corner is used. */
+  /** the tone most of its pieces have ("neutral", "dark", …): a joint building is matched to it */
+  tone?: string;
+  /** one-cell corner pieces by the arms they join (the 4-neighbour mask: N|E = 3, E|S = 6,
+   *  S|W = 12, W|N = 9). Set only when the art really has all four — a palisade does, ruined
+   *  stone walls do not, and then a joint is a building instead. */
+  corners?: Record<number, string>;
+  /** one-cell half walls by the side they are attached to (the arm bit: N = 1, E = 2, S = 4,
+   *  W = 8) — the crumbled end of a run */
+  stubs?: Record<number, string>;
+  /** a 1×1 stone turret that matches the set — what stands on its joints by default */
   tower?: string;
 }
-/** Available wall styles. A maze uses ONE so the art doesn't mix; the 2×2 stone set wins. */
+/** A building a maze may stand on a joint. `kind` is the catalogue's own English name of it:
+ *  "Tower" (round stone), "Watchtower" (wooden), "Small tower", "Giants' tower", "Lighthouse",
+ *  "Column", "Rune monolith", "Obelisk". */
+export interface MazeOrnament {
+  id: string;
+  kind: string;
+  tone: string;
+}
+/** Buildings for the joints of a maze, from the mod's catalogue. */
+export interface MazeOrnaments {
+  /** one-cell towers */
+  towers: MazeOrnament[];
+  /** 2×2 towers — a bastion for the corner of a fortress */
+  bastions: MazeOrnament[];
+  /** one-cell columns, monoliths and obelisks */
+  pillars: MazeOrnament[];
+}
+/** Available wall styles (a maze uses ONE, so the art doesn't mix) and joint buildings. */
 export interface WallSet {
   styles: WallStyle[];
+  ornaments?: MazeOrnaments;
 }
 
 const emptyWallPieces = (): WallPieces => ({ "NE-SW": [], "NW-SE": [], corner: [] });
 const wallComplete = (p: WallPieces): boolean =>
   p.corner.length > 0 && (p["NE-SW"].length > 0 || p["NW-SE"].length > 0);
+const pieceCount = (st: WallStyle): number =>
+  [st.s1, st.s2].reduce((n, p) => n + p["NE-SW"].length + p["NW-SE"].length + p.corner.length, 0);
 
 interface WallCatalogEntry {
   id: string;
   shape: string;
   cx: number;
   cy: number;
-  iso?: { orient?: string };
+  /** `dx` / `base`: where the piece sits on its source canvas (build_decor_catalog) — dx is
+   *  how far its mass is off the canvas centre (−1 all left … +1 all right), base its lowest
+   *  row counted down from the centre. Absent in a catalogue built before they existed. */
+  iso?: { orient?: string; dx?: number; base?: number };
   tone?: string;
   tags?: string[];
+  desc_en?: string;
 }
 
+/** a piece leaning this far off the centre is a half wall, or a corner that opens sideways */
+const LEAN = 0.4;
+
 /**
- * Collect 1×1 wall/fence pieces from the catalog, grouped into consistent ART SETS
- * (shape + faction), each by iso orientation. Styles are sorted so the most complete
- * stone "wall" set is first — a maze then uses ONE style instead of mixing art.
+ * Collect the catalogue's wall and palisade pieces into ART SETS, and the buildings a maze may
+ * stand on its joints. A set is a run of consecutive ids of one shape and footprint; sets come
+ * 2×2 stone first (the fortress look), then by the number of pieces, so a recipe that asks for
+ * a look gets its richest set.
  */
 export function buildWallSet(
   catalog: Record<string, WallCatalogEntry> | WallCatalogEntry[],
@@ -133,42 +172,88 @@ export function buildWallSet(
   // (`mazeTower`); the stock id is the fallback for a catalog that comes without a profile.
   const preferredTower = (opts.preferredTower ?? "G000MG0149").toUpperCase();
   const arr = Array.isArray(catalog) ? catalog : Object.values(catalog);
-  const byKey = new Map<string, WallStyle>();
-  for (const e of arr) {
-    if (e.shape !== "wall" && e.shape !== "fence") continue;
-    const cx = e.cx ?? 1, cy = e.cy ?? 1;
-    if (!((cx === 1 && cy === 1) || (cx === 2 && cy === 2))) continue; // 1×1 + 2×2 only
-    const key = `${e.shape}|${e.id.slice(0, 4)}`; // one art set = shape + faction prefix
-    let st = byKey.get(key);
-    if (!st) { st = { key, s1: emptyWallPieces(), s2: emptyWallPieces() }; byKey.set(key, st); }
-    const pieces = cx === 2 ? st.s2 : st.s1;
-    const o = e.iso?.orient;
-    if (o === "NE-SW" || o === "NW-SE") pieces[o].push(e.id);
-    else pieces.corner.push(e.id);
+  const sizeOf = (e: WallCatalogEntry): number => ((e.cx ?? 1) === 2 && (e.cy ?? 1) === 2 ? 2 : (e.cx ?? 1) === 1 && (e.cy ?? 1) === 1 ? 1 : 0);
+
+  // ---- art sets
+  const walls = arr
+    .filter((e) => (e.shape === "wall" || e.shape === "fence") && sizeOf(e) > 0)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const runs: { style: WallStyle; entries: WallCatalogEntry[] }[] = [];
+  let prev: WallCatalogEntry | undefined;
+  for (const e of walls) {
+    const num = Number(e.id.slice(-4));
+    const follows = !!prev && prev.shape === e.shape && sizeOf(prev) === sizeOf(e)
+      && prev.id.slice(0, -4) === e.id.slice(0, -4) && Number.isInteger(num) && num === Number(prev.id.slice(-4)) + 1;
+    if (!follows) runs.push({ style: { key: `${e.shape}|${e.id}`, s1: emptyWallPieces(), s2: emptyWallPieces() }, entries: [] });
+    runs[runs.length - 1]!.entries.push(e);
+    prev = e;
   }
-  // matching corner TOWER per faction: a 1×1 plain stone turret (prefer tone "neutral", so a
-  // grey turret that matches the wall — not the red-roof / snowy 2×2 watchtowers).
-  const towerByFaction = new Map<string, { id: string; score: number }>();
-  for (const e of arr) {
-    if (e.shape !== "tower" || (e.cx ?? 1) !== 1 || (e.cy ?? 1) !== 1) continue;
-    const fac = e.id.slice(0, 4);
-    // Prefer the mod's maze tower; fall back to any neutral turret of the faction.
-    const score =
-      (e.id.toUpperCase() === preferredTower ? 2 : 0) +
-      (e.tone === "neutral" || (e.tags ?? []).includes("neutral") ? 1 : 0);
-    const cur = towerByFaction.get(fac);
-    if (!cur || score > cur.score) towerByFaction.set(fac, { id: e.id, score });
+  for (const { style, entries } of runs) {
+    const into = sizeOf(entries[0]!) === 2 ? style.s2 : style.s1;
+    const lean = (e: WallCatalogEntry): number => Math.abs(e.iso?.dx ?? 0);
+    // whole pieces first within a direction (stable for a catalogue without the geometry)
+    for (const e of entries.slice().sort((a, b) => lean(a) - lean(b))) {
+      const o = e.iso?.orient;
+      if (o === "NE-SW" || o === "NW-SE") into[o].push(e.id);
+      else into.corner.push(e.id);
+    }
+    // the tone most pieces have
+    const tones = new Map<string, number>();
+    for (const e of entries) tones.set(e.tone ?? "neutral", (tones.get(e.tone ?? "neutral") ?? 0) + 1);
+    style.tone = [...tones].sort((a, b) => b[1] - a[1] || (a[0] === "neutral" ? -1 : 1))[0]?.[0];
+    if (into !== style.s1) continue;
+    // one-cell pieces: tell the corners apart, and the half walls
+    const straights = entries.filter((e) => e.iso?.orient === "NE-SW" || e.iso?.orient === "NW-SE");
+    const bases = straights.map((e) => e.iso?.base).filter((b): b is number => typeof b === "number");
+    const base = bases.length ? bases.reduce((a, b) => a + b, 0) / bases.length : undefined;
+    const corners: Record<number, string> = {};
+    for (const e of entries) {
+      const dx = e.iso?.dx;
+      if (e.iso?.orient !== "corner" || typeof dx !== "number") continue;
+      // a corner opens to the side its mass leans to: right = toward N and E, left = S and W;
+      // of two that sit in the middle, the one standing higher than the straights opens up
+      // (W and N), the other down (E and S)
+      const arms = dx > LEAN ? 3 : dx < -LEAN ? 12
+        : typeof e.iso?.base === "number" && base !== undefined && e.iso.base < base - 3 ? 9 : 6;
+      if (!(arms in corners)) corners[arms] = e.id;
+    }
+    if ([3, 6, 9, 12].every((m) => m in corners)) style.corners = corners;
+    const stubs: Record<number, string> = {};
+    for (const e of straights) {
+      const dx = e.iso?.dx;
+      if (typeof dx !== "number" || Math.abs(dx) <= LEAN - 0.1) continue;
+      // on screen N is up-right and S down-left (the NE-SW pieces), E down-right and W up-left
+      const arm = e.iso?.orient === "NE-SW" ? (dx > 0 ? 1 : 4) : dx > 0 ? 2 : 8;
+      if (!(arm in stubs)) stubs[arm] = e.id;
+    }
+    if (Object.keys(stubs).length) style.stubs = stubs;
   }
 
-  const styles = [...byKey.values()].filter((s) => wallComplete(s.s1) || wallComplete(s.s2));
-  // a wall family without a turret of its own (the thin stone walls are another id prefix
-  // than the round tower) takes the best turret of the catalogue
-  const anyTower = [...towerByFaction.values()].sort((a, b) => b.score - a.score)[0];
-  for (const s of styles) s.tower = (towerByFaction.get(s.key.split("|")[1] ?? "") ?? anyTower)?.id;
-  // prefer "wall" (stone) over "fence", then faction desc, so the stone sets sort first.
-  styles.sort((a, b) =>
-    (a.key.startsWith("wall|") ? 0 : 1) - (b.key.startsWith("wall|") ? 0 : 1) || (a.key < b.key ? 1 : -1));
-  return { styles };
+  // ---- buildings for the joints
+  const ornament = (e: WallCatalogEntry): MazeOrnament => ({ id: e.id, kind: e.desc_en ?? "Tower", tone: e.tone ?? "neutral" });
+  const byId = (a: MazeOrnament, b: MazeOrnament): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const ornaments: MazeOrnaments = {
+    towers: arr.filter((e) => e.shape === "tower" && sizeOf(e) === 1).map(ornament).sort(byId),
+    bastions: arr.filter((e) => e.shape === "tower" && sizeOf(e) === 2).map(ornament).sort(byId),
+    pillars: arr.filter((e) => (e.shape === "standing-stone" || e.shape === "obelisk") && sizeOf(e) === 1).map(ornament).sort(byId),
+  };
+  // the turret of a set: the mod's maze tower — unless the set has a tone of its own (mossy
+  // stone), then a round tower of that tone first; a plain grey one before any other
+  const round = ornaments.towers.filter((t) => t.kind === "Tower");
+  const turrets = round.length ? round : ornaments.towers;
+  const turretFor = (tone: string | undefined): string | undefined => {
+    const own = tone ?? "neutral";
+    const score = (t: MazeOrnament): number =>
+      (t.id.toUpperCase() === preferredTower ? 4 : 0) + (t.tone === own ? (own === "neutral" ? 2 : 6) : 0) + (t.tone === "neutral" ? 1 : 0);
+    return turrets.slice().sort((a, b) => score(b) - score(a) || byId(a, b))[0]?.id;
+  };
+
+  const styles = runs.map((r) => r.style).filter((st) => wallComplete(st.s1) || wallComplete(st.s2));
+  for (const st of styles) st.tower = turretFor(st.tone);
+  // stone before a palisade, the 2×2 sets first, then the richer set, then by id
+  const rank = (st: WallStyle): number => (st.key.startsWith("wall|") ? 0 : 2) + (wallComplete(st.s2) ? 0 : 1);
+  styles.sort((a, b) => rank(a) - rank(b) || pieceCount(b) - pieceCount(a) || (a.key < b.key ? -1 : 1));
+  return { styles, ornaments };
 }
 
 /**
@@ -217,13 +302,22 @@ export function buildOccupiedSet(
 }
 
 /**
- * The art set a wall recipe is drawn with: of the asked shape (any, stone first, when none is
- * asked), with a complete set of pieces of the asked size. Undefined when the mod has none —
- * a palisade maze in a mod without palisades, a fine maze in a mod with only fortress walls.
+ * The art sets a wall recipe may be drawn with: of the asked shape (any, stone first, when none
+ * is asked), with a complete set of pieces of the asked size — the richest ones only, so a
+ * handful of wreckage pieces does not stand in for a wall. Empty when the mod has none: a
+ * palisade maze in a mod without palisades, a fine maze in a mod with only fortress walls.
  */
-export function pickWallStyle(walls: WallSet, shape: "wall" | "fence" | undefined, size: number): WallStyle | undefined {
-  const pool = shape ? walls.styles.filter((s) => s.key.startsWith(`${shape}|`)) : walls.styles;
-  return pool.find((s) => wallComplete(size >= 2 ? s.s2 : s.s1));
+export function wallStylesFor(walls: WallSet, shape: "wall" | "fence" | undefined, size: number): WallStyle[] {
+  const pool = (shape ? walls.styles.filter((s) => s.key.startsWith(`${shape}|`)) : walls.styles)
+    .filter((s) => wallComplete(size >= 2 ? s.s2 : s.s1));
+  const best = Math.max(0, ...pool.map(pieceCount));
+  return pool.filter((s) => pieceCount(s) === best);
+}
+
+/** The art set for a recipe; `variant` leafs through the sets that fit (stone, mossy stone…). */
+export function pickWallStyle(walls: WallSet, shape: "wall" | "fence" | undefined, size: number, variant = 0): WallStyle | undefined {
+  const pool = wallStylesFor(walls, shape, size);
+  return pool.length ? pool[((variant % pool.length) + pool.length) % pool.length] : undefined;
 }
 
 /** 1×1 decoration landmark ids grouped by catalog `shape` (rock / vegetation / …). */
@@ -323,6 +417,10 @@ export function decodeGrid(
   /** Collab id slot (M4): landmark ids are minted in this slot's disjoint band so two clients
    *  generating CONCURRENTLY never collide. 0 = solo / offline (the low band). */
   slot = 0,
+  /** Which of its looks a wall recipe takes: the art set (stone or mossy stone) and the
+   *  buildings on the joints. The server passes the seed, so «another variant» is another maze
+   *  in another dress; 0 is the stock look. */
+  variant = 0,
 ): EditOp[] {
   const n = doc.size;
   const inb = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < n && y < n;
@@ -400,69 +498,145 @@ export function decodeGrid(
   // id (they read the current max/count from the doc).
   let work = doc;
 
-  // 2a: wall landmarks — ONE consistent art set, auto-tiled by the 4-neighbour mask. At
-  // scale 2 the maze is coarse and uses the 2×2 stone wall pieces; neighbours are checked
-  // at the coarse `scale` spacing.
+  // 2a: wall landmarks — ONE consistent art set, auto-tiled by the 4-neighbour mask, with a
+  // building on the joints the art has no piece for. At scale 2 the maze is coarse and uses
+  // the 2×2 stone wall pieces; neighbours are checked at the coarse `scale` spacing.
   const wantS2 = scale >= 2;
+  const look = Math.abs(Math.trunc(variant));
   // (a coarse maze in a mod without 2×2 pieces is built from one-cell ones — see recipeLacks)
-  const style = pickWallStyle(walls, wallShape, scale) ?? pickWallStyle(walls, wallShape, 1) ?? (wallShape ? undefined : walls.styles[0]);
+  const style = pickWallStyle(walls, wallShape, scale, look) ?? pickWallStyle(walls, wallShape, 1, look) ?? (wallShape ? undefined : walls.styles[0]);
   const pieces = style ? (wantS2 && wallComplete(style.s2) ? style.s2 : style.s1) : undefined;
-  // a stone turret belongs to stone walls; a palisade turns its corners with its own pieces
-  const tower = wallShape === "fence" ? undefined : style?.tower;
-  // one-cell pieces of the same art, to close a coarse joint around its single tower
-  const thin = wantS2 ? pickWallStyle(walls, wallShape, 1)?.s1 : undefined;
-  if (pieces && wallComplete(pieces)) {
+  const coarse = wantS2 && !!style && pieces === style.s2;
+  if (style && pieces && wallComplete(pieces)) {
     const place = (x: number, y: number, type: string): void => {
       const op = placeLandmarkOps(work, x, y, type, slot);
       ops.push(...op);
       work = applyOps(work, op);
     };
-    // the outer corners of the whole wall figure — where a fine maze gets its towers
+    const fence = style.key.startsWith("fence|");
+    const orn = walls.ornaments;
+    const tone = style.tone ?? "neutral";
+    /** of a pool, the ones of the set's tone when there are any */
+    const toned = (pool: readonly MazeOrnament[]): MazeOrnament[] => {
+      const same = pool.filter((o) => o.tone === tone);
+      return same.length ? same : pool.slice();
+    };
+    const ofKind = (...kinds: string[]): MazeOrnament[] => (orn?.towers ?? []).filter((t) => kinds.includes(t.kind));
+    const nth = <T,>(pool: readonly T[], i: number): T | undefined => (pool.length ? pool[((i % pool.length) + pool.length) % pool.length] : undefined);
+
+    // ---- what stands on the joints, by the look of the wall. One building of a kind per
+    // maze (the variant picks which), so a maze is of a piece and the next one differs.
+    // • a palisade: wooden watchtowers on the outer corners and by the entrances; its inner
+    //   corners turn with its own four corner pieces;
+    // • ruined one-cell stone walls: a column (monolith, obelisk) on every joint, a turret on
+    //   the outer corners, and runs that crumble at their free ends;
+    // • a fortress of 2×2 walls: a round tower on every joint, of the set's own stone — two
+    //   kinds take turns when the mod has them — and, in every third variant, a 2×2 bastion
+    //   on the outer corners.
+    const watch = ofKind("Watchtower");
+    const small = toned(ofKind("Small tower", "Giants' tower"));
+    const turret = style.tower;
+    // the set's turret, and the other round towers of the same stone to take turns with it
+    const turretTone = orn?.towers.find((t) => t.id === turret)?.tone;
+    const jointTowers = !turret || fence ? [] : [turret, ...ofKind("Tower").filter((t) => t.id !== turret && t.tone === turretTone).map((t) => t.id)];
+    // (a column is its own thing — a grey monolith or a dark obelisk, whichever the variant brings)
+    const pillar = fence || coarse ? undefined : nth(orn?.pillars ?? [], look)?.id;
+    const cornerTower = fence ? nth(watch, look)?.id : coarse ? undefined : (nth(small, look)?.id ?? turret);
+    const gateTower = fence ? nth(watch, look + 1)?.id ?? cornerTower : coarse ? undefined : cornerTower;
+    // (of the bastions an earth-toned one first: the other lighthouse of the stock tables is snowed in)
+    const bastions = (orn?.bastions ?? []).slice().sort((a, b) => Number(b.tone === "earth") - Number(a.tone === "earth"));
+    const bastion = coarse && look % 3 === 2 ? bastions[0]?.id : undefined;
+    // one-cell pieces of a matching look, to close a coarse joint around its single tower
+    const thin = coarse ? pickWallStyle(walls, wallShape, 1, look)?.s1 : undefined;
+
+    // the bounding box of the whole wall figure: its corners and its edges (an entrance is a
+    // gap in an edge, so a wall that ENDS on the edge flanks an entrance)
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const key of wallCells) {
       const [x, y] = key.split(",").map(Number) as [number, number];
       minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
     }
-    for (const key of wallCells) {
-      const [x, y] = key.split(",").map(Number) as [number, number];
+    const ordered = [...wallCells].map((k) => k.split(",").map(Number) as [number, number]).sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+    let joints = 0;
+    for (const [x, y] of ordered) {
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
-      const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
-      // A corner/junction/isolated cell gets the round stone TOWER the game's own maze maps
-      // place at nodes (G000MG0149) — ONE tower per joint. In a coarse maze the joint is a
-      // scale×scale block and one tower would leave a walk-through gap, so the tower stands in
-      // the block's FRONT cell (drawn over the rest) and one-cell walls of the same art close
-      // the other cells, each turned along the arm it touches. Without one-cell walls in the
-      // mod the block is tiled with towers (sealed, if heavy) — the look this replaced.
-      // A fine (one-cell) maze has a joint every other cell: a tower on each would bury the
-      // walls, so only the outer corners of the figure and a lone post get one, and the other
-      // joints turn with the art's own corner pieces.
+      const ns = !!(m & 1) || !!(m & 4), ew = !!(m & 2) || !!(m & 8);
+      const straight = ns !== ew; // a run, or the end of one
+      const arms = (m & 1 ? 1 : 0) + (m & 2 ? 1 : 0) + (m & 4 ? 1 : 0) + (m & 8 ? 1 : 0);
+      const onEdge = x === minX || x === maxX || y === minY || y === maxY;
       const outerCorner = (x === minX || x === maxX) && (y === minY || y === maxY);
-      if (scale === 1 && tower && (outerCorner || m === 0)) {
-        place(x, y, tower);
-      } else if (!straight && tower && scale > 1) {
+      const gate = arms === 1 && onEdge; // the outer wall stops here: one side of an entrance
+
+      if (coarse) {
+        // ---- a fortress: a straight block is one 2×2 piece — so is the free tip of an inner
+        // wall; a corner, a branch, a lone post and the two sides of an entrance are joints
+        if (straight && !gate) {
+          const piece = wallPiece(m, pieces);
+          if (piece) place(x, y, piece);
+          continue;
+        }
+        if (outerCorner && bastion) { place(x, y, bastion); continue; } // a 2×2 building fills the block
+        const tower = nth(jointTowers, joints++);
+        if (!tower) { // no tower in the mod: the art's own piece, as far as it goes
+          const piece = wallPiece(m, pieces);
+          if (piece) place(x, y, piece);
+          continue;
+        }
+        // ONE tower per joint. It stands in the block's FRONT cell (drawn over the rest) and
+        // one-cell walls of the same stone close the cells an arm runs into, each turned
+        // along its arm — a lone tower would leave a walk-through gap between the arms. A
+        // cell no arm touches (the outside of a corner, the tip of a wall) stays empty: it
+        // leads nowhere, and a stray block of wall beside the tower only looked like litter.
+        // Without one-cell walls in the mod towers alone close the joint: one in every cell
+        // that lies BETWEEN two arms — the inside of a turn. The walls are two cells thick, so
+        // that cell touches both of them and no way is left, while the rest of the block
+        // stays open ground (four towers on every joint stood in bunches).
+        const front = scale - 1;
         if (scale === 2 && thin && wallComplete(thin)) {
-          const front = scale - 1;
           for (let dy = 0; dy < scale; dy++) {
             for (let dx = 0; dx < scale; dx++) {
               if (dx === front && dy === front) continue;
               const alongNS = dy === 0 ? !!(m & 1) : !!(m & 4); // the arm above / below this cell
               const alongEW = dx === 0 ? !!(m & 8) : !!(m & 2); // the arm to its left / right
+              if (!alongNS && !alongEW) continue;
               const piece = alongNS !== alongEW
                 ? wallPiece(alongNS ? 1 : 2, thin) // one arm: a straight along it
-                : thin.corner[(dx + dy) % thin.corner.length]; // both or none: a corner piece
+                : thin.corner[(dx + dy) % thin.corner.length]; // both: a corner block
               if (piece) place(x + dx, y + dy, piece);
             }
           }
           place(x + front, y + front, tower);
+        } else if (scale === 2) {
+          const inside: [number, number][] = [];
+          if (m & 1 && m & 2) inside.push([1, 0]); // north and east
+          if (m & 2 && m & 4) inside.push([1, 1]); // east and south
+          if (m & 4 && m & 8) inside.push([0, 1]); // south and west
+          if (m & 8 && m & 1) inside.push([0, 0]); // west and north
+          // a tip or a lone post has no turn: one tower, in the cell its wall runs into
+          if (!inside.length) inside.push(!m || m & 6 ? [1, 1] : m & 1 ? [1, 0] : [0, 1]);
+          for (const [dx, dy] of inside) place(x + dx, y + dy, tower);
         } else {
           for (let dy = 0; dy < scale; dy++)
             for (let dx = 0; dx < scale; dx++) place(x + dx, y + dy, tower);
         }
-      } else {
-        const wallType = wallPiece(m, pieces);
-        if (wallType) place(x, y, wallType);
+        continue;
       }
+
+      // ---- one-cell walls (also a coarse recipe in a mod with no 2×2 pieces: block by block)
+      const cells: [number, number][] = [];
+      for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < scale; dx++) cells.push([x + dx, y + dy]);
+      let piece: string | undefined;
+      if (outerCorner && cornerTower) piece = cornerTower;
+      else if (gate && gateTower) piece = gateTower;
+      else if (straight && arms === 2) piece = wallPiece(m, pieces);
+      else if (arms === 1) piece = style.stubs?.[m] ?? wallPiece(m, pieces); // a free end: it crumbles
+      else if (arms === 2 && style.corners?.[m]) piece = style.corners[m]; // a corner the art has
+      else if (arms === 0 && cornerTower) piece = cornerTower; // a lone post
+      else if (fence) piece = wallPiece(arms >= 3 ? ((m & 5) === 5 ? 5 : 10) : m, pieces); // no T in the art: the through run
+      else piece = pillar ?? wallPiece(m, pieces); // a joint: a column, or the art's own corner block
+      if (!piece) piece = wallPiece(m, pieces);
+      if (piece) for (const [cx, cy] of cells) place(cx, cy, piece);
     }
   }
 

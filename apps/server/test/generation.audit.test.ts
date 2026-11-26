@@ -24,7 +24,7 @@ import {
 } from "@d2/map-edit";
 import { RECIPES } from "@d2/mapgen";
 import type { MapDocument } from "@d2/map-schema";
-import { runGenerationSteps, sealMazeGrid } from "../src/maps/generation";
+import { mazeLatticeSide, recipePreview, runGenerationSteps, sealMazeGrid, widenMazeGrid } from "../src/maps/generation";
 import { config } from "../src/config";
 import { campaignMap } from "../../../test-helpers/gameDir";
 
@@ -118,36 +118,74 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
     }
   }
 
-  it("wall_maze seals every block — no walk-through gap (straights=2×2, junctions=tower bastions)", async () => {
-    // The maze is a scale-2 lattice: straight runs are 2×2 wall pieces; junctions tile the block
-    // with the round tower (4× 1×1). Either way a touched 2×2 block must be FULLY covered — an
-    // unfilled cell is a gap a unit slips through. Region is snapped to a multiple of 2, so every
-    // piece anchors on the even lattice and blocks align to even origins.
+  it("wall_maze leaves no way through a wall (straights = 2×2 pieces, joints = a tower and its side walls)", async () => {
+    // The maze is a scale-2 lattice: a straight block is one 2×2 piece; a joint block has a tower
+    // in its front cell and one-cell walls where an arm runs in. A cell of a joint that no arm
+    // touches (the outside of a corner, the tip of a wall) is left free — it leads nowhere. So
+    // the invariant is not "every touched block is full" but what that stood for: a walker,
+    // stepping in all eight directions, gets no further than if every touched block WERE full.
     for (const seed of SEEDS) {
       const { ops } = await run("wall_maze", seed);
-      const walls = ops.filter(
+      const placed = ops.filter(
         (o): o is Extract<EditOp, { kind: "addObject" }> => o.kind === "addObject" && o.object.type === "landmark",
       );
-      expect(walls.length, `seed=${seed}: placed no walls`).toBeGreaterThan(0);
+      expect(placed.length, `seed=${seed}: placed no walls`).toBeGreaterThan(0);
       // union of every placed piece's footprint
       const covered = new Set<string>();
-      for (const op of walls) {
+      for (const op of placed) {
         const bt = String((op.object as { baseType?: string }).baseType ?? "").toUpperCase();
         const [w, h] = landmarkSizes[bt] ?? [1, 1];
         const { x, y } = op.object.pos as { x: number; y: number };
         for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) covered.add(`${x + dx},${y + dy}`);
       }
-      // every 2×2 block that received any piece must have all four cells filled
-      const blocks = new Set<string>();
+      // the same with every touched 2×2 block filled whole
+      const full = new Set<string>();
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const k of covered) {
         const [x, y] = k.split(",").map(Number) as [number, number];
-        blocks.add(`${x - (x % 2)},${y - (y % 2)}`);
+        const bx = x - (x % 2), by = y - (y % 2);
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) full.add(`${bx + dx},${by + dy}`);
+        minX = Math.min(minX, bx); minY = Math.min(minY, by); maxX = Math.max(maxX, bx + 1); maxY = Math.max(maxY, by + 1);
       }
-      for (const b of blocks) {
-        const [bx, by] = b.split(",").map(Number) as [number, number];
-        for (let dy = 0; dy < 2; dy++)
-          for (let dx = 0; dx < 2; dx++)
-            expect(covered.has(`${bx + dx},${by + dy}`), `seed=${seed}: GAP at ${bx + dx},${by + dy} (block ${b})`).toBe(true);
+      const box = [minX - 1, minY - 1, maxX + 1, maxY + 1] as const;
+      /** component id of every free cell of the box, for a set of blocked cells */
+      const components = (blocked: ReadonlySet<string>): Map<string, number> => {
+        const comp = new Map<string, number>();
+        let id = 0;
+        for (let y0 = box[1]; y0 <= box[3]; y0++) for (let x0 = box[0]; x0 <= box[2]; x0++) {
+          const k0 = `${x0},${y0}`;
+          if (blocked.has(k0) || comp.has(k0)) continue;
+          id++;
+          comp.set(k0, id);
+          const queue: [number, number][] = [[x0, y0]];
+          while (queue.length) {
+            const [x, y] = queue.pop()!;
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx, ny = y + dy, k = `${nx},${ny}`;
+              if (nx < box[0] || ny < box[1] || nx > box[2] || ny > box[3] || blocked.has(k) || comp.has(k)) continue;
+              comp.set(k, id);
+              queue.push([nx, ny]);
+            }
+          }
+        }
+        return comp;
+      };
+      const whenFull = components(full);
+      const asBuilt = components(covered);
+      // two cells joined in the maze as built must be joined with full blocks too
+      const seen = new Map<number, number>();
+      for (const [k, built] of asBuilt) {
+        const ref = whenFull.get(k);
+        if (ref === undefined) continue; // a cell left free inside a joint block
+        const first = seen.get(built);
+        if (first === undefined) seen.set(built, ref);
+        else expect(ref, `seed=${seed}: a way through a wall near ${k}`).toBe(first);
+      }
+      // and a straight block is always whole: its piece is 2×2
+      for (const op of placed) {
+        const bt = String((op.object as { baseType?: string }).baseType ?? "").toUpperCase();
+        const [w] = landmarkSizes[bt] ?? [1, 1];
+        if (w === 2) expect(op.object.pos.x % 2 === 0 && op.object.pos.y % 2 === 0, `seed=${seed}: a 2×2 piece off the lattice`).toBe(true);
       }
     }
   });
@@ -223,6 +261,72 @@ describe("generation mechanics audit (all recipes, real executor)", () => {
       expect(cells.size, `seed=${seed}: produced no mountains`).toBeGreaterThan(area * 0.08);
       expect(cells.size, `seed=${seed}: covered the whole rectangle (that's mountain_fill)`).toBeLessThan(area * 0.85);
     }
+  });
+
+  it("mazeLatticeSide: the largest 4m+3 side whose widened maze fits", () => {
+    expect([2, 3, 6, 7, 10, 11, 12, 18].map((u) => mazeLatticeSide(u, 1))).toEqual([0, 3, 3, 7, 7, 11, 11, 15]);
+    // corridors two cells wide: a side n takes (n+1)/2 wall lines and (n−1) corridor cells
+    expect([3, 4, 9, 10, 16, 22, 26].map((u) => mazeLatticeSide(u, 2))).toEqual([0, 3, 3, 7, 11, 15, 15]);
+    expect(mazeLatticeSide(100, 3)).toBe(47); // 24 + 23·3 = 93 ≤ 100 < 26 + 25·3
+  });
+
+  it("widenMazeGrid keeps a wall line one cell thick and makes a corridor line wider", () => {
+    const lattice = { width: 3, height: 3, rows: ["BAB", "BWB", "BBB"] };
+    expect(widenMazeGrid(lattice, 1)).toBe(lattice);
+    expect(widenMazeGrid(lattice, 2)).toEqual({ width: 4, height: 4, rows: ["BAAB", "BWWB", "BWWB", "BBBB"] });
+    expect(widenMazeGrid(lattice, 3).rows).toEqual(["BAAAB", "BWWWB", "BWWWB", "BWWWB", "BBBBB"]);
+  });
+
+  it("a maze is whole: a sealed perimeter with two entrances, walls one line thick, every corridor reachable", async () => {
+    for (const [recipeId, corridor] of [["wall_maze", 1], ["wall_maze_thin", 2], ["wall_maze_fence", 2]] as const) {
+      for (const seed of [1, 2, 3, 7, 13, 21, 42]) {
+        const plan = await recipePreview(recipeId, { width: 36, height: 28, seed });
+        expect(plan, recipeId).toBeTruthy();
+        const { width: w, height: h, rows } = plan!;
+        const label = `${recipeId} seed=${seed}`;
+        const wall = (x: number, y: number): boolean => rows[y]?.[x] === "B";
+        // the size is that of the lattice: both outer lines are wall lines
+        const side = (n: number): number => (n + 1) / 2 + ((n - 1) / 2) * corridor;
+        expect([side(mazeLatticeSide(Math.floor(36 / plan!.scale), corridor)), side(mazeLatticeSide(Math.floor(28 / plan!.scale), corridor))], label).toEqual([w, h]);
+        // the perimeter: wall everywhere but two entrances, each as wide as a corridor
+        const ring: boolean[] = [];
+        for (let x = 0; x < w; x++) ring.push(wall(x, 0));
+        for (let y = 1; y < h; y++) ring.push(wall(w - 1, y));
+        for (let x = w - 2; x >= 0; x--) ring.push(wall(x, h - 1));
+        for (let y = h - 2; y >= 1; y--) ring.push(wall(0, y));
+        const gaps: number[] = [];
+        for (let i = 0; i < ring.length; i++) {
+          if (ring[i]) continue;
+          if (i > 0 && !ring[i - 1]) gaps[gaps.length - 1]!++;
+          else gaps.push(1);
+        }
+        expect(gaps, `${label}: entrances`).toEqual([corridor, corridor]);
+        // no doubled wall: nowhere four wall cells in a square
+        for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) {
+          expect(wall(x, y) && wall(x + 1, y) && wall(x, y + 1) && wall(x + 1, y + 1), `${label}: doubled wall at ${x},${y}`).toBe(false);
+        }
+        // one maze: every open cell is reached from any other without crossing a wall
+        const open: [number, number][] = [];
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (!wall(x, y)) open.push([x, y]);
+        const seen = new Set<string>([open[0]!.join()]);
+        const queue = [open[0]!];
+        while (queue.length) {
+          const [x, y] = queue.pop()!;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+            const nx = x + dx, ny = y + dy, k = `${nx},${ny}`;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h || wall(nx, ny) || seen.has(k)) continue;
+            seen.add(k);
+            queue.push([nx, ny]);
+          }
+        }
+        expect(seen.size, `${label}: unreachable corridors`).toBe(open.length);
+      }
+    }
+  });
+
+  it("a zone too small for one room gives no maze instead of a stub", async () => {
+    const { ops } = await run("wall_maze", 3, { x: 30, y: 30, w: 4, h: 4 });
+    expect(ops).toEqual([]);
   });
 
   it("sealMazeGrid seals the perimeter and cuts 1–2 doors into corridors", () => {

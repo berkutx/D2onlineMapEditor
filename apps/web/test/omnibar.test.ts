@@ -487,6 +487,12 @@ describe("the newer recipes", () => {
   it("a maze has three looks: fortress walls, thin walls, a palisade", () => {
     expect(all("лабиринт")).toEqual(["wall_maze"]);
     expect(all("тонкий лабиринт")).toEqual(["wall_maze_thin", "wall_maze"]);
+    // … which is a maze of ruined walls: that is what it is called now
+    expect(first("лабиринт из руин")).toBe("wall_maze_thin");
+    expect(first("руины лабиринта")).toBe("wall_maze_thin");
+    expect(first("ruined maze")).toBe("wall_maze_thin");
+    expect(first("labirynt z gruzów")).toBe("wall_maze_thin");
+    expect(first("руины")).toBe("decor_ruins"); // without the maze it is still the scatter of ruins
     expect(first("лабиринт с тонкими стенами")).toBe("wall_maze_thin");
     expect(first("узкий лабиринт 30x30")).toBe("wall_maze_thin");
     expect(all("лабиринт из частокола")).toEqual(["wall_maze_fence", "wall_maze"]);

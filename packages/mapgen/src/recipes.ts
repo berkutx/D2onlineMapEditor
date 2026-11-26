@@ -48,6 +48,10 @@ export interface Recipe {
    *  entrances (canonical MazeGrowth leaves the border open on every side — not a maze
    *  a stack can meaningfully enter). Applied by the server executor. */
   sealMaze?: boolean;
+  /** maze only: how wide a corridor is, in grid cells (a wall stays one grid cell thick).
+   *  Default 1. A fine maze (one-cell walls) reads far better with 2: long walls, joints three
+   *  cells apart, instead of a wall on every other cell. */
+  corridor?: number;
   /** ribbon recipes (river/road/ridge): the result must touch ≥2 distinct grid edges with
    *  this symbol; the executor re-rolls the seed a few times otherwise (a degenerate
    *  Voronoi border can hug one edge). */
@@ -188,8 +192,9 @@ export const RECIPES: Record<string, Recipe> = {
   // --- maze (MarkovJunior MazeGrowth) ---------------------------------------
   // The mazes: ONE layout idea (B=barrier, W/A=passage; the perimeter is sealed with two doors)
   // in three looks. `wall_maze` is coarse (scale 2): 2×2 fortress walls, a tower at each joint.
-  // `wall_maze_thin` and `wall_maze_fence` are fine (scale 1): one-cell stone walls or a
-  // palisade, corridors one cell wide — twice the maze in the same zone.
+  // `wall_maze_thin` and `wall_maze_fence` are fine (scale 1): one-cell pieces — ruined stone
+  // walls or a palisade — with corridors two cells wide, so the walls run long and the joints
+  // stand three cells apart (a wall on every other cell read as rubble).
   wall_maze: {
     id: "wall_maze",
     title: "Лабиринт",
@@ -200,18 +205,19 @@ export const RECIPES: Record<string, Recipe> = {
     alphabet: "BWA",
     sealMaze: true,
     inputMode: "zone",
-    notes: "Лабиринт из каменных стен 2×2 с башнями на стыках (запечатан, два входа).",
+    notes: "Лабиринт-крепость: каменные стены 2×2, башни на стыках и у входов (запечатан, два входа).",
   },
   wall_maze_thin: {
     id: "wall_maze_thin",
-    title: "Лабиринт: тонкие стены",
+    title: "Лабиринт: руины стен",
     group: "structures",
     kind: "mj",
     xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
+    corridor: 2,
     alphabet: "BWA",
     sealMaze: true,
     inputMode: "zone",
-    notes: "Лабиринт из каменных стен в одну клетку, башни по углам (запечатан, два входа).",
+    notes: "Лабиринт из обломков каменных стен: колонны на стыках, башенки по углам (запечатан, два входа).",
   },
   wall_maze_fence: {
     id: "wall_maze_fence",
@@ -219,10 +225,11 @@ export const RECIPES: Record<string, Recipe> = {
     group: "structures",
     kind: "mj",
     xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
+    corridor: 2,
     alphabet: "BWA",
     sealMaze: true,
     inputMode: "zone",
-    notes: "Лабиринт из частокола в одну клетку (запечатан, два входа).",
+    notes: "Лабиринт из частокола с вышками по углам и у входов (запечатан, два входа).",
   },
 
   // --- mountains & hills (decoded to 1×1 mountain objects) -------------------

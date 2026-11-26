@@ -761,7 +761,7 @@ export async function registerMapRoutes(
         "decor_forest (groves)", "forest_scatter (sparse trees)",
         "mountain_fill (solid fill — frame/border)", "mountain_blob (organic massif)",
         "relief_ridge (mountain ridge)", "relief_hills (scattered hills)",
-        "wall_maze (stone-wall labyrinth, 2×2 walls + towers)", "wall_maze_thin (fine labyrinth of one-cell stone walls)", "wall_maze_fence (fine labyrinth of palisade)",
+        "wall_maze (fortress labyrinth: 2×2 stone walls, towers on the joints)", "wall_maze_thin (labyrinth of ruined one-cell stone walls, wide corridors, columns on the joints)", "wall_maze_fence (labyrinth of a palisade, wide corridors, watchtowers on the corners)",
         "road_path (winding road)", "decor_rocks", "decor_bushes", "decor_ruins", "decor_graves",
         "snow_overlay (solid wash)", "snow_patches (organic)",
         "grass_fill (wash)",

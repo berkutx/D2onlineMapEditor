@@ -170,7 +170,9 @@ describe("GET /api/generate/recipes", () => {
     }
   });
 
-  it("offers only recipes the server can really run", async () => {
+  // every recipe is generated AND validated on a whole map — about a second each, some twenty
+  // seconds in all on this suite's own; the stock 30 s is not enough when the files run side by side
+  it("offers only recipes the server can really run", { timeout: 120_000 }, async () => {
     const { recipes } = (await app.inject({ method: "GET", url: REST.generateRecipes })).json() as GenRecipeList;
     for (const r of recipes) {
       const res = await postJson(REST.mapGenerate(id), { project: project(), recipeId: r.id, region: { x: 6, y: 6, w: 8, h: 8 }, seed: 1 });

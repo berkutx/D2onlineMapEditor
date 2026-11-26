@@ -89,22 +89,31 @@ export function spansGrid(grid: SymbolGrid, symbol: string): boolean {
  * border. Canonical MazeGrowth leaves the border open on every side — a "maze" a stack
  * can walk around; sealing + two doors makes it a playable feature. Corridors are
  * always ONE connected component (audit: 100% of runs), so both doors reach everywhere.
+ *
+ * An entrance is cut in front of a ROOM (W), not of a passage between rooms (A): on the maze
+ * lattice the first is a span of the outer wall between two posts, the second is a post — and
+ * a hole where a post stood is a one-cell gap with a stump of wall on either side.
  */
 export function sealMazeGrid(grid: SymbolGrid, seed: number): SymbolGrid {
   const { width: w, height: h } = grid;
   if (w < 3 || h < 3) return grid;
   const cells = grid.rows.map((r) => r.split(""));
-  const isPass = (x: number, y: number): boolean => cells[y]?.[x] === "A" || cells[y]?.[x] === "W";
-  // entrance candidates BEFORE sealing: border cells whose inner neighbour is a corridor
-  const candidates: { x: number; y: number }[] = [];
-  for (let x = 1; x < w - 1; x++) {
-    if (isPass(x, 1)) candidates.push({ x, y: 0 });
-    if (isPass(x, h - 2)) candidates.push({ x, y: h - 1 });
-  }
-  for (let y = 1; y < h - 1; y++) {
-    if (isPass(1, y)) candidates.push({ x: 0, y });
-    if (isPass(w - 2, y)) candidates.push({ x: w - 1, y });
-  }
+  // entrance candidates BEFORE sealing: border cells whose inner neighbour is a room — or, in
+  // a grid that has none there (not a maze lattice), any corridor cell
+  const collect = (open: (x: number, y: number) => boolean): { x: number; y: number }[] => {
+    const out: { x: number; y: number }[] = [];
+    for (let x = 1; x < w - 1; x++) {
+      if (open(x, 1)) out.push({ x, y: 0 });
+      if (open(x, h - 2)) out.push({ x, y: h - 1 });
+    }
+    for (let y = 1; y < h - 1; y++) {
+      if (open(1, y)) out.push({ x: 0, y });
+      if (open(w - 2, y)) out.push({ x: w - 1, y });
+    }
+    return out;
+  };
+  const byRooms = collect((x, y) => cells[y]?.[x] === "W");
+  const candidates = byRooms.length ? byRooms : collect((x, y) => cells[y]?.[x] === "A" || cells[y]?.[x] === "W");
   for (let x = 0; x < w; x++) { cells[0]![x] = "B"; cells[h - 1]![x] = "B"; }
   for (let y = 0; y < h; y++) { cells[y]![0] = "B"; cells[y]![w - 1] = "B"; }
   if (candidates.length) {
@@ -117,8 +126,43 @@ export function sealMazeGrid(grid: SymbolGrid, seed: number): SymbolGrid {
   return { width: w, height: h, rows };
 }
 
+/**
+ * The side of a maze lattice for a zone `units` grid cells long, with corridors `corridor`
+ * cells wide. The maze program carves rooms two cells apart starting from the middle cell, so
+ * the rooms sit on every other line; for BOTH outer lines to be wall lines the side must be
+ * 3, 7, 11, … (4m + 3). Any other side leaves a line of rooms against the border, which the
+ * sealing then walls up — a doubled wall with holes in it, and a cluster of joints at every
+ * corner. Returns the largest such side whose widened maze still fits, or 0 when even the
+ * smallest (one room) does not.
+ */
+export function mazeLatticeSide(units: number, corridor: number): number {
+  const c = Math.max(1, Math.floor(corridor));
+  let side = 0;
+  for (let n = 3; (n + 1) / 2 + ((n - 1) / 2) * c <= units; n += 4) side = n;
+  return side;
+}
+
+/**
+ * Widen the corridors of a maze lattice (see mazeLatticeSide: wall lines are the even ones):
+ * a wall line stays one cell thick, a room line becomes `corridor` cells. A wall between two
+ * rooms turns into a run of `corridor` wall cells, a post stays a single cell — long walls,
+ * joints `corridor + 1` apart.
+ */
+export function widenMazeGrid(grid: SymbolGrid, corridor: number): SymbolGrid {
+  const c = Math.max(1, Math.floor(corridor));
+  if (c === 1) return grid;
+  const span = (i: number): number => (i % 2 === 0 ? 1 : c);
+  const rows: string[] = [];
+  for (let y = 0; y < grid.height; y++) {
+    let row = "";
+    for (let x = 0; x < grid.width; x++) row += (grid.rows[y]?.[x] ?? "B").repeat(span(x));
+    for (let k = 0; k < span(y); k++) rows.push(row);
+  }
+  return { width: rows[0]?.length ?? 0, height: rows.length, rows };
+}
+
 async function buildGrid(
-  recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; seedsFrac?: number; sealMaze?: boolean; spanSymbol?: string },
+  recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; seedsFrac?: number; sealMaze?: boolean; spanSymbol?: string; corridor?: number },
   region: StepRegion,
   seed: number,
   scale: number,
@@ -133,6 +177,15 @@ async function buildGrid(
   }
   if (recipe.kind === "mj") {
     if (!recipe.xml) throw new Error("mj recipe missing xml");
+    if (recipe.sealMaze) {
+      // a maze lives on its own lattice (mazeLatticeSide): the grid it returns is the widened
+      // maze, which may be a little smaller than the zone — the caller centres it
+      const corridor = recipe.corridor ?? 1;
+      const lw = mazeLatticeSide(Math.floor(region.w / scale), corridor);
+      const lh = mazeLatticeSide(Math.floor(region.h / scale), corridor);
+      if (!lw || !lh) return { width: 0, height: 0, rows: [] }; // the zone is too small for one room
+      return widenMazeGrid(sealMazeGrid(await runRecipe(recipe.xml, lw, lh, seed), seed), corridor);
+    }
     const gw = Math.max(1, Math.floor(region.w / scale));
     const gh = Math.max(1, Math.floor(region.h / scale));
     let xml = recipe.xml;
@@ -163,7 +216,6 @@ async function buildGrid(
       // eslint-disable-next-line no-console
       console.warn(`[generate] ribbon did not span after ${attempts} attempts (${gw}x${gh}, seed=${seed})`);
     }
-    if (recipe.sealMaze) grid = sealMazeGrid(grid!, seed);
     return grid!;
   }
   throw new Error(`unknown recipe kind '${recipe.kind}'`);
@@ -269,7 +321,7 @@ export async function runGenerationSteps(
   let work = liveDoc;
   const all: EditOp[] = [];
   for (const step of steps) {
-    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; seedsFrac?: number; sealMaze?: boolean; spanSymbol?: string; cellScale?: number; maskSymbol?: string; maskDensity?: number };
+    let recipe: { kind: string; fillSymbol?: string; xml?: string; fillFrac?: number; seedsFrac?: number; sealMaze?: boolean; spanSymbol?: string; cellScale?: number; maskSymbol?: string; maskDensity?: number; corridor?: number };
     let table: DecodeTable;
     if (step.recipeId) {
       const r = getRecipe(step.recipeId);
@@ -304,9 +356,22 @@ export async function runGenerationSteps(
     const grid = maskFill
       ? maskFillGrid(genRegion, recipe.maskSymbol!, recipe.maskDensity ?? 1, seed)
       : await buildGrid(recipe, genRegion, seed, scale);
+    // a maze is as large as its lattice allows, which may be less than the zone: centre it
+    if (recipe.sealMaze && !maskFill) {
+      const spareX = Math.floor(genRegion.w / scale) - grid.width;
+      const spareY = Math.floor(genRegion.h / scale) - grid.height;
+      genRegion = {
+        ...genRegion,
+        x: genRegion.x + Math.floor(spareX / 2) * scale,
+        y: genRegion.y + Math.floor(spareY / 2) * scale,
+        w: grid.width * scale,
+        h: grid.height * scale,
+      };
+    }
     // occupancy rebuilt per step: a later step must respect the objects an earlier one placed
     const occupied = buildOccupiedSet(work, landmarkSizes);
-    const ops = decodeGrid(work, grid, table, genRegion, walls, mask, protect, decor, maskFill ? 1 : scale, occupied, slot);
+    // the seed also picks the maze's dress: which stone, which buildings on the joints
+    const ops = decodeGrid(work, grid, table, genRegion, walls, mask, protect, decor, maskFill ? 1 : scale, occupied, slot, seed);
     all.push(...ops);
     work = applyOps(work, ops);
   }
