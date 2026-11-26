@@ -35,7 +35,10 @@ export type DecodeAction =
   | { kind: "terrain"; terrain: number } // land tileset id (1=HU,2=DW snow,3=HE,4=UN,5=NE,6=EL)
   | { kind: "water" }
   | { kind: "forest" }
-  | { kind: "wall" } // landmark wall, orientation from the 16-mask
+  // landmark wall, orientation from the 16-mask. `shape` picks the art (stone "wall" by
+  // default, or the wooden "fence"); `size` is the piece size the recipe is drawn with
+  // (2 = the 2×2 fortress pieces of a coarse maze, 1 = one-cell pieces) — what a mod must have.
+  | { kind: "wall"; shape?: "wall" | "fence"; size?: 1 | 2 }
   | { kind: "mountain" } // a 1×1 mountain object (+37 cell stamp)
   | { kind: "road" } // a road cell (auto-tiled via roadBrush)
   | { kind: "decor"; shape: string }; // a scattered decoration (decorCatalog 1×1 of `shape`)
@@ -44,8 +47,11 @@ export type DecodeTable = Record<string, DecodeAction>;
 
 /** Decode tables per recipe id (the symbol grid is engine-agnostic; this maps to OUR tiles). */
 export const DECODE_TABLES: Record<string, DecodeTable> = {
-  // The maze: B = the wall/barrier symbol → 2×2 stone wall pieces; W/A = carved passage.
-  wall_maze: { B: { kind: "wall" }, W: { kind: "skip" }, A: { kind: "skip" } },
+  // The mazes: B = the wall/barrier symbol, W/A = carved passage. Three looks of one idea:
+  // a coarse fortress of 2×2 stone walls, a fine maze of one-cell stone walls, a palisade.
+  wall_maze: { B: { kind: "wall", shape: "wall", size: 2 }, W: { kind: "skip" }, A: { kind: "skip" } },
+  wall_maze_thin: { B: { kind: "wall", shape: "wall", size: 1 }, W: { kind: "skip" }, A: { kind: "skip" } },
+  wall_maze_fence: { B: { kind: "wall", shape: "fence", size: 1 }, W: { kind: "skip" }, A: { kind: "skip" } },
   // Organic water (MJ growth): W = water, B = untouched land.
   water_lake: { W: { kind: "water" } },
   water_isles: { W: { kind: "water" } },
@@ -57,7 +63,6 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   // Organic forest (MJ): F = forest, B = untouched land.
   decor_forest: { F: { kind: "forest" } },
   forest_scatter: { F: { kind: "forest" } },
-  forest_clearings: { F: { kind: "forest" }, B: { kind: "skip" } }, // forest with grown glades
   forest_fill: { F: { kind: "forest" } }, // solid forest (zone or a brush stroke)
   // Mountains / hills (MJ): M = a 1×1 mountain; ridge = Voronoi border (U), greedy-packed
   // into 2×2/3×3 peaks by the decoder.
@@ -75,7 +80,6 @@ export const DECODE_TABLES: Record<string, DecodeTable> = {
   // Snow: full wash, organic patches, or sparse scatter — all map S -> snow tileset.
   snow_overlay: { S: { kind: "terrain", terrain: 2 } }, // 2 = DW/snow tileset
   snow_patches: { S: { kind: "terrain", terrain: 2 } },
-  snow_scatter: { S: { kind: "terrain", terrain: 2 } },
   grass_fill: { G: { kind: "terrain", terrain: 5 } }, // 5 = neutral land
 };
 
@@ -157,7 +161,10 @@ export function buildWallSet(
   }
 
   const styles = [...byKey.values()].filter((s) => wallComplete(s.s1) || wallComplete(s.s2));
-  for (const s of styles) s.tower = towerByFaction.get(s.key.split("|")[1] ?? "")?.id;
+  // a wall family without a turret of its own (the thin stone walls are another id prefix
+  // than the round tower) takes the best turret of the catalogue
+  const anyTower = [...towerByFaction.values()].sort((a, b) => b.score - a.score)[0];
+  for (const s of styles) s.tower = (towerByFaction.get(s.key.split("|")[1] ?? "") ?? anyTower)?.id;
   // prefer "wall" (stone) over "fence", then faction desc, so the stone sets sort first.
   styles.sort((a, b) =>
     (a.key.startsWith("wall|") ? 0 : 1) - (b.key.startsWith("wall|") ? 0 : 1) || (a.key < b.key ? 1 : -1));
@@ -209,6 +216,16 @@ export function buildOccupiedSet(
   return out;
 }
 
+/**
+ * The art set a wall recipe is drawn with: of the asked shape (any, stone first, when none is
+ * asked), with a complete set of pieces of the asked size. Undefined when the mod has none —
+ * a palisade maze in a mod without palisades, a fine maze in a mod with only fortress walls.
+ */
+export function pickWallStyle(walls: WallSet, shape: "wall" | "fence" | undefined, size: number): WallStyle | undefined {
+  const pool = shape ? walls.styles.filter((s) => s.key.startsWith(`${shape}|`)) : walls.styles;
+  return pool.find((s) => wallComplete(size >= 2 ? s.s2 : s.s1));
+}
+
 /** 1×1 decoration landmark ids grouped by catalog `shape` (rock / vegetation / …). */
 export type DecorSet = Record<string, string[]>;
 
@@ -228,7 +245,9 @@ export function recipeLacks(
     if (action.kind === "decor" && !sets.decor[action.shape]?.length) {
       return "в этом моде нет таких украшений";
     }
-    if (action.kind === "wall" && !sets.walls.styles.length) {
+    // a coarse maze falls back to one-cell pieces when the mod has no 2×2 ones (decodeGrid)
+    const size = action.kind === "wall" ? action.size ?? 2 : 0;
+    if (action.kind === "wall" && !pickWallStyle(sets.walls, action.shape, size) && !(size === 2 && pickWallStyle(sets.walls, action.shape, 1))) {
       return "в этом моде нет стен для лабиринта";
     }
   }
@@ -321,6 +340,8 @@ export function decodeGrid(
   };
   const ops: EditOp[] = [];
   const wallCells = new Set<string>();
+  /** the art the recipe's wall symbol asks for (one per recipe) */
+  let wallShape: "wall" | "fence" | undefined;
   const mountainCells: { x: number; y: number }[] = [];
   const roadCells: { x: number; y: number }[] = [];
   const decorCells: { x: number; y: number; shape: string }[] = [];
@@ -361,6 +382,7 @@ export function decodeGrid(
       // object actions: the WHOLE scale×scale block must be allowed AND unoccupied (the
       // old anchor-only check let 2×2 wall pieces overhang masks and existing objects)
       if (action.kind === "wall") {
+        wallShape = action.shape;
         if (fits(ax, ay, scale, scale)) wallCells.add(`${ax},${ay}`);
       } else if (action.kind === "mountain") {
         if (fits(ax, ay, 1, 1)) mountainCells.push({ x: ax, y: ay });
@@ -382,26 +404,61 @@ export function decodeGrid(
   // scale 2 the maze is coarse and uses the 2×2 stone wall pieces; neighbours are checked
   // at the coarse `scale` spacing.
   const wantS2 = scale >= 2;
-  const style = walls.styles.find((s) => wallComplete(wantS2 ? s.s2 : s.s1)) ?? walls.styles[0];
+  // (a coarse maze in a mod without 2×2 pieces is built from one-cell ones — see recipeLacks)
+  const style = pickWallStyle(walls, wallShape, scale) ?? pickWallStyle(walls, wallShape, 1) ?? (wallShape ? undefined : walls.styles[0]);
   const pieces = style ? (wantS2 && wallComplete(style.s2) ? style.s2 : style.s1) : undefined;
+  // a stone turret belongs to stone walls; a palisade turns its corners with its own pieces
+  const tower = wallShape === "fence" ? undefined : style?.tower;
+  // one-cell pieces of the same art, to close a coarse joint around its single tower
+  const thin = wantS2 ? pickWallStyle(walls, wallShape, 1)?.s1 : undefined;
   if (pieces && wallComplete(pieces)) {
     const place = (x: number, y: number, type: string): void => {
       const op = placeLandmarkOps(work, x, y, type, slot);
       ops.push(...op);
       work = applyOps(work, op);
     };
+    // the outer corners of the whole wall figure — where a fine maze gets its towers
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const key of wallCells) {
+      const [x, y] = key.split(",").map(Number) as [number, number];
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    }
     for (const key of wallCells) {
       const [x, y] = key.split(",").map(Number) as [number, number];
       let m = 0;
       for (const [dx, dy, bit] of N4) if (wallCells.has(`${x + dx * scale},${y + dy * scale}`)) m |= bit;
       const straight = (!!(m & 1) || !!(m & 4)) !== (!!(m & 2) || !!(m & 8));
       // A corner/junction/isolated cell gets the round stone TOWER the game's own maze maps
-      // place at nodes (G000MG0149). A lone 1×1 tower fills only one cell, so we tile the WHOLE
-      // scale×scale block with it (scale 2 → 4× 1×1 = a sealed bastion): the shipped-map tower
-      // look WITHOUT the walk-through gap a single 1×1 tower left at a 2×2 junction.
-      if (!straight && style?.tower) {
-        for (let dy = 0; dy < scale; dy++)
-          for (let dx = 0; dx < scale; dx++) place(x + dx, y + dy, style.tower);
+      // place at nodes (G000MG0149) — ONE tower per joint. In a coarse maze the joint is a
+      // scale×scale block and one tower would leave a walk-through gap, so the tower stands in
+      // the block's FRONT cell (drawn over the rest) and one-cell walls of the same art close
+      // the other cells, each turned along the arm it touches. Without one-cell walls in the
+      // mod the block is tiled with towers (sealed, if heavy) — the look this replaced.
+      // A fine (one-cell) maze has a joint every other cell: a tower on each would bury the
+      // walls, so only the outer corners of the figure and a lone post get one, and the other
+      // joints turn with the art's own corner pieces.
+      const outerCorner = (x === minX || x === maxX) && (y === minY || y === maxY);
+      if (scale === 1 && tower && (outerCorner || m === 0)) {
+        place(x, y, tower);
+      } else if (!straight && tower && scale > 1) {
+        if (scale === 2 && thin && wallComplete(thin)) {
+          const front = scale - 1;
+          for (let dy = 0; dy < scale; dy++) {
+            for (let dx = 0; dx < scale; dx++) {
+              if (dx === front && dy === front) continue;
+              const alongNS = dy === 0 ? !!(m & 1) : !!(m & 4); // the arm above / below this cell
+              const alongEW = dx === 0 ? !!(m & 8) : !!(m & 2); // the arm to its left / right
+              const piece = alongNS !== alongEW
+                ? wallPiece(alongNS ? 1 : 2, thin) // one arm: a straight along it
+                : thin.corner[(dx + dy) % thin.corner.length]; // both or none: a corner piece
+              if (piece) place(x + dx, y + dy, piece);
+            }
+          }
+          place(x + front, y + front, tower);
+        } else {
+          for (let dy = 0; dy < scale; dy++)
+            for (let dx = 0; dx < scale; dx++) place(x + dx, y + dy, tower);
+        }
       } else {
         const wallType = wallPiece(m, pieces);
         if (wallType) place(x, y, wallType);

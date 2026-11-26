@@ -1,26 +1,40 @@
 <script setup lang="ts">
 /**
- * Copilot — a light, frosted-glass floating command input docked at the bottom-centre of
- * the canvas (NOT a panel). Just a field: type a command, Enter to send. The chat log
- * floats above only while expanded (on focus / after a message). "/" focuses it (viewStore
+ * Copilot — a light, frosted-glass floating command bar docked at the bottom-centre of the
+ * canvas (NOT a panel): the editor's OMNIBAR. Type what you want, and a list above the input
+ * shows what the bar understood BEFORE Enter runs it: a generation («озеро в центре»), a tool
+ * («туман»), a menu command («сетка», «экспорт»), a cell to jump to («20 30») or an object to
+ * find («найти столица»). The words are read by services/omnibar.ts — Russian, English and
+ * Polish alike; this component turns a reading into an action through the stores.
+ * The chat log floats above only while expanded (💬). "/" focuses the bar (viewStore
  * focusCopilot); the ✕ hides it (and "/" brings it back).
  *
  * Three ways to ask for a generation meet here and all go through genStore, so each gets the
  * same variant controls (GenResultStrip): a TILE of the generator palette (one click, no
- * typing), a typed COMMAND (the keyword router below), and — from the tool dock — a stroke
- * drawn «по рисунку».
+ * typing), a typed COMMAND, and — from the tool dock — a stroke drawn «по рисунку».
  */
 import { ref, nextTick, watch, onMounted } from "vue";
 import { ElInput, ElPopover, ElSegmented, ElMessage } from "element-plus";
-import { Promotion, Close, RefreshRight, Reading, ChatLineSquare, Grid } from "@element-plus/icons-vue";
+import { Promotion, Close, RefreshRight, Reading, ChatLineSquare, Grid, Menu as MenuIcon, Aim, Search, QuestionFilled } from "@element-plus/icons-vue";
 import { computed } from "vue";
+import type { Component } from "vue";
 import type { GenRecipeInfo } from "@d2/socket-contract";
+import type { MapDocument } from "@d2/map-schema";
+import { cellToWorld } from "@d2/pixi-render";
 import { useViewStore } from "../stores/viewStore";
 import { useEditStore } from "../stores/editStore";
 import { useToolStore } from "../stores/toolStore";
+import { useCommandStore } from "../stores/commandStore";
 import { AMOUNT_STEPS, useGenStore } from "../stores/genStore";
 import { useFloatingDock } from "../composables/useFloatingDock";
+import { getScene } from "../canvas/sceneHolder";
+import { OBJ_ICONS } from "../services/refNames";
+import {
+  NO_AREA, interpret, nearest, parseArea, textMatches,
+  type AmountStep, type CommandId, type Interpretation, type ParsedArea, type Side, type ToolId,
+} from "../services/omnibar";
 import { tr, trn } from "../i18n";
+import { toolDef } from "./tools";
 import GenResultStrip from "./GenResultStrip.vue";
 
 interface Msg {
@@ -31,6 +45,7 @@ interface Msg {
 const view = useViewStore();
 const editStore = useEditStore();
 const toolStore = useToolStore();
+const commands = useCommandStore();
 const gen = useGenStore();
 
 // Draggable + persistent (like the minimap / history docks): grab the ⠿ grip to park the bar
@@ -91,7 +106,7 @@ const scroller = ref<HTMLElement | null>(null);
 const log = ref<Msg[]>([
   {
     role: "assistant",
-    text: tr("Copilot (превью). Скоро: «залей водой», «добавь горы слева», «выдели участок и перегенерируй»."),
+    text: tr("Командная строка. Генерация: «озеро», «лес на севере», «побольше камней». Инструменты и меню: «туман», «сетка», «экспорт». Ещё: «найти столица», «клетка 20 30»."),
   },
 ]);
 
@@ -158,7 +173,7 @@ function validationReason(): string {
 const placeholder = computed(() =>
   llmMode.value
     ? tr("🧠 опиши, что сгенерировать: «озеро на севере и гряда гор по диагонали»  ( / )")
-    : tr("напр. «озеро», «река», «лабиринт», «озеро вокруг этой точки 20x20»  ( / )"),
+    : tr("что сделать: «озеро», «лес на севере», «туман», «сетка», «найти столица», «20 30»  ( / )"),
 );
 
 /** The last successful LLM composition, so "↻" can roll it back and ask again. (A recipe
@@ -215,6 +230,8 @@ function onFocus(): void {
   // NB: do NOT auto-open the chat log here — it obscures the map and jitters the layout
   // (user request). The log is opened only by the 💬 toggle; results surface as toasts.
   inputFocused.value = true;
+  dismissed.value = false; // the suggestions come back with the focus
+  resetHighlight();
   markActive();
   maybeHintExamples();
   maybeHintArea();
@@ -296,122 +313,109 @@ const exPop = ref<InstanceType<typeof ElPopover> | null>(null);
 // Каждый пункт ДЕЛАЕТ ровно то, что говорит (пере-аудит всех рецептов ASCII-гридами):
 // «по всей карте» = вся карта, «в центре» = центр, «по краю» = кайма-маска, острова = СУША
 // среди воды. Обещания, которых движок не держит («у воды», «по диагонали», «через лес»),
-// из меню убраны — команда без пункта всё равно роутится по ключевым словам.
-// `text` is the COMMAND put into the input: the router below reads Russian words, so it stays
-// Russian in every interface language. `label` is what the list shows for it.
-const EXAMPLES: { group: string; items: { text: string; label: string; llm?: boolean; mj?: boolean; need?: "screen" | "zone" | "point" | "side" }[] }[] = [
+// из меню убраны — команда без пункта всё равно читается по словам.
+// `text` is the COMMAND put into the input, in the interface language: the bar reads Russian,
+// English and Polish alike, so an example's translation must read as the same command
+// (test/omnibar.test.ts keeps the translations of these examples and checks just that).
+const EXAMPLES: { group: string; items: { text: string; llm?: boolean; mj?: boolean; need?: "zone" }[] }[] = [
   { group: tr("🌊 Вода"), items: [
-    { text: "озеро", label: tr("озеро"), mj: true },
-    { text: "озеро в центре", label: tr("озеро в центре"), mj: true },
-    { text: "озеро вокруг этой точки 20x20", label: tr("озеро вокруг этой точки 20x20"), mj: true },
-    { text: "пруд 10x10", label: tr("пруд 10x10"), mj: true },
-    { text: "несколько озёр", label: tr("несколько озёр"), mj: true },
-    { text: "острова 30x30", label: tr("острова 30x30"), mj: true },
-    { text: "река", label: tr("река"), mj: true },
-    { text: "река по всей карте", label: tr("река по всей карте"), mj: true },
+    { text: tr("озеро"), mj: true },
+    { text: tr("озеро в центре"), mj: true },
+    { text: tr("озеро вокруг этой точки 20x20"), mj: true },
+    { text: tr("пруд 10x10"), mj: true },
+    { text: tr("несколько озёр"), mj: true },
+    { text: tr("острова 30x30"), mj: true },
+    { text: tr("река"), mj: true },
+    { text: tr("река по всей карте"), mj: true },
   ] },
   { group: tr("🌲 Лес"), items: [
-    { text: "лес", label: tr("лес"), mj: true },
-    { text: "густой лес", label: tr("густой лес"), mj: true },
-    { text: "лес с полянами", label: tr("лес с полянами"), mj: true },
-    { text: "редкий лес", label: tr("редкий лес"), mj: true },
-    { text: "роща вокруг этой точки 16x16", label: tr("роща вокруг этой точки 16x16"), mj: true },
-    { text: "рощи по всей карте", label: tr("рощи по всей карте"), mj: true },
+    { text: tr("лес"), mj: true },
+    { text: tr("густой лес"), mj: true },
+    { text: tr("лес с полянами"), mj: true },
+    { text: tr("редкий лес"), mj: true },
+    { text: tr("сплошной лес") },
+    { text: tr("роща вокруг этой точки 16x16"), mj: true },
+    { text: tr("рощи по всей карте"), mj: true },
   ] },
   { group: tr("⛰️ Горы и холмы"), items: [
-    { text: "горы 20x20", label: tr("горы 20x20"), mj: true },
-    { text: "горная гряда", label: tr("горная гряда"), mj: true },
-    { text: "разбросай холмы", label: tr("разбросай холмы"), mj: true },
-    { text: "горы по краю 30x30", label: tr("горы по краю 30x30") },
-    { text: "горы вокруг этой точки 18x18", label: tr("горы вокруг этой точки 18x18"), mj: true },
+    { text: tr("горы 20x20"), mj: true },
+    { text: tr("горная гряда"), mj: true },
+    { text: tr("разбросай холмы"), mj: true },
+    { text: tr("горы по краю 30x30") },
+    { text: tr("горы вокруг этой точки 18x18"), mj: true },
   ] },
   { group: tr("🧱 Лабиринт"), items: [
-    { text: "лабиринт", label: tr("лабиринт"), mj: true },
-    { text: "лабиринт 28x28", label: tr("лабиринт 28x28"), mj: true },
+    { text: tr("лабиринт"), mj: true },
+    { text: tr("лабиринт 28x28"), mj: true },
+    { text: tr("тонкий лабиринт"), mj: true },
+    { text: tr("лабиринт из частокола"), mj: true },
   ] },
   { group: tr("❄️ Снег и трава"), items: [
-    { text: "снег на севере", label: tr("снег на севере") },
-    { text: "снег пятнами", label: tr("снег пятнами"), mj: true },
-    { text: "редкий снег", label: tr("редкий снег"), mj: true },
-    { text: "трава 20x20", label: tr("трава 20x20") },
-    { text: "трава по всей карте", label: tr("трава по всей карте") },
+    { text: tr("снег на севере") },
+    { text: tr("снег пятнами"), mj: true },
+    { text: tr("редкий снег"), mj: true },
+    { text: tr("трава 20x20") },
+    { text: tr("трава по всей карте") },
   ] },
   { group: tr("🛣 Дорога и декор"), items: [
-    { text: "извилистая дорога", label: tr("извилистая дорога"), mj: true },
-    { text: "разбросай камни", label: tr("разбросай камни"), mj: true },
-    { text: "кусты", label: tr("кусты"), mj: true },
-    { text: "руины", label: tr("руины"), mj: true },
-    { text: "кладбище 16x16", label: tr("кладбище 16x16"), mj: true },
+    { text: tr("извилистая дорога"), mj: true },
+    { text: tr("разбросай камни"), mj: true },
+    { text: tr("побольше кустов"), mj: true },
+    { text: tr("руины"), mj: true },
+    { text: tr("кладбище 16x16"), mj: true },
   ] },
   { group: tr("✎ По рисунку (режим ⛶ Зона — проведи кистью/полосой, потом команду)"), items: [
-    { text: "дорога", label: tr("дорога"), need: "zone" },
-    { text: "река", label: tr("река"), need: "zone" },
-    { text: "камни", label: tr("камни"), need: "zone" },
-    { text: "кусты", label: tr("кусты"), need: "zone" },
-    { text: "руины", label: tr("руины"), need: "zone" },
+    { text: tr("дорога"), need: "zone" },
+    { text: tr("река"), need: "zone" },
+    { text: tr("камни"), need: "zone" },
+    { text: tr("кусты"), need: "zone" },
+    { text: tr("руины"), need: "zone" },
+  ] },
+  { group: tr("🧭 Не только генерация"), items: [
+    { text: tr("туман") },
+    { text: tr("ластик") },
+    { text: tr("сетка") },
+    { text: tr("слой объектов") },
+    { text: tr("отменить") },
+    { text: tr("экспорт") },
+    { text: tr("клетка 20 30") },
+    { text: tr("найти столица") },
   ] },
   { group: tr("🗺️ Композиции — режим 🧠 LLM"), items: [
-    { text: "озеро в центре, снег на севере, лес по южному краю", label: tr("озеро в центре, снег на севере, лес по южному краю"), llm: true },
-    { text: "крепость: трава, водяной ров и стены вокруг центра", label: tr("крепость: трава, водяной ров и стены вокруг центра"), llm: true },
-    { text: "остров: вода по краям, горы и лес в центре", label: tr("остров: вода по краям, горы и лес в центре"), llm: true },
-    { text: "зимний север со снегом, лесистый юг, озёра в центре", label: tr("зимний север со снегом, лесистый юг, озёра в центре"), llm: true },
+    { text: tr("озеро в центре, снег на севере, лес по южному краю"), llm: true },
+    { text: tr("крепость: трава, водяной ров и стены вокруг центра"), llm: true },
+    { text: tr("остров: вода по краям, горы и лес в центре"), llm: true },
+    { text: tr("зимний север со снегом, лесистый юг, озёра в центре"), llm: true },
   ] },
 ];
 
-/** Examples shown in the UI — drops the LLM-only items/groups when the bridge is disabled. */
-const displayExamples = computed(() =>
-  LLM_AVAILABLE
-    ? EXAMPLES
-    : EXAMPLES.map((g) => ({ ...g, items: g.items.filter((i) => !i.llm) })).filter((g) => g.items.length),
-);
+/** The recipe each generation example is there to show (what its words mean when every recipe
+ *  the bar knows exists). */
+const EXAMPLE_RECIPES = new Map<string, string>();
+for (const g of EXAMPLES) {
+  for (const it of g.items) {
+    const reading = it.llm ? undefined : interpret(it.text)[0];
+    if (reading?.kind === "generate") EXAMPLE_RECIPES.set(it.text, reading.recipeId);
+  }
+}
+
+/** Examples shown in the UI — drops the LLM-only items/groups when the bridge is disabled, and
+ *  an example whose recipe the server no longer has (recipes come and go there: the words
+ *  would be read as its nearest sibling, which is not what the example promises). */
+const displayExamples = computed(() => {
+  const catalogue = gen.catalog.length ? new Set(gen.catalog.map((r) => r.id)) : null;
+  const shown = (it: { text: string; llm?: boolean }): boolean => {
+    if (it.llm) return LLM_AVAILABLE;
+    const recipe = EXAMPLE_RECIPES.get(it.text);
+    return !catalogue || recipe === undefined || catalogue.has(recipe);
+  };
+  return EXAMPLES.map((g) => ({ ...g, items: g.items.filter(shown) })).filter((g) => g.items.length);
+});
 
 function regionCenter(r: Region): { x: number; y: number } {
   return { x: r.x + Math.floor(r.w / 2), y: r.y + Math.floor(r.h / 2) };
 }
 
-/**
- * Keyword router (Phase 3, no LLM): text -> recipe id. Density modifiers
- * (редкий/разбросай/пятнами/густой) pick the scatter / patch / full variant of a biome,
- * so "редкий снег" no longer falls through to the solid snow wash.
- */
-function routeRecipe(text: string): string | null {
-  const t = text.toLowerCase();
-  const sparse = /редк|разброс|местами|кое-?где|отдельн|дусти|припорош/.test(t);
-  const patchy = /пятн|клоч|островк|местечк/.test(t);
-  // the ONE maze — каменные стены 2×2 (Cyrillic-safe: \w doesn't match Cyrillic without /u).
-  if (/лабиринт|maze/.test(t)) return "wall_maze";
-  if (/забор|частокол|стен/.test(t)) return "wall_maze";
-  // mountains & hills (before generic checks; «гряда гор», «разбросай холмы», «горы по краю»)
-  if (/холм/.test(t) || (sparse && /гор|скал/.test(t))) return "relief_hills";
-  if (/гряд|хребет/.test(t)) return "relief_ridge";
-  // «по краю/рамкой» + «сплошные/залей» need the solid FILL (the frame band must be a wall);
-  // a bare «горы/массив/скалы» gets the ORGANIC blob — nobody asks for a razor-edged rectangle.
-  if (/гор\b|горы|гора|горн|скал|утёс|утес|массив/.test(t)) {
-    return /по\s*кра|перимет|рамк|кольц|сплошн|залей/.test(t) ? "mountain_fill" : "mountain_blob";
-  }
-  // roads & scattered decorations (before water/forest so «кусты у воды» isn't water)
-  if (/дорог|тропа|тропинк|тропу|путь|перекрёст|перекрест|просёлок|просёл|просел/.test(t)) return "road_path";
-  if (/камн|валун|булыжник/.test(t)) return "decor_rocks";
-  if (/куст|поросль|кустарник/.test(t)) return "decor_bushes";
-  if (/руин|развалин/.test(t)) return "decor_ruins";
-  if (/могил|кладбищ|кост|череп|надгроб/.test(t)) return "decor_graves";
-  // snow
-  if (/снег|снеж|зим/.test(t)) return sparse ? "snow_scatter" : patchy ? "snow_patches" : "snow_overlay";
-  // water
-  if (/река|речк|ручей|русло/.test(t)) return "river";
-  // «острова/архипелаг» = СУША среди воды (v1 routed it to scattered LAKES — the opposite).
-  // (?!к) keeps the TEXTURE word «островками» («лес островками», «снег островками») out —
-  // it's a patchiness modifier for the biome branches below, not a water request.
-  if (/архипелаг|остров(?!к)/.test(t)) return "water_islands";
-  if (/озёра|озера|несколько\s+озёр/.test(t)) return "water_isles";
-  if (/вод|озер|море|залей|пруд|болот/.test(t)) return "water_lake";
-  // forest: dense (чаща/густой = solid with organic glades), clearings, groves, or scatter
-  if (/полян|прогалин|просек|чащ|густ/.test(t)) return "forest_clearings";
-  if (/лес|дерев|рощ|\bбор\b/.test(t)) return sparse ? "forest_scatter" : "decor_forest";
-  // ground
-  if (/трав|земл|очист|равнин|плато|луг/.test(t)) return "grass_fill";
-  return null;
-}
 function pushAi(text: string): void {
   log.value.push({ role: "assistant", text });
   void nextTick(() => {
@@ -423,19 +427,6 @@ function pushAi(text: string): void {
  *  follow a drawing follows it. A mask that only clips (the visible screen, a «по краю»
  *  band) is not: there the recipe runs normally and is cut to the mask. */
 type Zone = { region: Region; cells: [number, number][] | null; drawn?: boolean };
-type Need = "screen" | "zone" | "point" | "side";
-
-/** What AREA a command implies, so the right filter (👁/⛶/📍) can be auto-selected. */
-function needOf(text: string): Need {
-  if (/вокруг|около|возле|здесь|тут|это[йм]\s*точк|в\s*точк|в\s*этом\s*месте/i.test(text)) return "point";
-  if (/север|\bюг|\bюж|запад|восток|слев|справ|сверху|снизу|вверх|вниз/i.test(text)) return "side";
-  return "screen"; // "zone" can't be inferred from words alone — it's set by the ✎ examples
-}
-/** A command's implied area maps onto one of the three filter buttons (side runs textually
- *  within the 👁 screen mode via the direction-halves branch). */
-function areaForNeed(n: Need): Area {
-  return n === "point" ? "point" : n === "zone" ? "zone" : "screen";
-}
 
 /** Perimeter band of a region as a global cell mask — «горы по краю» without hand-drawing
  *  the ▢ frame. Band ≈ 12% of the shorter side, clamped 2..4 (mountains pack 2×2/3×3). */
@@ -453,81 +444,147 @@ function frameCells(r: Region, sizeCap: number): [number, number][] {
   return out;
 }
 
+/** How a zone was arrived at — the suggestions list says it in words. */
+type How = "point" | "map" | "selection" | "size" | "center" | Side | "screen";
+/** Where a command will generate, worked out from the area it names (parsed by
+ *  services/omnibar.ts) and the bar's area mode. */
+interface Plan {
+  /** The area mode the command works in: 📍 for «тут / вокруг точки», 👁 when it names a
+   *  place while the bar is in 📍, otherwise the current one. */
+  mode: Area;
+  /** Null: there is nowhere to generate yet (no cell clicked, no zone drawn). */
+  zone: Zone | null;
+  how: How | null;
+  /** The cell a 📍 patch is centred on, and where it was taken from. */
+  anchor?: { x: number; y: number; from: "selection" | "cursor" };
+  /** The zone is cut down to its perimeter band («по краю»). */
+  band: boolean;
+}
+
 /**
- * Resolve the target zone — its bbox `region` + an optional cell `cells` mask. Priority:
- *  1. 📍 point mode / "вокруг точки" — centre NxN (or POINT_DEFAULT) on the clicked cell.
- *  2. ⛶ an explicit drag selection — with its drawn mask (brush/line/frame).
- *  3. «по всей карте / везде» -> the WHOLE map (v1 silently generated on the visible screen).
+ * Plan the target zone — its bbox `region` + an optional cell `cells` mask — WITHOUT changing
+ * anything, so the suggestions list can say what Enter will do and Enter then does exactly
+ * that. Priority:
+ *  1. 📍 point mode / «вокруг точки» — centre NxN (or POINT_DEFAULT) on the clicked cell, else
+ *     on the cell under the cursor. «тут» with neither is no zone: the bar asks for a click.
+ *  2. «по всей карте / везде» -> the WHOLE map (v1 silently generated on the visible screen).
+ *  3. ⛶ an explicit drag selection — with its drawn mask (brush/line/frame).
  *  4. "NxM" centred on the map; «в центре» without a size -> a centred ~40% block.
- *  5. a direction ("север/юг/запад/восток") -> half the map.
+ *  5. a direction («север/юг/запад/восток») -> half the map.
  *  6. 👁 screen -> the EXACT visible cells (diamond mask), so it matches what you see.
  * «по краю/периметру/рамкой» turns the resolved region into its perimeter-band cell mask.
+ *
+ * `follow`: let the command's words pick the area mode (a typed command does; a palette tile
+ * and the LLM mode keep the mode the bar is in). `dry`: the list only needs the outline — skip
+ * the cell masks (the visible screen is thousands of cells, and the list is rebuilt as the
+ * pointer moves).
  */
-function resolveZone(text: string, size: number): Zone | null {
-  const zone = resolveZoneBase(text, size);
+function planZone(a: ParsedArea, size: number, opts: { follow?: boolean; dry?: boolean } = {}): Plan {
+  const follow = opts.follow ?? true;
+  let mode = area.value;
+  let sel = toolStore.region;
+  let eye = toolStore.eyeZone;
+  if (follow && a.where === "point") mode = "point";
+  else if (follow && a.where && mode === "point") {
+    // a named place is the more explicit intent: back to 👁, which drops the clicked point
+    mode = "screen";
+    sel = null;
+    eye = true;
+  }
+  const base = planBase(a, size, mode, sel, eye, !!opts.dry);
+  if (!base) return { mode, zone: null, how: null, band: false };
   // frame intent: keep the region, clip generation to its perimeter band. A HAND-DRAWN ⛶
   // mask wins (the drawing IS the shape); the 👁 eye's derived diamond mask does NOT — else
   // a bare «горы по краю» in the default screen mode skipped the band and mountain_fill
   // flooded the whole visible screen. Eye cells are intersected so the band stays visible.
-  if (zone && /по\s*кра|перимет|рамк|кольц/i.test(text)) {
-    const drawnMask = !!toolStore.region && !!toolStore.regionMask?.length;
-    if (!drawnMask) {
-      const band = frameCells(zone.region, size);
-      if (!zone.cells) return { region: zone.region, cells: band };
+  const band = a.frame && !(sel && toolStore.regionMask?.length);
+  let zone = base.zone;
+  if (band && !opts.dry) {
+    const cells = frameCells(zone.region, size);
+    if (!zone.cells) zone = { region: zone.region, cells };
+    else {
       const visible = new Set(zone.cells.map(([x, y]) => `${x},${y}`));
-      const clipped = band.filter(([x, y]) => visible.has(`${x},${y}`));
-      return { region: zone.region, cells: clipped.length ? clipped : band };
+      const clipped = cells.filter(([x, y]) => visible.has(`${x},${y}`));
+      zone = { region: zone.region, cells: clipped.length ? clipped : cells };
     }
   }
-  return zone;
+  return { mode, zone, how: base.how, anchor: base.anchor, band };
 }
-function resolveZoneBase(text: string, size: number): Zone | null {
+function planBase(
+  a: ParsedArea, size: number, mode: Area, sel: Region | null, eye: boolean, dry: boolean,
+): { zone: Zone; how: How; anchor?: Plan["anchor"] } | null {
   const clamp = (n: number): number => Math.max(2, Math.min(n, size));
-  const m = /(\d{1,3})\s*[x×х*]\s*(\d{1,3})/i.exec(text);
-  const around = /вокруг|около|возле|здесь|тут|это[йм]\s*точк|в\s*точк|в\s*этом\s*месте/i.test(text);
-  const sel = toolStore.region;
-  const anchor = sel
-    ? regionCenter(sel)
+  const anchor: Plan["anchor"] = sel
+    ? { ...regionCenter(sel), from: "selection" }
     : view.cursorCell
-      ? { x: view.cursorCell.x, y: view.cursorCell.y }
-      : null;
+      ? { x: view.cursorCell.x, y: view.cursorCell.y, from: "cursor" }
+      : undefined;
 
-  // 1) POINT: the 📍 mode, an explicit "вокруг точки", or a 1×1 selection + a size. Size = the
-  //    command's NxN, else POINT_DEFAULT (so a bare "озеро" in 📍 mode isn't a single cell).
-  const pointIntent = area.value === "point" || around || (!!m && sel ? sel.w <= 2 && sel.h <= 2 : false);
+  // 1) POINT: the 📍 mode, an explicit «вокруг точки», or a 1×1 selection + a size. Size = the
+  //    command's NxN, else POINT_DEFAULT (so a bare «озеро» in 📍 mode isn't a single cell).
+  const pointIntent = mode === "point" || a.where === "point" || (!!a.size && !!sel && sel.w <= 2 && sel.h <= 2);
   if (pointIntent && anchor) {
-    const w = clamp(m ? +m[1]! : POINT_DEFAULT), h = clamp(m ? +m[2]! : POINT_DEFAULT);
+    const w = clamp(a.size?.w ?? POINT_DEFAULT), h = clamp(a.size?.h ?? POINT_DEFAULT);
     const x = Math.max(0, Math.min(anchor.x - Math.floor(w / 2), size - w));
     const y = Math.max(0, Math.min(anchor.y - Math.floor(h / 2), size - h));
-    return { region: { x, y, w, h }, cells: null };
+    return { zone: { region: { x, y, w, h }, cells: null }, how: "point", anchor };
   }
+  // «тут» with no cell to stand on: nothing to generate in yet (v1 fell through and put a
+  // sized «озеро тут 20x20» in the centre of the map while asking to click a cell)
+  if (a.where === "point") return null;
   // 2) «по всей карте / везде» — the WHOLE map, even over a drawn selection (the words are
   //    the more explicit intent). v1 silently generated on the visible screen, so «трава по
   //    всей карте» cleaned a screenful and left the rest untouched.
-  if (/по\s*всей\s*карте|всю\s*карту|на\s*всей\s*карте|везде|повсюду/i.test(text)) {
-    return { region: { x: 0, y: 0, w: size, h: size }, cells: null };
-  }
+  if (a.where === "map") return { zone: { region: { x: 0, y: 0, w: size, h: size }, cells: null }, how: "map" };
   // 3) an explicit drag selection (+ its drawn mask)
-  if (sel) return { region: sel, cells: toPairs(toolStore.regionMask), drawn: !!toolStore.regionMask?.length };
+  if (sel) {
+    return { zone: { region: sel, cells: dry ? null : toPairs(toolStore.regionMask), drawn: !!toolStore.regionMask?.length }, how: "selection" };
+  }
   // 4) "NxM" centred; «в центре» without a size = a centred ~40% block (v1 ignored the word
   //    and filled the whole screen)
-  if (m) {
-    const w = clamp(+m[1]!), h = clamp(+m[2]!);
-    return { region: { x: Math.floor((size - w) / 2), y: Math.floor((size - h) / 2), w, h }, cells: null };
+  if (a.size) {
+    const w = clamp(a.size.w), h = clamp(a.size.h);
+    return { zone: { region: { x: Math.floor((size - w) / 2), y: Math.floor((size - h) / 2), w, h }, cells: null }, how: "size" };
   }
-  if (/в\s*центре|по\s*центру/i.test(text)) {
+  if (a.where === "center") {
     const w = clamp(Math.round(size * 0.4));
-    return { region: { x: Math.floor((size - w) / 2), y: Math.floor((size - w) / 2), w, h: w }, cells: null };
+    return { zone: { region: { x: Math.floor((size - w) / 2), y: Math.floor((size - w) / 2), w, h: w }, cells: null }, how: "center" };
   }
   // 5) direction halves
   const half = Math.floor(size / 2);
-  if (/север|сверху|вверх/i.test(text)) return { region: { x: 0, y: 0, w: size, h: half }, cells: null };
-  if (/юг|снизу|вниз/i.test(text)) return { region: { x: 0, y: size - half, w: size, h: half }, cells: null };
-  if (/запад|слев/i.test(text)) return { region: { x: 0, y: 0, w: half, h: size }, cells: null };
-  if (/восток|справ/i.test(text)) return { region: { x: size - half, y: 0, w: half, h: size }, cells: null };
+  if (a.where === "north") return { zone: { region: { x: 0, y: 0, w: size, h: half }, cells: null }, how: "north" };
+  if (a.where === "south") return { zone: { region: { x: 0, y: size - half, w: size, h: half }, cells: null }, how: "south" };
+  if (a.where === "west") return { zone: { region: { x: 0, y: 0, w: half, h: size }, cells: null }, how: "west" };
+  if (a.where === "east") return { zone: { region: { x: size - half, y: 0, w: half, h: size }, cells: null }, how: "east" };
   // 6) 👁 eye: the exact visible cells (diamond mask), bbox as the region
-  if (toolStore.eyeZone && view.visibleCells) return { region: view.visibleCells, cells: toPairs(view.visibleMask) };
+  if (eye && view.visibleCells) return { zone: { region: view.visibleCells, cells: dry ? null : toPairs(view.visibleMask) }, how: "screen" };
   return null;
+}
+
+/** A plan in words, for the suggestions list. */
+function whereText(p: Plan): string {
+  if (!p.zone) {
+    if (p.mode === "point") return tr("📍 точка не выбрана — кликни клетку на карте");
+    if (p.mode === "zone") return tr("⛶ зона не обведена — обведи область на карте");
+    return tr("👁 карта не видна на экране");
+  }
+  const { w, h } = p.zone.region;
+  switch (p.how) {
+    case "point":
+      return p.anchor?.from === "cursor"
+        ? tr("📍 вокруг курсора — {w}×{h}", { w, h })
+        : tr("📍 вокруг клетки {x}, {y} — {w}×{h}", { x: p.anchor?.x ?? 0, y: p.anchor?.y ?? 0, w, h });
+    case "map": return tr("вся карта — {w}×{h}", { w, h });
+    case "selection":
+      return regionMask.value?.length ? trn("⛶ в обведённой зоне — {n} кл.", regionMask.value.length) : tr("⛶ в обведённой зоне — {w}×{h}", { w, h });
+    case "size":
+    case "center": return tr("в центре карты — {w}×{h}", { w, h });
+    case "north": return tr("северная половина карты");
+    case "south": return tr("южная половина карты");
+    case "west": return tr("западная половина карты");
+    case "east": return tr("восточная половина карты");
+    default: return tr("👁 на всём, что видно на экране");
+  }
 }
 
 /** LLM-bridge send (Phase-4 POC): the server file-bridges the command to the agent. */
@@ -547,7 +604,7 @@ async function sendLlm(text: string): Promise<void> {
     if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight;
   });
   try {
-    const zone = editStore.liveDoc ? resolveZone(text, editStore.liveDoc.size) : null;
+    const zone = editStore.liveDoc ? planZone(parseArea(text), editStore.liveDoc.size, { follow: false }).zone : null;
     const res = await editStore.copilot(text, zone?.region ?? null, zone?.cells ?? null, protect.value);
     if (!res) {
       thinking.text = tr("Карта не загружена.");
@@ -570,40 +627,349 @@ async function sendLlm(text: string): Promise<void> {
   }
 }
 
+// --- the suggestions list: what the bar understood, before Enter ---------------------------
+
+/** One row of the list: what would happen. */
+interface Row {
+  key: string;
+  icon: string | Component;
+  title: string;
+  /** Dimmer: what exactly will happen — or, on a row that cannot run, why not. */
+  detail: string;
+  disabled?: boolean;
+  /** A «type this…» row: it puts the text into the input instead of doing something. */
+  fill?: string;
+  /** It generates, so it waits while another generation is running. */
+  generates?: boolean;
+  /** `typed`: the line it was run from (empty for a row of the starter list). */
+  run?: (typed: string) => void | Promise<void>;
+}
+const MAX_ROWS = 6;
+
+type GenReading = { recipeId: string; area: ParsedArea; amount: AmountStep };
+
+const AMOUNT_WORDS: Record<number, string> = {
+  [-2]: tr("намного меньше"), [-1]: tr("меньше"), 1: tr("больше"), 2: tr("намного больше"),
+};
+/** The amount «побольше / чуть…» stands for — only where the recipe's amount can be tuned. */
+function amountFor(g: GenReading): AmountStep {
+  return gen.infoOf(g.recipeId)?.amountLabel ? g.amount : 0;
+}
+
+function genRow(g: GenReading): Row {
+  const info = gen.infoOf(g.recipeId);
+  const base = { key: `g:${g.recipeId}`, icon: gen.iconOf(g.recipeId), title: gen.titleOf(g.recipeId), generates: true };
+  // a recipe this mod has nothing to place for stays in the list, greyed out, with the reason
+  if (info?.lacks) return { ...base, detail: tr(info.lacks), disabled: true };
+  const doc = editStore.liveDoc;
+  if (!doc) return { ...base, detail: tr("Карта не загружена."), disabled: true };
+  const plan = planZone(g.area, doc.size, { dry: true });
+  const parts = [whereText(plan)];
+  if (plan.zone && plan.band) parts.push(tr("по краю"));
+  const amount = AMOUNT_WORDS[amountFor(g)];
+  if (amount) parts.push(amount);
+  return { ...base, detail: parts.join(" · "), run: (typed) => runGenerate(g, typed) };
+}
+
+function toolRow(id: ToolId): Row {
+  const def = toolDef(id);
+  return {
+    key: `t:${id}`,
+    icon: def?.icon ?? "🖌",
+    title: tr("Инструмент: {name}", { name: def?.label ?? id }),
+    detail: toolStore.tool === id ? tr("уже выбран") : def?.hint ?? "",
+    run: () => runTool(id),
+  };
+}
+
+/** The menu commands as the list names them: the menu's own words, the menu they are in,
+ *  for a switch — whether it is on now, and for undo / redo — whether there is anything to. */
+const COMMAND_ROWS: Record<CommandId, { title: string; menu: string; on?: () => boolean; blocked?: () => string | null }> = {
+  "file:open": { title: tr("Открыть карту…"), menu: tr("Файл") },
+  "file:new": { title: tr("Новая карта…"), menu: tr("Файл") },
+  "file:upload": { title: tr("Загрузить .sg…"), menu: tr("Файл") },
+  "file:export": { title: tr("Экспорт карты…"), menu: tr("Файл") },
+  "file:passport": { title: tr("Паспорт карты…"), menu: tr("Файл") },
+  "edit:undo": { title: tr("Отменить"), menu: tr("Правка"), blocked: () => (editStore.undoable ? null : tr("нечего отменять")) },
+  "edit:redo": { title: tr("Вернуть"), menu: tr("Правка"), blocked: () => (editStore.redoable ? null : tr("нечего возвращать")) },
+  "edit:validate": { title: tr("Проверить карту"), menu: tr("Правка") },
+  "view:terrain": { title: tr("Слой рельефа"), menu: tr("Вид"), on: () => view.terrainVisible },
+  "view:objects": { title: tr("Слой объектов"), menu: tr("Вид"), on: () => view.objectsVisible },
+  "view:grid": { title: tr("Сетка"), menu: tr("Вид"), on: () => view.gridVisible },
+  "view:locations": { title: tr("Слой локаций"), menu: tr("Вид"), on: () => view.locationsVisible },
+  "view:animate": { title: tr("Анимация"), menu: tr("Вид"), on: () => view.animate },
+  "view:objectPanel": { title: tr("Панель объектов"), menu: tr("Вид"), on: () => view.objectPanelVisible },
+  "view:eventPanel": { title: tr("Сценарий (события)"), menu: tr("Вид"), on: () => view.eventPanelVisible },
+  "view:anchors": { title: tr("Связи (якоря ⚓)"), menu: tr("Вид"), on: () => view.anchorsVisible },
+  "view:roles": { title: tr("Роли локаций"), menu: tr("Вид"), on: () => view.rolesVisible },
+  "view:minimap": { title: tr("Миникарта"), menu: tr("Вид"), on: () => view.minimapVisible },
+  "view:fit": { title: tr("К размеру окна"), menu: tr("Вид") },
+  "view:appearance": { title: tr("Тёмная тема"), menu: tr("Вид"), on: () => view.dark },
+  "help:keys": { title: tr("Горячие клавиши…"), menu: tr("Справка") },
+  "help:commands": { title: tr("Командная строка и генераторы…"), menu: tr("Справка") },
+};
+
+function commandRow(id: CommandId): Row {
+  const c = COMMAND_ROWS[id];
+  const blocked = c.blocked?.() ?? null;
+  const parts = [c.menu];
+  if (blocked) parts.push(blocked);
+  else if (c.on) parts.push(c.on() ? tr("сейчас включено — выключить") : tr("сейчас выключено — включить"));
+  // the menu owns the action (and its own guards): ask it, as if the item were picked there
+  return { key: `c:${id}`, icon: MenuIcon, title: c.title, detail: parts.join(" · "), disabled: !!blocked, run: () => commands.run(id) };
+}
+
+function cellRow(x: number, y: number): Row {
+  const base = { key: "cell", icon: Aim, title: tr("Перейти к клетке {x}, {y}", { x, y }) };
+  const size = editStore.liveDoc?.size;
+  if (size === undefined) return { ...base, detail: tr("Карта не загружена."), disabled: true };
+  if (x >= size || y >= size) return { ...base, detail: tr("такой клетки нет — карта {n}×{n}", { n: size }), disabled: true };
+  return { ...base, detail: tr("показать её в центре экрана"), run: () => goToCell(x, y) };
+}
+
+type MapObject = MapDocument["objects"][number];
+/** What an object is, where the list says so (the inspector's words). */
+const OBJECT_KINDS: Record<string, string> = {
+  capital: tr("Столица"), village: tr("Город"), ruin: tr("Руина"), merchant: tr("Торговец"), mage: tr("Маг"),
+  trainer: tr("Тренер"), mercenary: tr("Наёмники"), resourceMarket: tr("Рынок ресурсов"), landmark: tr("Декор"),
+  location: tr("Локация"), stack: tr("Отряд"), treasure: tr("Сундук"),
+};
+/** The objects whose name — or, after those, description — contains the query. */
+function findObjects(query: string): MapObject[] {
+  const named: MapObject[] = [], described: MapObject[] = [];
+  for (const o of editStore.liveDoc?.objects ?? []) {
+    const t = o as { name?: string; desc?: string };
+    if (textMatches(query, t.name)) named.push(o);
+    else if (textMatches(query, t.desc)) described.push(o);
+  }
+  return [...named, ...described];
+}
+function objectRow(o: MapObject): Row {
+  const t = o as { name?: string; desc?: string };
+  return {
+    key: `o:${o.id}`,
+    icon: OBJ_ICONS[o.type] ?? "📍",
+    title: t.name || t.desc || o.id,
+    detail: `${OBJECT_KINDS[o.type] ?? o.type} · ${o.pos.x}, ${o.pos.y}`,
+    // the canvas centres on it, selects it and blinks it (the same path as a link to an object)
+    run: () => { toolStore.focusObjectId = o.id; },
+  };
+}
+
+const CELL_EXAMPLE = tr("клетка 20 30");
+const FIND_EXAMPLE = tr("найти столица");
+/** The first word of an example and a space: what a «type this…» row puts into the input. */
+const firstWord = (example: string): string => `${example.split(" ")[0]} `;
+
+/** Empty input: a few things of each kind the bar can do. */
+function starterRows(): Row[] {
+  const rows: Row[] = [];
+  for (const recipeId of ["water_lake", "relief_ridge"]) {
+    if (gen.infoOf(recipeId)) rows.push(genRow({ recipeId, area: NO_AREA, amount: 0 }));
+  }
+  rows.push(toolRow("fog"), commandRow("view:grid"));
+  rows.push({ key: "s:cell", icon: Aim, title: tr("Перейти к клетке"), detail: tr("набери, например: {example}", { example: CELL_EXAMPLE }), fill: firstWord(CELL_EXAMPLE) });
+  rows.push({ key: "s:find", icon: Search, title: tr("Найти объект по названию"), detail: tr("набери, например: {example}", { example: FIND_EXAMPLE }), fill: firstWord(FIND_EXAMPLE) });
+  return rows;
+}
+
+function rowOf(i: Interpretation): Row | null {
+  switch (i.kind) {
+    case "generate": return genRow(i);
+    case "tool": return toolRow(i.tool);
+    case "command": return commandRow(i.command);
+    case "goto": return cellRow(i.x, i.y);
+    case "find": return null; // «найти …» becomes a row per object found
+  }
+}
+const isRow = (r: Row | null): r is Row => r !== null;
+
+interface Suggestion {
+  /** A line above the rows saying what they are; empty when the rows speak for themselves. */
+  caption: string;
+  rows: Row[];
+  /** The rows are readings of the typed line, so Enter runs the first. Offers (the starter
+   *  list, the nearest things to a line that was not understood) run only when picked. */
+  understood: boolean;
+}
+
+const suggestion = computed<Suggestion>(() => {
+  const text = input.value.trim();
+  const offer = (caption: string): Suggestion => ({ caption, rows: starterRows(), understood: false });
+  if (!text) return offer(tr("Что можно сделать — выбери или начни печатать"));
+  // only what the server can generate (a recipe may be dropped there); before the catalogue
+  // has loaded, everything the bar knows the words for
+  const options = gen.catalog.length ? { recipes: gen.catalog.map((r) => r.id) } : {};
+  const readings = interpret(text, options);
+  const rows: Row[] = [];
+  let caption = "";
+
+  // «найти …»: a row per object found. Whatever else the words could mean stays below as an
+  // offer — a line that asks to FIND something never generates on a bare Enter.
+  const find = readings.find((i): i is Extract<Interpretation, { kind: "find" }> => i.kind === "find");
+  if (find) {
+    const found = find.query ? findObjects(find.query) : [];
+    if (!find.query) caption = tr("Найти объект: допиши название, например: {example}", { example: FIND_EXAMPLE });
+    else if (!found.length) caption = tr("Найти «{query}»: на карте такого нет", { query: find.query });
+    else if (found.length > MAX_ROWS) caption = trn("Найти «{query}»: {n} объект, показаны первые {shown}|Найти «{query}»: {n} объекта, показаны первые {shown}|Найти «{query}»: {n} объектов, показаны первые {shown}", found.length, { query: find.query, shown: MAX_ROWS });
+    else caption = trn("Найти «{query}»: {n} объект|Найти «{query}»: {n} объекта|Найти «{query}»: {n} объектов", found.length, { query: find.query });
+    rows.push(...found.slice(0, MAX_ROWS).map(objectRow), ...readings.map(rowOf).filter(isRow));
+    return { caption, rows: rows.slice(0, MAX_ROWS), understood: found.length > 0 };
+  }
+  rows.push(...readings.map(rowOf).filter(isRow));
+
+  // no reading is never a dead end: the line may only say how / where / how much so far
+  // («редкий…», «на севере…») — then what goes with that; or a word is misspelt — then the
+  // nearest things; or else what the bar can do at all. (A line of a letter or two is just
+  // not typed yet: no «не понял» for it.)
+  if (!rows.length) {
+    if (text.length < 3) return offer(tr("Что можно сделать — выбери или начни печатать"));
+    const offers = nearest(text, options, MAX_ROWS);
+    const offered = offers.map(rowOf).filter(isRow);
+    if (!offered.length) return offer(tr("Не понял «{text}». Вот что можно:", { text }));
+    caption = offers[0]?.match === "open" ? tr("Что именно? Например:") : tr("Не понял «{text}». Может быть, это:", { text });
+    return { caption, rows: offered, understood: false };
+  }
+
+  // room left under a generation: its sibling recipes, for the same place
+  const top = readings[0];
+  if (top?.kind === "generate") {
+    const group = gen.infoOf(top.recipeId)?.group;
+    for (const r of gen.catalog) {
+      if (rows.length >= MAX_ROWS) break;
+      if (r.group === group && !rows.some((row) => row.key === `g:${r.id}`)) rows.push(genRow({ recipeId: r.id, area: top.area, amount: 0 }));
+    }
+  }
+  return { caption, rows: rows.slice(0, MAX_ROWS), understood: true };
+});
+
+/** The highlighted row; −1 = none (an offer is not run by a bare Enter). */
+const highlighted = ref(-1);
+/** Back to where the highlight starts: the first reading of the line, or nothing on a list of offers. */
+function resetHighlight(): void {
+  highlighted.value = suggestion.value.understood ? 0 : -1;
+}
+/** Esc closed the list; typing or focusing the input brings it back. */
+const dismissed = ref(false);
+const listShown = computed(() =>
+  inputFocused.value && !dismissed.value && !(llmMode.value && LLM_AVAILABLE)
+  && (suggestion.value.rows.length > 0 || !!suggestion.value.caption),
+);
+watch(input, resetHighlight);
+
+function onInput(): void {
+  dismissed.value = false;
+  markActive();
+}
+
+/** ↑/↓ move the highlight, Enter runs it (the first reading by default), Esc closes the list. */
+function onKeydown(e: KeyboardEvent | Event): void {
+  if (!(e instanceof KeyboardEvent) || e.isComposing) return;
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (!e.repeat) void send();
+    return;
+  }
+  if (llmMode.value && LLM_AVAILABLE) return;
+  const n = suggestion.value.rows.length;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (!n) return;
+    e.preventDefault();
+    if (!listShown.value) { dismissed.value = false; return; } // first bring the list back
+    const step = e.key === "ArrowDown" ? 1 : -1;
+    highlighted.value = highlighted.value < 0 ? (step > 0 ? 0 : n - 1) : (highlighted.value + step + n) % n;
+  } else if (e.key === "Escape" && listShown.value) {
+    e.preventDefault();
+    e.stopPropagation(); // this Esc closes the list — not whatever else listens for it
+    dismissed.value = true;
+  }
+}
+
+/** Run a row of the list (Enter on it, or a click). */
+async function runRow(row: Row): Promise<void> {
+  markActive();
+  if (row.fill !== undefined) {
+    input.value = row.fill;
+    dismissed.value = false;
+    void nextTick(() => inputRef.value?.focus());
+    return;
+  }
+  if (row.disabled || !row.run) {
+    notify(`${row.title} — ${row.detail}`, "warning");
+    return;
+  }
+  if (row.generates && (sending.value || gen.busy)) return;
+  const typed = input.value.trim();
+  log.value.push({ role: "user", text: typed || row.title });
+  input.value = "";
+  dismissed.value = true;
+  highlighted.value = -1; // a row picked from the starter list must not stay armed for the next Enter
+  await row.run(typed);
+}
+
 async function send(): Promise<void> {
   const text = input.value.trim();
-  if (!text || sending.value) return;
-  markActive();
-  log.value.push({ role: "user", text });
-  input.value = "";
+  if (sending.value) return;
 
   if (llmMode.value && LLM_AVAILABLE) {
+    if (!text) return;
+    markActive();
+    log.value.push({ role: "user", text });
+    input.value = "";
     await sendLlm(text);
     return;
   }
 
-  const recipeId = routeRecipe(text);
-  if (!recipeId) {
-    notify(tr("Не понял команду. Примеры: «лабиринт», «залей водой», «снег на севере», «лес», «трава»."), "warning");
+  const { rows, understood } = suggestion.value;
+  const row = rows[highlighted.value >= 0 ? Math.min(highlighted.value, rows.length - 1) : understood ? 0 : -1];
+  if (row) {
+    await runRow(row);
     return;
   }
+  if (!text) return;
+  // nothing to run: the list says what was not understood and what is close — show it
+  dismissed.value = false;
+  void nextTick(() => inputRef.value?.focus());
+}
+
+/** A typed generation: the area mode follows the command's words, then generate. */
+async function runGenerate(g: GenReading, typed: string): Promise<void> {
   const doc = editStore.liveDoc;
   if (!doc) {
     notify(tr("Карта не загружена."), "warning");
     return;
   }
-  // Auto-select the area filter a TYPED command implies (point → 📍, direction → 👁 screen);
-  // a generic command keeps the current mode (respect a drawn ⛶ zone).
-  const need = needOf(text);
-  if (need === "point" && area.value !== "point") setArea("point", { auto: true });
-  else if (need === "side" && area.value === "point") setArea("screen");
-
-  const zone = resolveZone(text, doc.size);
-  if (!zone) {
-    explainNoZone();
+  // Auto-select the area filter the command implies («тут» → 📍, a named place while in 📍 →
+  // 👁); a generic command keeps the current mode (respect a drawn ⛶ zone).
+  const plan = planZone(g.area, doc.size);
+  // «тут» with no cell clicked and the pointer off the map: 📍 asks for the click
+  const asksForClick = plan.mode === "point" && plan.mode !== area.value && !plan.zone;
+  if (plan.mode !== area.value) {
+    setArea(plan.mode, { auto: asksForClick });
+    if (!asksForClick) pulseArea(plan.mode);
+  }
+  if (!plan.zone) {
+    input.value = typed; // keep the command: once there is an area, Enter runs it
+    if (!asksForClick) explainNoZone();
     return;
   }
-  await generateIn(recipeId, zone);
+  const amount = amountFor(g);
+  await generateIn(g.recipeId, plan.zone, amount ? AMOUNT_STEPS[2 + amount] : undefined);
+}
+
+function runTool(id: ToolId): void {
+  // a dock tool takes the clicks on the map, so the bar stops waiting for a ⛶ zone / 📍 point
+  if (area.value !== "screen") setArea("screen");
+  toolStore.setTool(id);
+}
+
+/** Show a cell: centred, at 100% (as a link to an object opens), marked until the pointer moves. */
+function goToCell(x: number, y: number): void {
+  const scene = getScene();
+  if (!scene) return;
+  const w = cellToWorld(x + 0.5, y + 0.5);
+  scene.setCursorCell({ x, y });
+  scene.focusOn(w.x, w.y, 1);
 }
 
 /** Mode-aware dead-end hint: there is no area to generate in yet. */
@@ -613,13 +979,14 @@ function explainNoZone(): void {
   else notify(tr("Не понял область. Наведи карту (👁 Экран) или выбери ⛶ Зона / 📍 Точка, либо укажи размер («25x25») / сторону («север»)."), "warning");
 }
 
-/** Generate `recipeId` in `zone` as a new session of variants, and say what came of it. */
-async function generateIn(recipeId: string, zone: Zone): Promise<void> {
+/** Generate `recipeId` in `zone` as a new session of variants, and say what came of it.
+ *  `amount`: how much of it, when the command said («побольше»); else the palette's amount. */
+async function generateIn(recipeId: string, zone: Zone, amount?: number): Promise<void> {
   const { region, cells } = zone;
   sending.value = true;
   const t0 = performance.now();
   try {
-    const rep = await gen.run({ recipeId, region, cells, stroke: !!zone.drawn, protect: protect.value });
+    const rep = await gen.run({ recipeId, region, cells, stroke: !!zone.drawn, protect: protect.value }, amount === undefined ? {} : { amount });
     const ms = Math.round(performance.now() - t0);
     const what = `${gen.titleOf(recipeId)} ${region.w}×${region.h}`;
     if (!rep) notify(tr("Карта недоступна для правок."), "warning");
@@ -644,7 +1011,7 @@ async function runTile(r: GenRecipeInfo): Promise<void> {
     return;
   }
   log.value.push({ role: "user", text: tr(r.title) });
-  const zone = resolveZone("", doc.size);
+  const zone = planZone(NO_AREA, doc.size, { follow: false }).zone;
   if (!zone) {
     explainNoZone();
     return;
@@ -704,15 +1071,19 @@ async function retry(): Promise<void> {
   }
 }
 
-/** Fill the input from an example, and AUTO-SELECT the area filter the command needs
- *  (👁 screen / ⛶ zone / 📍 point) — the button pulses so the switch is visible. */
-function applyExample(ex: { text: string; llm?: boolean; mj?: boolean; need?: Need }): void {
+/** Fill the input from an example, and AUTO-SELECT the area filter a generation needs
+ *  (👁 screen / ⛶ zone / 📍 point) — the button pulses so the switch is visible. The list
+ *  above the input then shows what Enter will do. */
+function applyExample(ex: { text: string; llm?: boolean; need?: "zone" }): void {
   input.value = ex.text;
   if (ex.llm) llmMode.value = true;
   examplesOpen.value = false;
   (exPop.value as unknown as { hide?: () => void } | null)?.hide?.();
-  const need = ex.need ?? needOf(ex.text);
-  setArea(areaForNeed(need), { auto: true });
+  // «…вокруг этой точки» wants 📍, a ✎ example draws in ⛶, any other generation runs on 👁;
+  // a tool, a menu command, a cell or a search has no area to choose
+  const generates = ex.llm || ex.need || interpret(ex.text)[0]?.kind === "generate";
+  if (generates) setArea(ex.need ?? (parseArea(ex.text).where === "point" ? "point" : "screen"), { auto: true });
+  dismissed.value = false;
   void nextTick(() => inputRef.value?.focus());
 }
 
@@ -782,6 +1153,44 @@ watch(
 
     <!-- the generation being tried: variants, more/less, keep or take away -->
     <GenResultStrip />
+
+    <!-- what the bar understood, BEFORE Enter: right above the input. mousedown.prevent keeps
+         the focus in the input (a blur would close the list before the click lands);
+         mousemove, not mouseenter, so a list opening under a resting pointer steals no
+         highlight — and a pointer that leaves gives the highlight back to the first reading -->
+    <div
+      v-if="listShown"
+      id="cp-suggest"
+      class="cp-suggest d2-float"
+      role="listbox"
+      :aria-label="tr('Что понял копайлот')"
+      @mousedown.prevent
+      @mouseleave="resetHighlight()"
+    >
+      <div v-if="suggestion.caption" class="cp-sg-cap">{{ suggestion.caption }}</div>
+      <button
+        v-for="(r, i) in suggestion.rows"
+        :key="r.key"
+        type="button"
+        tabindex="-1"
+        class="cp-sg-row"
+        :class="{ active: i === highlighted, off: r.disabled }"
+        role="option"
+        :aria-selected="i === highlighted"
+        :aria-disabled="!!r.disabled"
+        :title="r.detail ? `${r.title} — ${r.detail}` : r.title"
+        @mousemove="highlighted = i"
+        @click="runRow(r)"
+      >
+        <span class="cp-sg-ico" aria-hidden="true">
+          <template v-if="typeof r.icon === 'string'">{{ r.icon }}</template>
+          <el-icon v-else><component :is="r.icon" /></el-icon>
+        </span>
+        <span class="cp-sg-title">{{ r.title }}</span>
+        <span class="cp-sg-detail">{{ r.detail }}</span>
+        <span v-if="i === highlighted" class="cp-sg-enter" aria-hidden="true">↵</span>
+      </button>
+    </div>
     </div>
 
     <div class="copilot-bar d2-float" :class="{ idle: idleEffective }">
@@ -842,13 +1251,16 @@ watch(
           <div v-for="g in displayExamples" :key="g.group" class="cp-ex-group">
             <div class="cp-ex-gtitle">{{ g.group }}</div>
             <button v-for="it in g.items" :key="it.text" class="cp-ex-item" @click="applyExample(it)">
-              <span>{{ it.label }}</span>
+              <span>{{ it.text }}</span>
               <span v-if="it.llm" class="cp-ex-llm">LLM</span>
               <span v-else-if="it.mj" class="cp-ex-mj">MJ</span>
             </button>
           </div>
         </div>
       </el-popover>
+
+      <el-button class="cp-ico" text :icon="QuestionFilled" :title="tr('Что умеет строка: все генераторы с картинками и команды')"
+        :aria-label="tr('Что умеет строка: все генераторы с картинками и команды')" @click="view.setCommandHelp(true)" />
 
       <el-tooltip
         :content="LLM_AVAILABLE ? tr('LLM-режим — генерация через агента (иначе офлайн-роутер)') : tr('LLM-режим временно отключён')"
@@ -879,10 +1291,13 @@ watch(
         v-model="input"
         class="cp-input"
         :placeholder="placeholder"
+        autocomplete="off"
+        aria-autocomplete="list"
+        aria-controls="cp-suggest"
         @focus="onFocus"
         @blur="onBlur"
-        @input="markActive()"
-        @keyup.enter="send()"
+        @input="onInput"
+        @keydown="onKeydown"
       />
 
       <el-tooltip :content="expanded ? tr('Скрыть лог') : tr('Показать лог команд')" placement="top" :show-after="300">
@@ -1110,6 +1525,77 @@ watch(
 }
 .cp-close:hover {
   color: var(--el-text-color-primary);
+}
+/* the suggestions list: what the bar understood, right above the input */
+.cp-suggest {
+  pointer-events: auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  background: var(--el-bg-color);
+}
+.cp-sg-cap {
+  padding: 3px 8px 2px;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-sg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--el-text-color-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.cp-sg-row.active {
+  background: var(--el-fill-color);
+}
+.cp-sg-row.off {
+  cursor: default;
+}
+.cp-sg-row.off .cp-sg-ico,
+.cp-sg-row.off .cp-sg-title {
+  opacity: 0.5;
+}
+.cp-sg-ico {
+  flex: 0 0 18px;
+  display: inline-flex;
+  justify-content: center;
+}
+.cp-sg-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-sg-detail {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-sg-enter {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
 }
 .cp-fade-enter-active,
 .cp-fade-leave-active {

@@ -16,6 +16,8 @@ import type {
   Region,
   GenerateResult,
   GenRecipeInfo,
+  GenRecipePreview,
+  GenPreviewList,
   GenRecipeList,
   CopilotResult,
   VoiceHandoffResult,
@@ -320,6 +322,13 @@ export async function generateRegion(
     amount: amount !== undefined && amount !== 1 ? amount : undefined,
     stroke: stroke || undefined,
   });
+}
+
+/** GET /api/generate/previews — a sample plan of every recipe, for the pictures of the help. */
+export async function fetchGenPreviews(): Promise<GenRecipePreview[]> {
+  const res = await fetch(u(REST.generatePreviews));
+  if (!res.ok) throw new Error(tr("Не удалось загрузить рецепты генератора: {status}", { status: `${res.status} ${res.statusText}` }));
+  return ((await res.json()) as GenPreviewList).previews;
 }
 
 /** GET /api/generate/recipes — what the server can generate, as a palette lists it. */

@@ -47,6 +47,17 @@ export const useViewStore = defineStore("view", () => {
   const animate = ref(bool(p.animate, false));
   /** Left "Objects" panel — hidden by default; toggle from the View menu. */
   const objectPanelVisible = ref(bool(p.objectPanelVisible, false));
+  /** The tool dock with labels (wide) or as icons only. Until the map maker picks one, a wide
+   *  window gets the labels — a newcomer reads them, and there is room. */
+  const dockWide = ref(typeof p.dockWide === "boolean" ? p.dockWide : typeof window !== "undefined" && window.innerWidth >= 1500);
+  function toggleDockWide(): void {
+    dockWide.value = !dockWide.value;
+  }
+  /** The help window of the command bar: every generator with a picture, every command. */
+  const commandHelpVisible = ref(false);
+  function setCommandHelp(open: boolean): void {
+    commandHelpVisible.value = open;
+  }
   /** Events panel (scenario triggers/effects). Hidden by default; toggle from the View menu. */
   const eventPanelVisible = ref(bool(p.eventPanelVisible, false));
   /** Scenario «Граф связей» column inside the events tab. OFF by default so the default
@@ -193,7 +204,7 @@ export const useViewStore = defineStore("view", () => {
   // Persist the toggles to localStorage on any change (transient zoom/cursor excluded).
   watch(
     [terrainVisible, objectsVisible, gridVisible, locationsVisible, animate,
-      objectPanelVisible, eventPanelVisible, eventGraphVisible, anchorsVisible, rolesVisible, minimapVisible, debugOverlay, dark, overlayTints],
+      objectPanelVisible, eventPanelVisible, eventGraphVisible, anchorsVisible, rolesVisible, minimapVisible, debugOverlay, dark, overlayTints, dockWide],
     () => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -203,6 +214,7 @@ export const useViewStore = defineStore("view", () => {
           locationsVisible: locationsVisible.value,
           animate: animate.value,
           objectPanelVisible: objectPanelVisible.value,
+          dockWide: dockWide.value,
           eventPanelVisible: eventPanelVisible.value,
           eventGraphVisible: eventGraphVisible.value,
           anchorsVisible: anchorsVisible.value,
@@ -230,6 +242,10 @@ export const useViewStore = defineStore("view", () => {
     animate,
     objectPanelVisible,
     eventPanelVisible,
+    dockWide,
+    toggleDockWide,
+    commandHelpVisible,
+    setCommandHelp,
     eventGraphVisible,
     anchorsVisible,
     rolesVisible,

@@ -48,8 +48,10 @@ describe("buildWallSet: the tower at maze junctions", () => {
 describe("recipeLacks: what a mod has nothing to place for", () => {
   const wall = (id: string, orient: string) => ({ id, shape: "wall", cx: 1, cy: 1, iso: { orient } });
   const decor = (id: string, shape: string, cx = 1) => ({ id, shape, cx, cy: cx });
+  const fence = (id: string, orient: string) => ({ id, shape: "fence", cx: 1, cy: 1, iso: { orient } });
   const full = [
     wall("G000MG0201", "NE-SW"), wall("G000MG0202", "NW-SE"), wall("G000MG0203", "corner"),
+    fence("G000MG8297", "NE-SW"), fence("G000MG8296", "NW-SE"), fence("G000MG8298", "corner"),
     decor("G000MG8109", "rock"), decor("G000MG0136", "vegetation"),
     decor("G000MG0033", "ruin-building"), decor("G000MG0031", "grave"),
   ];

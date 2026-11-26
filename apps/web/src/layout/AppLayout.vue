@@ -21,7 +21,10 @@ import { tr } from "../i18n";
 import TopMenuBar from "./TopMenuBar.vue";
 import ToolDock from "./ToolDock.vue";
 import ToolOptionsBar from "./ToolOptionsBar.vue";
+import { toolByKey } from "./tools";
+import { hotkeyOf } from "../services/hotkeys";
 import FogToolBar from "./FogToolBar.vue";
+import CommandHelp from "./CommandHelp.vue";
 import LeftObjectPanel from "./LeftObjectPanel.vue";
 import ObjectInspector from "./ObjectInspector.vue";
 import ZoneInspector from "./ZoneInspector.vue";
@@ -68,15 +71,17 @@ const inspectorWidth = computed(() => {
     : "clamp(220px, 24vw, 260px)";
 });
 
-/** Global view hotkeys (single keys; ignored while typing or with modifiers). */
+/** Global hotkeys (single keys; ignored while typing or with modifiers). Letters, digits and
+ *  brackets are read as PHYSICAL keys (hotkeyOf), so they work in a Russian layout too. */
 function onKey(e: KeyboardEvent): void {
   const t = e.target as HTMLElement | null;
   const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+  const key = hotkeyOf(e);
   // Global undo/redo: Ctrl+Z / Ctrl+Shift+Z (and Ctrl+Y), the single source of truth.
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")) {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (key === "z" || key === "y")) {
     if (typing) return;
     if (readOnly.value) { e.preventDefault(); return; }
-    const redo = (e.key === "y" || e.key === "Y") || e.shiftKey;
+    const redo = key === "y" || e.shiftKey;
     if (redo) editStore.redoEdit();
     else editStore.undoEdit();
     e.preventDefault();
@@ -86,7 +91,7 @@ function onKey(e: KeyboardEvent): void {
   if (typing) return;
   // Preview mode keeps navigation/view shortcuts but drops every edit/copilot shortcut before
   // it reaches the tool-specific handlers below. Escape is retained for clearing selection.
-  if (readOnly.value && !["t", "o", "g", "l", "a", "p", "d", "f", "escape"].includes(e.key.toLowerCase())) return;
+  if (readOnly.value && !["t", "o", "g", "l", "a", "p", "d", "f", "escape"].includes(key)) return;
   // road-select tool: Delete erases the selected segment, Escape clears it
   // (same actions as the floating RoadActionBar — shared via useRoadActions).
   if (toolStore.tool === "roadsel" && toolStore.roadSel.length) {
@@ -130,9 +135,9 @@ function onKey(e: KeyboardEvent): void {
     const curId = obj ? decorStore.catalogIdOf(obj) : null;
     if (obj && curId) {
       let next: string | null = null;
-      if (e.key === "r" || e.key === "R") next = decorStore.randomVariant(curId);
-      else if (e.key === "[" || e.key === "]" || e.key === "," || e.key === ".")
-        next = decorStore.neighbor(curId, e.key === "[" || e.key === "," ? -1 : 1);
+      if (key === "r") next = decorStore.randomVariant(curId);
+      else if (key === "[" || key === "]" || key === "," || key === ".")
+        next = decorStore.neighbor(curId, key === "[" || key === "," ? -1 : 1);
       if (next) {
         const fields = decorStore.variantPatch(obj, next);
         if (fields) editStore.commit([{ kind: "patchObject", id: obj.id, fields }]);
@@ -143,21 +148,28 @@ function onKey(e: KeyboardEvent): void {
   }
   // decor tool: cycle the picked variant ([ ] , .) or roll a random look (R).
   if (toolStore.tool === "decor") {
-    if (e.key === "[" || e.key === "]" || e.key === "," || e.key === ".") {
-      const dir = e.key === "[" || e.key === "," ? -1 : 1;
+    if (key === "[" || key === "]" || key === "," || key === ".") {
+      const dir = key === "[" || key === "," ? -1 : 1;
       const next = decorStore.neighbor(toolStore.decorId, dir);
       if (next) toolStore.setDecor(next);
       e.preventDefault();
       return;
     }
-    if (e.key === "r" || e.key === "R") {
+    if (key === "r") {
       const next = decorStore.randomVariant(toolStore.decorId);
       if (next) toolStore.setDecor(next);
       e.preventDefault();
       return;
     }
   }
-  switch (e.key.toLowerCase()) {
+  // a digit picks a tool (the dock shows which)
+  const byDigit = toolByKey(key);
+  if (byDigit) {
+    toolStore.setTool(byDigit);
+    e.preventDefault();
+    return;
+  }
+  switch (key) {
     case "t": view.setLayerVisible("terrain", !view.terrainVisible); break;
     case "o": view.setLayerVisible("objects", !view.objectsVisible); break;
     case "g": view.toggleGrid(); break;
@@ -191,6 +203,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
         <MapCanvasHost />
         <ToolOptionsBar v-if="currentScenarioId && !readOnly" />
         <FogToolBar v-if="currentScenarioId && !readOnly" />
+        <CommandHelp />
         <ObjectActionBar v-if="!readOnly && toolStore.tool === 'move'" />
         <RoadActionBar v-if="!readOnly && toolStore.tool === 'roadsel'" />
         <SelectionActionBar v-if="!readOnly && toolStore.tool === 'select'" />

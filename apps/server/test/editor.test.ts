@@ -136,7 +136,7 @@ describe("GET /api/generate/recipes", () => {
     const res = await app.inject({ method: "GET", url: REST.generateRecipes });
     expect(res.statusCode).toBe(200);
     const { recipes } = res.json() as GenRecipeList;
-    expect(recipes.length).toBeGreaterThan(20);
+    expect(recipes.length).toBeGreaterThanOrEqual(20);
     const byId = new Map(recipes.map((r) => [r.id, r]));
     expect(byId.get("mountain_blob")).toEqual({
       id: "mountain_blob", title: "Горный массив", group: "mountains", amountLabel: "размер массива", varies: true, strokeVaries: true,
@@ -311,5 +311,37 @@ describe("POST /api/maps/:id/copilot (LLM file bridge)", () => {
       steps: [{ recipeId: "water_lake", region: { x: 0, y: 0, w: 0, h: 5 } }],
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe("GET /api/generate/previews", () => {
+  it("gives a sample plan of every recipe, with what each symbol puts on the map", async () => {
+    const res = await app.inject({ method: "GET", url: REST.generatePreviews });
+    expect(res.statusCode).toBe(200);
+    const { previews } = res.json() as { previews: { id: string; width: number; height: number; scale: number; rows: string[]; legend: Record<string, string> }[] };
+    const recipes = ((await app.inject({ method: "GET", url: REST.generateRecipes })).json() as GenRecipeList).recipes;
+    expect(previews.map((p) => p.id).sort()).toEqual(recipes.map((r) => r.id).sort());
+    for (const p of previews) {
+      expect(p.rows, p.id).toHaveLength(p.height);
+      expect(p.rows.every((r) => r.length === p.width), p.id).toBe(true);
+      expect(Object.keys(p.legend).length, p.id).toBeGreaterThan(0);
+      // the plan really draws something: at least one cell carries a symbol of the legend
+      expect(p.rows.join("").split("").some((ch) => ch in p.legend), p.id).toBe(true);
+    }
+    const byId = new Map(previews.map((p) => [p.id, p]));
+    expect(byId.get("water_lake")!.legend).toEqual({ W: "water" });
+    expect(byId.get("wall_maze")).toMatchObject({ scale: 2, legend: { B: "wall" } });
+    expect(byId.get("wall_maze_fence")).toMatchObject({ scale: 1, legend: { B: "wall:fence" } });
+    expect(byId.get("decor_rocks")!.legend).toEqual({ D: "decor:rock" });
+    // a fill covers its whole zone; a lake does not
+    const filled = (id: string): number => byId.get(id)!.rows.join("").split("").filter((ch) => ch in byId.get(id)!.legend).length;
+    expect(filled("forest_fill")).toBe(byId.get("forest_fill")!.width * byId.get("forest_fill")!.height);
+    expect(filled("water_lake")).toBeLessThan(byId.get("water_lake")!.width * byId.get("water_lake")!.height);
+  });
+
+  it("is the same plan every time (the help does not flicker)", async () => {
+    const a = (await app.inject({ method: "GET", url: REST.generatePreviews })).body;
+    const b = (await app.inject({ method: "GET", url: REST.generatePreviews })).body;
+    expect(a).toBe(b);
   });
 });

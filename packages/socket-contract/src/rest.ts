@@ -260,6 +260,25 @@ export interface GenRecipeList {
   recipes: GenRecipeInfo[];
 }
 
+/**
+ * What a recipe draws, as a small PLAN — for a picture in the generator help, not for a map.
+ * `rows` is the recipe's symbol grid over a sample zone (one character per plan cell; a plan
+ * cell is `scale`×`scale` map cells), and `legend` says what each symbol puts on the map:
+ * "water", "forest", "mountain", "road", "wall", "wall:fence", "terrain:<id>",
+ * "decor:<shape>"; a symbol absent from the legend leaves the ground as it is.
+ */
+export interface GenRecipePreview {
+  id: string;
+  width: number;
+  height: number;
+  scale: number;
+  rows: string[];
+  legend: Record<string, string>;
+}
+export interface GenPreviewList {
+  previews: GenRecipePreview[];
+}
+
 /** Generation result: the new EditOps to commit + the validation verdict for them. */
 export interface GenerateResult {
   ops: EditOp[];
@@ -304,6 +323,7 @@ export const REST = {
   mapExport: (id: string) => `/api/maps/${id}/export`, // POST EditorProject -> .sg bytes (or 422 + report)
   mapExportAt: (id: string) => `/api/maps/${id}/export-at`, // GET ?channel&seq -> .sg bytes of the room log up to seq ("выкачать промежуток")
   mapGenerate: (id: string) => `/api/maps/${id}/generate`, // POST { project, recipeId, region, seed?, amount?, cells?, stroke?, protect? } -> { ops, report, debug }
+  generatePreviews: "/api/generate/previews", // GET -> GenPreviewList (a sample plan of every recipe, for the generator help)
   generateRecipes: "/api/generate/recipes", // GET [?mod=<id>] -> GenRecipeList (what can be generated, as a palette lists it; with a mod, what that mod lacks for a recipe)
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
   mods: "/api/mods", // GET -> ModList (the mod data sets this server serves)

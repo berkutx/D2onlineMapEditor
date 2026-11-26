@@ -14,6 +14,9 @@ import { useEditStore } from "../stores/editStore";
 import { useLordStore } from "../stores/lordStore";
 import { useCollabStore } from "../stores/collabStore";
 import { useModStore } from "../stores/modStore";
+import { useFogStore } from "../stores/fogStore";
+import { useToolStore } from "../stores/toolStore";
+import { useViewStore } from "../stores/viewStore";
 import { assetUrl } from "../services/api";
 import {
   RACES, RACE_KEYS, raceAlreadyPresent, mintPlayerIds, findFreeCapitalSpot, type EditOp,
@@ -52,6 +55,25 @@ const modRaceNames = computed(() => {
 });
 const raceName = (r: number): string => modRaceNames.value[r] ?? RACE_NAMES[r] ?? tr("Раса {n}", { n: r });
 const isNeutral = (p: { race: number }): boolean => p.race === 4;
+
+// A player's fog of war as the file has it, and the way to the tool that sets it
+// (the «Туман» tool: its «Игроки» table has the presets, the brush draws the rest).
+const fogStore = useFogStore();
+const toolStore = useToolStore();
+const viewStore = useViewStore();
+const fogOf = (id: string) => fogStore.players.find((x) => x.id === id);
+function fogText(id: string): string {
+  const f = fogOf(id);
+  if (!f) return "";
+  if (f.state === "unset") return tr("не задан");
+  if (f.state === "hidden") return tr("вся карта скрыта");
+  return tr("открыто {open} из {total}", { open: fogStore.totalCells - f.hidden, total: fogStore.totalCells });
+}
+function setUpFog(id: string): void {
+  fogStore.setPlayer(id);
+  toolStore.setTool("fog");
+  if (viewStore.eventPanelVisible) viewStore.toggleEventPanel(); // the scenario window covers the map
+}
 
 // BANK / стартовые ресурсы: "G####:R####:Y####:E####:W####:B####" (letter + 4-digit amount).
 const BANK_ORDER = ["G", "R", "Y", "E", "W", "B"] as const;
@@ -176,6 +198,11 @@ async function removeFaction(p: { id: string; name?: string; race: number }): Pr
             </span>
           </el-tooltip>
         </div>
+        <div v-if="fogOf(p.id)" class="pl-row">
+          <label>{{ tr("Туман войны") }}</label>
+          <span class="pl-fog" :class="fogOf(p.id)!.state">{{ fogText(p.id) }}</span>
+          <el-button size="small" text type="primary" @click="setUpFog(p.id)">{{ tr("Настроить на карте") }}</el-button>
+        </div>
         <div v-if="!isNeutral(p)" class="pl-row">
           <label>{{ tr("Лорд") }}</label>
           <img v-if="lordUrl(p.lordId)" class="lord-pic" :src="lordUrl(p.lordId)" alt="" @error="onImgErr" />
@@ -255,4 +282,11 @@ async function removeFaction(p: { id: string; name?: string; race: number }): Pr
 .add-row > label { min-width: 48px; color: var(--el-text-color-secondary); }
 .add-hint { font-size: 11px; margin: 6px 0 0; }
 .muted { color: var(--el-text-color-secondary); }
+.pl-fog {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.pl-fog.unset {
+  color: var(--el-color-warning);
+}
 </style>

@@ -168,19 +168,6 @@ export const RECIPES: Record<string, Recipe> = {
     inputMode: "zone",
     notes: "Sparse scattered trees (light woodland).",
   },
-  // Dense forest with organic glades: fill with forest, scatter a few seeds, grow them into clearings.
-  forest_clearings: {
-    id: "forest_clearings",
-    title: "Густой лес с полянами",
-    group: "forest",
-    amountLabel: "поляны",
-    kind: "mj",
-    xml: `<sequence values="FB"><prl in="F" out="B" p="0.01" steps="1"/><one in="BF" out="BB" steps="STEPS"/></sequence>`,
-    fillFrac: 0.22,
-    alphabet: "FB",
-    inputMode: "zone",
-    notes: "Dense forest broken by organic glades/clearings.",
-  },
 
   // A SOLID forest over the zone/mask — what a mapmaker paints with a brush («лес под
   // кистью»); the grown recipes above are for a zone the generator shapes itself.
@@ -199,8 +186,10 @@ export const RECIPES: Record<string, Recipe> = {
   },
 
   // --- maze (MarkovJunior MazeGrowth) ---------------------------------------
-  // The ONE maze: coarse (scale 2) stone-wall labyrinth. Walls are 2×2 stone pieces (auto-tiled),
-  // junctions get a tower/corner. B=barrier, W/A=passage; the perimeter is sealed with two doors.
+  // The mazes: ONE layout idea (B=barrier, W/A=passage; the perimeter is sealed with two doors)
+  // in three looks. `wall_maze` is coarse (scale 2): 2×2 fortress walls, a tower at each joint.
+  // `wall_maze_thin` and `wall_maze_fence` are fine (scale 1): one-cell stone walls or a
+  // palisade, corridors one cell wide — twice the maze in the same zone.
   wall_maze: {
     id: "wall_maze",
     title: "Лабиринт",
@@ -212,6 +201,28 @@ export const RECIPES: Record<string, Recipe> = {
     sealMaze: true,
     inputMode: "zone",
     notes: "Лабиринт из каменных стен 2×2 с башнями на стыках (запечатан, два входа).",
+  },
+  wall_maze_thin: {
+    id: "wall_maze_thin",
+    title: "Лабиринт: тонкие стены",
+    group: "structures",
+    kind: "mj",
+    xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
+    alphabet: "BWA",
+    sealMaze: true,
+    inputMode: "zone",
+    notes: "Лабиринт из каменных стен в одну клетку, башни по углам (запечатан, два входа).",
+  },
+  wall_maze_fence: {
+    id: "wall_maze_fence",
+    title: "Лабиринт: частокол",
+    group: "structures",
+    kind: "mj",
+    xml: `<one values="BWA" in="WBB" out="WAW" origin="True"/>`,
+    alphabet: "BWA",
+    sealMaze: true,
+    inputMode: "zone",
+    notes: "Лабиринт из частокола в одну клетку (запечатан, два входа).",
   },
 
   // --- mountains & hills (decoded to 1×1 mountain objects) -------------------
@@ -387,20 +398,6 @@ export const RECIPES: Record<string, Recipe> = {
     alphabet: "BS",
     inputMode: "zone",
     notes: "Patchy snow (organic clumps), not a solid sheet.",
-  },
-  // Sparse snow dabs: tiny grown blobs (2–4 cells) — single-cell dots each grew a full
-  // ring of snow/land transition tiles around themselves (visual noise, not a dusting).
-  snow_scatter: {
-    id: "snow_scatter",
-    title: "Редкий снег",
-    group: "snow",
-    amountLabel: "снег",
-    kind: "mj",
-    xml: `<sequence values="BS"><prl in="B" out="S" p="0.02" steps="1"/><one in="SB" out="SS" steps="STEPS"/></sequence>`,
-    fillFrac: 0.08,
-    alphabet: "BS",
-    inputMode: "zone",
-    notes: "Light dusting of snow (small organic dabs).",
   },
   grass_fill: {
     id: "grass_fill",

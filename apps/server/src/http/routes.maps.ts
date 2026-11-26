@@ -13,7 +13,7 @@
 import { mkdir, writeFile, readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { REST, Region, type GenRecipeList, type ValidationReport } from "@d2/socket-contract";
+import { REST, Region, type GenRecipeList, type GenPreviewList, type ValidationReport } from "@d2/socket-contract";
 import {
   parseScenario,
   parseScenarioRaw,
@@ -45,7 +45,7 @@ import {
 } from "@d2/map-edit";
 import { AMOUNT_MAX, AMOUNT_MIN, getRecipe, recipeCatalog } from "@d2/mapgen";
 import { clientIdOf } from "./routes.scenarios.js";
-import { runGenerationSteps, type PlanStep } from "../maps/generation.js";
+import { runGenerationSteps, recipePreview, type PlanStep } from "../maps/generation.js";
 import { config } from "../config.js";
 import { roomKey } from "../realtime/RoomManager.js";
 import type { EditLog } from "../realtime/EditLog.js";
@@ -265,7 +265,7 @@ const COPILOT_RESPONSE_SPEC = {
     steps:
       "array — each step paints one region. Use a registered recipe OR an inline recipe you author.",
   },
-  step_registered: { recipeId: "water_lake|water_isles|water_islands|river|decor_forest|forest_scatter|forest_clearings|mountain_fill|mountain_blob|relief_ridge|relief_hills|wall_maze|road_path|decor_rocks|decor_bushes|decor_ruins|decor_graves|snow_overlay|snow_patches|snow_scatter|grass_fill", region: { x: 0, y: 0, w: 10, h: 10 } },
+  step_registered: { recipeId: "water_lake|water_isles|water_islands|river|decor_forest|forest_scatter|mountain_fill|mountain_blob|relief_ridge|relief_hills|wall_maze|wall_maze_thin|wall_maze_fence|road_path|decor_rocks|decor_bushes|decor_ruins|decor_graves|snow_overlay|snow_patches|grass_fill", region: { x: 0, y: 0, w: 10, h: 10 } },
   step_inline_fill: {
     recipe: { kind: "fill", fillSymbol: "X" },
     decode: { X: { kind: "terrain", terrain: 4 } },
@@ -604,6 +604,26 @@ export async function registerMapRoutes(
     return reply.header("cache-control", "no-cache").send(list);
   });
 
+  // GET /api/generate/previews -> a sample plan of every recipe (what it draws on an empty
+  // zone), for the pictures of the generator help. Deterministic, so computed once.
+  let previewsP: Promise<GenPreviewList> | null = null;
+  app.get(REST.generatePreviews, async (_req, reply) => {
+    previewsP ??= (async () => {
+      const previews: GenPreviewList["previews"] = [];
+      for (const r of recipeCatalog()) {
+        const p = await recipePreview(r.id);
+        if (p) previews.push(p);
+      }
+      return { previews };
+    })();
+    try {
+      return reply.header("cache-control", "max-age=3600").send(await previewsP);
+    } catch (e) {
+      previewsP = null; // do not keep a failure
+      return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   // POST /api/maps/:id/generate -> run a MarkovJunior recipe over a region, decode to
   // EditOps against the current project, validate, return { ops, report }. The client
   // commits the ops (one undo step). The LLM/keyword router (client) only picks recipe+region.
@@ -738,12 +758,12 @@ export async function registerMapRoutes(
       registeredRecipes: [
         "water_lake (organic blob)", "water_isles (several lakes)",
         "water_islands (water with dry land islands)", "river (crosses the zone)",
-        "decor_forest (groves)", "forest_scatter (sparse trees)", "forest_clearings (dense forest+glades)",
+        "decor_forest (groves)", "forest_scatter (sparse trees)",
         "mountain_fill (solid fill — frame/border)", "mountain_blob (organic massif)",
         "relief_ridge (mountain ridge)", "relief_hills (scattered hills)",
-        "wall_maze (stone-wall labyrinth, 2×2 walls + towers)",
+        "wall_maze (stone-wall labyrinth, 2×2 walls + towers)", "wall_maze_thin (fine labyrinth of one-cell stone walls)", "wall_maze_fence (fine labyrinth of palisade)",
         "road_path (winding road)", "decor_rocks", "decor_bushes", "decor_ruins", "decor_graves",
-        "snow_overlay (solid wash)", "snow_patches (organic)", "snow_scatter (sparse)",
+        "snow_overlay (solid wash)", "snow_patches (organic)",
         "grass_fill (wash)",
       ],
       respondTo: resFile,

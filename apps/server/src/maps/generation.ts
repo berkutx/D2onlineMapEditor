@@ -170,6 +170,40 @@ async function buildGrid(
 }
 
 /** Cheap deterministic hash → [0,1) from a global cell + seed (stable across requests). */
+/** What a decode action puts on the map, as the preview legend names it (null = nothing). */
+function legendOf(action: DecodeTable[string]): string | null {
+  switch (action.kind) {
+    case "skip": return null;
+    case "terrain": return `terrain:${action.terrain}`;
+    case "decor": return `decor:${action.shape}`;
+    case "wall": return action.shape === "fence" ? "wall:fence" : "wall";
+    default: return action.kind;
+  }
+}
+
+/** A sample plan of a registered recipe (see GenRecipePreview): the recipe run at its stock
+ *  amount over a small empty zone. The same code path as a real generation up to the symbol
+ *  grid — so the picture in the help is what the generator really draws. */
+export async function recipePreview(
+  recipeId: string,
+  opts: { width?: number; height?: number; seed?: number } = {},
+): Promise<{ id: string; width: number; height: number; scale: number; rows: string[]; legend: Record<string, string> } | null> {
+  const base = getRecipe(recipeId);
+  const table = DECODE_TABLES[recipeId];
+  if (!base || !table) return null;
+  const recipe = tuneRecipe(base, 1) as Parameters<typeof buildGrid>[0] & { cellScale?: number };
+  const scale = Number.isInteger(recipe.cellScale) && (recipe.cellScale as number) > 1 ? (recipe.cellScale as number) : 1;
+  const snap = (n: number): number => Math.max(scale, n - (n % scale));
+  const region = { x: 0, y: 0, w: snap(opts.width ?? 36), h: snap(opts.height ?? 24) };
+  const grid = await buildGrid(recipe, region, opts.seed ?? 7, scale);
+  const legend: Record<string, string> = {};
+  for (const [symbol, action] of Object.entries(table)) {
+    const what = legendOf(action);
+    if (what) legend[symbol] = what;
+  }
+  return { id: recipeId, width: grid.width, height: grid.height, scale, rows: grid.rows.slice(), legend };
+}
+
 function rand01(x: number, y: number, seed: number): number {
   let h = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(seed, 83492791)) >>> 0;
   h = Math.imul(h ^ (h >>> 13), 0x5bd1e995) >>> 0;

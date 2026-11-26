@@ -24,6 +24,8 @@ import {
 } from "../services/api";
 import { useMapStore } from "../stores/mapStore";
 import { useViewStore } from "../stores/viewStore";
+import { useCommandStore } from "../stores/commandStore";
+import MapPassportDialog from "./MapPassportDialog.vue";
 import { useEditStore } from "../stores/editStore";
 import { useCollabStore } from "../stores/collabStore";
 import { useModStore } from "../stores/modStore";
@@ -218,6 +220,25 @@ async function doValidate(): Promise<void> {
   }
 }
 
+/** The map passport window (Файл ▸ Паспорт карты, and offered after an export). */
+const passportVisible = ref(false);
+/** The file just exported, when the passport is shown because of an export; null otherwise. */
+const passportExported = ref<string | null>(null);
+function openPassport(exported: string | null = null): void {
+  passportExported.value = exported;
+  passportVisible.value = true;
+}
+/** After an export: show the passport unless the map maker has switched that off in it. */
+function offerPassport(filename: string): void {
+  let wanted = true;
+  try {
+    wanted = window.localStorage.getItem("d2.passport.afterExport") !== "0";
+  } catch {
+    /* storage blocked: offer it */
+  }
+  if (wanted) openPassport(filename);
+}
+
 async function doExport(): Promise<void> {
   if (!currentScenarioId.value) {
     ElMessage.warning(tr("Сначала откройте карту"));
@@ -226,8 +247,10 @@ async function doExport(): Promise<void> {
   try {
     const r = await editStore.exportSg();
     if (!r) return;
-    if (r.ok) ElMessage.success(tr("Экспортировано «{name}» (проверено)", { name: r.filename }));
-    else {
+    if (r.ok) {
+      ElMessage.success(tr("Экспортировано «{name}» (проверено)", { name: r.filename }));
+      offerPassport(r.filename);
+    } else {
       showReport(r.report);
       ElMessage.error(tr("Экспорт заблокирован — карта не прошла проверку"));
     }
@@ -265,6 +288,7 @@ async function doPackageExport(allowMissing = false): Promise<void> {
       return void doPackageExport(true);
     }
     saveBlob(r.blob, r.filename); ElMessage.success(tr("Готов пакет «{name}»", { name: r.filename }));
+    offerPassport(r.filename);
   } catch (e) {
     if (e instanceof VoiceLoginRequiredError) {
       sessionStorage.setItem("d2.voice.export", allowMissing ? "allow-missing" : "1");
@@ -435,6 +459,10 @@ async function onUploadFile(e: Event): Promise<void> {
   }
 }
 
+// a menu command asked for from elsewhere (the command bar): run it as if picked in the menu
+const commandStore = useCommandStore();
+watch(() => commandStore.request, (r) => { if (r) onSelect(r.id); });
+
 /** el-menu dispatcher — one place routes every menu-item index to its action. */
 function onSelect(index: string): void {
   if (readOnly.value && !index.startsWith("view:") && !index.startsWith("help:")) {
@@ -447,6 +475,7 @@ function onSelect(index: string): void {
     case "file:upload": return triggerUpload();
     case "file:export": return void (voiceEnabled.value ? doPackageExport() : doExport());
     case "file:exportSg": return void doExport();
+    case "file:passport": return openPassport();
     case "edit:undo": return editStore.undoEdit();
     case "edit:redo": return editStore.redoEdit();
     case "edit:validate": return void doValidate();
@@ -466,6 +495,7 @@ function onSelect(index: string): void {
     case "view:copilot": return viewStore.toggleCopilot();
     case "view:appearance": return viewStore.toggleDark();
     case "help:keys": shortcutsVisible.value = true; return;
+    case "help:commands": return viewStore.setCommandHelp(true);
   }
   if (index.startsWith("view:tint:")) return viewStore.toggleOverlayTint(index.slice(10) as never);
   if (index.startsWith("map:")) return void onMapCommand(index.slice(4));
@@ -512,6 +542,7 @@ watch(
         <el-menu-item index="file:upload">{{ tr("Загрузить .sg…") }}</el-menu-item>
         <el-menu-item index="file:export">{{ voiceEnabled ? tr('Скачать карту с аудио (.zip)…') : tr('Экспорт .sg…') }}</el-menu-item>
         <el-menu-item v-if="voiceEnabled" index="file:exportSg">{{ tr("Экспорт только .sg…") }}</el-menu-item>
+        <el-menu-item index="file:passport" :disabled="!currentScenarioId">{{ tr("Паспорт карты…") }}</el-menu-item>
       </el-sub-menu>
 
       <!-- Правка / Вид / Карта / Справка consolidated under ONE menu — the freed bar space
@@ -566,6 +597,7 @@ watch(
       <el-sub-menu index="help">
         <template #title>{{ tr("Справка") }}</template>
         <el-menu-item index="help:keys">{{ tr("Горячие клавиши…") }}</el-menu-item>
+        <el-menu-item index="help:commands">{{ tr("Командная строка и генераторы…") }}</el-menu-item>
       </el-sub-menu>
       </el-sub-menu>
     </el-menu>
@@ -651,6 +683,8 @@ watch(
       <el-button class="appearance" text :icon="dark ? Sunny : Moon" @click="viewStore.toggleDark()" />
     </el-tooltip>
 
+    <MapPassportDialog v-model="passportVisible" :exported="passportExported" />
+
     <el-dialog v-model="dialogVisible" :title="tr('Открыть карту')" width="640px" :close-on-click-modal="true">
       <el-table
         v-loading="listLoading"
@@ -735,19 +769,29 @@ watch(
 
     <el-dialog v-model="shortcutsVisible" :title="tr('Горячие клавиши')" width="420px">
       <div class="keys">
+        <div class="krow"><kbd>1</kbd>…<kbd>9</kbd> <kbd>0</kbd> <span>{{ tr("инструменты по порядку панели слева") }}</span></div>
         <div class="krow"><kbd>T</kbd> <kbd>O</kbd> <kbd>G</kbd> <kbd>L</kbd> <span>{{ tr("слои: рельеф / объекты / сетка / локации") }}</span></div>
         <div class="krow"><kbd>A</kbd> <kbd>P</kbd> <kbd>D</kbd> <span>{{ tr("анимация / панель объектов / отладка") }}</span></div>
         <div class="krow"><kbd>F</kbd> <span>{{ tr("вписать карту в окно") }}</span></div>
-        <div class="krow"><kbd>/</kbd> <span>{{ tr("фокус на Copilot") }}</span></div>
+        <div class="krow"><kbd>E</kbd> <span>{{ tr("окно сценария: события, игроки, ограничения") }}</span></div>
+        <div class="krow"><kbd>/</kbd> <span>{{ tr("командная строка: команды и генератор") }}</span></div>
         <div class="krow"><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> <span>{{ tr("отменить / вернуть") }}</span></div>
         <div class="krow"><kbd>Ctrl</kbd>+{{ tr("тащить") }} <span>{{ tr("двигать карту · колесо — масштаб") }}</span></div>
         <div class="krow"><kbd>R</kbd> <kbd>[</kbd> <kbd>]</kbd> <span>{{ tr("облик декора (инструменты Декор / Двигать)") }}</span></div>
+        <div class="krow"><kbd>Del</kbd> <span>{{ tr("удалить выделенные объекты или участок дороги") }}</span></div>
+        <div class="krow"><kbd>Esc</kbd> <span>{{ tr("снять выделение, отменить перенос") }}</span></div>
+        <div class="knote">{{ tr("Клавиши работают в любой раскладке клавиатуры.") }}</div>
       </div>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
+.knote {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
 .menu-bar {
   display: flex;
   align-items: center;
