@@ -45,8 +45,21 @@ interface ModData {
 | `manifest` | The mod's sprite manifest (`packages/asset-manifest` 0.2): `spritesheets[]` (`id`, `ff`, `image` = store path `blobs/<xx>/<sha256>.png`, `size`), `frames` (name → `[sheetIndex, x, y, w, h, trimX, trimY, sourceW, sourceH]`), `animations[]` (`id`, `atlas`, `frames`). Optional: without it no frame or animation is compared. |
 | `files` | The `files` map of the store's `mods/<id>/mod.json`: logical name → store path `blobs/<xx>/<sha256>.<ext>` (a bare sha256 works too). Icons (`uniticons/`, `itemicons/`, `spellicons/`, `lordicons/`, any `*icons/` folder) and `modscripts/*` are compared by hash. Optional. |
 
-`diffMods(a, b, { redesignThreshold })`: a race whose redesign score reaches the threshold
-(default 0.5) is flagged `redesigned`.
+`diffMods(a, b, { redesignThreshold, texts })`:
+
+- `redesignThreshold`: a race whose redesign score reaches it (default 0.5) is flagged
+  `redesigned`.
+- `texts`: whether the wording of the texts is compared.
+  - `"compare"` (the default): a text worded differently is a change like any other.
+  - `"skip"`: it is not. A text cell of a text table (Tglobal, TApp, TAppEdit, Tleader,
+    TAiMsg, Tplayer) that both mods have and that reads differently is no op, only counted
+    in `TableChange.translations`, and no entity shows it under `texts`. A text only one mod
+    has is still added or deleted. A list keyed by the whole row (Tleader, TAiMsg) is not
+    compared at all: there a reworded row is a delete and an add, and every op is counted.
+  - `"auto"`: `"skip"` when the two mods' Tglobal is written in different scripts
+    (`ModDiff.texts`), else `"compare"`. For the GOG game, which is in English, and a
+    Russian mod: one is a translation of the other, and a diff of every text hides the real
+    changes.
 
 ## Words used here
 
@@ -85,6 +98,7 @@ interface ModData {
 | `terrainOther` | `PictureChange[]` | IsoTerrn.ff pictures of no terrain code (roads, fog, ...). |
 | `pictures` | `PictureDiff` | Every frame, animation and icon change, with counts. |
 | `scripts` | `ScriptChange[]` | `modscripts/*` files that differ. |
+| `texts` | `{ a, b, skipped }` | The script each mod's Tglobal is mostly written in, `"cyrillic"`, `"latin"` or `null` (no text); `skipped`: the wording was not compared (the `texts` option). |
 | `summary` | `DiffSummary` | Counts for a front page. |
 
 ## tables: TableChange
@@ -104,7 +118,7 @@ interface ModData {
       "values": { "UNIT_ID": "G000UU0001", "IMMUNITY": 5, "IMMUNECAT": 2 },
       "owners": [{ "section": "units", "id": "G000UU0001" }] }
   ],
-  "skipped": [], "unassigned": 0, "noIdSpellings": 0
+  "skipped": [], "unassigned": 0, "noIdSpellings": 0, "translations": 0
 }
 ```
 
@@ -124,6 +138,7 @@ interface ModData {
 | `error?` | `diffTable` refused the table even after the fallbacks; it has no ops. (None on the four known mods.) |
 | `unassigned` | Ops of an `"entities"` table no entity took; always 0 unless the entity map misses a case. |
 | `noIdSpellings` | Cells that differ only in how they write "no id": empty in one mod, `G000000000` (any case) in the other (`sameEmptyId`). Both name nothing, so they are not ops: such a set is dropped, and so is a deleted row with an added row that reads the same but for such cells (a whole-row key). Сёмга → Сёмга 2 has 9: `GItem.MOD_POTION` of the healing potions. |
+| `translations` | Text cells worded differently that were not compared (the `texts` option); 0 when texts are compared. |
 | `note?` | How the table was compared when not the plain way, or a remark (Gunits_2: "a copy of Gunits ..."). |
 
 ### TableOp
@@ -506,7 +521,7 @@ hunk comes before), `aCount` / `bCount` the lines of each side, `lines` the `Dif
 ```json
 {
   "sections": { "units": { "added": 0, "changed": 2, "removed": 0, "artOnly": 0, "viaShared": 0, "orphans": 0, "total": 2 }, "…": "…" },
-  "tables": { "compared": 13, "differ": 8, "onlyA": [], "onlyB": [], "ops": 10, "set": 7, "add": 2, "delete": 1, "skipped": 0, "refused": [], "noIdSpellings": 0 },
+  "tables": { "compared": 13, "differ": 8, "onlyA": [], "onlyB": [], "ops": 10, "set": 7, "add": 2, "delete": 1, "skipped": 0, "refused": [], "noIdSpellings": 0, "translations": 0 },
   "assignedOps": 9, "tableOnlyOps": 1, "unassignedOps": 0,
   "pictures": { "frames": { "same": 0, "added": 1, "removed": 0, "changed": 2 }, "animations": { "…": "…" }, "icons": { "…": "…" } },
   "scripts": { "added": 1, "changed": 1, "removed": 0 },
@@ -525,6 +540,7 @@ hunk comes before), `aCount` / `bCount` the lines of each side, `lines` the `Dif
 | `tables.skipped` | Total `skipped` values. |
 | `tables.refused` | Tables with an `error`. |
 | `tables.noIdSpellings` | Total `noIdSpellings` cells (not ops). |
+| `tables.translations` | Total `translations` cells (not ops). |
 | `assignedOps` | Ops given to an entity or a terrain code. |
 | `tableOnlyOps` | Ops of `"table"` tables. `assignedOps + tableOnlyOps + unassignedOps = tables.ops`. |
 | `unassignedOps` | Ops of `"entities"` tables no entity took; 0. |

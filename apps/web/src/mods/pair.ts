@@ -16,7 +16,16 @@ export interface CompareQuery {
   card: string | null;
   /** The open table or script of the Tables / Scripts screen. */
   item: string | null;
+  /**
+   * Whether the wording of the texts is compared: "compare" or "skip". Null: the page decides
+   * (skip when the two mods are written in different scripts — the English game and a Russian mod).
+   */
+  texts: TextsChoice | null;
 }
+
+/** The texts choice the address can hold (see CompareQuery.texts). */
+export type TextsChoice = "compare" | "skip";
+const isTextsChoice = (v: string | null): v is TextsChoice => v === "compare" || v === "skip";
 
 export function isComparePage(search: string): boolean {
   return new URLSearchParams(search).has("mods");
@@ -38,13 +47,14 @@ export function parseCompareQuery(search: string): CompareQuery {
     const v = q.get(k);
     return v && v.trim() ? v.trim() : null;
   };
-  return { a: get("a"), b: get("b"), view: get("view"), card: get("card"), item: get("item") };
+  const texts = get("texts");
+  return { a: get("a"), b: get("b"), view: get("view"), card: get("card"), item: get("item"), texts: isTextsChoice(texts) ? texts : null };
 }
 
 /** The search part for a state, always starting with "?mods"; empty fields are left out. */
 export function compareSearch(q: Partial<CompareQuery>): string {
   let s = "?mods";
-  for (const k of ["a", "b", "view", "card", "item"] as const) {
+  for (const k of ["a", "b", "view", "card", "item", "texts"] as const) {
     const v = q[k];
     if (v) s += `&${k}=${encodeURIComponent(v)}`;
   }
@@ -58,19 +68,23 @@ export interface PairCandidate {
   familyOrder: number;
   /** The base of a derived mod. */
   parent?: string | null;
+  /** The unmodded game, the base every other mod is compared with. */
+  reference?: boolean;
 }
 
 /**
  * What to compare B with when the address does not say: B's parent when B is derived;
- * else the previous version of B's family; else the server's default mod; else (B is the
- * default mod) another version of its family; else the first other mod. B itself when it
- * is the only mod.
+ * else the reference mod (the unmodded game) when B is not it; else the previous version
+ * of B's family; else the server's default mod; else (B is the default mod) another
+ * version of its family; else the first other mod. B itself when it is the only mod.
  */
 export function predecessorOf(mods: readonly PairCandidate[], b: string, defaultModId: string): string {
   const has = (id: string | null | undefined): id is string => !!id && mods.some((m) => m.id === id);
   const self = mods.find((m) => m.id === b);
   if (!self) return mods.find((m) => m.id !== b)?.id ?? b;
   if (has(self.parent) && self.parent !== b) return self.parent;
+  const reference = mods.find((m) => m.reference && m.id !== b);
+  if (reference) return reference.id;
   const older = mods
     .filter((m) => m.family === self.family && m.familyOrder < self.familyOrder)
     .sort((x, y) => y.familyOrder - x.familyOrder)[0];

@@ -59,6 +59,50 @@ describe.skipIf(!rootOf("semga") || !rootOf("semga-2"))("the diff from semga to 
   }, 180_000);
 });
 
+/** A mod from the local store alone (its tables/ and capital.dat blobs), without its install. */
+function loadStored(id: string): ModData | null {
+  const modJson = join(STORE, "mods", id, "mod.json");
+  if (!existsSync(modJson)) return null;
+  const files = (JSON.parse(readFileSync(modJson, "utf8")) as { files: Record<string, string> }).files;
+  const tables = new Map<string, DbfTable>();
+  for (const [logical, blob] of Object.entries(files)) {
+    const m = /^tables\/(.+)\.dbf$/i.exec(logical);
+    if (m && existsSync(join(STORE, blob))) tables.set(m[1]!, readTable(join(STORE, blob), `${id}/${m[1]}`));
+  }
+  if (!tables.size) return null;
+  const data: ModData = { id, name: id, tables, files };
+  if (files["capital.dat"]) data.capitalDat = readFileSync(join(STORE, files["capital.dat"]), "latin1");
+  const manifest = files["manifest.json"];
+  if (manifest && existsSync(join(STORE, manifest))) data.manifest = JSON.parse(readFileSync(join(STORE, manifest), "utf8")) as SpriteManifest;
+  return data;
+}
+
+const VANILLA = loadStored("vanilla");
+describe.skipIf(!VANILLA || !rootOf("semga"))("the diff from the GOG game (English) to semga (Russian)", () => {
+  it("leaves the translation out by itself, and only the translation", () => {
+    const b = load("semga");
+    const auto = diffMods(VANILLA!, b, { texts: "auto" });
+    const all = diffMods(VANILLA!, b);
+    const t = (d: typeof all, name: string) => d.tables.find((x) => x.name.toLowerCase() === name)!;
+    console.log(
+      `vanilla -> semga: ops ${all.summary.tables.ops} with the texts, ${auto.summary.tables.ops} without; translations ${auto.summary.tables.translations}; ` +
+        `texts entities ${all.summary.sections.texts.total} -> ${auto.summary.sections.texts.total}`,
+    );
+    expect(auto.texts).toEqual({ a: "latin", b: "cyrillic", skipped: true });
+    expect(all.texts.skipped).toBe(false);
+    // what is left out is exactly the reworded text cells (and the whole-row text lists)
+    expect(all.summary.tables.ops - auto.summary.tables.ops).toBe(auto.summary.tables.translations);
+    const tg = t(auto, "tglobal");
+    expect(tg.counts.set).toBe(0);
+    expect(tg.translations).toBe(t(all, "tglobal").counts.set);
+    // texts only semga has are still there
+    expect(tg.counts.add).toBe(t(all, "tglobal").counts.add);
+    // nothing but text tables changed
+    for (const x of auto.tables) if (!["tglobal", "tapp", "tappedit", "tleader", "taimsg", "tplayer"].includes(x.name.toLowerCase())) expect(x.ops).toEqual(t(all, x.name.toLowerCase()).ops);
+    expect(auto.summary.unassignedOps).toBe(0);
+  }, 180_000);
+});
+
 describe.skipIf(!rootOf("semga") || !rootOf("nazar-legacy"))("the diff from semga to nazar-legacy", () => {
   it("flags Clans, Legions and Undead as redesigned, above every other race", () => {
     const d = diffMods(load("semga"), load("nazar-legacy"));

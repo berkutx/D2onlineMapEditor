@@ -78,7 +78,7 @@ class TestBuildModParent(Case):
 
     def test_refuses_flags_a_derived_mod_cannot_have(self):
         for flags in (["--parent", "child"], ["--parent", "semga", "--default"], ["--parent", "semga", "--source-url", "http://x"],
-                      ["--parent", "semga", "--engine-fingerprint", FP]):
+                      ["--parent", "semga", "--engine-fingerprint", FP], ["--parent", "semga", "--reference"]):
             with self.assertRaises(SystemExit, msg=" ".join(flags)):
                 self.run_main(*flags)
 
@@ -89,6 +89,16 @@ class TestBuildModParent(Case):
         with self.assertRaisesRegex(build_mod.BuildError, "itself derived from semga"):
             self.run_main("--parent", "semga-x")
         self.assertEqual(build_mod.load_parent(os.path.join(self.tmp, "store"), "semga")["id"], "semga")
+
+    def test_one_reference_mod_per_store(self):
+        root = self.store_with({"vanilla": ("vanilla", 1, {"a.json": b"{}"}, None)}, "vanilla")
+        index_path = os.path.join(root, "mods", "index.json")
+        with open(index_path, encoding="utf-8") as fp:
+            index = json.load(fp)
+        index["mods"][0]["reference"] = True
+        self.write(build_mod.dump_json(index), "store", "mods", "index.json")
+        with self.assertRaisesRegex(build_mod.BuildError, "vanilla is the store's reference already"):
+            self.run_main("--reference")
 
     def test_is_inside_ignores_case_and_other_drives(self):
         self.assertTrue(build_mod.is_inside(r"C:\GOG Games\X\var", r"c:\gog games\x"))

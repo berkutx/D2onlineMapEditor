@@ -24,7 +24,7 @@ const list = computed(() => {
   const q = search.value.trim().toLowerCase();
   return all.value.filter(
     (t) =>
-      (!onlyDiffering.value || t.ops.length || t.presence !== "both" || hasSchema(t) || t.skipped.length) &&
+      (!onlyDiffering.value || t.ops.length || t.presence !== "both" || hasSchema(t) || t.skipped.length || t.translations) &&
       (!q || t.name.toLowerCase().includes(q)),
   );
 });
@@ -62,12 +62,16 @@ const tabRows = computed<unknown[]>(() => {
 });
 const pageRows = computed(() => tabRows.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value));
 watch([current, tab, opSearch, pageSize], () => (page.value = 1));
-watch(current, (t) => {
-  if (!t) return;
-  // open on the first tab that has something
-  const c = t.counts;
-  tab.value = c.set ? "set" : c.add ? "add" : c.delete ? "delete" : t.skipped.length ? "skipped" : "set";
-});
+watch(
+  current,
+  (t) => {
+    if (!t) return;
+    // open on the first tab that has something (also for a table the address opened)
+    const c = t.counts;
+    tab.value = c.set ? "set" : c.add ? "add" : c.delete ? "delete" : t.skipped.length ? "skipped" : "set";
+  },
+  { immediate: true },
+);
 
 const num = (n: number | null) => (n === null ? "—" : n.toLocaleString(intlLocale()));
 function open(t: TableChange): void {
@@ -106,6 +110,7 @@ const skipRow = (o: unknown) => o as TableChange["skipped"][number];
               <span v-if="row.counts.set" class="tiny st-changed">~{{ row.counts.set }}</span>
               <span v-if="row.counts.add" class="tiny st-added">+{{ row.counts.add }}</span>
               <span v-if="row.counts.delete" class="tiny st-removed">−{{ row.counts.delete }}</span>
+              <span v-if="row.translations" class="tiny st-shared" :title="tr('Тексты, написанные по-разному, не сравнивались')">{{ tr("перевод {n}", { n: row.translations }) }}</span>
             </template>
           </el-table-column>
         </el-table>
@@ -128,6 +133,8 @@ const skipRow = (o: unknown) => o as TableChange["skipped"][number];
           <p v-if="current.note" class="dim note">{{ current.note }}</p>
           <p v-if="current.projected" class="dim note">{{ tr("Сравнивается по общим колонкам: {cols}", { cols: current.projected.join(", ") }) }}</p>
           <p v-if="current.noIdSpellings" class="dim note">{{ tr("Ячеек, где различается только запись пустого id (пусто в одном моде, G000000000 в другом): {n}. Это одно и то же, в правки они не входят.", { n: current.noIdSpellings }) }}</p>
+          <p v-if="current.translations && current.key?.kind === 'row'" class="dim note">{{ tr("Переводы не сравниваются, а эта таблица — список текстов без своего id: она не сравнивается совсем. Скрыто правок: {n}.", { n: current.translations }) }}</p>
+          <p v-else-if="current.translations" class="dim note">{{ tr("Текстов, написанных в модах по-разному: {n}. Переводы не сравниваются, в правки они не входят; новые и удалённые тексты видны.", { n: current.translations }) }}</p>
 
           <div v-if="hasSchema(current)" class="schema">
             <span v-for="c in current.schema.added" :key="`+${c.name}`" class="mono tiny st-added">+{{ c.name }} {{ c.type }}{{ c.length }}</span>

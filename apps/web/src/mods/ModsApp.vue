@@ -111,6 +111,27 @@ const missingNames = computed(() => {
 });
 
 const ready = computed(() => store.phase === "ready" && !!store.diff);
+
+// the wording of texts: what the last diff did, else what the address asks
+const skipTexts = computed(() => store.diff?.texts.skipped ?? store.texts === "skip");
+const SCRIPT_NAMES = { latin: () => tr("на латинице"), cyrillic: () => tr("на кириллице") } as const;
+/** Why the texts were not compared, shown above every screen. */
+const textsNotice = computed(() => {
+  const d = store.diff;
+  if (!d?.texts.skipped || store.identical) return null;
+  const n = d.summary.tables.translations;
+  const { a, b } = d.texts;
+  if (store.texts !== "skip" && a && b && a !== b) {
+    return tr("Тексты {a} — {sa}, {b} — {sb}: один мод переведён с другого, поэтому формулировки текстов не сравниваются (не показано различий: {n}). Новые и удалённые тексты видны.", {
+      a: store.modA?.name ?? "A",
+      b: store.modB?.name ?? "B",
+      sa: SCRIPT_NAMES[a](),
+      sb: SCRIPT_NAMES[b](),
+      n,
+    });
+  }
+  return tr("Формулировки текстов не сравниваются (не показано различий: {n}). Новые и удалённые тексты видны.", { n });
+});
 const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
 </script>
 
@@ -154,6 +175,16 @@ const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
       <div v-if="store.modA && store.modB" class="pair-names" :title="`${store.modA.id} → ${store.modB.id}`">
         <b>{{ store.modA.name }}</b> → <b>{{ store.modB.name }}</b>
       </div>
+      <el-checkbox
+        class="texts-box"
+        size="small"
+        :model-value="skipTexts"
+        :disabled="!ready || store.identical"
+        :title="tr('Тексты, которые есть в обоих модах и написаны по-разному, не считаются правкой. Так сравнение английской игры с русским модом показывает только настоящие изменения. Новые и удалённые тексты видны.')"
+        @update:model-value="(v: string | number | boolean) => store.setTexts(v === true)"
+      >
+        {{ tr("Не сравнивать переводы") }}
+      </el-checkbox>
       <div class="spacer" />
       <el-dropdown trigger="click" @command="(l: Locale) => switchLocale(l)">
         <el-button class="lang-btn" text size="small" :title="tr('Язык интерфейса')">{{ locale.toUpperCase() }}</el-button>
@@ -196,6 +227,7 @@ const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
           :closable="false"
           class="notice"
         />
+        <el-alert v-if="ready && textsNotice" :title="textsNotice" type="info" show-icon :closable="false" class="notice" />
 
         <div v-if="store.phase === 'error'" class="state">
           <el-result icon="error" :title="tr('Сравнение не получилось')" :sub-title="store.error ?? ''">
@@ -407,6 +439,10 @@ html.dark .st-changed {
 }
 .spacer {
   flex: 1;
+}
+.texts-box {
+  flex: 0 0 auto;
+  margin-right: 0;
 }
 .back-link {
   color: var(--el-color-primary);

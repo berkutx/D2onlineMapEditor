@@ -74,6 +74,12 @@ export const ModSummary = z.object({
    * has none.
    */
   sourceUrl: z.string().url().optional(),
+  /**
+   * The REFERENCE data set — the unmodded game every mod is built on. The comparison page
+   * compares a mod with it when the address names no other one (a derived mod keeps its
+   * parent). One mod of an index at most.
+   */
+  reference: z.boolean().optional(),
 });
 export type ModSummary = z.infer<typeof ModSummary>;
 
@@ -127,6 +133,6 @@ export type ModManifest = z.infer<typeof ModManifest>;
 
 /** The index row of a manifest (the fields the two share). */
 export function summaryOf(manifest: ModManifest): ModSummary {
-  const { id, name, family, familyOrder, status, contentFingerprint, sourceUrl } = manifest;
-  return { id, name, family, familyOrder, status, contentFingerprint, ...(sourceUrl ? { sourceUrl } : {}) };
+  const { id, name, family, familyOrder, status, contentFingerprint, sourceUrl, reference } = manifest;
+  return { id, name, family, familyOrder, status, contentFingerprint, ...(sourceUrl ? { sourceUrl } : {}), ...(reference ? { reference } : {}) };
 }

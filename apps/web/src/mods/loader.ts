@@ -42,6 +42,8 @@ export interface CompareMod {
   assetBase: string;
   /** A derived mod's base. */
   parent: string | null;
+  /** The unmodded game: other mods are compared with it by default. */
+  reference: boolean;
   /** Not in the server's list (a closed mod opened by its id). */
   hidden: boolean;
 }
@@ -73,6 +75,7 @@ function toCompareMod(info: ModInfo, passport: ModPassport | null, hidden: boole
     familyOrder: info.familyOrder,
     assetBase: info.assetBase,
     parent: passport?.parent?.modId ?? null,
+    reference: info.reference === true,
     hidden,
   };
 }
@@ -237,7 +240,12 @@ export interface DiffPayload {
   blobs: Record<string, ArrayBuffer>;
   /** False when either side has no tables: then only pictures and scripts are compared. */
   compareTables: boolean;
+  /** Whether the wording of the texts is compared (DiffOptions.texts of @d2/mod-diff). */
+  texts: TextsMode;
 }
+
+/** DiffOptions.texts: "auto" skips the wording when the two mods are written in different scripts. */
+export type TextsMode = "compare" | "skip" | "auto";
 
 function payloadSide(s: SideData, withTables: boolean): PayloadSide {
   const files: Record<string, string> = {};
@@ -253,7 +261,7 @@ function payloadSide(s: SideData, withTables: boolean): PayloadSide {
 }
 
 /** The worker's input for two loaded sides (bytes from `cache`, each hash once). */
-export async function buildPayload(a: SideData, b: SideData, cache: BlobCache): Promise<DiffPayload> {
+export async function buildPayload(a: SideData, b: SideData, cache: BlobCache, texts: TextsMode = "auto"): Promise<DiffPayload> {
   const compareTables = !a.tablesMissing && !b.tablesMissing;
   const pa = payloadSide(a, compareTables);
   const pb = payloadSide(b, compareTables);
@@ -267,5 +275,5 @@ export async function buildPayload(a: SideData, b: SideData, cache: BlobCache): 
     // every hash was fetched by loadSide; the URL is not used again
     blobs[sha] = await cache.get(sha, "");
   }
-  return { a: pa, b: pb, blobs, compareTables };
+  return { a: pa, b: pb, blobs, compareTables, texts };
 }

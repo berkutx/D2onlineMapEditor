@@ -56,7 +56,7 @@ python tools/asset-pipeline/build_mod.py \
     --game "C:/Games/SomeMod" --mod-id some-mod --name "Some Mod" \
     --family some --family-order 1 --store public/assets \
     [--graphics | --ingest-atlases <dir of an existing pipeline.py output>] [--default] [--dry-run]
-    [--engine-pack <dir of the engine's content pack>] [--source-url <url>]
+    [--engine-pack <dir of the engine's content pack>] [--source-url <url>] [--reference]
 ```
 
 - `--game` is the directory holding `Globals` / `Imgs` / `Scripts` (for an original install
@@ -83,6 +83,10 @@ python tools/asset-pipeline/build_mod.py \
 - `--engine-fingerprint <sha256>` gives the same value by hand, unchecked (no pack at hand).
 - `--source-url` records where the data set can be downloaded from (`sourceUrl`, also in
   `mods/index.json`) — the slot a catalog of ready builds fills in.
+- `--reference` marks the unmodded game (`reference` in `mod.json` and `mods/index.json`):
+  the mod comparison compares every other mod with it when the address names no other one
+  (a derived mod keeps its parent). One mod of a store at most: the build stops when another
+  mod is the reference already. It cannot go with `--parent`.
 
 Per mod it writes the catalogs and icon sets the editor already used (same builders, same
 output) plus:
@@ -171,6 +175,30 @@ All table reads go through `fflib/dbf.py`. The mods do not have the same columns
 is wider, added or missing), so a row answers a missing column with an empty value and the
 miss is listed in the build summary and in `dbfSchema.json` instead of failing the build.
 
+### The unmodded game (`gog_extract.py`)
+
+The reference is the GOG release, Disciples II: Rise of the Elves 3.01, built from its
+offline installer without installing it. The installer's English game is the one taken
+(its texts are English; four files have a Polish variant, left out). It has no `Scripts`:
+no Lua at all. `gog_extract.py` reads GOG's Inno Setup layout (see its header) and checks
+every part and every file against the installer's own hashes. Only what `build_mod.py`
+reads is extracted, about 110 MB; `Imgs/BatUnits.ff` (347 MB, battle animations nothing
+draws yet) and the sounds and videos are left in the installer. A RAM disk keeps the
+extraction off a full drive:
+
+```
+py -3.7 tools/asset-pipeline/gog_extract.py "setup_disciples_2_-_rise_of_the_elves_3.01_(30373).exe" R:/d2-vanilla \
+    "^Globals/" "^Interf/TApp" \
+    "^Imgs/(capital\.dat|(IsoTerrn|IsoStill|IsoCmon|City|Capital|IsoAnim|IsoUnit|Ground|GrBorder|IconItem|IconSpel|Lords|Faces)\.ff)$"
+py -3.7 tools/asset-pipeline/build_mod.py --game R:/d2-vanilla --mod-id vanilla --name "Ваниль GOG 3.01" \
+    --family vanilla --family-order 1 --reference --store public/assets --graphics
+```
+
+`--list` prints what a set of regexes picks; `--lang` takes another installer language.
+English texts against a Russian mod would make every text a change: the comparison page
+leaves the wording out by itself when the two mods are written in different scripts
+(`texts` of `diffMods`, packages/mod-diff) and has a switch for it.
+
 ### Derived mods (`derive_mod.py`)
 
 A **derived mod** is a mod of the store (its parent) plus edits to the parent's tables and
@@ -252,6 +280,7 @@ fflib/
 build_mod.py     one mod -> the store (catalogs, icons, ids, profile, dictionaries, variables)
 derive_mod.py    a derived mod (parent install + edit file) -> the store, through build_mod
 store_upload.py  the store's non-derived mods + the blobs they name, as one .tgz for a server (closed mods without their tables)
+gog_extract.py   chosen files of GOG's offline installer (the unmodded game), without installing it
 data/            curated descriptions (scenario variables)
 extract_ff.py    .ff -> named FFImage list
 decode_images.py color-key + trim -> Frame (keeps spriteSourceSize/sourceSize)

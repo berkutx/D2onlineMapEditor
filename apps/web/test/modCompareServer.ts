@@ -37,6 +37,8 @@ export interface FakeMod {
   family: string;
   familyOrder: number;
   parent?: string;
+  /** The unmodded game (ModInfo.reference). */
+  reference?: boolean;
   /** Left out of /api/mods (a closed mod), still served by id. */
   hidden?: boolean;
   files: Record<string, Uint8Array>;
@@ -99,11 +101,38 @@ export function sampleMods(): FakeMod[] {
   ];
 }
 
+/**
+ * The sample mods plus the unmodded game, "vanilla" (reference), whose texts are in English
+ * like semga's, and "semga-ru": semga's units with the texts in Russian.
+ */
+export function referenceMods(): FakeMod[] {
+  const mods = sampleMods();
+  const semga = mods.find((m) => m.id === "semga")!;
+  mods.unshift({ id: "vanilla", name: "Vanilla", family: "vanilla", familyOrder: 0, reference: true, files: { ...semga.files } });
+  mods.push({
+    id: "semga-ru",
+    name: "Semga RU",
+    family: "semga-ru",
+    familyOrder: 1,
+    files: {
+      ...semga.files,
+      "tables/Tglobal.dbf": dbf("Tglobal", [
+        { TXT_ID: "x000tg0001", TEXT: "Сквайр" },
+        { TXT_ID: "x000tg0002", TEXT: "Лучник" },
+        { TXT_ID: "x000tg0003", TEXT: "Удар" },
+        { TXT_ID: "x000tg0004", TEXT: "Рыцарь" },
+      ]),
+      "tables/Gunits.dbf": dbf("Gunits", [unit(U1, "X000TG0001", 120), unit(U2, "X000TG0002", 80)]),
+    },
+  });
+  return mods;
+}
+
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 export function fakeServer(mods: FakeMod[], defaultModId: string) {
   const calls: string[] = [];
-  const info = (m: FakeMod) => ({ id: m.id, name: m.name, family: m.family, familyOrder: m.familyOrder, status: "ready", rev: "r1", assetBase: `/assets/mods/${m.id}` });
+  const info = (m: FakeMod) => ({ id: m.id, name: m.name, family: m.family, familyOrder: m.familyOrder, status: "ready", rev: "r1", assetBase: `/assets/mods/${m.id}`, ...(m.reference ? { reference: true } : {}) });
   const byId = (id: string) => mods.find((m) => m.id === id);
   const fetchFn = async (url: string): Promise<Response> => {
     calls.push(url);

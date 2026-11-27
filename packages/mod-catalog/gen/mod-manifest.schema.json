@@ -37,6 +37,9 @@
           "type": "string",
           "format": "uri"
         },
+        "reference": {
+          "type": "boolean"
+        },
         "schemaVersion": {
           "type": "number",
           "const": 1

@@ -135,6 +135,7 @@ export class ModContext {
       contentFingerprint: m.contentFingerprint,
       rev: this.rev,
       assetBase: `/assets/mods/${m.id}/${this.rev}`,
+      ...(m.reference ? { reference: true } : {}),
     };
   }
 

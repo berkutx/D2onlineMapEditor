@@ -728,6 +728,9 @@ def main(argv=None):
     ap.add_argument("--parent", default=None, metavar="MOD_ID",
                     help="a DERIVED mod: the store's mod it was derived from (recorded as parent; "
                          "derive_mod.py gives it, with --game a folder made from that mod's install)")
+    ap.add_argument("--reference", action="store_true",
+                    help="the unmodded game (e.g. the GOG release): the compare page compares "
+                         "other mods with it by default; one mod of the store at most")
     ap.add_argument("--dry-run", action="store_true",
                     help="build and report sizes, but leave the store untouched")
     args = ap.parse_args(argv)
@@ -739,7 +742,8 @@ def main(argv=None):
             ap.error("--parent names the mod itself")
         clash = [flag for flag, on in (("--default", args.default), ("--engine-pack", args.engine_pack),
                                        ("--engine-fingerprint", args.engine_fingerprint),
-                                       ("--source-url", args.source_url)) if on]
+                                       ("--source-url", args.source_url),
+                                       ("--reference", args.reference)) if on]
         if clash:
             # a derived mod is not the parent's install: no engine profile matches it, it is
             # never the store's default, and it is not offered for download
@@ -757,6 +761,11 @@ def main(argv=None):
     scripts_dir = find_dir(game, "Scripts")
     store_root = os.path.abspath(args.store)
     parent = load_parent(store_root, args.parent) if args.parent else None
+    if args.reference:
+        other = [m["id"] for m in load_index(store_root).get("mods", []) if m.get("reference") and m.get("id") != args.mod_id]
+        if other:
+            raise BuildError("--reference: %s is the store's reference already; rebuild it without "
+                             "--reference first" % other[0])
     store = BlobStore(store_root)
     stage = os.path.join(store_root, "mods", args.mod_id, ".stage")
     assert stage.endswith(".stage")
@@ -908,11 +917,14 @@ def main(argv=None):
         mod["engineContentFingerprint"] = args.engine_fingerprint
     if args.source_url:
         mod["sourceUrl"] = args.source_url
+    if args.reference:
+        mod["reference"] = True
     validate(mod, "mod-manifest.schema.json", "ModManifest")
 
     report = dbf.REPORT
     ids = new_files["ids.json"]["tables"]
-    print("mod %s (%s, family %s #%d): %s" % (mod["id"], mod["name"], mod["family"], mod["familyOrder"], status))
+    print("mod %s (%s, family %s #%d): %s%s" % (mod["id"], mod["name"], mod["family"], mod["familyOrder"], status,
+                                              ", the reference (unmodded game)" if args.reference else ""))
     print("  fingerprint  %s" % content_fp)
     if parent:
         shared = sum(1 for k, v in mod["files"].items() if parent.get("files", {}).get(k) == v)
@@ -948,7 +960,8 @@ def main(argv=None):
 
     write_atomic(os.path.join(store_root, "mods", args.mod_id, "mod.json"), dump_json(mod))
     index = load_index(store_root)
-    row = {k: mod[k] for k in ("id", "name", "family", "familyOrder", "status", "contentFingerprint", "sourceUrl")
+    row = {k: mod[k] for k in ("id", "name", "family", "familyOrder", "status", "contentFingerprint", "sourceUrl",
+                               "reference")
            if k in mod}
     index["mods"] = sorted([m for m in index.get("mods", []) if m.get("id") != mod["id"]] + [row],
                            key=lambda m: (m["family"], m["familyOrder"], m["id"]))

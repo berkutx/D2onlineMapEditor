@@ -49,6 +49,9 @@
               "sourceUrl": {
                 "type": "string",
                 "format": "uri"
+              },
+              "reference": {
+                "type": "boolean"
               }
             },
             "required": [

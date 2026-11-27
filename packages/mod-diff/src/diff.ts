@@ -17,7 +17,7 @@ import { defaultRootName, ownedSpecs, RACE_SLOT_HEAD, RACE_SLOT_TAIL, rootOf } f
 import { diffPictures, indexFrames, pictureOwnerId, shaOf } from "./pictures.js";
 import { buildRefs, rowOwners, type Ref } from "./refs.js";
 import { ModSide } from "./side.js";
-import { diffTables, type TableWork } from "./tables.js";
+import { diffTables, textScripts, type TableWork } from "./tables.js";
 import { countTerrainArt, terrainCodes, terrainPictures } from "./terrain.js";
 import {
   SECTIONS,
@@ -84,7 +84,10 @@ export function diffMods(a: ModData, b: ModData, options: DiffOptions = {}): Mod
   const sb = new ModSide(b);
   const canonical = (lower: string) => sa.displayName(lower) ?? sb.displayName(lower) ?? lower;
   sa.canonical = sb.canonical = canonical;
-  const works = diffTables(sa, sb);
+  const { a: scriptA, b: scriptB } = textScripts(sa, sb);
+  const mode = options.texts ?? "compare";
+  const skipTexts = mode === "skip" || (mode === "auto" && !!scriptA && !!scriptB && scriptA !== scriptB);
+  const works = diffTables(sa, sb, skipTexts);
   const builders = new Map<string, Builder>();
   const terrainOps = new Map<string, OpAt[]>();
 
@@ -175,7 +178,7 @@ export function diffMods(a: ModData, b: ModData, options: DiffOptions = {}): Mod
   const refsB = buildRefs(sb, canonical);
   // a text that changed under the same id: shown under every entity whose rows name it in both mods
   for (const x of [...builders.values()]) {
-    if (x.section !== "texts" || !x.inA || !x.inB) continue;
+    if (skipTexts || x.section !== "texts" || !x.inA || !x.inB) continue;
     const ta = sa.root(x.root).get(x.id)?.TEXT;
     const tb = sb.root(x.root).get(x.id)?.TEXT;
     if (ta === tb) continue;
@@ -637,6 +640,7 @@ export function diffMods(a: ModData, b: ModData, options: DiffOptions = {}): Mod
     terrainOther: tp.other,
     pictures,
     scripts,
+    texts: { a: scriptA, b: scriptB, skipped: skipTexts },
     summary,
   };
 }
@@ -698,8 +702,10 @@ function summarize(
   let tableOnly = 0;
   let unassigned = 0;
   let noIdSpellings = 0;
+  let translations = 0;
   for (const t of tables) {
     noIdSpellings += t.noIdSpellings;
+    translations += t.translations;
     ops += t.ops.length;
     set += t.counts.set;
     add += t.counts.add;
@@ -725,6 +731,7 @@ function summarize(
       skipped,
       refused: tables.filter((t) => t.error).map((t) => t.name),
       noIdSpellings,
+      translations,
     },
     assignedOps: assigned,
     tableOnlyOps: tableOnly,

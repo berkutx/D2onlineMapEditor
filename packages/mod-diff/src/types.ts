@@ -52,6 +52,28 @@ export interface ModData {
 export interface DiffOptions {
   /** A race whose redesign score reaches this is flagged `redesigned` (default 0.5). */
   redesignThreshold?: number;
+  /**
+   * Whether a text that both mods have but word differently is a change:
+   * - "compare" (default): it is;
+   * - "skip": it is not, only counted (`TableChange.translations`) — for a pair whose texts
+   *   are in two languages, like the English GOG vanilla against a Russian mod;
+   * - "auto": "skip" when the two mods' texts are in different scripts (`TextLanguages`).
+   * Texts only one mod has are added or removed either way; but a list of texts keyed by
+   * the whole row (Tleader, TAiMsg), where a reworded text is a delete and an add, is not
+   * compared at all when skipped.
+   */
+  texts?: "compare" | "skip" | "auto";
+}
+
+/** The script most of a mod's Tglobal texts are written in. */
+export type TextScript = "cyrillic" | "latin";
+
+/** The scripts of the two mods' texts (null: a mod without texts), and what was done. */
+export interface TextLanguages {
+  a: TextScript | null;
+  b: TextScript | null;
+  /** True when text wording was not compared (DiffOptions.texts). */
+  skipped: boolean;
 }
 
 // ---------------------------------------------------------------- output: shared shapes
@@ -270,6 +292,8 @@ export interface TableChange {
    * an added one that reads the same but for such cells (a whole-row key).
    */
   noIdSpellings: number;
+  /** Text cells both mods have, worded differently, not compared (DiffOptions.texts "skip"). */
+  translations: number;
   note?: string;
 }
 
@@ -428,7 +452,7 @@ export interface SectionCounts {
 
 export interface DiffSummary {
   sections: Record<SectionId, SectionCounts>;
-  tables: { compared: number; differ: number; onlyA: string[]; onlyB: string[]; ops: number; set: number; add: number; delete: number; skipped: number; refused: string[]; noIdSpellings: number };
+  tables: { compared: number; differ: number; onlyA: string[]; onlyB: string[]; ops: number; set: number; add: number; delete: number; skipped: number; refused: string[]; noIdSpellings: number; translations: number };
   /** Ops given to at least one entity (or a terrain code). */
   assignedOps: number;
   /** Ops of tables no entity covers, listed under their table only. */
@@ -455,5 +479,7 @@ export interface ModDiff {
   terrainOther: PictureChange[];
   pictures: PictureDiff;
   scripts: ScriptChange[];
+  /** The scripts of both mods' texts, and whether their wording was compared. */
+  texts: TextLanguages;
   summary: DiffSummary;
 }

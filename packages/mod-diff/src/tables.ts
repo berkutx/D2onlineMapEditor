@@ -9,7 +9,8 @@
  * once), unless diffTable would refuse its key.
  *
  * A cell empty in one mod and G000000000 in the other names nothing in both (sameEmptyId): it
- * is no op, only counted in `noIdSpellings`.
+ * is no op, only counted in `noIdSpellings`. With `skipTexts`, a string cell of a text table
+ * (TEXT_TABLES) that differs is no op either, only counted in `translations`.
  *
  * Fallbacks when diffTable refuses a table: a whole-row table whose columns differ (Nazar's
  * GUmodif has MODIF_7) is compared over the columns both have; a table whose key names two
@@ -20,7 +21,51 @@ import { declareKey, diffTable, DiffError, keyColumns, keyString, missingKeyColu
 import { sameEmptyId } from "./ids.js";
 import { coveredTable } from "./model.js";
 import { decodeRow, type ModSide, type TableText } from "./side.js";
-import type { Row, TableChange, TableOp } from "./types.js";
+import type { Row, TableChange, TableOp, TextScript } from "./types.js";
+
+/** The tables of texts (every game text table is named T...): Tglobal, TApp, TAppEdit, Tleader, TAiMsg, Tplayer. */
+export const TEXT_TABLES: ReadonlySet<string> = new Set(["tglobal", "tapp", "tappedit", "tleader", "taimsg", "tplayer"]);
+
+/**
+ * The script most of a mod's Tglobal texts are written in; null when it has none. Counted on
+ * the file's bytes (CP866) of the TEXT column, without decoding the rows: the table diff
+ * decodes only the rows that differ.
+ */
+export function textScript(side: ModSide): TextScript | null {
+  const t = side.table("tglobal");
+  const tt = side.text866("tglobal");
+  const f = t?.fields.find((x) => x.type === "C" && x.name.toUpperCase() === "TEXT");
+  if (!t || !tt || !f) return null;
+  const { bytes, headerLength, recordLength } = tt;
+  let cyrillic = 0;
+  let latin = 0;
+  for (let r = 0; r < t.rowCount; r++) {
+    if (t.isDeleted(r)) continue;
+    const s = headerLength + r * recordLength + f.offset;
+    const e = Math.min(s + f.length, bytes.length);
+    let tag = false;
+    for (let i = s; i < e; i++) {
+      const c = bytes[i]!;
+      // the style tags (\fNormal;) are Latin in every language: left out
+      if (tag) {
+        if (c === 0x3b) tag = false;
+      } else if (c === 0x5c) tag = true;
+      // CP866: А-Я а-п 0x80-0xAF, р-я 0xE0-0xEF, Ё ё Є є Ї ї Ў ў 0xF0-0xF7
+      else if ((c >= 0x80 && c <= 0xaf) || (c >= 0xe0 && c <= 0xf7)) cyrillic++;
+      else if ((c >= 0x61 && c <= 0x7a) || (c >= 0x41 && c <= 0x5a)) latin++;
+    }
+  }
+  if (!cyrillic && !latin) return null;
+  return cyrillic > latin ? "cyrillic" : "latin";
+}
+
+/** textScript of both sides; B's Tglobal, when it is A's file, is not decoded a second time. */
+export function textScripts(sa: ModSide, sb: ModSide): { a: TextScript | null; b: TextScript | null } {
+  const a = textScript(sa);
+  const ta = sa.text866("tglobal");
+  const tb = sb.text866("tglobal");
+  return { a, b: ta && tb && sameFile(ta.bytes, tb.bytes) ? a : textScript(sb) };
+}
 
 export interface TableWork {
   lower: string;
@@ -237,7 +282,8 @@ function dropSpellingPairs(ops: TableOp[]): { ops: TableOp[]; cells: number; add
   return { ops: drop.size ? ops.filter((_, i) => !drop.has(i)) : ops, cells, adds: drop.size / 2, deletes: drop.size / 2 };
 }
 
-export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
+/** `skipTexts`: a text cell both mods have, worded differently, is no op (see DiffOptions.texts). */
+export function diffTables(sa: ModSide, sb: ModSide, skipTexts = false): TableWork[] {
   const names = new Set([...sa.tableNames(), ...sb.tableNames()]);
   const out: TableWork[] = [];
   for (const lower of names) {
@@ -259,7 +305,9 @@ export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
       skipped: [],
       unassigned: 0,
       noIdSpellings: 0,
+      translations: 0,
     };
+    const textTable = skipTexts && TEXT_TABLES.has(lower);
     if (lower === "gunits_2") base.note = "a copy of Gunits that only some mods have; whether the game reads it is not known";
     if (!ta || !tb) {
       out.push({ lower, change: base, rowA: () => undefined, rowB: () => undefined });
@@ -288,6 +336,10 @@ export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
             base.noIdSpellings++;
             continue;
           }
+          if (textTable && (typeof was === "string" || typeof op.value === "string")) {
+            base.translations++;
+            continue;
+          }
           const t: TableOp = { op: "dbf.set", key: op.key, keyText, field, was, value: op.value, owners: [] };
           const wt = sa.display(lower, field, was);
           const vt = sb.display(lower, field, op.value);
@@ -310,6 +362,13 @@ export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
         base.counts.add -= p.adds;
         base.counts.delete -= p.deletes;
       } else base.ops = ops;
+      if (textTable && at.key.kind === "row" && base.ops.length) {
+        // a list of texts keyed by the whole row (Tleader, TAiMsg): a reworded row is a
+        // delete and an add, so the table's wording is not compared at all
+        base.translations += base.ops.length;
+        base.ops = [];
+        base.counts = { set: 0, add: 0, delete: 0 };
+      }
       base.skipped = at.d.skipped.map((s) => {
         const keyText = keyString(s.key);
         const field = s.field.toUpperCase();

@@ -328,6 +328,51 @@ describe("diffMods", () => {
     expect(d.summary.tables.noIdSpellings).toBe(0);
   });
 
+  describe("texts", () => {
+    const RU: Record<string, string> = { x000tg0001: "Сквайр", x000tg0002: "Лучник", x000tg0003: "Удар", x000tg0004: "Выстрел", x000tg0005: "Империя", x000tg0006: "Храм", x000tg0007: "Мод один", x000tg0008: "Мод два" };
+    /** B in Russian, with one stat changed and one text added. */
+    const russian = (b: ModRows) => {
+      for (const r of b.Tglobal!) r.TEXT = RU[r.TXT_ID as string]!;
+      b.Tglobal!.push({ TXT_ID: "x000tg0009", TEXT: "Новый текст" });
+      rowOf(b.Gunits!, "UNIT_ID", U1).HIT_POINT = 120;
+    };
+    const run = (texts?: "compare" | "skip" | "auto") => {
+      const b = baseRows();
+      russian(b);
+      return diffMods(mod("a", baseRows()), mod("b", b), texts ? { texts } : {});
+    };
+
+    it("compares the wording by default", () => {
+      const d = run();
+      expect(d.texts).toEqual({ a: "latin", b: "cyrillic", skipped: false });
+      expect(d.tables.find((t) => t.name === "Tglobal")).toMatchObject({ counts: { set: 8, add: 1, delete: 0 }, translations: 0 });
+      expect(entity(d, "units", U1).texts.map((t) => t.b)).toEqual(["Сквайр"]);
+    });
+
+    it("with skip, counts a reworded text and keeps the rest", () => {
+      const d = run("skip");
+      expect(d.texts.skipped).toBe(true);
+      const t = d.tables.find((x) => x.name === "Tglobal")!;
+      expect(t).toMatchObject({ counts: { set: 0, add: 1, delete: 0 }, translations: 8 });
+      expect(t.ops.map((o) => o.keyText)).toEqual(['["X000TG0009"]']);
+      expect(d.summary.tables.translations).toBe(8);
+      const u = entity(d, "units", U1);
+      expect(u.fields).toEqual([{ table: "Gunits", field: "HIT_POINT", a: 100, b: 120 }]);
+      expect(u.texts).toEqual([]);
+      expect(ids(d, "attacks")).toEqual([]);
+    });
+
+    it("with auto, skips when the two mods write in different scripts", () => {
+      expect(run("auto").texts.skipped).toBe(true);
+      const b = baseRows();
+      rowOf(b.Tglobal!, "TXT_ID", "x000tg0001").TEXT = "Knight";
+      const same = diffMods(mod("a", baseRows()), mod("b", b), { texts: "auto" });
+      expect(same.texts).toEqual({ a: "latin", b: "latin", skipped: false });
+      expect(same.summary.tables.translations).toBe(0);
+      expect(entity(same, "units", U1).texts.map((t) => t.b)).toEqual(["Knight"]);
+    });
+  });
+
   it("reports a table only one mod has", () => {
     const b = baseRows();
     delete b.LAttR;

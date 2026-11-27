@@ -24,6 +24,8 @@ export const ModInfo = z.object({
    * the files may be cached forever and a rebuild is picked up at once.
    */
   assetBase: z.string(),
+  /** The unmodded game: what the comparison page compares other mods with by default. */
+  reference: z.boolean().optional(),
 });
 export type ModInfo = z.infer<typeof ModInfo>;
 

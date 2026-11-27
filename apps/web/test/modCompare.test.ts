@@ -4,7 +4,7 @@ import { compareSearch, defaultPair, isComparePage, parseCompareQuery, predecess
 import { BlobCache, buildPayload, listCompareMods, loadSide } from "../src/mods/loader";
 import { runPayload } from "../src/mods/prepare";
 import { useCompareStore } from "../src/mods/compareStore";
-import { fakeServer, sampleMods, U1, U3 } from "./modCompareServer";
+import { fakeServer, referenceMods, sampleMods, U1, U3 } from "./modCompareServer";
 
 describe("the default pair", () => {
   const mods: PairCandidate[] = [
@@ -62,6 +62,18 @@ describe("the default pair", () => {
     expect(defaultPair(mods, "default", { a: "nope", b: "gone" })).toEqual({ a: "semga", b: "default" });
     expect(defaultPair([], "default", { b: "semga" })).toEqual({ a: null, b: null });
   });
+
+  it("with the unmodded game listed: every mod but a derived one is compared with it", () => {
+    const withGame: PairCandidate[] = [{ id: "vanilla", family: "vanilla", familyOrder: 0, reference: true }, ...mods];
+    expect(predecessorOf(withGame, "semga", "default")).toBe("vanilla");
+    expect(predecessorOf(withGame, "semga-3", "default")).toBe("vanilla");
+    expect(predecessorOf(withGame, "default", "default")).toBe("vanilla");
+    // a derived mod keeps its parent
+    expect(predecessorOf(withGame, "semga-2", "default")).toBe("semga");
+    // the game itself: by the other rules
+    expect(predecessorOf(withGame, "vanilla", "default")).toBe("default");
+    expect(defaultPair(withGame, "semga", {})).toEqual({ a: "vanilla", b: "semga-3" });
+  });
 });
 
 describe("the address", () => {
@@ -72,13 +84,17 @@ describe("the address", () => {
     expect(isComparePage("")).toBe(false);
   });
   it("reads and writes the state, leaving empty fields out", () => {
-    const q = { a: "semga", b: "semga-2", view: "units", card: "units:Gunits:G000UU0019", item: null };
+    const q = { a: "semga", b: "semga-2", view: "units", card: "units:Gunits:G000UU0019", item: null, texts: null };
     const s = compareSearch(q);
     expect(s).toBe("?mods&a=semga&b=semga-2&view=units&card=units%3AGunits%3AG000UU0019");
     expect(parseCompareQuery(s)).toEqual(q);
     expect(compareSearch({})).toBe("?mods");
-    expect(parseCompareQuery("?mods&a=&b=%20x%20")).toEqual({ a: null, b: "x", view: null, card: null, item: null });
+    expect(parseCompareQuery("?mods&a=&b=%20x%20")).toEqual({ a: null, b: "x", view: null, card: null, item: null, texts: null });
     expect(parseCompareQuery(compareSearch({ item: "modscripts/a b.lua" })).item).toBe("modscripts/a b.lua");
+    expect(compareSearch({ a: "x", texts: "skip" })).toBe("?mods&a=x&texts=skip");
+    expect(parseCompareQuery("?mods&texts=compare").texts).toBe("compare");
+    // anything else is auto
+    expect(parseCompareQuery("?mods&texts=maybe").texts).toBeNull();
   });
 });
 
@@ -220,6 +236,42 @@ describe("the compare store and the address", () => {
     await store.init("?mods", { fetchFn: async () => new Response("down", { status: 502 }) });
     expect(store.phase).toBe("error");
     expect(store.error).toBe("Не удалось получить список модов: Сервер ответил 502 на /api/mods");
+  });
+
+  it("compares a mod with the unmodded game, skipping a translation's texts, and lets the user compare them", async () => {
+    const server = fakeServer(referenceMods(), "semga");
+    const store = useCompareStore();
+    await store.init("?mods&b=semga-ru", { fetchFn: server.fetchFn });
+    expect([store.aId, store.bId]).toEqual(["vanilla", "semga-ru"]);
+    expect(store.modA?.reference).toBe(true);
+    // English → Russian: auto skips the wording; the unit's own change stays
+    expect(store.diff?.texts).toEqual({ a: "latin", b: "cyrillic", skipped: true });
+    expect(store.diff?.summary.tables.translations).toBe(4);
+    expect(store.index.tables.get("tglobal")?.ops).toEqual([]);
+    expect(store.entity("units", U1)?.fields.map((f) => f.field)).toEqual(["HIT_POINT"]);
+    expect(loc.search).toBe("?mods&a=vanilla&b=semga-ru");
+
+    // the user asks for the texts: the loaded sides are diffed again, nothing is downloaded
+    const files = server.calls.length;
+    await store.setTexts(false);
+    expect(store.phase).toBe("ready");
+    expect(server.calls.length).toBe(files);
+    expect(store.diff?.texts.skipped).toBe(false);
+    expect(store.index.tables.get("tglobal")?.counts.set).toBe(4);
+    expect(loc.search).toBe("?mods&a=vanilla&b=semga-ru&texts=compare");
+
+    // a new pair starts on auto again; semga → semga-2 is English on both sides
+    store.setPair("semga", "semga-2");
+    await vi.waitFor(() => expect(store.phase).toBe("ready"));
+    expect(store.texts).toBeNull();
+    expect(store.diff?.texts.skipped).toBe(false);
+    expect(loc.search).toBe("?mods&a=semga&b=semga-2");
+
+    // and the choice in the address is kept
+    setActivePinia(createPinia());
+    const store2 = useCompareStore();
+    await store2.init("?mods&a=semga&b=semga-2&texts=skip", { fetchFn: server.fetchFn });
+    expect(store2.diff?.texts.skipped).toBe(true);
   });
 
   it("the same mod on both sides is loaded once", async () => {

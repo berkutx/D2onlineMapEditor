@@ -155,7 +155,7 @@ export function runPayload(payload: DiffPayload): DiffResult {
   const ta = sideTables(payload.a, payload.blobs, cache);
   const tb = sideTables(payload.b, payload.blobs, cache);
   const t0 = performance.now();
-  const diff = diffMods(toModData(payload.a, ta, payload.blobs), toModData(payload.b, tb, payload.blobs));
+  const diff = diffMods(toModData(payload.a, ta, payload.blobs), toModData(payload.b, tb, payload.blobs), { texts: payload.texts ?? "auto" });
   const ms = Math.round(performance.now() - t0);
   const want = referencedTexts(diff);
   return { diff, extras: { a: sideExtras(ta, want), b: sideExtras(tb, want) }, ms };

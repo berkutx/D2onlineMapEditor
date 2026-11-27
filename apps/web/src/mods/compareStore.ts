@@ -8,7 +8,7 @@ import { computed, markRaw, ref, shallowRef } from "vue";
 import type { EntityChange, ModDiff, RaceChange, SectionId, TableChange } from "@d2/mod-diff";
 import { tr } from "../i18n";
 import { ICON_FOLDERS, BlobCache, buildPayload, fileUrl, listCompareMods, loadSide, HttpError, withShareKey, type CompareMod, type FetchFn, type SideData, type SideProgress } from "./loader";
-import { compareSearch, defaultPair, parseCompareQuery, shareKeyOf } from "./pair";
+import { compareSearch, defaultPair, parseCompareQuery, shareKeyOf, type TextsChoice } from "./pair";
 import type { DiffResult, SideExtras } from "./prepare";
 import { runDiff } from "./runDiff";
 import { isNavId, type NavId } from "./labels";
@@ -61,6 +61,8 @@ export const useCompareStore = defineStore("modCompare", () => {
   const history = ref<CardRef[]>([]);
   /** The open table (Tables) or script (Scripts). */
   const item = ref<string | null>(null);
+  /** The user's choice on comparing the wording of texts; null: auto (see CompareQuery.texts). */
+  const texts = ref<TextsChoice | null>(null);
 
   let fetchFn: FetchFn = (url, init) => fetch(url, init);
   let cache = new BlobCache(fetchFn);
@@ -106,6 +108,7 @@ export const useCompareStore = defineStore("modCompare", () => {
       view: view.value === "overview" ? null : view.value,
       card: card.value ? cardKey(card.value) : null,
       item: item.value,
+      texts: texts.value,
     });
     // the fragment (a share key, #key=...) stays: the address remains the link that was opened
     if (window.location.search !== search) window.history.replaceState(null, "", window.location.pathname + search + (window.location.hash || ""));
@@ -124,6 +127,7 @@ export const useCompareStore = defineStore("modCompare", () => {
     if (isNavId(q.view)) view.value = q.view;
     card.value = cardOf(q.card);
     item.value = q.item;
+    texts.value = q.texts;
     phase.value = "listing";
     error.value = null;
     try {
@@ -173,19 +177,47 @@ export const useCompareStore = defineStore("modCompare", () => {
       if (mine !== run) return;
       const both = { a: sa, b: sb ?? sa };
       sides.value = markRaw(both);
-      phase.value = "diffing";
-      const payload = await buildPayload(both.a, both.b, cache);
-      const r = await runDiff(payload);
-      if (mine !== run) return;
-      result.value = markRaw(r);
-      phase.value = "ready";
-      // a card from the address that the diff does not have is dropped
-      if (card.value && !cardExists(card.value)) card.value = null;
-      syncUrl();
+      await diffSides(mine, both);
     } catch (e) {
       if (mine !== run) return;
       phase.value = "error";
       error.value = tr("Не удалось загрузить моды: {error}", { error: message(e) });
+    }
+  }
+
+  /** Diff loaded sides (run `mine` of load / setTexts). */
+  async function diffSides(mine: number, both: Record<Side, SideData>): Promise<void> {
+    phase.value = "diffing";
+    const payload = await buildPayload(both.a, both.b, cache, texts.value ?? "auto");
+    const r = await runDiff(payload);
+    if (mine !== run) return;
+    result.value = markRaw(r);
+    phase.value = "ready";
+    // a card from the address (or of the last diff) that this diff does not have is dropped
+    if (card.value && !cardExists(card.value)) {
+      card.value = null;
+      history.value = [];
+    }
+    syncUrl();
+  }
+
+  /** Compare the wording of texts or not; the loaded sides are diffed again. */
+  async function setTexts(skip: boolean): Promise<void> {
+    const choice: TextsChoice = skip ? "skip" : "compare";
+    if (texts.value === choice && diff.value?.texts.skipped === skip) return;
+    texts.value = choice;
+    const both = sides.value;
+    if (!both) {
+      syncUrl();
+      return;
+    }
+    const mine = ++run;
+    try {
+      await diffSides(mine, both);
+    } catch (e) {
+      if (mine !== run) return;
+      phase.value = "error";
+      error.value = tr("Не удалось сравнить моды: {error}", { error: message(e) });
     }
   }
 
@@ -199,6 +231,8 @@ export const useCompareStore = defineStore("modCompare", () => {
     bId.value = b;
     card.value = null;
     history.value = [];
+    // a texts choice was for the last pair: a new pair starts on auto again
+    texts.value = null;
     void load();
   }
 
@@ -303,9 +337,11 @@ export const useCompareStore = defineStore("modCompare", () => {
     card,
     history,
     item,
+    texts,
     tablesMissing,
     init,
     load,
+    setTexts,
     setPair,
     swap,
     openView,
