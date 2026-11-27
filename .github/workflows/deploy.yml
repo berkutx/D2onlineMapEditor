@@ -47,6 +47,7 @@ jobs:
           PREVIEW_TTL_MS: ${{ vars.PREVIEW_TTL_MS }}
           PREVIEW_UPLOAD_LIMIT: ${{ vars.PREVIEW_UPLOAD_LIMIT }}
           PREVIEW_RATE_WINDOW_MS: ${{ vars.PREVIEW_RATE_WINDOW_MS }}
+          MOD_SHARE_KEYS: ${{ secrets.MOD_SHARE_KEYS }}
         run: |
           set -euo pipefail
           install -m 600 /dev/null key
@@ -83,6 +84,8 @@ jobs:
           PREVIEW_UPLOAD_LIMIT="${PREVIEW_UPLOAD_LIMIT:-5}"
           PREVIEW_RATE_WINDOW_MS="${PREVIEW_RATE_WINDOW_MS:-$(keep PREVIEW_RATE_WINDOW_MS)}"
           PREVIEW_RATE_WINDOW_MS="${PREVIEW_RATE_WINDOW_MS:-3600000}"
+          # the mod comparison's share keys: a GitHub secret if set, else what the server has
+          MOD_SHARE_KEYS="${MOD_SHARE_KEYS:-$(keep MOD_SHARE_KEYS)}"
           test -n "$D2_INTEGRATION_SECRET" || { echo 'Missing GitHub secret D2_INTEGRATION_SECRET'; exit 1; }
           umask 077
           {
@@ -93,6 +96,7 @@ jobs:
             printf 'PREVIEW_TTL_MS=%s\n' "$PREVIEW_TTL_MS"
             printf 'PREVIEW_UPLOAD_LIMIT=%s\n' "$PREVIEW_UPLOAD_LIMIT"
             printf 'PREVIEW_RATE_WINDOW_MS=%s\n' "$PREVIEW_RATE_WINDOW_MS"
+            printf 'MOD_SHARE_KEYS=%s\n' "$MOD_SHARE_KEYS"
           } > env.out
           ssh $SSHOPTS "$REMOTE" 'cat > ~/d2editor/.env && chmod 600 ~/d2editor/.env' < env.out
 

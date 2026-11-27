@@ -7,6 +7,7 @@
     { "path": "packages/dbf" },
     { "path": "packages/ff" },
     { "path": "packages/mod-edit" },
+    { "path": "packages/mod-diff" },
     { "path": "packages/socket-contract" },
     { "path": "packages/sg-parser" },
     { "path": "packages/map-edit" },

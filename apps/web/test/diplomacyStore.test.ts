@@ -47,7 +47,7 @@ beforeAll(async () => {
   DiplomacyComponent = fixture.DiplomacyComponent;
   ssrEditStore = fixture.useEditStore;
   ssrElementPlus = fixture;
-});
+}, 60_000); // Vite's first SSR load is slow, slower still beside the other SSR suite
 afterAll(async () => { await componentServer?.close(); });
 async function renderDiplomacy(word: number) {
   const pinia = createPinia(), edit = ssrEditStore(pinia);

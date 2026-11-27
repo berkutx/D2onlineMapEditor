@@ -69,6 +69,26 @@ export const ModPassport = ModInfo.extend({
 export type ModPassport = z.infer<typeof ModPassport>;
 
 /**
+ * The files of ONE mod with the sha256 of each (GET REST.modFiles, additive): logical name
+ * ("unitCatalog.json", "tables/Gunits.dbf") -> the hash of its bytes. The hash names the
+ * blob in the store, so two mods that give a name the same hash have the same file there:
+ * a client compares mods without downloading what did not change. Only the names that start
+ * with the asked `prefix` are listed. The implicit `default` mod (flat layout) has none.
+ */
+export const ModFileList = z.object({
+  files: z.record(z.string(), z.string().regex(/^[0-9a-f]{64}$/)),
+});
+export type ModFileList = z.infer<typeof ModFileList>;
+
+/**
+ * Request header with a share key of the mod comparison (a secret link). With a key the
+ * server also lists the hidden mods (GET REST.mods) and serves their full tables
+ * (`tables/`, `capital.dat`: in GET REST.modFiles and under the mod's assetBase), which it
+ * otherwise leaves out. Without one, or with a wrong one, nothing changes.
+ */
+export const MOD_SHARE_KEY_HEADER = "x-mod-share-key";
+
+/**
  * How a map fits its mod, in the shape of the online engine SDK's compatibility report (the
  * same as `CompatibilityReport` of @d2/mod-catalog), so editor and engine reports are
  * interchangeable. Codes: `UNRESOLVED_GLOBAL_ID` (error: an id field points at a row the mod
@@ -413,6 +433,7 @@ export const REST = {
   mapCopilot: (id: string) => `/api/maps/${id}/copilot`, // POST { project, text, selection? } -> { ops, report, reasoning } (LLM bridge)
   mods: "/api/mods", // GET -> ModList (the mod data sets this server serves)
   mod: (id: string) => `/api/mods/${id}`, // GET -> ModPassport (ETag = the mod's rev) | 404
+  modFiles: (id: string) => `/api/mods/${id}/files`, // GET [?prefix=<p>] -> ModFileList (logical name -> sha256; ETag = the mod's rev) | 404
   mapMod: (id: string) => `/api/maps/${id}/mod`, // PUT { modId } -> MapMeta (owner of an uploaded map only)
   mapNew: "/api/maps/new", // POST { size, fill?, name?, modId? } -> { id } (from-scratch blank terrain)
   mapClone: (id: string) => `/api/maps/${id}/clone`, // POST -> { id } (byte-exact personal copy, owned by x-client-id)

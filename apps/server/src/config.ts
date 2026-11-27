@@ -175,10 +175,21 @@ export const config = {
    * Mods visitors are not shown (a closed beta). GET /api/mods leaves them out, the maps and
    * sagas of their own scenario folders are not listed, and no map is opened on them: a map
    * of theirs is matched among the other mods. Nothing is deleted, and their files are still
-   * served to whoever has the URL — the hiding is for the eye only. Mod ids, ";" or ","
+   * served to whoever has the URL — the hiding is for the eye only — except their full tables,
+   * which need a share key (MOD_SHARE_KEYS). Mod ids, ";" or ","
    * between them. Read live, so a test may change it.
    */
   HIDDEN_MODS: envList("HIDDEN_MODS", []).flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean),
+
+  /**
+   * Share keys of the mod comparison (a secret link, `?mods...#key=<key>`). A request that
+   * carries one of them in the `x-mod-share-key` header also sees the hidden mods in the mod
+   * list and gets their full tables (`tables/`, `capital.dat`), which are otherwise not
+   * served at all. Each key at least 24 characters (shorter ones are ignored); ";" or ","
+   * between them. Set on the server only (deploy/README), never in the repository. Read
+   * live, so a test may change it.
+   */
+  MOD_SHARE_KEYS: envList("MOD_SHARE_KEYS", []).flatMap((s) => s.split(",")).map((s) => s.trim()).filter((s) => s.length >= 24),
 
   /** Absolute path to the generated assets: the mod store (mods/ + blobs/), or the flat
    *  pre-multi-mod layout (atlases + manifest + catalogs side by side). */

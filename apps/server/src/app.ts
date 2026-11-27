@@ -11,6 +11,7 @@ import { config } from "./config.js";
 import { MapStore } from "./maps/mapStore.js";
 import { EditLog } from "./realtime/EditLog.js";
 import { ModRegistry } from "./mods/modRegistry.js";
+import { hasShareKey } from "./mods/shareKey.js";
 import { registerStatic } from "./http/static.js";
 import { registerSpa } from "./http/spa.js";
 import { registerHealthRoutes } from "./http/routes.health.js";
@@ -76,7 +77,8 @@ export async function buildApp(): Promise<BuiltApp> {
   // is shared by the REST export-at route AND socket.io (createIo receives this same instance).
   const log = new EditLog(config.ROOMS_DIR);
 
-  await registerStatic(app);
+  // a hidden mod's tables are served by hash only to a request with a share key
+  await registerStatic(app, { isPrivateBlob: (blob) => mods.isPrivateBlob(blob), hasKey: (req) => hasShareKey(req) });
   await registerModRoutes(app, mods);
   await registerHealthRoutes(app, log);
   await registerScenarioRoutes(app, store);

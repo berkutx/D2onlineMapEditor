@@ -1,5 +1,5 @@
 export { ScenarioEntry, MapMeta, ValidationReport, REST, Region, GenerateRequest, CopilotRequest } from "./rest.js";
-export { ModInfo, ModList, ModPassport, CompatReport, MapMod, MapModSource } from "./rest.js";
+export { ModInfo, ModList, ModPassport, ModFileList, MOD_SHARE_KEY_HEADER, CompatReport, MapMod, MapModSource } from "./rest.js";
 export {
   CampaignRaceKey,
   CampaignHeaderInfo,

@@ -69,6 +69,9 @@ importers:
       '@d2/asset-manifest':
         specifier: workspace:*
         version: link:../../packages/asset-manifest
+      '@d2/dbf':
+        specifier: workspace:*
+        version: link:../../packages/dbf
       '@d2/map-edit':
         specifier: workspace:*
         version: link:../../packages/map-edit
@@ -78,6 +81,9 @@ importers:
       '@d2/mod-catalog':
         specifier: workspace:*
         version: link:../../packages/mod-catalog
+      '@d2/mod-diff':
+        specifier: workspace:*
+        version: link:../../packages/mod-diff
       '@d2/pixi-render':
         specifier: workspace:*
         version: link:../../packages/pixi-render
@@ -202,6 +208,19 @@ importers:
       zod-to-json-schema:
         specifier: ^3.23.5
         version: 3.25.2(zod@3.25.76)
+
+  packages/mod-diff:
+    dependencies:
+      '@d2/dbf':
+        specifier: workspace:*
+        version: link:../dbf
+      '@d2/mod-edit':
+        specifier: workspace:*
+        version: link:../mod-edit
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.5
+        version: 22.20.0
 
   packages/mod-edit:
     dependencies:

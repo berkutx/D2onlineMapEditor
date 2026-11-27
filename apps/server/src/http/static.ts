@@ -20,7 +20,8 @@
  * config.ASSETS_DIR (absolute).
  */
 
-import type { FastifyInstance } from "fastify";
+import { join } from "node:path";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { config } from "../config.js";
 
@@ -28,13 +29,34 @@ import { config } from "../config.js";
 const ATLAS_CACHE = "public, max-age=86400, stale-while-revalidate=604800";
 /** Content-addressed blobs: the URL names the bytes. */
 const BLOB_CACHE = "public, max-age=31536000, immutable";
+/** A private blob (served with a share key only): the browser keeps it, a shared cache never. */
+const PRIVATE_BLOB_CACHE = "private, max-age=31536000, immutable";
 
 /** True for a file inside the store's `blobs/` directory. */
 export function isBlobPath(filePath: string): boolean {
   return /[\\/]blobs[\\/][0-9a-f]{2}[\\/][0-9a-f]{64}\.[a-z0-9]+$/.test(filePath);
 }
 
-export async function registerStatic(app: FastifyInstance): Promise<void> {
+/** The store name ("blobs/<xx>/<sha256>.<ext>") of a blob file path, or null for any other file. */
+export function blobName(filePath: string): string | null {
+  const m = /[\\/]blobs[\\/]([0-9a-f]{2})[\\/]([0-9a-f]{64}\.[a-z0-9]+)$/.exec(filePath);
+  return m ? `blobs/${m[1]}/${m[2]}` : null;
+}
+
+export interface StaticAccess {
+  /** True for a blob only a share key may fetch (a hidden mod's tables). */
+  isPrivateBlob(blob: string): boolean;
+  /** True when the request carries a share key. */
+  hasKey(req: FastifyRequest): boolean;
+}
+
+const NO_PRIVATE: StaticAccess = { isPrivateBlob: () => false, hasKey: () => false };
+
+export async function registerStatic(app: FastifyInstance, access: StaticAccess = NO_PRIVATE): Promise<void> {
+  const isPrivate = (filePath: string) => {
+    const blob = blobName(filePath);
+    return !!blob && access.isPrivateBlob(blob);
+  };
   await app.register(fastifyStatic, {
     root: config.ASSETS_DIR,
     prefix: "/assets/",
@@ -44,7 +66,10 @@ export async function registerStatic(app: FastifyInstance): Promise<void> {
     cacheControl: true,
     maxAge: 86400_000,
     immutable: false,
+    // a private blob answers only to a request with a share key: by its hash under
+    // /assets/blobs/ and through reply.sendFile alike (the mod file route)
+    allowedPath: (pathName, root, req) => !isPrivate(join(root ?? config.ASSETS_DIR, pathName)) || access.hasKey(req),
     setHeaders: (res, filePath) =>
-      res.setHeader("cache-control", isBlobPath(filePath) ? BLOB_CACHE : ATLAS_CACHE),
+      res.setHeader("cache-control", !isBlobPath(filePath) ? ATLAS_CACHE : isPrivate(filePath) ? PRIVATE_BLOB_CACHE : BLOB_CACHE),
   });
 }

@@ -122,7 +122,16 @@ mod plus local edits) unless they are named (`--mods a,b --include-derived`), an
 uploaded mod names (old atlas pages, earlier builds); its `mods/index.json` lists exactly the
 mods it packs. `--list` prints the member paths instead, e.g. to check the copy on the server
 with `sha256sum`. Do not tar `public/assets/mods` whole: its `index.json` also lists the local
-derived mods.
+derived mods, and its `mod.json` files carry the closed mods' tables.
+
+- **Closed mods' tables stay on this PC.** A mod's `mod.json` names its install's own tables
+  (`tables/<Name>.dbf`) and `capital.dat`. For a mod listed in `closedMods` of
+  `mods.local.json` (a closed beta, today `semga-2`), the archive carries a `mod.json` without
+  those entries and none of the blobs only they name; stderr says how many were left out.
+  `store_upload.py` reads the list from `mods.local.json` at the repo root (or
+  `--local-config <file>`), so **`mods.local.json` on the uploading PC must list every closed
+  mod**; without the file no mod is treated as closed (stderr says so). The server's
+  `mod.json` of a closed mod therefore differs from the local one (fewer files, another `rev`).
 
 - **Adding or rebuilding a mod is the same command again.** Blobs are immutable and named by
   their hash, so re-sending is idempotent and never disturbs files in use; `mod.json` and
@@ -260,7 +269,19 @@ What is there (2026-11-26):
   the maps and sagas of their own folders not listed, no map opened on them (a map of theirs
   is matched among the other mods, the way a data-only mod is skipped). For the eye only:
   nothing is deleted, and a mod's files and a map's id still answer. To show the mod again,
-  drop it from `docker-compose.yml` and deploy.
+  drop it from `docker-compose.yml` and deploy. One exception: a hidden mod's full tables
+  (`tables/`, `capital.dat`) are not served at all without a share key (next toggle).
+- `MOD_SHARE_KEYS` — share keys of the mod comparison's secret link,
+  `http://151.115.56.12/map/?mods&a=<mod>&b=<hidden mod>#key=<key>`. A page opened with a key
+  sends it with every request; the server then lists the hidden mods too and serves their full
+  tables (privately cached); by logical name and by blob hash alike, nothing of them answers
+  without a key. Each key at least 24 characters; several separated by `,`. The key lives
+  in the server's `~/d2editor/.env` only, never in the repository: the Deploy workflow keeps
+  the value it finds there (or takes the `MOD_SHARE_KEYS` GitHub secret when that is set).
+  To add or change one: edit `MOD_SHARE_KEYS=` in `~/d2editor/.env`, then
+  `cd ~/d2editor && docker compose up -d --no-build --force-recreate`. To revoke a link, drop
+  its key the same way. A hidden mod's tables reach the volume only with
+  `store_upload.py --with-closed-tables`; without that flag they stay on the dev box.
 - Atlases via the `d2editor_assets` volume; uploads via `d2editor_uploads`.
 - The shared `lastwar_nginx` must let uploads through: both `location /map/` blocks in
   `/opt/lastwar-deploy/nginx/nginx.conf` (the lastwar stack's file, not in this repo) carry

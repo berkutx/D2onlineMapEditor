@@ -1,0 +1,70 @@
+/**
+ * diffMods on the mods of this machine (test-helpers/modRoots.ts), with each mod's sprite
+ * manifest and file list from the local store (public/assets/mods/<id>/mod.json) when it is
+ * there. Skipped without the installs (CI has none).
+ */
+import { describe, it, expect } from "vitest";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { DbfTable } from "@d2/dbf";
+import { findEntry, readTable, tableFiles } from "@d2/mod-edit/node";
+import { diffMods, type ModData, type SpriteManifest } from "../src/index";
+import { modRoots } from "../../../test-helpers/modRoots";
+
+const MODS = modRoots();
+const rootOf = (id: string) => MODS.find((m) => m.modId === id)?.root;
+const STORE = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../public/assets");
+
+function load(id: string): ModData {
+  const root = rootOf(id)!;
+  const tables = new Map<string, DbfTable>();
+  for (const [name, path] of tableFiles(root)) tables.set(name, readTable(path, `${id}/${name}`));
+  const imgs = findEntry(root, "Imgs");
+  const cap = imgs ? findEntry(imgs, "capital.dat") : undefined;
+  const data: ModData = { id, name: id, tables };
+  if (cap) data.capitalDat = readFileSync(cap, "latin1");
+  const modJson = join(STORE, "mods", id, "mod.json");
+  if (existsSync(modJson)) {
+    const files = (JSON.parse(readFileSync(modJson, "utf8")) as { files: Record<string, string> }).files;
+    data.files = files;
+    const manifest = files["manifest.json"];
+    if (manifest && existsSync(join(STORE, manifest))) data.manifest = JSON.parse(readFileSync(join(STORE, manifest), "utf8")) as SpriteManifest;
+  }
+  return data;
+}
+
+describe.skipIf(!rootOf("semga") || !rootOf("semga-2"))("the diff from semga to semga-2", () => {
+  it("finds the 27 tables that differ, gives every op an owner, and takes under 3 s", () => {
+    const a = load("semga");
+    const b = load("semga-2");
+    const t0 = performance.now();
+    const d = diffMods(a, b);
+    const ms = performance.now() - t0;
+    console.log(`semga -> semga-2: ${Math.round(ms)} ms, pictures ${a.manifest ? "compared" : "not in the store"}`);
+    const s = d.summary;
+    expect(s.tables.differ).toBe(27);
+    expect(s.tables.ops).toBe(2689);
+    expect(s.tables.refused).toEqual([]);
+    expect(s.unassignedOps).toBe(0);
+    expect(s.assignedOps + s.tableOnlyOps).toBe(s.tables.ops);
+    expect(d.tables.every((t) => t.unassigned === 0)).toBe(true);
+    expect(s.sections.units.added).toBe(4);
+    expect(ms).toBeLessThan(3000);
+    // plain data: the whole diff survives JSON
+    expect(JSON.parse(JSON.stringify(d.summary))).toEqual(d.summary);
+  }, 180_000);
+});
+
+describe.skipIf(!rootOf("semga") || !rootOf("nazar-legacy"))("the diff from semga to nazar-legacy", () => {
+  it("flags Clans, Legions and Undead as redesigned, above every other race", () => {
+    const d = diffMods(load("semga"), load("nazar-legacy"));
+    const score = new Map(d.races.map((r) => [r.id, r.redesign.score]));
+    const redesigned = ["G000RR0001", "G000RR0002", "G000RR0003"]; // Clans, Legions, Undead
+    console.log(d.races.map((r) => `${r.id} ${r.nameB}: ${r.redesign.score}`).join("; "));
+    expect(d.summary.races.redesigned.sort()).toEqual(redesigned);
+    const others = d.races.filter((r) => !redesigned.includes(r.id)).map((r) => r.redesign.score);
+    for (const id of redesigned) expect(score.get(id)!).toBeGreaterThan(Math.max(...others));
+    expect(d.summary.unassignedOps).toBe(0);
+  }, 180_000);
+});

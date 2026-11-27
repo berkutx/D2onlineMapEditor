@@ -467,9 +467,15 @@ async function onUploadFile(e: Event): Promise<void> {
 const commandStore = useCommandStore();
 watch(() => commandStore.request, (r) => { if (r) onSelect(r.id); });
 
+/** The mod compare page in a new tab, with the open map's mod as B. */
+function openModCompare(): void {
+  const b = modStore.activeModId;
+  window.open(`${import.meta.env.BASE_URL}?mods${b ? `&b=${encodeURIComponent(b)}` : ""}`, "_blank", "noopener");
+}
+
 /** el-menu dispatcher — one place routes every menu-item index to its action. */
 function onSelect(index: string): void {
-  if (readOnly.value && !index.startsWith("view:") && !index.startsWith("help:")) {
+  if (readOnly.value && !index.startsWith("view:") && !index.startsWith("help:") && !index.startsWith("mods:")) {
     ElMessage.info(tr("Временная карта открыта только для просмотра"));
     return;
   }
@@ -504,6 +510,7 @@ function onSelect(index: string): void {
     case "view:appearance": return viewStore.toggleDark();
     case "help:keys": shortcutsVisible.value = true; return;
     case "help:commands": return viewStore.setCommandHelp(true);
+    case "mods:compare": return openModCompare();
   }
   if (index.startsWith("view:tint:")) return viewStore.toggleOverlayTint(index.slice(10) as never);
   if (index.startsWith("map:")) return void onMapCommand(index.slice(4));
@@ -607,6 +614,8 @@ watch(
           </el-menu-item>
         </el-sub-menu>
       </el-sub-menu>
+
+      <el-menu-item index="mods:compare">{{ tr("Сравнить моды") }}</el-menu-item>
 
       <el-sub-menu index="help">
         <template #title>{{ tr("Справка") }}</template>

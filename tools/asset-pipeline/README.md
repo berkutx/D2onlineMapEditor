@@ -96,9 +96,28 @@ output) plus:
 | `settings.json` | numbers and flags of `Scripts/settings.lua` | value limits |
 | `dbfSchema.json` | header of every Globals table | which columns this mod has |
 | `modscripts/**` | `Scripts/modifiers/**.lua` | the modifier inspector |
+| `tables/<Name>.dbf` | every `Globals/*.dbf`, and `Interf/TApp.dbf` / `TAppEdit.dbf` unless Globals has a table of that name; `<Name>` is the file name as on disk | comparing mods table by table (the mod editor) |
+| `capital.dat` | `Imgs/capital.dat`, when the install has one | the capital screens of a comparison |
 
 The JSON shapes are **Contract D** (`packages/mod-catalog`); `build_mod.py` checks its
 output against the JSON Schemas in `packages/mod-catalog/gen/`.
+
+**The install's own tables are in the store.** The catalogs keep only part of the tables
+(a comparison of Сёмга and Сёмга 2 by catalogs misses at least 44% of the edits), so the
+mod editor compares the tables themselves. `build_mod.py` takes them in by name, as they
+are, after the builders (the same list as `tableFiles` of `packages/mod-edit`), together with
+`Imgs/capital.dat`. They are COPIED into the store, never hard-linked: a link would share
+bytes with the game's file, which the game or a mod tool may rewrite in place. All tables of
+the four mods are 165 blobs, 19 MB (1.4 MB gzipped); a table two mods share is one blob. The
+owner allowed them in the public store (2026-11-27), **except for closed mods**: a mod in
+`closedMods` of `mods.local.json` keeps its tables on this machine — `store_upload.py` sends
+its `mod.json` without the `tables/…` and `capital.dat` entries and leaves out the blobs only
+they name (deploy/README.md). For the mod comparison's secret link the owner let a closed
+mod's tables go to a server that keeps them private (2026-11-27): `--with-closed-tables`
+sends them, and the server serves them only to a request with a share key, as long as it
+lists the mod in `HIDDEN_MODS` (deploy/README.md, `MOD_SHARE_KEYS`). A builder still may not
+leave a game file in its output (see below): the tables come from the install, not from a
+builder.
 
 ### Graphics: one sheet per source image record (`build_sheets.py`)
 
@@ -190,13 +209,16 @@ one-name edit in `Tglobal` adds one new `unitCatalog.json` to the store and noth
   Contract D already). It refuses a parent the store lacks or that is derived itself (one
   level only), and `--default`, `--engine-pack`, `--engine-fingerprint`, `--source-url`.
 - Any build stops if a builder leaves a `.dbf`, `.ff`, `.opt`, `.exe` or `.dll` in its output:
-  the store is served to anyone; game files never become blobs.
+  builders write what they make from the game's files, not the files. The tables go into the
+  store separately, by name (`tables/…`, see above), so a derived mod's edited tables are
+  blobs of their own and the parent's unchanged ones are shared.
 - Archives the store build does not read (`BatUnits.ff`, `Events.ff`, …) are not rebuilt: their
   ops stay in the edit file and are reported as carried.
 - A parent listed in `closedMods` of `mods.local.json` (a closed beta) is refused without
   `--allow-closed-parent`.
 - **Derived mods stay on this machine**: `store_upload.py` (deploy/README.md) leaves them out
-  unless they are named with `--mods … --include-derived`.
+  unless they are named with `--mods … --include-derived`. One derived from a closed mod
+  goes up without its tables, like its parent.
 - **New ids are untested in the game**: rows an edit adds get `G<namespace>UU0001`-style ids
   (decimal counter, the table's own letter case). Before a derived mod with new rows is used
   for real, run one such unit in the game and in ScenEdit.
@@ -228,7 +250,7 @@ fflib/
   blobstore.py   content-addressed store: blobs/<xx>/<sha256>.<ext>, hard link / copy / move
 build_mod.py     one mod -> the store (catalogs, icons, ids, profile, dictionaries, variables)
 derive_mod.py    a derived mod (parent install + edit file) -> the store, through build_mod
-store_upload.py  the store's non-derived mods + the blobs they name, as one .tgz for a server
+store_upload.py  the store's non-derived mods + the blobs they name, as one .tgz for a server (closed mods without their tables)
 data/            curated descriptions (scenario variables)
 extract_ff.py    .ff -> named FFImage list
 decode_images.py color-key + trim -> Frame (keeps spriteSourceSize/sourceSize)

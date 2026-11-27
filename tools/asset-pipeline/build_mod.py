@@ -25,6 +25,12 @@ What is built here (the DATA of a mod):
   * ``settings.json``      scalar values of Scripts/settings.lua
   * ``dbfSchema.json``     columns of every Globals table, and which expected ones are absent
   * ``modscripts/**``      the Lua sources of scripted modifiers
+  * ``tables/<Name>.dbf``  every Globals table and Interf TApp / TAppEdit, as they are -> mod comparison
+  * ``capital.dat``        Imgs/capital.dat (the capital screens' layout), as it is
+
+The tables and capital.dat are the install's own bytes, taken by name (step 6 of main). The
+owner allowed them in the public store (2026-11-27) except for closed mods: store_upload.py
+leaves a closed mod's tables on this machine.
 
 ``--graphics`` also builds the mod's sprites (build_sheets: one small palette sheet per
 source image record, AssetManifest 0.2) and the decoration catalog, which needs them.
@@ -50,7 +56,7 @@ from fflib import dbf  # noqa: E402
 from fflib.blobstore import BlobStore, sha256_file  # noqa: E402
 import manifest as manifest_mod  # noqa: E402
 
-PIPELINE_VERSION = "2.1.0"
+PIPELINE_VERSION = "2.2.0"
 SCHEMA_VERSION = 1
 MOD_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 NULL_ID = "G000000000"
@@ -160,6 +166,54 @@ def find_file(parent, name):
     except OSError:
         pass
     return None
+
+
+# ---- the install's own files ---------------------------------------------------------
+
+#: Interf tables that hold mod data (the rest of Interf is the game's own UI). The same list
+#: as INTERF_TABLES of packages/mod-edit src/node/tables.ts.
+INTERF_TABLES = ("TApp", "TAppEdit")
+#: Logical names of the install's own files in a mod: "tables/<Name>.dbf" and "capital.dat".
+TABLES_PREFIX = "tables/"
+CAPITAL_DAT = "capital.dat"
+
+
+def is_install_file(logical):
+    """True for a logical name that is one of the install's own files (a table, capital.dat)."""
+    return logical.startswith(TABLES_PREFIX) or logical == CAPITAL_DAT
+
+
+def table_files(game):
+    """Table name (file name without .dbf, as on disk) -> path, as packages/mod-edit
+    tableFiles: every .dbf of Globals, and the INTERF_TABLES of Interf unless Globals has a
+    table of that name (ignoring case). ``game`` may also be a bare folder of .dbf files."""
+    out = {}
+    globals_dir = find_dir(game, "Globals")
+    if globals_dir is None and any(n.lower().endswith(".dbf") for n in os.listdir(game)):
+        globals_dir = game
+    if globals_dir:
+        for name in os.listdir(globals_dir):
+            path = os.path.join(globals_dir, name)
+            if name.lower().endswith(".dbf") and os.path.isfile(path):
+                out[name[:-4]] = path
+    interf = find_dir(game, "Interf")
+    if interf:
+        for table in INTERF_TABLES:
+            path = find_file(interf, table + ".dbf")
+            if path and not any(k.lower() == table.lower() for k in out):
+                out[os.path.basename(path)[:-4]] = path
+    return out
+
+
+def install_files(game):
+    """[(logical name, path)] of the install's own files a mod keeps: its tables and
+    Imgs/capital.dat when there is one."""
+    out = [(TABLES_PREFIX + name + ".dbf", path) for name, path in sorted(table_files(game).items())]
+    imgs = find_dir(game, "Imgs")
+    capital = find_file(imgs, CAPITAL_DAT) if imgs else None
+    if capital:
+        out.append((CAPITAL_DAT, capital))
+    return out
 
 
 # ---- identity ------------------------------------------------------------------------
@@ -598,7 +652,9 @@ def load_index(store_root):
     return {"schemaVersion": SCHEMA_VERSION, "mods": []}
 
 
-#: Files of an install that must never become store blobs (see step 5 of main).
+#: Game files a BUILDER must not leave in its output (step 5 of main). The install's tables
+#: do go into the store, but deliberately and by name (step 6, install_files); a game file
+#: in the stage folder is a builder copying what it should have converted.
 GAME_DATA_EXTENSIONS = (".dbf", ".ff", ".opt", ".exe", ".dll")
 
 
@@ -798,14 +854,26 @@ def main(argv=None):
                 if rel in atlas_names:
                     continue  # already in the store (step 1)
                 if rel.lower().endswith(GAME_DATA_EXTENSIONS):
-                    # the store is served to anyone: the game's own tables and archives never
-                    # go in, only what the builders made from them
+                    # builders write what they made from the game's files, never the files
+                    # themselves; the tables are taken in step 6, by name
                     raise BuildError("a builder left a game data file in the output: %s" % rel)
                 staged_bytes += os.path.getsize(path)
                 if args.dry_run:
                     files[rel] = store.would_put(path)
                 else:
                     files[rel] = store.put_file(path, move=True)
+
+        # 6. the install's own tables and capital.dat, by name and as they are (the mod
+        #    comparison reads them). Copied, never linked: a hard link would share bytes with
+        #    the game's file, which may be rewritten in place, and the blob would change under
+        #    its hash.
+        install = install_files(game)
+        install_bytes = 0
+        for logical, path in install:
+            if logical in files:
+                raise BuildError("a builder wrote %s, a name kept for the install's own files" % logical)
+            install_bytes += os.path.getsize(path)
+            files[logical] = store.would_put(path) if args.dry_run else store.put_file(path, link=False)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
         if args.dry_run:  # leave no empty directories behind in a store we promised not to touch
@@ -857,6 +925,9 @@ def main(argv=None):
     print("  variables    %s" % (", ".join(v["name"] + ("*" if v.get("prefix") else "") for v in new_files["scenVariables.json"]["variables"]) or "-"))
     print("  files        %d logical (%d atlas, %d modifier scripts), built %.1f MB" % (
         len(files), len(atlas_names), script_count, staged_bytes / 1048576.0))
+    tables = sum(1 for logical, _path in install if logical.startswith(TABLES_PREFIX))
+    print("  tables       %d files%s, %.1f MB" % (
+        tables, " + capital.dat" if len(install) > tables else "", install_bytes / 1048576.0))
     if sheet_stats:
         print("  sheets       %d (%d palette, %d RGBA), %.1f MB; %d frames, %d animations" % (
             sheet_stats["sheets"], sheet_stats["palette"], sheet_stats["rgba"],
