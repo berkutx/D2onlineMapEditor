@@ -15,6 +15,9 @@ let fx: Record<string, any>;
 beforeAll(async () => {
   server = await createServer({
     root: fileURLToPath(new URL("../", import.meta.url)),
+    // The fake server answers at the root; the Docker build sets VITE_BASE=/map/, which the
+    // config would otherwise turn into the page's base.
+    base: "/",
     // No HMR socket: another SSR suite running in parallel holds the default port.
     server: { middlewareMode: true, hmr: false, ws: false },
     appType: "custom",
@@ -30,7 +33,7 @@ async function render(search: string, view: (store: ReturnType<typeof fx.useComp
   const pinia = createPinia();
   const store = fx.useCompareStore(pinia);
   await store.init(search, { fetchFn: fakeServer(sampleMods(), "semga").fetchFn });
-  expect(store.phase).toBe("ready");
+  expect(store.phase, store.error ?? "").toBe("ready");
   const { c, props } = view(store);
   const app = createSSRApp({ render: () => h(c, props) }).use(pinia).use(fx.ElementPlus);
   app.provide(fx.ID_INJECTION_KEY, { prefix: 1, current: 0 });
