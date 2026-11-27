@@ -104,7 +104,7 @@ interface ModData {
       "values": { "UNIT_ID": "G000UU0001", "IMMUNITY": 5, "IMMUNECAT": 2 },
       "owners": [{ "section": "units", "id": "G000UU0001" }] }
   ],
-  "skipped": [], "unassigned": 0
+  "skipped": [], "unassigned": 0, "noIdSpellings": 0
 }
 ```
 
@@ -123,6 +123,7 @@ interface ModData {
 | `projected?` | A whole-row table whose columns differ (one mod has GUmodif.MODIF_7) is compared over the columns both have; this lists them. |
 | `error?` | `diffTable` refused the table even after the fallbacks; it has no ops. (None on the four known mods.) |
 | `unassigned` | Ops of an `"entities"` table no entity took; always 0 unless the entity map misses a case. |
+| `noIdSpellings` | Cells that differ only in how they write "no id": empty in one mod, `G000000000` (any case) in the other (`sameEmptyId`). Both name nothing, so they are not ops: such a set is dropped, and so is a deleted row with an added row that reads the same but for such cells (a whole-row key). Сёмга → Сёмга 2 has 9: `GItem.MOD_POTION` of the healing potions. |
 | `note?` | How the table was compared when not the plain way, or a remark (Gunits_2: "a copy of Gunits ..."). |
 
 ### TableOp
@@ -505,7 +506,7 @@ hunk comes before), `aCount` / `bCount` the lines of each side, `lines` the `Dif
 ```json
 {
   "sections": { "units": { "added": 0, "changed": 2, "removed": 0, "artOnly": 0, "viaShared": 0, "orphans": 0, "total": 2 }, "…": "…" },
-  "tables": { "compared": 13, "differ": 8, "onlyA": [], "onlyB": [], "ops": 10, "set": 7, "add": 2, "delete": 1, "skipped": 0, "refused": [] },
+  "tables": { "compared": 13, "differ": 8, "onlyA": [], "onlyB": [], "ops": 10, "set": 7, "add": 2, "delete": 1, "skipped": 0, "refused": [], "noIdSpellings": 0 },
   "assignedOps": 9, "tableOnlyOps": 1, "unassignedOps": 0,
   "pictures": { "frames": { "same": 0, "added": 1, "removed": 0, "changed": 2 }, "animations": { "…": "…" }, "icons": { "…": "…" } },
   "scripts": { "added": 1, "changed": 1, "removed": 0 },
@@ -523,6 +524,7 @@ hunk comes before), `aCount` / `bCount` the lines of each side, `lines` the `Dif
 | `tables.ops`, `set`, `add`, `delete` | Op totals. |
 | `tables.skipped` | Total `skipped` values. |
 | `tables.refused` | Tables with an `error`. |
+| `tables.noIdSpellings` | Total `noIdSpellings` cells (not ops). |
 | `assignedOps` | Ops given to an entity or a terrain code. |
 | `tableOnlyOps` | Ops of `"table"` tables. `assignedOps + tableOnlyOps + unassignedOps = tables.ops`. |
 | `unassignedOps` | Ops of `"entities"` tables no entity took; 0. |

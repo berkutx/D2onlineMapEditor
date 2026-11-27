@@ -2284,6 +2284,7 @@
   "Якорь снят": "Usunięto kotwicę",
   "Якоря (связи зданий)": "Kotwice (powiązania budynków)",
   "Якоря сняты: {n}": "Usunięto kotwice: {n}",
+  "Ячеек, где различается только запись пустого id (пусто в одном моде, G000000000 в другом): {n}. Это одно и то же, в правки они не входят.": "Komórki różniące się tylko zapisem pustego id (puste w jednym modzie, G000000000 w drugim): {n}. Oba zapisy znaczą to samo, więc nie są liczone jako zmiany.",
   "ATTITUDE — агрессивность ИИ": "ATTITUDE — agresywność SI",
   "BOOLVALUE (служебный)": "BOOLVALUE (wewnętrzne)",
   "copilot недоступен: {error}": "Copilot jest niedostępny: {error}",

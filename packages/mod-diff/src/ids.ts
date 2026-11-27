@@ -52,6 +52,19 @@ export function isNoId(v: unknown): boolean {
   return s === "" || /^g0+$/i.test(s) || s.toLowerCase() === "none";
 }
 
+const NULL_ID = /^g0{9}$/i;
+const emptyOrNullId = (v: unknown) => v === null || v === undefined || (typeof v === "string" && (v.trim() === "" || NULL_ID.test(v.trim())));
+
+/**
+ * True when two cells both name nothing and differ at most in how they write it: empty on one
+ * side, the null id "G000000000" (any case) on the other. The diff counts no change for such a
+ * pair (Сёмга 2 writes g000000000 where Сёмга leaves MOD_POTION of its healing potions empty).
+ * Narrower than isNoId: "none" and ids of other lengths stay values.
+ */
+export function sameEmptyId(a: unknown, b: unknown): boolean {
+  return emptyOrNullId(a) && emptyOrNullId(b);
+}
+
 /** A Tglobal text without its leading style tag ("\fNormal;"), trimmed, as the catalogs show it. */
 export function stripStyle(text: string): string {
   return text.replace(/^\\f\w+;/, "").trim();

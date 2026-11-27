@@ -12,7 +12,7 @@
  */
 import type { CellValue } from "@d2/mod-edit";
 import { diffCapital, parseCapitalDat } from "./capital.js";
-import { classifyId, isNoId, normId, stripStyle } from "./ids.js";
+import { classifyId, isNoId, normId, sameEmptyId, stripStyle } from "./ids.js";
 import { defaultRootName, ownedSpecs, RACE_SLOT_HEAD, RACE_SLOT_TAIL, rootOf } from "./model.js";
 import { diffPictures, indexFrames, pictureOwnerId, shaOf } from "./pictures.js";
 import { buildRefs, rowOwners, type Ref } from "./refs.js";
@@ -75,9 +75,9 @@ interface Builder {
 }
 
 const OWN_STATUSES = new Set<EntityStatus>(["added", "removed", "changed"]);
-const blank = (v: CellValue | undefined) => v === null || v === undefined || v === "" || v === false || v === 0;
+const blank = (v: CellValue | undefined) => v === false || v === 0 || sameEmptyId(v, null);
 const sameCell = (a: CellValue | undefined, b: CellValue | undefined) =>
-  typeof a === "string" || typeof b === "string" ? normId(a ?? "") === normId(b ?? "") : (a ?? null) === (b ?? null);
+  sameEmptyId(a, b) || (typeof a === "string" || typeof b === "string" ? normId(a ?? "") === normId(b ?? "") : (a ?? null) === (b ?? null));
 
 export function diffMods(a: ModData, b: ModData, options: DiffOptions = {}): ModDiff {
   const sa = new ModSide(a);
@@ -697,7 +697,9 @@ function summarize(
   let assigned = 0;
   let tableOnly = 0;
   let unassigned = 0;
+  let noIdSpellings = 0;
   for (const t of tables) {
+    noIdSpellings += t.noIdSpellings;
     ops += t.ops.length;
     set += t.counts.set;
     add += t.counts.add;
@@ -722,6 +724,7 @@ function summarize(
       delete: del,
       skipped,
       refused: tables.filter((t) => t.error).map((t) => t.name),
+      noIdSpellings,
     },
     assignedOps: assigned,
     tableOnlyOps: tableOnly,

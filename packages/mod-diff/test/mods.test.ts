@@ -44,7 +44,10 @@ describe.skipIf(!rootOf("semga") || !rootOf("semga-2"))("the diff from semga to 
     console.log(`semga -> semga-2: ${Math.round(ms)} ms, pictures ${a.manifest ? "compared" : "not in the store"}`);
     const s = d.summary;
     expect(s.tables.differ).toBe(27);
-    expect(s.tables.ops).toBe(2689);
+    // 2689 cells and rows differ; 9 of them only write "no id" another way (GItem.MOD_POTION
+    // of the healing potions: empty in semga, g000000000 in semga-2) and are no ops
+    expect(s.tables.ops).toBe(2680);
+    expect(s.tables.noIdSpellings).toBe(9);
     expect(s.tables.refused).toEqual([]);
     expect(s.unassignedOps).toBe(0);
     expect(s.assignedOps + s.tableOnlyOps).toBe(s.tables.ops);

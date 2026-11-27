@@ -8,12 +8,16 @@
  * A table whose file is the same in both mods is not compared at all (its rows are decoded
  * once), unless diffTable would refuse its key.
  *
+ * A cell empty in one mod and G000000000 in the other names nothing in both (sameEmptyId): it
+ * is no op, only counted in `noIdSpellings`.
+ *
  * Fallbacks when diffTable refuses a table: a whole-row table whose columns differ (Nazar's
  * GUmodif has MODIF_7) is compared over the columns both have; a table whose key names two
  * rows is compared by the whole row. A table still refused keeps the error and no ops.
  */
 import { DbfTable, diffSchemas, type DbfFieldSpec, type DbfTable as DbfTableType } from "@d2/dbf";
 import { declareKey, diffTable, DiffError, keyColumns, keyString, missingKeyColumns, registeredKey, type KeyDecl, type TableDiff } from "@d2/mod-edit";
+import { sameEmptyId } from "./ids.js";
 import { coveredTable } from "./model.js";
 import { decodeRow, type ModSide, type TableText } from "./side.js";
 import type { Row, TableChange, TableOp } from "./types.js";
@@ -200,6 +204,39 @@ const upperRow = (values: Record<string, Row[string]>): Row => {
   return out;
 };
 
+/**
+ * Drops each deleted row that has an added row reading the same but for "no id" spellings
+ * (sameEmptyId), with that added row: a whole-row key turns such a cell into a delete and an
+ * add. Returns the ops left and how many cells the dropped pairs differ in.
+ */
+function dropSpellingPairs(ops: TableOp[]): { ops: TableOp[]; cells: number; adds: number; deletes: number } {
+  const sig = (row: Row) => JSON.stringify(Object.keys(row).sort().map((k) => [k, sameEmptyId(row[k], "") ? null : row[k]]));
+  const deleted = new Map<string, number[]>();
+  ops.forEach((op, i) => {
+    if (op.op !== "dbf.delete") return;
+    const s = sig(op.was);
+    const list = deleted.get(s);
+    if (list) list.push(i);
+    else deleted.set(s, [i]);
+  });
+  const drop = new Set<number>();
+  let cells = 0;
+  ops.forEach((op, i) => {
+    if (op.op !== "dbf.add") return;
+    const list = deleted.get(sig(op.values));
+    const d = list?.[0];
+    if (d === undefined) return;
+    const was = (ops[d] as Extract<TableOp, { op: "dbf.delete" }>).was;
+    const differ = [...new Set([...Object.keys(was), ...Object.keys(op.values)])].filter((k) => (was[k] ?? null) !== (op.values[k] ?? null)).length;
+    // a row deleted and added as it is would not be a spelling
+    if (differ === 0) return;
+    list!.shift();
+    drop.add(d).add(i);
+    cells += differ;
+  });
+  return { ops: drop.size ? ops.filter((_, i) => !drop.has(i)) : ops, cells, adds: drop.size / 2, deletes: drop.size / 2 };
+}
+
 export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
   const names = new Set([...sa.tableNames(), ...sb.tableNames()]);
   const out: TableWork[] = [];
@@ -221,6 +258,7 @@ export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
       ops: [],
       skipped: [],
       unassigned: 0,
+      noIdSpellings: 0,
     };
     if (lower === "gunits_2") base.note = "a copy of Gunits that only some mods have; whether the game reads it is not known";
     if (!ta || !tb) {
@@ -246,6 +284,10 @@ export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
         if (op.op === "dbf.set") {
           const field = op.field.toUpperCase();
           const was = op.was ?? null;
+          if (sameEmptyId(was, op.value)) {
+            base.noIdSpellings++;
+            continue;
+          }
           const t: TableOp = { op: "dbf.set", key: op.key, keyText, field, was, value: op.value, owners: [] };
           const wt = sa.display(lower, field, was);
           const vt = sb.display(lower, field, op.value);
@@ -261,7 +303,13 @@ export function diffTables(sa: ModSide, sb: ModSide): TableWork[] {
           base.counts.delete++;
         }
       }
-      base.ops = ops;
+      if (base.counts.add && base.counts.delete) {
+        const p = dropSpellingPairs(ops);
+        base.ops = p.ops;
+        base.noIdSpellings += p.cells;
+        base.counts.add -= p.adds;
+        base.counts.delete -= p.deletes;
+      } else base.ops = ops;
       base.skipped = at.d.skipped.map((s) => {
         const keyText = keyString(s.key);
         const field = s.field.toUpperCase();

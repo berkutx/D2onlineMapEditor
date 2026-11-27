@@ -264,6 +264,12 @@ export interface TableChange {
   error?: string;
   /** Ops of an "entities" table no entity took (must be 0). */
   unassigned: number;
+  /**
+   * Cells that differ only in how they write "no id" (empty in one mod, G000000000 in the
+   * other; see sameEmptyId). They are not ops: a set is dropped, and so is a deleted row with
+   * an added one that reads the same but for such cells (a whole-row key).
+   */
+  noIdSpellings: number;
   note?: string;
 }
 
@@ -422,7 +428,7 @@ export interface SectionCounts {
 
 export interface DiffSummary {
   sections: Record<SectionId, SectionCounts>;
-  tables: { compared: number; differ: number; onlyA: string[]; onlyB: string[]; ops: number; set: number; add: number; delete: number; skipped: number; refused: string[] };
+  tables: { compared: number; differ: number; onlyA: string[]; onlyB: string[]; ops: number; set: number; add: number; delete: number; skipped: number; refused: string[]; noIdSpellings: number };
   /** Ops given to at least one entity (or a terrain code). */
   assignedOps: number;
   /** Ops of tables no entity covers, listed under their table only. */

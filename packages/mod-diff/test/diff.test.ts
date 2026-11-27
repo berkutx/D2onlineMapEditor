@@ -298,6 +298,36 @@ describe("diffMods", () => {
     for (const s of SECTIONS) expect(d.sections[s]).toEqual([]);
   });
 
+  it("counts no change where one mod leaves an id cell empty and the other writes G000000000", () => {
+    const ra = baseRows();
+    const rb = baseRows();
+    rowOf(ra.Gunits!, "UNIT_ID", U1).ATTACK2_ID = "";
+    rowOf(rb.Gunits!, "UNIT_ID", U1).ATTACK2_ID = "g000000000";
+    // a whole-row table: there the spelling would be a deleted row and an added one
+    ra.GUmodif!.push({ UNIT_ID: U1, MODIF_1: "" });
+    rb.GUmodif!.push({ UNIT_ID: U1, MODIF_1: "G000000000" });
+    const d = diffMods(mod("a", ra), mod("b", rb));
+    for (const s of SECTIONS) expect(d.sections[s]).toEqual([]);
+    expect(d.summary.tables).toMatchObject({ ops: 0, differ: 0, noIdSpellings: 2 });
+    for (const name of ["Gunits", "GUmodif"]) {
+      expect(d.tables.find((t) => t.name === name)).toMatchObject({ ops: [], counts: { set: 0, add: 0, delete: 0 }, noIdSpellings: 1 });
+    }
+  });
+
+  it("still counts an id written where the other mod has an empty cell", () => {
+    const ra = baseRows();
+    const rb = baseRows();
+    rowOf(ra.Gunits!, "UNIT_ID", U1).ATTACK2_ID = "";
+    rowOf(rb.Gunits!, "UNIT_ID", U1).ATTACK2_ID = A2;
+    ra.GUmodif!.push({ UNIT_ID: U1, MODIF_1: "" });
+    rb.GUmodif!.push({ UNIT_ID: U1, MODIF_1: M2 });
+    const d = diffMods(mod("a", ra), mod("b", rb));
+    expect(entity(d, "units", U1).fields.map((f) => f.field)).toEqual(["ATTACK2_ID"]);
+    expect(d.tables.find((t) => t.name === "Gunits")).toMatchObject({ counts: { set: 1, add: 0, delete: 0 }, noIdSpellings: 0 });
+    expect(d.tables.find((t) => t.name === "GUmodif")).toMatchObject({ counts: { set: 0, add: 1, delete: 1 }, noIdSpellings: 0 });
+    expect(d.summary.tables.noIdSpellings).toBe(0);
+  });
+
   it("reports a table only one mod has", () => {
     const b = baseRows();
     delete b.LAttR;

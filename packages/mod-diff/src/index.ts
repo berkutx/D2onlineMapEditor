@@ -3,7 +3,7 @@ export { diffLines, lineEdits, splitLines } from "./lines.js";
 export type { DiffLine, LineHunk } from "./lines.js";
 export { parseCapitalDat, diffCapital, diffCapitalSection } from "./capital.js";
 export { diffPictures, pictureOwnerId, shaOf } from "./pictures.js";
-export { ID_KINDS, classifyId, normId, isNoId, stripStyle } from "./ids.js";
+export { ID_KINDS, classifyId, normId, isNoId, sameEmptyId, stripStyle } from "./ids.js";
 export type { IdKind } from "./ids.js";
 export { linkOf, rootOf, ROOTS, OWNED, coveredTable } from "./model.js";
 export type { LinkTarget, Link, RootSpec, OwnedSpec } from "./model.js";

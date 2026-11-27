@@ -2284,6 +2284,7 @@
   "Якорь снят": "Anchor removed",
   "Якоря (связи зданий)": "Anchors (building links)",
   "Якоря сняты: {n}": "Anchors removed: {n}",
+  "Ячеек, где различается только запись пустого id (пусто в одном моде, G000000000 в другом): {n}. Это одно и то же, в правки они не входят.": "Cells that differ only in how they write an empty id (blank in one mod, G000000000 in the other): {n}. Both mean the same, so they are not counted as edits.",
   "ATTITUDE — агрессивность ИИ": "ATTITUDE — how aggressive the AI is",
   "BOOLVALUE (служебный)": "BOOLVALUE (internal)",
   "copilot недоступен: {error}": "Copilot is unavailable: {error}",

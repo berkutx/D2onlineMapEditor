@@ -127,6 +127,7 @@ const skipRow = (o: unknown) => o as TableChange["skipped"][number];
           <el-alert v-if="current.error" type="error" :closable="false" class="note" :title="current.error" />
           <p v-if="current.note" class="dim note">{{ current.note }}</p>
           <p v-if="current.projected" class="dim note">{{ tr("Сравнивается по общим колонкам: {cols}", { cols: current.projected.join(", ") }) }}</p>
+          <p v-if="current.noIdSpellings" class="dim note">{{ tr("Ячеек, где различается только запись пустого id (пусто в одном моде, G000000000 в другом): {n}. Это одно и то же, в правки они не входят.", { n: current.noIdSpellings }) }}</p>
 
           <div v-if="hasSchema(current)" class="schema">
             <span v-for="c in current.schema.added" :key="`+${c.name}`" class="mono tiny st-added">+{{ c.name }} {{ c.type }}{{ c.length }}</span>
