@@ -114,8 +114,9 @@ owner allowed them in the public store (2026-11-27), **except for closed mods**:
 its `mod.json` without the `tables/…` and `capital.dat` entries and leaves out the blobs only
 they name (deploy/README.md). For the mod comparison's secret link the owner let a closed
 mod's tables go to a server that keeps them private (2026-11-27): `--with-closed-tables`
-sends them, and the server serves them only to a request with a share key, as long as it
-lists the mod in `HIDDEN_MODS` (deploy/README.md, `MOD_SHARE_KEYS`). A builder still may not
+sends them, and the server serves them (and every other file of the mod) only to a request
+with a share key, as long as it lists the mod in `HIDDEN_MODS` (deploy/README.md,
+`MOD_SHARE_KEYS`). A builder still may not
 leave a game file in its output (see below): the tables come from the install, not from a
 builder.
 

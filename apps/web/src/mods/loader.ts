@@ -19,7 +19,9 @@ export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
  * `fetchFn` that sends a share key with every request (a secret link): the server then lists
- * the hidden mods too and serves their full tables. Unchanged without a key.
+ * the hidden mods too and serves their files. Its answer to the first request, GET /api/mods
+ * (listCompareMods asks it before anything else), also sets the key as a cookie, which the
+ * pictures (`<img>`, CSS backgrounds) carry. Unchanged without a key.
  */
 export function withShareKey(fetchFn: FetchFn, key: string | null): FetchFn {
   if (!key) return fetchFn;

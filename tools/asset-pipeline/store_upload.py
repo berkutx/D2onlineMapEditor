@@ -20,8 +20,9 @@ parent's tables). stderr names the closed mods and how many files were left out.
 server a closed mod's mod.json is not the local file, and its rev differs from the local one.
 
 ``--with-closed-tables`` sends the closed mods whole, tables included, for a server that
-keeps them private: it must list them in HIDDEN_MODS, and then serves their tables only to a
-request with a share key (MOD_SHARE_KEYS, the mod comparison's secret link; deploy/README).
+keeps them private: it must list them in HIDDEN_MODS, and then serves their files (tables
+included) only to a request with a share key (MOD_SHARE_KEYS, the mod comparison's secret
+link; deploy/README).
 
 ``--list`` prints the archive's member paths instead (one per line), e.g. to check a server
 copy with ``sha256sum``. It lists the same set the archive would hold.
@@ -186,7 +187,7 @@ def main(argv=None):
                          "(default: mods.local.json at the repo root; absent = no closed mod)")
     ap.add_argument("--with-closed-tables", action="store_true",
                     help="send the closed mods with their tables too, for a server that hides them "
-                         "(HIDDEN_MODS) and serves their tables only with a share key")
+                         "(HIDDEN_MODS) and serves their files only with a share key")
     out = ap.add_mutually_exclusive_group(required=True)
     out.add_argument("--tar", metavar="FILE", help="write the .tgz here ('-' for stdout)")
     out.add_argument("--list", action="store_true", help="print the member paths instead")

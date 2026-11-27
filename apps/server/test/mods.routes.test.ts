@@ -374,9 +374,9 @@ describe("a hidden mod (config HIDDEN_MODS)", () => {
       const list = (await get(REST.mods)).json() as ModList;
       expect(list.mods.map((m) => m.id)).toEqual(["beta"]);
       expect(list.defaultModId).toBe("beta");
-      // for the eye only: its passport and files still answer
-      expect((await get(REST.mod("alpha"))).statusCode).toBe(200);
-      expect((await get(`${infoOf("alpha").assetBase}/unitCatalog.json`)).statusCode).toBe(200);
+      // without a share key its passport and files do not answer either
+      expect((await get(REST.mod("alpha"))).statusCode).toBe(404);
+      expect((await get(`${infoOf("alpha").assetBase}/unitCatalog.json`)).statusCode).toBe(404);
 
       // the fixture fits alpha best, the map made for alpha is recorded for it: both open on beta
       const meta = await metaOf(fixtureId);

@@ -16,10 +16,10 @@
  * pipeline used to write (catalogs and atlases side by side). It is served as ONE implicit
  * mod, `default`, so such a deployment keeps working unchanged until its assets are rebuilt.
  *
- * A mod named in HIDDEN_MODS (a closed beta) stays installed and its files are served, but
- * visitors are not shown it: it is left out of the mod list and of detection, and no map is
- * opened on it. Its full tables (`tables/`, `capital.dat`) are PRIVATE: they are served only
- * to a request with a share key (shareKey.ts), and their blobs are not served by hash either.
+ * A mod named in HIDDEN_MODS (a closed beta) stays installed, but visitors are not shown it:
+ * it is left out of the mod list and of detection, and no map is opened on it. Without a
+ * share key (shareKey.ts) it does not exist for a request at all: its passport, its file
+ * list and its files answer 404, and so do the blobs that only hidden mods name, by hash.
  */
 
 import { readFileSync, statSync } from "node:fs";
@@ -320,11 +320,6 @@ export class ModContext {
 /** How often the index file is re-checked for a rebuild, at most. */
 const RECHECK_MS = 1000;
 
-/** A mod's full game tables in the store: `tables/<Name>.dbf` and `capital.dat`. */
-export function isFullTableFile(logical: string): boolean {
-  return logical.startsWith("tables/") || logical === "capital.dat";
-}
-
 export class ModRegistry {
   private mods = new Map<string, ModContext>();
   private defaultId = DEFAULT_MOD_ID;
@@ -438,17 +433,12 @@ export class ModRegistry {
     return this.list().filter((m) => !this.isHidden(m.id));
   }
 
-  /** True for a file of a hidden mod that only a share key opens: its full tables. */
-  isPrivateFile(modId: string, logical: string): boolean {
-    return isFullTableFile(logical) && this.isHidden(modId);
-  }
-
   private privateCache: { key: string; blobs: ReadonlySet<string> } | null = null;
 
   /**
-   * True for a store blob ("blobs/<xx>/<sha256>.<ext>") that only private files name: a
-   * table of a hidden mod that no shown mod shares. Such a blob is not served by its hash
-   * without a share key (a table both mods have is public through the shown one anyway).
+   * True for a store blob ("blobs/<xx>/<sha256>.<ext>") that only hidden mods name: a file
+   * of a closed beta that no shown mod shares. Such a blob is not served by its hash without
+   * a share key (a file both mods have is public through the shown one anyway).
    */
   isPrivateBlob(blob: string): boolean {
     this.refresh();
@@ -457,7 +447,8 @@ export class ModRegistry {
       const priv = new Set<string>();
       const pub = new Set<string>();
       for (const m of this.mods.values()) {
-        for (const [name, b] of Object.entries(m.files)) (this.isPrivateFile(m.id, name) ? priv : pub).add(b);
+        const into = this.isHidden(m.id) ? priv : pub;
+        for (const b of Object.values(m.files)) into.add(b);
       }
       for (const b of pub) priv.delete(b);
       this.privateCache = { key, blobs: priv };

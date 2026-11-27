@@ -82,9 +82,10 @@ export type ModFileList = z.infer<typeof ModFileList>;
 
 /**
  * Request header with a share key of the mod comparison (a secret link). With a key the
- * server also lists the hidden mods (GET REST.mods) and serves their full tables
- * (`tables/`, `capital.dat`: in GET REST.modFiles and under the mod's assetBase), which it
- * otherwise leaves out. Without one, or with a wrong one, nothing changes.
+ * server also lists the hidden mods (GET REST.mods) and serves their passports, file lists
+ * and files, which otherwise answer 404; the first keyed GET REST.mods also sets the key as
+ * an HttpOnly cookie, so the page's pictures (`<img>`, CSS) get through too. Without a key,
+ * or with a wrong one, nothing changes.
  */
 export const MOD_SHARE_KEY_HEADER = "x-mod-share-key";
 

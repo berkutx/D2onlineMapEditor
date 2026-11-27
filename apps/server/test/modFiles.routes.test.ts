@@ -107,15 +107,12 @@ describe("GET /api/mods/:id/files", () => {
     expect((await app.inject({ method: "GET", url: REST.mod("gamma") })).statusCode).toBe(404);
   });
 
-  it("answers for a hidden mod, as its passport does, without its full tables", async () => {
+  it("404s for a hidden mod, as its passport does (a share key opens both: modShareKey.routes.test.ts)", async () => {
     const app = await serve(new ModRegistry(storeDir, ["alpha"]));
     const list = (await app.inject({ method: "GET", url: REST.mods })).json() as ModList;
     expect(list.mods.map((m) => m.id)).toEqual(["beta"]);
-    expect((await app.inject({ method: "GET", url: REST.mod("alpha") })).statusCode).toBe(200);
-    const res = await app.inject({ method: "GET", url: REST.modFiles("alpha") });
-    expect(res.statusCode).toBe(200);
-    // its tables and capital.dat need a share key (modShareKey.routes.test.ts)
-    expect(Object.keys((res.json() as ModFileList).files)).toEqual(["unitCatalog.json"]);
+    expect((await app.inject({ method: "GET", url: REST.mod("alpha") })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: REST.modFiles("alpha") })).statusCode).toBe(404);
   });
 
   it("the flat legacy mod has no files to list", async () => {

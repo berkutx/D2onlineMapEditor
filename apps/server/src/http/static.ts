@@ -44,9 +44,9 @@ export function blobName(filePath: string): string | null {
 }
 
 export interface StaticAccess {
-  /** True for a blob only a share key may fetch (a hidden mod's tables). */
+  /** True for a blob only a share key may fetch (a file only hidden mods have). */
   isPrivateBlob(blob: string): boolean;
-  /** True when the request carries a share key. */
+  /** True when the request carries a share key (in the header or its cookie). */
   hasKey(req: FastifyRequest): boolean;
 }
 

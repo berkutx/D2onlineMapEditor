@@ -267,15 +267,17 @@ What is there (2026-11-26):
 - `MOD_SCENARIO_DIR=/app/var/mod-scenarios` — the mods' own maps (`d2editor_scenarios` volume).
 - `HIDDEN_MODS=semga-2` — mods visitors are not shown (a closed beta): left out of the mod list,
   the maps and sagas of their own folders not listed, no map opened on them (a map of theirs
-  is matched among the other mods, the way a data-only mod is skipped). For the eye only:
-  nothing is deleted, and a mod's files and a map's id still answer. To show the mod again,
-  drop it from `docker-compose.yml` and deploy. One exception: a hidden mod's full tables
-  (`tables/`, `capital.dat`) are not served at all without a share key (next toggle).
+  is matched among the other mods, the way a data-only mod is skipped). Nothing is deleted,
+  and a map's id still opens, but without a share key (next toggle) the mod does not exist
+  for a request: its passport, file list and files answer 404, and so does every blob only
+  hidden mods name (a file a shown mod has too stays public through that mod). To show the
+  mod again, drop it from `docker-compose.yml` and deploy.
 - `MOD_SHARE_KEYS` — share keys of the mod comparison's secret link,
   `http://151.115.56.12/map/?mods&a=<mod>&b=<hidden mod>#key=<key>`. A page opened with a key
-  sends it with every request; the server then lists the hidden mods too and serves their full
-  tables (privately cached); by logical name and by blob hash alike, nothing of them answers
-  without a key. Each key at least 24 characters; several separated by `,`. The key lives
+  sends it with every request; the server then lists the hidden mods too and serves their
+  passports and files (privately cached). Its first answer (`GET /api/mods`) also sets the key
+  as an HttpOnly session cookie on `/map/`, which carries it to the pictures (`<img>` and CSS
+  cannot send a header). Each key at least 24 characters; several separated by `,`. The key lives
   in the server's `~/d2editor/.env` only, never in the repository: the Deploy workflow keeps
   the value it finds there (or takes the `MOD_SHARE_KEYS` GitHub secret when that is set).
   To add or change one: edit `MOD_SHARE_KEYS=` in `~/d2editor/.env`, then
