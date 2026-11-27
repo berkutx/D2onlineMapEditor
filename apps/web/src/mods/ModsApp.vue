@@ -5,7 +5,7 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { Switch } from "@element-plus/icons-vue";
-import { tr } from "../i18n";
+import { tr, LOCALES, currentLocale, switchLocale, type Locale } from "../i18n";
 import { useCompareStore } from "./compareStore";
 import { NAV, navLabel, type NavId } from "./labels";
 import type { SectionId } from "@d2/mod-diff";
@@ -45,6 +45,9 @@ function toggleTheme(): void {
 }
 
 const editorHref = import.meta.env.BASE_URL;
+// the interface language, as in the editor's top bar: the choice is shared with the editor,
+// and the reload keeps the address (the pair, the open screen, a share key in the fragment)
+const locale = currentLocale();
 
 onMounted(() => {
   applyTheme();
@@ -152,6 +155,16 @@ const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
         <b>{{ store.modA.name }}</b> → <b>{{ store.modB.name }}</b>
       </div>
       <div class="spacer" />
+      <el-dropdown trigger="click" @command="(l: Locale) => switchLocale(l)">
+        <el-button class="lang-btn" text size="small" :title="tr('Язык интерфейса')">{{ locale.toUpperCase() }}</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-for="l in LOCALES" :key="l.value" :command="l.value" :class="{ 'lang-current': l.value === locale }">
+              {{ l.label }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <el-button text size="small" @click="toggleTheme">{{ dark ? tr("Светлая тема") : tr("Тёмная тема") }}</el-button>
       <a class="back-link" :href="editorHref">{{ tr("← К редактору карт") }}</a>
     </header>
@@ -399,6 +412,16 @@ html.dark .st-changed {
   color: var(--el-color-primary);
   text-decoration: none;
   white-space: nowrap;
+}
+.lang-btn {
+  min-width: 34px;
+  padding: 0 6px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+:global(.lang-current) {
+  color: var(--el-color-primary);
+  font-weight: 600;
 }
 .back-link:hover {
   text-decoration: underline;

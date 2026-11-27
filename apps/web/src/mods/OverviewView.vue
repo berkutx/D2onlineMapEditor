@@ -4,10 +4,11 @@
  * rebuilt, the terrain art it added, and the tables and columns only one mod has.
  */
 import { computed } from "vue";
-import { SECTIONS, type PictureChange, type RaceMembers } from "@d2/mod-diff";
+import { SECTIONS, type PictureChange } from "@d2/mod-diff";
 import { tr, trn, intlLocale } from "../i18n";
 import { useCompareStore } from "./compareStore";
 import { navLabel, RACE_PARTS, TERRAIN_CODES, type NavId } from "./labels";
+import { capitalLayersChanged, overviewRaces, ownChanged } from "./raceRows";
 import CountChips from "./CountChips.vue";
 import PicturePair from "./PicturePair.vue";
 
@@ -72,18 +73,9 @@ const tiles = computed<Tile[]>(() => {
   return out;
 });
 
-const races = computed(() =>
-  [...d.value.races]
-    .filter((r) => r.redesign.score > 0 || r.status || r.presence !== "both")
-    .sort((x, y) => y.redesign.score - x.redesign.score),
-);
-
-function raceCapitalChanged(r: (typeof d.value.races)[number]): number {
-  return r.capital ? r.capital.layers.length : 0;
-}
-function changedMembers(m: RaceMembers): number {
-  return m.changed.filter((x) => x.status !== "via-shared").length;
-}
+const raceCapitalChanged = capitalLayersChanged;
+const changedMembers = ownChanged;
+const races = computed(() => overviewRaces(d.value.races, d.value.summary.races.changed));
 const anyRedesigned = computed(() => d.value.races.some((r) => r.redesign.redesigned));
 
 const terrains = computed(() =>
@@ -144,7 +136,7 @@ const nothing = computed(() => d.value.summary.tables.ops === 0 && d.value.pictu
             <span v-if="r.nameA && r.nameB && r.nameA !== r.nameB" class="dim"> ({{ r.nameA }})</span>
             <el-tag v-if="r.redesign.redesigned" type="danger" size="small" effect="dark" disable-transitions>{{ tr("переделана") }}</el-tag>
           </div>
-          <div class="race-score">
+          <div class="race-score" :title="tr('Насколько раса новая')">
             <el-progress :percentage="Math.round(r.redesign.score * 100)" :stroke-width="10" :color="r.redesign.redesigned ? 'var(--el-color-danger)' : 'var(--el-color-warning)'" />
           </div>
           <div class="race-parts">
