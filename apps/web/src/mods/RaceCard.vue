@@ -372,4 +372,19 @@ const parts = computed(() => {
   gap: 4px;
   align-items: center;
 }
+@media (max-width: 760px) {
+  .card-head {
+    padding: 8px 12px 10px;
+  }
+  .card-body {
+    padding: 10px 12px 24px;
+  }
+  .slots th,
+  .slots td {
+    padding: 4px 6px;
+  }
+  .slot-cell {
+    flex-wrap: wrap;
+  }
+}
 </style>

@@ -6,10 +6,12 @@ import { tr, intlLocale } from "../i18n";
 import { useCompareStore } from "./compareStore";
 import { CHANGE_LABEL, PICTURE_KINDS } from "./labels";
 import { comparable, pictureStats, sourcesFor, type PictureStats } from "./pictureCompare";
+import { usePhone } from "./phone";
 import PicturePair from "./PicturePair.vue";
 import CountChips from "./CountChips.vue";
 
 const store = useCompareStore();
+const phone = usePhone();
 const kind = ref<string>("");
 const archive = ref<string>("");
 const changes = ref<Change[]>(["added", "changed", "removed"]);
@@ -152,7 +154,8 @@ const num = (n: number) => n.toLocaleString(intlLocale());
         v-model:page-size="pageSize"
         :total="filtered.length"
         :page-sizes="[60, 120, 240]"
-        layout="total, sizes, prev, pager, next"
+        :layout="phone ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
+        :pager-count="phone ? 5 : 7"
         size="small"
         class="pager"
       />
@@ -223,5 +226,17 @@ const num = (n: number) => n.toLocaleString(intlLocale());
 }
 .pager {
   margin-top: 12px;
+}
+/* phone: the archives are a strip that scrolls sideways */
+@media (max-width: 760px) {
+  .archives {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .arch {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
 </style>

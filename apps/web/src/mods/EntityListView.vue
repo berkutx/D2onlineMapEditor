@@ -8,11 +8,14 @@ import { linkOf, type EntityChange, type EntityStatus, type SectionId } from "@d
 import { tr } from "../i18n";
 import { useCompareStore } from "./compareStore";
 import { lookupLabel, navLabel, STATUS_LABEL, STATUSES } from "./labels";
+import { usePhone } from "./phone";
 import StatusTag from "./StatusTag.vue";
 import ModIcon from "./ModIcon.vue";
 
 const props = defineProps<{ section: SectionId }>();
 const store = useCompareStore();
+// on a phone the id and the status go under the name, and the group column is left out
+const phone = usePhone();
 
 /** The group value a section is filtered by as "category", with its root column. */
 const CATEGORY: Partial<Record<SectionId, { key: string; table: string; column: string; label: string }>> = {
@@ -164,7 +167,7 @@ const noTables = computed(() => store.tablesMissing.a || store.tablesMissing.b);
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="name" :label="tr('Название')" sortable="custom" min-width="260">
+        <el-table-column prop="name" :label="tr('Название')" sortable="custom" :min-width="phone ? 150 : 260">
           <template #default="{ row }">
             <span class="name">
               <template v-if="row.nameA && row.nameB && row.nameA !== row.nameB">
@@ -172,22 +175,23 @@ const noTables = computed(() => store.tablesMissing.a || store.tablesMissing.b);
               </template>
               <b v-else>{{ row.nameB ?? row.nameA ?? "—" }}</b>
             </span>
+            <span v-if="phone" class="under"><StatusTag :status="row.status" /> <span class="mono dim">{{ row.id }}</span></span>
           </template>
         </el-table-column>
-        <el-table-column prop="id" label="Id" sortable="custom" width="190">
+        <el-table-column v-if="!phone" prop="id" label="Id" sortable="custom" width="190">
           <template #default="{ row }"><span class="mono">{{ row.id }}</span></template>
         </el-table-column>
-        <el-table-column prop="status" :label="tr('Статус')" sortable="custom" width="140">
+        <el-table-column v-if="!phone" prop="status" :label="tr('Статус')" sortable="custom" width="140">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
-        <el-table-column prop="changes" :label="tr('Изменений')" sortable="custom" width="120" align="right">
+        <el-table-column prop="changes" :label="tr('Изменений')" sortable="custom" :width="phone ? 92 : 120" align="right">
           <template #default="{ row }">
             <span v-if="row.status === 'changed'" class="count">{{ changeCount(row) || "" }}</span>
             <span v-if="row.shared.length" class="extra st-shared" :title="tr('Изменились общие строки')">↪{{ row.shared.length }}</span>
             <span v-if="row.pictures.length" class="extra st-art" :title="tr('Изменились картинки')">◩{{ row.pictures.length }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="CATEGORY[section] || raceOptions.length" :label="tr('Группа')" min-width="180">
+        <el-table-column v-if="!phone && (CATEGORY[section] || raceOptions.length)" :label="tr('Группа')" min-width="180">
           <template #default="{ row }">
             <span class="dim">{{ [racesOf(row).map((r) => raceNames.get(r) ?? r).join(", "), categoryText(row)].filter(Boolean).join(" · ") }}</span>
           </template>
@@ -200,7 +204,8 @@ const noTables = computed(() => store.tablesMissing.a || store.tablesMissing.b);
         v-model:page-size="pageSize"
         :total="filtered.length"
         :page-sizes="[25, 50, 100, 200]"
-        layout="total, sizes, prev, pager, next"
+        :layout="phone ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
+        :pager-count="phone ? 5 : 7"
         class="pager"
         size="small"
       />
@@ -236,6 +241,14 @@ const noTables = computed(() => store.tablesMissing.a || store.tablesMissing.b);
 .name {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.under {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin-top: 2px;
+  font-size: 11px;
 }
 .count {
   font-variant-numeric: tabular-nums;

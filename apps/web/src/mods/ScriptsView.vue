@@ -5,10 +5,12 @@ import type { Change, ScriptChange } from "@d2/mod-diff";
 import { tr } from "../i18n";
 import { useCompareStore } from "./compareStore";
 import { CHANGE_LABEL } from "./labels";
+import { usePhone, useShowOnPhone } from "./phone";
 import { scriptRows, scriptText, type SideRow } from "./scriptText";
 import EntityLink from "./EntityLink.vue";
 
 const store = useCompareStore();
+const phone = usePhone();
 const search = ref("");
 const changes = ref<Change[]>(["added", "changed", "removed"]);
 const all = computed(() => store.diff?.scripts ?? []);
@@ -17,6 +19,8 @@ const filtered = computed(() => {
   return all.value.filter((s) => changes.value.includes(s.change) && (!q || s.path.toLowerCase().includes(q)));
 });
 const current = computed<ScriptChange | null>(() => all.value.find((s) => s.path === store.item) ?? null);
+// on a phone the file opens below the list: bring it into sight
+const viewerEl = useShowOnPhone(() => current.value?.path);
 
 const rows = ref<SideRow[]>([]);
 const loading = ref(false);
@@ -84,7 +88,7 @@ const stats = computed(() => ({
         </div>
       </div>
 
-      <div class="viewer mods-block">
+      <div v-if="current || !phone" ref="viewerEl" class="viewer mods-block">
         <div v-if="!current" class="dim pick">{{ tr("Выберите файл слева.") }}</div>
         <template v-else>
           <div class="viewer-head">
@@ -279,5 +283,28 @@ const stats = computed(() => ({
   text-align: center;
   color: var(--el-text-color-placeholder);
   background: var(--el-fill-color-lighter);
+}
+/* phone: the list above the file, not beside it */
+@media (max-width: 760px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .list {
+    position: static;
+    max-height: 300px;
+  }
+  /* tall enough to be scrolled to the top while its text still loads */
+  .viewer {
+    min-height: 80vh;
+  }
+  .diff {
+    font-size: 11px;
+  }
+  .diff td {
+    padding: 0 4px;
+  }
+  .no {
+    width: 30px;
+  }
 }
 </style>

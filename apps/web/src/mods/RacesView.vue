@@ -79,7 +79,7 @@ function guardian(r: (typeof races.value)[number]): { side: "a" | "b"; id: strin
 }
 .races {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -138,5 +138,15 @@ function guardian(r: (typeof races.value)[number]): { side: "a" | "b"; id: strin
 }
 .sub-row:hover {
   background: var(--el-fill-color-light);
+}
+@media (max-width: 760px) {
+  .race {
+    padding: 12px;
+  }
+  .race-head,
+  .sub-row {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
 }
 </style>

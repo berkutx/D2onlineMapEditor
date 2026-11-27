@@ -12,6 +12,7 @@ import { drawable } from "./pictures";
 import { comparable, comparePicture, sourcesFor, type PictureComparison } from "./pictureCompare";
 import { changedShare, cropRaster, growBox, sizeChanged } from "./pixelDiff";
 import { CHANGE_LABEL, PICTURE_KINDS } from "./labels";
+import { usePhone } from "./phone";
 import SpriteCrop from "./SpriteCrop.vue";
 import ModIcon from "./ModIcon.vue";
 import RasterCanvas from "./RasterCanvas.vue";
@@ -19,6 +20,9 @@ import PictureDiffViewer from "./PictureDiffViewer.vue";
 
 const props = withDefaults(defineProps<{ change: PictureChange; size?: number; showName?: boolean }>(), { size: 64, showName: true });
 const store = useCompareStore();
+// a phone's gallery has two columns only with thumbnails a little smaller
+const phone = usePhone();
+const px = computed(() => (phone.value ? Math.min(props.size, 60) : props.size));
 
 const picA = computed(() => drawable(props.change, props.change.a, store.side("a")?.manifest));
 const picB = computed(() => drawable(props.change, props.change.b, store.side("b")?.manifest));
@@ -83,18 +87,18 @@ function openViewer(): void {
     </div>
     <div v-else class="thumbs" :title="tr('Щёлкните, чтобы рассмотреть крупно')" @click="openViewer">
       <div class="thumb">
-        <ModIcon v-if="change.kind === 'icon'" :url="iconA" :size="size" />
-        <SpriteCrop v-else :pic="picA" :size="size" />
+        <ModIcon v-if="change.kind === 'icon'" :url="iconA" :size="px" />
+        <SpriteCrop v-else :pic="picA" :size="px" />
         <span class="side-mark">A</span>
       </div>
       <div class="thumb">
-        <ModIcon v-if="change.kind === 'icon'" :url="iconB" :size="size" />
-        <SpriteCrop v-else :pic="picB" :size="size" />
+        <ModIcon v-if="change.kind === 'icon'" :url="iconB" :size="px" />
+        <SpriteCrop v-else :pic="picB" :size="px" />
         <span class="side-mark">B</span>
       </div>
       <div v-if="withDiff" class="thumb">
-        <RasterCanvas v-if="diffThumb" :raster="diffThumb" :fit="size" checker />
-        <span v-else class="pending" :style="{ width: `${size}px`, height: `${size}px` }">{{ cmpError ? "?" : "…" }}</span>
+        <RasterCanvas v-if="diffThumb" :raster="diffThumb" :fit="px" checker />
+        <span v-else class="pending" :style="{ width: `${px}px`, height: `${px}px` }">{{ cmpError ? "?" : "…" }}</span>
         <span class="side-mark diff-mark">Δ</span>
       </div>
     </div>
@@ -213,5 +217,13 @@ function openViewer(): void {
   flex-direction: column;
   gap: 2px;
   font-family: ui-monospace, Consolas, monospace;
+}
+@media (max-width: 760px) {
+  .pic-pair {
+    padding: 6px;
+  }
+  .thumbs {
+    gap: 4px;
+  }
 }
 </style>

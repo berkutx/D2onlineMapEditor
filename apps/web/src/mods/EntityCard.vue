@@ -432,8 +432,9 @@ const opsCount = computed(() => e.value.ops.length);
 }
 .link-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 4px 10px;
   padding: 4px 0;
 }
 .via {
@@ -462,5 +463,25 @@ const opsCount = computed(() => e.value.ops.length);
 .foot {
   font-size: 11px;
   margin-top: 20px;
+}
+@media (max-width: 760px) {
+  .card-head {
+    padding: 8px 12px 10px;
+  }
+  .card-body {
+    padding: 10px 12px 24px;
+  }
+  .title-row {
+    align-items: flex-start;
+  }
+  .via {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .fields th,
+  .fields td {
+    padding: 4px 6px;
+    word-break: break-word;
+  }
 }
 </style>

@@ -330,4 +330,24 @@ const nothing = computed(() => d.value.summary.tables.ops === 0 && d.value.pictu
 .schema {
   margin-top: 6px;
 }
+@media (max-width: 760px) {
+  .tiles {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+  }
+  .tile {
+    padding: 10px 12px;
+  }
+  .tile-total {
+    font-size: 19px;
+  }
+  .race-row,
+  .terrain-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .terrain-sample {
+    grid-column: 1;
+  }
+}
 </style>

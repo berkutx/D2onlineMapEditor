@@ -3,11 +3,12 @@
  * The mod compare page: header with the pair, a navigation of sections with counts, the
  * open screen, and a card drawer. Opened by `?mods&a=<id>&b=<id>`.
  */
-import { computed, onMounted, ref } from "vue";
-import { Switch } from "@element-plus/icons-vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { Moon, Sunny, Switch } from "@element-plus/icons-vue";
 import { tr, LOCALES, currentLocale, switchLocale, type Locale } from "../i18n";
 import { useCompareStore } from "./compareStore";
 import { NAV, navLabel, type NavId } from "./labels";
+import { usePhone } from "./phone";
 import type { SectionId } from "@d2/mod-diff";
 import OverviewView from "./OverviewView.vue";
 import EntityListView from "./EntityListView.vue";
@@ -133,6 +134,17 @@ const textsNotice = computed(() => {
   return tr("Формулировки текстов не сравниваются (не показано различий: {n}). Новые и удалённые тексты видны.", { n });
 });
 const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
+
+// on a phone the navigation is a strip across the top: keep the open screen's tab in sight
+const phone = usePhone();
+const navEl = ref<HTMLElement | null>(null);
+function showActiveTab(): void {
+  if (!phone.value) return;
+  void nextTick(() => navEl.value?.querySelector(".nav-item.active")?.scrollIntoView({ block: "nearest", inline: "center" }));
+}
+// the counts that come with the diff widen the tabs: center the open one again
+watch([() => store.view, phone, ready], showActiveTab);
+onMounted(showActiveTab);
 </script>
 
 <template>
@@ -186,7 +198,7 @@ const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
         {{ tr("Не сравнивать переводы") }}
       </el-checkbox>
       <div class="spacer" />
-      <el-dropdown trigger="click" @command="(l: Locale) => switchLocale(l)">
+      <el-dropdown class="lang-menu" trigger="click" @command="(l: Locale) => switchLocale(l)">
         <el-button class="lang-btn" text size="small" :title="tr('Язык интерфейса')">{{ locale.toUpperCase() }}</el-button>
         <template #dropdown>
           <el-dropdown-menu>
@@ -196,12 +208,14 @@ const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <el-button text size="small" @click="toggleTheme">{{ dark ? tr("Светлая тема") : tr("Тёмная тема") }}</el-button>
+      <el-button class="theme-btn" text size="small" :icon="phone ? (dark ? Sunny : Moon) : undefined" :title="dark ? tr('Светлая тема') : tr('Тёмная тема')" @click="toggleTheme">
+        <span v-if="!phone">{{ dark ? tr("Светлая тема") : tr("Тёмная тема") }}</span>
+      </el-button>
       <a class="back-link" :href="editorHref">{{ tr("← К редактору карт") }}</a>
     </header>
 
     <div class="mods-body">
-      <nav class="mods-nav">
+      <nav ref="navEl" class="mods-nav">
         <a
           v-for="n in NAV"
           :key="n.id"
@@ -269,7 +283,7 @@ const isEntityView = computed(() => ENTITY_VIEWS.includes(store.view));
       </main>
     </div>
 
-    <el-drawer v-model="cardOpen" :with-header="false" size="min(860px, 94vw)" class="mods-drawer" append-to-body>
+    <el-drawer v-model="cardOpen" :with-header="false" :size="phone ? '100%' : 'min(860px, 94vw)'" class="mods-drawer" append-to-body>
       <template v-if="ready">
         <RaceCard v-if="store.card?.kind === 'race' && store.index.races.has(store.card.id)" :key="store.card.id" :race-id="store.card.id" />
         <EntityCard v-else-if="store.card?.kind === 'entity' && store.index.byUid.has(store.card.uid)" :key="store.card.uid" :uid="store.card.uid" />
@@ -375,6 +389,41 @@ html.dark .st-changed {
 }
 .mods-drawer .el-drawer__body {
   padding: 0;
+}
+
+/* phone: toolbars take the whole width, button groups wrap as separate buttons */
+@media (max-width: 760px) {
+  .mods-block {
+    padding: 10px 12px;
+  }
+  .mods-app .mods-toolbar .el-input {
+    flex: 1 1 100%;
+    width: auto;
+  }
+  .mods-app .mods-toolbar .el-select {
+    flex: 1 1 140px;
+    width: auto;
+  }
+  .mods-app .mods-toolbar .el-checkbox-group,
+  .mods-app .mods-toolbar .el-radio-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .mods-app .mods-toolbar .el-checkbox-button .el-checkbox-button__inner,
+  .mods-app .mods-toolbar .el-radio-button .el-radio-button__inner {
+    border-left: var(--el-border);
+    border-radius: var(--el-border-radius-base);
+  }
+  .mods-app .mods-toolbar .el-checkbox-button.is-checked .el-checkbox-button__inner,
+  .mods-app .mods-toolbar .el-radio-button.is-active .el-radio-button__inner {
+    border-left-color: var(--el-color-primary);
+  }
+  /* two columns of picture pairs also in a block on a 360 px phone (PicturePair: 60 px thumbs) */
+  .mods-gallery {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px;
+  }
 }
 </style>
 
@@ -549,5 +598,76 @@ html.dark .st-changed {
 .progress-text {
   color: var(--el-text-color-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+/* phone: the header wraps (brand and buttons, then the pair, then the switch and the way
+   back), the navigation becomes a strip of tabs above the screen */
+@media (max-width: 760px) {
+  .mods-head {
+    flex-wrap: wrap;
+    height: auto;
+    gap: 8px 10px;
+    padding: 8px 12px;
+  }
+  .spacer {
+    order: 1;
+  }
+  .lang-menu {
+    order: 2;
+  }
+  .theme-btn {
+    order: 3;
+  }
+  .pair {
+    order: 4;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .mod-select {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+  }
+  .pair-names {
+    display: none;
+  }
+  .texts-box {
+    order: 5;
+  }
+  .back-link {
+    order: 6;
+    margin-left: auto;
+  }
+  .mods-body {
+    flex-direction: column;
+  }
+  .mods-nav {
+    width: auto;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px 8px;
+    gap: 4px;
+    border-right: 0;
+    border-bottom: var(--d2-hairline);
+    scrollbar-width: none;
+  }
+  .nav-item {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 5px 10px;
+  }
+  .mods-main {
+    min-height: 0;
+    padding: 12px 12px 32px;
+  }
+  .progress-row {
+    grid-template-columns: 24px 1fr;
+    gap: 6px 10px;
+  }
+  .progress-row .bar,
+  .progress-text {
+    grid-column: 1 / -1;
+  }
 }
 </style>

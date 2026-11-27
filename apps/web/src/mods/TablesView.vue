@@ -9,9 +9,11 @@ import type { TableChange, TableOp } from "@d2/mod-diff";
 import { tr, intlLocale } from "../i18n";
 import { useCompareStore } from "./compareStore";
 import { keyText, labelOf, plain, rowLine } from "./display";
+import { usePhone, useShowOnPhone } from "./phone";
 import EntityLink from "./EntityLink.vue";
 
 const store = useCompareStore();
+const phone = usePhone();
 const onlyDiffering = ref(true);
 const search = ref("");
 const tab = ref<"set" | "add" | "delete" | "skipped">("set");
@@ -32,6 +34,8 @@ const current = computed<TableChange | null>(() => {
   const name = store.item?.toLowerCase();
   return name ? (all.value.find((t) => t.name.toLowerCase() === name) ?? null) : null;
 });
+// on a phone the table opens below the list: bring it into sight
+const detailEl = useShowOnPhone(() => current.value?.name);
 
 function hasSchema(t: TableChange): boolean {
   return t.presence === "both" && !!(t.schema.added.length || t.schema.removed.length || t.schema.changed.length);
@@ -105,7 +109,7 @@ const skipRow = (o: unknown) => o as TableChange["skipped"][number];
           <el-table-column :label="tr('Строк A → B')" width="104" align="right">
             <template #default="{ row }"><span class="num">{{ num(row.rowsA) }} → {{ num(row.rowsB) }}</span></template>
           </el-table-column>
-          <el-table-column :label="tr('Правки')" width="150" align="right">
+          <el-table-column :label="tr('Правки')" :width="phone ? 116 : 150" align="right">
             <template #default="{ row }">
               <span v-if="row.counts.set" class="tiny st-changed">~{{ row.counts.set }}</span>
               <span v-if="row.counts.add" class="tiny st-added">+{{ row.counts.add }}</span>
@@ -116,7 +120,7 @@ const skipRow = (o: unknown) => o as TableChange["skipped"][number];
         </el-table>
       </div>
 
-      <div class="mods-block detail">
+      <div v-if="current || !phone" ref="detailEl" class="mods-block detail">
         <div v-if="!current" class="dim pick">{{ tr("Выберите таблицу слева.") }}</div>
         <template v-else>
           <h2 class="mods-section-title">
@@ -220,7 +224,8 @@ const skipRow = (o: unknown) => o as TableChange["skipped"][number];
               v-model:page-size="pageSize"
               :total="tabRows.length"
               :page-sizes="[50, 100, 200, 500]"
-              layout="total, sizes, prev, pager, next"
+              :layout="phone ? 'prev, pager, next' : 'total, sizes, prev, pager, next'"
+              :pager-count="phone ? 5 : 7"
               size="small"
               class="pager"
             />
@@ -322,5 +327,21 @@ html.dark .now {
 }
 .pager {
   margin-top: 10px;
+}
+/* phone: the list above the open table, not beside it */
+@media (max-width: 760px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .list {
+    position: static;
+  }
+  .tlist {
+    max-height: 320px;
+  }
+  /* tall enough to be scrolled to the top before its rows are laid out */
+  .detail {
+    min-height: 80vh;
+  }
 }
 </style>
